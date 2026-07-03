@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -20,6 +21,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
@@ -2543,24 +2545,25 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
               <div className="px-3 py-2 border-b border-border bg-muted/20">
-                <select
+                <SelectField
                   value={counsellorFilter}
-                  onChange={(e) => { setCounsellorFilter(e.target.value); setUnrepliedOnly(false); }}
-                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20"
-                >
-                  <option value="all">All Counsellors</option>
-                  <option value="unassigned">Unassigned</option>
-                  {counsellorList.map((cc) => (
-                    <option key={cc.id} value={cc.id}>{cc.name}</option>
-                  ))}
-                </select>
+                  onValueChange={(value) => { setCounsellorFilter(value); setUnrepliedOnly(false); }}
+                  options={[
+                    { value: "all", label: "All Counsellors" },
+                    { value: "unassigned", label: "Unassigned" },
+                    ...counsellorList.map((cc) => ({ value: cc.id, label: cc.name })),
+                  ]}
+                  allowEmpty={false}
+                  triggerClassName="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:ring-1 focus:ring-ring/20"
+                  ariaLabel="Filter WhatsApp conversations by counsellor"
+                />
               </div>
             )}
 
             <div className="p-3 border-b border-border">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
+                <Input
                   type="text"
                   placeholder="Search conversations..."
                   value={search}

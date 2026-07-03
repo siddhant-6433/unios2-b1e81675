@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SelectField, DatePickerField } from "@/components/ui/state-fields";
 import { Loader2, UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
@@ -171,8 +172,6 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
     onSuccess();
   };
 
-  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -203,43 +202,44 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Session</label>
-              <select value={form.session_id} onChange={e => setForm(p => ({ ...p, session_id: e.target.value }))} className={inputCls}>
-                <option value="">Select session</option>
-                {sessions.map(s => <option key={s.id} value={s.id}>{sessionYearLabel(s.name)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Batch</label>
-              <select value={form.batch_id} onChange={e => setForm(p => ({ ...p, batch_id: e.target.value }))} className={inputCls}>
-                <option value="">Select batch</option>
-                {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
+            <SelectField
+              value={form.session_id}
+              onValueChange={value => setForm(p => ({ ...p, session_id: value }))}
+              options={sessions.map(s => ({ value: s.id, label: sessionYearLabel(s.name) }))}
+              label="Session"
+              placeholder="Select session"
+            />
+            <SelectField
+              value={form.batch_id}
+              onValueChange={value => setForm(p => ({ ...p, batch_id: value }))}
+              options={batches.map(b => ({ value: b.id, label: b.name }))}
+              label="Batch"
+              placeholder="Select batch"
+            />
           </div>
 
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date</label>
-            <input type="date" value={form.admission_date} onChange={e => setForm(p => ({ ...p, admission_date: e.target.value }))} className={inputCls} />
-          </div>
+          <DatePickerField
+            value={form.admission_date}
+            onValueChange={value => setForm(p => ({ ...p, admission_date: value }))}
+            label="Admission Date"
+          />
 
           {isSchoolCourse ? (
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year</label>
-              <select value={form.joining_academic_year} onChange={e => setForm(p => ({ ...p, joining_academic_year: e.target.value }))} className={inputCls}>
-                <option value="">Select admission year</option>
-                {SCHOOL_SESSION_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
-              </select>
-            </div>
+            <SelectField
+              value={form.joining_academic_year}
+              onValueChange={value => setForm(p => ({ ...p, joining_academic_year: value }))}
+              options={SCHOOL_SESSION_YEARS.map(year => ({ value: year, label: year }))}
+              label="Admission Year"
+              placeholder="Select admission year"
+            />
           ) : (
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Current Semester / Year</label>
-              <select value={form.semester} onChange={e => setForm(p => ({ ...p, semester: e.target.value }))} className={inputCls}>
-                <option value="">Select current semester/year</option>
-                {higherEdTerms.map(term => <option key={term} value={term}>{term}</option>)}
-              </select>
-            </div>
+            <SelectField
+              value={form.semester}
+              onValueChange={value => setForm(p => ({ ...p, semester: value }))}
+              options={higherEdTerms.map(term => ({ value: term, label: term }))}
+              label="Current Semester / Year"
+              placeholder="Select current semester/year"
+            />
           )}
 
           <div className="flex justify-end gap-2 pt-2">

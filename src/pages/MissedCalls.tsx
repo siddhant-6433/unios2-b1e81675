@@ -23,6 +23,7 @@ import {
   Phone, PhoneMissed, CheckCircle2, Loader2, ExternalLink,
   Clock, MessageSquare, RefreshCw, User, UserPlus, X,
 } from "lucide-react";
+import { SelectField } from "@/components/ui/state-fields";
 import { Checkbox } from "@/components/ui/checkbox";
 import { recordCallDisposition } from "@/lib/callDisposition";
 import { type CallDispositionData, type DialogCallStatus } from "@/components/admissions/CallDispositionDialog";
@@ -416,19 +417,17 @@ export default function MissedCalls() {
         </div>
         <div className="flex items-center gap-2">
           {canViewAll && (counsellorOptions.length > 0 || allCalls.some(c => !c.lead_counsellor_id)) && (
-            <select
+            <SelectField
               value={counsellorFilter}
-              onChange={e => setCounsellorFilter(e.target.value)}
-              className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring/20"
-            >
-              <option value="all">All Counsellors</option>
-              {allCalls.some(c => !c.lead_counsellor_id) && (
-                <option value="unassigned">Unassigned</option>
-              )}
-              {counsellorOptions.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onValueChange={setCounsellorFilter}
+              options={[
+                { value: "all", label: "All Counsellors" },
+                ...(allCalls.some(c => !c.lead_counsellor_id) ? [{ value: "unassigned", label: "Unassigned" }] : []),
+                ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+              ]}
+              hideLabel
+              placeholder="All Counsellors"
+            />
           )}
           <Button size="sm" variant="outline" onClick={refresh} className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />Refresh

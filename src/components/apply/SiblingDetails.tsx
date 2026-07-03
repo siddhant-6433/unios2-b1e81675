@@ -1,5 +1,7 @@
 import { Plus, X, ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 
 interface Props {
@@ -22,7 +24,7 @@ interface Sibling {
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
 export function SiblingDetails({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
-  const schoolDetails = (data.school_details || {}) as Record<string, any>;
+  const schoolDetails = (data.school_details || {}) as Record<string, unknown>;
   const siblings: Sibling[] = schoolDetails.siblings || [];
 
   const updateSiblings = (updated: Sibling[]) => {
@@ -61,29 +63,15 @@ export function SiblingDetails({ data, onChange, onNext, onBack, saving, readOnl
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
-              <input value={sib.name} onChange={e => updateSibling(i, "name", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Age</label>
-              <input value={sib.age} onChange={e => updateSibling(i, "age", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Current Grade/Class</label>
-              <input value={sib.grade} onChange={e => updateSibling(i, "grade", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">School Name</label>
-              <input value={sib.school} onChange={e => updateSibling(i, "school", e.target.value)} className={inputCls} />
-            </div>
+            <TextField label="Name" value={sib.name} onValueChange={(value) => updateSibling(i, "name", value)} inputClassName={inputCls} />
+            <TextField label="Age" value={sib.age} onValueChange={(value) => updateSibling(i, "age", value)} inputClassName={inputCls} />
+            <TextField label="Current Grade/Class" value={sib.grade} onValueChange={(value) => updateSibling(i, "grade", value)} inputClassName={inputCls} />
+            <TextField label="School Name" value={sib.school} onValueChange={(value) => updateSibling(i, "school", value)} inputClassName={inputCls} />
           </div>
           <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={sib.studying_here}
-              onChange={e => updateSibling(i, "studying_here", e.target.checked)}
-              className="rounded border-border"
+              onCheckedChange={(checked) => updateSibling(i, "studying_here", checked === true)}
             />
             Studying at our school
           </label>

@@ -1,5 +1,6 @@
 import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TextAreaField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 
 interface Props {
@@ -29,35 +30,21 @@ export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving,
 
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="space-y-4">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Achievements & Awards</label>
-          <textarea rows={2} value={ext.achievements || ''} onChange={e => update('achievements', e.target.value)} placeholder="Any notable achievements..." className={textareaCls} />
-        </div>
+        <TextAreaField
+          label="Achievements & Awards"
+          rows={2}
+          value={ext.achievements || ''}
+          onValueChange={(value) => update('achievements', value)}
+          placeholder="Any notable achievements..."
+          textareaClassName={textareaCls}
+        />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Competitions</label>
-            <input value={ext.competitions || ''} onChange={e => update('competitions', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Leadership Roles</label>
-            <input value={ext.leadership || ''} onChange={e => update('leadership', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sports</label>
-            <input value={ext.sports || ''} onChange={e => update('sports', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Volunteer Work</label>
-            <input value={ext.volunteer || ''} onChange={e => update('volunteer', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Portfolio URL</label>
-            <input type="url" value={ext.portfolio || ''} onChange={e => update('portfolio', e.target.value)} placeholder="https://..." className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">LinkedIn</label>
-            <input type="url" value={ext.linkedin || ''} onChange={e => update('linkedin', e.target.value)} placeholder="https://linkedin.com/in/..." className={inputCls} />
-          </div>
+          <TextField label="Competitions" value={ext.competitions || ''} onValueChange={(value) => update('competitions', value)} inputClassName={inputCls} />
+          <TextField label="Leadership Roles" value={ext.leadership || ''} onValueChange={(value) => update('leadership', value)} inputClassName={inputCls} />
+          <TextField label="Sports" value={ext.sports || ''} onValueChange={(value) => update('sports', value)} inputClassName={inputCls} />
+          <TextField label="Volunteer Work" value={ext.volunteer || ''} onValueChange={(value) => update('volunteer', value)} inputClassName={inputCls} />
+          <TextField label="Portfolio URL" type="url" value={ext.portfolio || ''} onValueChange={(value) => update('portfolio', value)} placeholder="https://..." inputClassName={inputCls} />
+          <TextField label="LinkedIn" type="url" value={ext.linkedin || ''} onValueChange={(value) => update('linkedin', value)} placeholder="https://linkedin.com/in/..." inputClassName={inputCls} />
         </div>
       </div>
       </fieldset>

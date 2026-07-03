@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
@@ -75,6 +76,7 @@ interface CampaignRow {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  nextAttemptAt: string | null;
   workerError: string | null;
 }
 
@@ -110,6 +112,7 @@ interface RecipientRow {
 }
 
 const statusTone = (status: string) => {
+  if (status === "scheduled") return "bg-sky-100 text-sky-700";
   if (status === "completed") return "bg-emerald-100 text-emerald-700";
   if (status === "failed") return "bg-red-100 text-red-700";
   if (status === "sending") return "bg-blue-100 text-blue-700";
@@ -117,6 +120,29 @@ const statusTone = (status: string) => {
   if (status === "terminated") return "bg-zinc-200 text-zinc-700";
   return "bg-amber-100 text-amber-700";
 };
+
+function scheduledDatePart(value: string) {
+  return value.match(/^(\d{4}-\d{2}-\d{2})T/)?.[1] || "";
+}
+
+function scheduledTimePart(value: string) {
+  const match = value.match(/T(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
+function defaultFutureTime() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function defaultFutureDateTime() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-") + `T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
 
 const pct = (num: number, den: number) => {
   if (!den) return "0.0%";
@@ -126,11 +152,23 @@ const pct = (num: number, den: number) => {
 const fmtDate = (value: string | null) => {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-IN", {
+    year: "numeric",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const isFutureAttempt = (value: string | null) => {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) && time > Date.now();
+};
+
+const campaignDisplayStatus = (campaign: Pick<CampaignRow, "status" | "nextAttemptAt">) => {
+  if (campaign.status === "pending" && isFutureAttempt(campaign.nextAttemptAt)) return "scheduled";
+  return campaign.status;
 };
 
 const csvCell = (value: unknown) => {
@@ -244,6 +282,24 @@ export default function Marketing() {
   const [deletingList, setDeletingList] = useState(false);
   const requestedListId = searchParams.get("listId") || "";
   const canDeleteLists = role === "super_admin";
+  const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
+  const scheduledTimeValue = scheduledTimePart(campaignScheduledAt);
+
+  const setScheduledDate = (date: string) => {
+    if (!date) {
+      setCampaignScheduledAt(scheduledTimeValue ? `T${scheduledTimeValue}` : "");
+      return;
+    }
+    setCampaignScheduledAt(`${date}T${scheduledTimeValue || defaultFutureTime()}`);
+  };
+
+  const setScheduledTime = (time: string) => {
+    if (!time) {
+      setCampaignScheduledAt(scheduledDateValue ? `${scheduledDateValue}T` : "");
+      return;
+    }
+    setCampaignScheduledAt(`${scheduledDateValue ? `${scheduledDateValue}T` : "T"}${time}`);
+  };
 
   const selectedList = useMemo(
     () => lists.find((list) => list.id === selectedListId) || null,
@@ -320,12 +376,12 @@ export default function Marketing() {
     setLoading(true);
     let whatsappQuery = supabase
       .from("whatsapp_campaigns" as any)
-      .select("id,name,template_key,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_key,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,next_attempt_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
     let emailQuery = supabase
       .from("email_campaigns" as any)
-      .select("id,name,template_slug,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_slug,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,next_attempt_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -364,6 +420,7 @@ export default function Marketing() {
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
+        nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
       };
     });
@@ -389,6 +446,7 @@ export default function Marketing() {
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
+        nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
       };
     });
@@ -760,6 +818,7 @@ export default function Marketing() {
         "Campaign",
         "Channel",
         "Status",
+        "Scheduled at",
         "List",
         "Template",
         "Total recipients",
@@ -780,7 +839,8 @@ export default function Marketing() {
       campaigns.map((campaign) => [
         campaign.name,
         campaign.channel,
-        campaign.status,
+        campaignDisplayStatus(campaign),
+        campaign.nextAttemptAt || "",
         campaign.listName || "",
         campaign.template || "",
         campaign.total,
@@ -880,18 +940,16 @@ export default function Marketing() {
             <div>
               <label className="text-xs font-medium text-muted-foreground">Lead list</label>
               <div className="mt-1 flex gap-2">
-                <select
+                <SelectField
                   value={selectedListId}
-                  onChange={(event) => setSelectedListId(event.target.value)}
-                  className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  {lists.length === 0 && <option value="">No lists available</option>}
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.name} ({list.member_count})
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setSelectedListId}
+                  placeholder={lists.length === 0 ? "No lists available" : "Select lead list"}
+                  options={lists.map((list) => ({ value: list.id, label: `${list.name} (${list.member_count})` }))}
+                  disabled={lists.length === 0}
+                  triggerClassName="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                  className="min-w-0 flex-1"
+                  ariaLabel="Select lead list"
+                />
                 {canDeleteLists && selectedList && (
                   <Button
                     type="button"
@@ -907,15 +965,17 @@ export default function Marketing() {
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Channel</label>
-              <select
+              <SelectField
+                label="Channel"
                 value={campaignChannel}
-                onChange={(event) => setCampaignChannel(event.target.value as Channel)}
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="whatsapp">WhatsApp</option>
-                <option value="email">Email</option>
-              </select>
+                onValueChange={(value) => setCampaignChannel(value as Channel)}
+                options={[
+                  { value: "whatsapp", label: "WhatsApp" },
+                  { value: "email", label: "Email" },
+                ]}
+                allowEmpty={false}
+                triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Campaign name</label>
@@ -929,26 +989,43 @@ export default function Marketing() {
           </div>
 
           <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Send time</label>
-              <select
-                value={campaignScheduleMode}
-                onChange={(event) => setCampaignScheduleMode(event.target.value as "now" | "scheduled")}
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="now">Send now</option>
-                <option value="scheduled">Schedule for later</option>
-              </select>
-            </div>
+            <SelectField
+              label="Send time"
+              value={campaignScheduleMode}
+              onValueChange={(value) => {
+                const nextMode = value as "now" | "scheduled";
+                setCampaignScheduleMode(nextMode);
+                if (nextMode === "scheduled" && !campaignScheduledAt) {
+                  setCampaignScheduledAt(defaultFutureDateTime());
+                }
+              }}
+              options={[
+                { value: "now", label: "Send now" },
+                { value: "scheduled", label: "Schedule for later" },
+              ]}
+              allowEmpty={false}
+              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            />
             {campaignScheduleMode === "scheduled" && (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Scheduled date and time</label>
-                <Input
-                  type="datetime-local"
-                  value={campaignScheduledAt}
-                  onChange={(event) => setCampaignScheduledAt(event.target.value)}
-                  className="mt-1"
+              <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
+                <DatePickerField
+                  label="Scheduled date"
+                  value={scheduledDateValue}
+                  onValueChange={setScheduledDate}
+                  placeholder="Pick date"
+                  minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                  triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  ariaLabel="Scheduled campaign date"
                 />
+                <FieldShell label="Time">
+                  <Input
+                    type="time"
+                    value={scheduledTimeValue || defaultFutureTime()}
+                    onChange={(event) => setScheduledTime(event.target.value)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    aria-label="Scheduled campaign time"
+                  />
+                </FieldShell>
               </div>
             )}
           </div>
@@ -957,19 +1034,17 @@ export default function Marketing() {
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">WhatsApp template</label>
-                  <select
+                  <SelectField
+                    label="WhatsApp template"
                     value={waTemplate}
-                    onChange={(event) => {
-                      setWaTemplate(event.target.value);
+                    onValueChange={(value) => {
+                      setWaTemplate(value);
                       setWaStaticParams({});
                     }}
-                    className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    {availableWaBulkTemplates.map((template) => (
-                      <option key={template.key} value={template.key}>{template.label}</option>
-                    ))}
-                  </select>
+                    options={availableWaBulkTemplates.map((template) => ({ value: template.key, label: template.label }))}
+                    allowEmpty={false}
+                    triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
                   {selectedWaTemplate?.description && (
                     <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
                   )}
@@ -993,24 +1068,24 @@ export default function Marketing() {
                         <div key={field.name}>
                           <label className="text-xs font-medium text-muted-foreground">{label}</label>
                           {canMap && (
-                            <select
+                            <SelectField
                               value={mappedToken ? value : WA_COMMON_VALUE}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
+                              onValueChange={(nextValue) => {
                                 setWaStaticParams((current) => ({
                                   ...current,
                                   [field.name]: nextValue === WA_COMMON_VALUE ? "" : nextValue,
                                 }));
                               }}
-                              className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                            >
-                              {WA_PARAM_FIELD_OPTIONS.map((option) => (
-                                <option key={option.token} value={encodeWaParamFieldMapping(option.token)}>
-                                  Use list column: {option.label}
-                                </option>
-                              ))}
-                              <option value={WA_COMMON_VALUE}>Use one common value</option>
-                            </select>
+                              options={[
+                                ...WA_PARAM_FIELD_OPTIONS.map((option) => ({
+                                  value: encodeWaParamFieldMapping(option.token),
+                                  label: `Use list column: ${option.label}`,
+                                })),
+                                { value: WA_COMMON_VALUE, label: "Use one common value" },
+                              ]}
+                              allowEmpty={false}
+                              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            />
                           )}
                           {(!canMap || !mappedToken) && (
                             <Input
@@ -1060,19 +1135,15 @@ export default function Marketing() {
                   </Button>
                 </div>
                 {emailMode === "template" ? (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Email template</label>
-                    <select
-                      value={emailSlug}
-                      onChange={(event) => setEmailSlug(event.target.value)}
-                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      {emailTemplates.length === 0 && <option value="">No active templates</option>}
-                      {emailTemplates.map((template) => (
-                        <option key={template.id} value={template.slug}>{template.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <SelectField
+                    label="Email template"
+                    value={emailSlug}
+                    onValueChange={setEmailSlug}
+                    placeholder={emailTemplates.length === 0 ? "No active templates" : "Select email template"}
+                    options={emailTemplates.map((template) => ({ value: template.slug, label: template.name }))}
+                    disabled={emailTemplates.length === 0}
+                    triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
                 ) : (
                   <div className="space-y-3">
                     <div>
@@ -1242,7 +1313,7 @@ export default function Marketing() {
                     <th className="px-4 py-3 text-right">Called</th>
                     <th className="px-4 py-3 text-right">Clicks</th>
                     <th className="px-4 py-3 text-right">Success</th>
-                    <th className="px-4 py-3 text-left">Created</th>
+                    <th className="px-4 py-3 text-left">Scheduled / Created</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1262,7 +1333,10 @@ export default function Marketing() {
                         <Badge variant="outline" className="capitalize">{campaign.channel}</Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`border-0 ${statusTone(campaign.status)}`}>{campaign.status}</Badge>
+                        {(() => {
+                          const displayStatus = campaignDisplayStatus(campaign);
+                          return <Badge className={`border-0 ${statusTone(displayStatus)}`}>{displayStatus}</Badge>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-emerald-700">{campaign.sent.toLocaleString("en-IN")}</td>
@@ -1282,7 +1356,16 @@ export default function Marketing() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(campaign.createdAt)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {campaignDisplayStatus(campaign) === "scheduled" ? (
+                          <div>
+                            <div className="font-medium text-foreground">{fmtDate(campaign.nextAttemptAt)}</div>
+                            <div className="text-[11px]">Created {fmtDate(campaign.createdAt)}</div>
+                          </div>
+                        ) : (
+                          fmtDate(campaign.createdAt)
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                         {campaign.pending > 0 && campaign.status !== "paused" && (
@@ -1293,7 +1376,7 @@ export default function Marketing() {
                             disabled={queueingId === campaign.id}
                           >
                             {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                            Queue
+                            {campaignDisplayStatus(campaign) === "scheduled" ? "Queue now" : "Queue"}
                           </Button>
                         )}
                         {campaign.status === "paused" && (

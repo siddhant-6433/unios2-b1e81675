@@ -8,6 +8,7 @@ import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { SelectField } from "@/components/ui/state-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -891,18 +892,28 @@ export default function Applications() {
             placeholder="Search name, phone, app ID, course..."
             className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Payments</option>
-          <option value="paid">Paid</option>
-          <option value="pending">Pending</option>
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="submitted">Submitted</option>
-        </select>
+        <SelectField
+          value={paymentFilter}
+          onValueChange={(v) => setPaymentFilter(v as any)}
+          options={[
+            { value: "all", label: "All Payments" },
+            { value: "paid", label: "Paid" },
+            { value: "pending", label: "Pending" },
+          ]}
+          hideLabel
+          placeholder="All Payments"
+        />
+        <SelectField
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as any)}
+          options={[
+            { value: "all", label: "All Status" },
+            { value: "draft", label: "Draft" },
+            { value: "submitted", label: "Submitted" },
+          ]}
+          hideLabel
+          placeholder="All Status"
+        />
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}

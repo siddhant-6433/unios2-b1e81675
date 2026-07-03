@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, AlertCircle, UserCheck, UserPlus,
@@ -738,45 +740,39 @@ export default function TransactionHistoryPanel() {
         </div>
 
         {tab === "applications" ? (
-          <select
+          <SelectField
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            <option value="all">All Statuses</option>
-            <option value="paid">Paid</option>
-            <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
-          </select>
+            onValueChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All Statuses" },
+              { value: "paid", label: "Paid" },
+              { value: "pending", label: "Pending" },
+              { value: "failed", label: "Failed" },
+            ]}
+            hideLabel
+            placeholder="All Statuses"
+          />
         ) : (
-          <select
+          <SelectField
             value={modeFilter}
-            onChange={(e) => setModeFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            <option value="all">All Modes</option>
-            <option value="online">Online</option>
-            <option value="cash">Cash</option>
-            <option value="upi">UPI</option>
-            <option value="cheque">Cheque</option>
-            <option value="bank_transfer">Bank Transfer</option>
-          </select>
+            onValueChange={setModeFilter}
+            options={[
+              { value: "all", label: "All Modes" },
+              { value: "online", label: "Online" },
+              { value: "cash", label: "Cash" },
+              { value: "upi", label: "UPI" },
+              { value: "cheque", label: "Cheque" },
+              { value: "bank_transfer", label: "Bank Transfer" },
+            ]}
+            hideLabel
+            placeholder="All Modes"
+          />
         )}
 
         <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          />
+          <FieldShell hideLabel><Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></FieldShell>
           <span className="text-muted-foreground text-xs">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          />
+          <FieldShell hideLabel><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></FieldShell>
         </div>
 
         <button

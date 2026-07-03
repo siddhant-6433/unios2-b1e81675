@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { SelectField, TextAreaField, TextField } from "@/components/ui/state-fields";
 import { Loader2, Send, Upload, X, Plus, Image as ImageIcon } from "lucide-react";
 
 type HeaderType = "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
@@ -273,59 +274,62 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
           {/* ── Form ── */}
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Template Name *</label>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
-                  placeholder="my_template_name"
-                  className={inputCls + " font-mono"}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
-                  <option value="UTILITY">Utility</option>
-                  <option value="MARKETING">Marketing</option>
-                  <option value="AUTHENTICATION">Authentication</option>
-                </select>
-              </div>
+              <TextField
+                label="Template Name"
+                required
+                value={name}
+                onValueChange={(value) => setName(value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
+                placeholder="my_template_name"
+                inputClassName={inputCls + " font-mono"}
+              />
+              <SelectField
+                label="Category"
+                value={category}
+                onValueChange={setCategory}
+                options={[
+                  { value: "UTILITY", label: "Utility" },
+                  { value: "MARKETING", label: "Marketing" },
+                  { value: "AUTHENTICATION", label: "Authentication" },
+                ]}
+                allowEmpty={false}
+                triggerClassName={inputCls}
+              />
             </div>
 
             {/* Header */}
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Header (optional)</label>
-              <select
-                value={headerType}
-                onChange={(e) => {
-                  setHeaderType(e.target.value as HeaderType);
-                  setMediaHandle(null);
-                  setMediaFileName(null);
-                }}
-                className={inputCls}
-              >
-                <option value="NONE">None</option>
-                <option value="TEXT">Text</option>
-                <option value="IMAGE">Image</option>
-                <option value="VIDEO">Video</option>
-                <option value="DOCUMENT">Document</option>
-              </select>
-            </div>
+            <SelectField
+              label="Header (optional)"
+              value={headerType}
+              onValueChange={(value) => {
+                setHeaderType(value as HeaderType);
+                setMediaHandle(null);
+                setMediaFileName(null);
+              }}
+              options={[
+                { value: "NONE", label: "None" },
+                { value: "TEXT", label: "Text" },
+                { value: "IMAGE", label: "Image" },
+                { value: "VIDEO", label: "Video" },
+                { value: "DOCUMENT", label: "Document" },
+              ]}
+              allowEmpty={false}
+              triggerClassName={inputCls}
+            />
 
             {headerType === "TEXT" && (
               <div className="space-y-2">
-                <input
+                <TextField
                   value={headerText}
-                  onChange={(e) => setHeaderText(e.target.value)}
+                  onValueChange={setHeaderText}
                   placeholder="Header text (you may use {{1}})"
-                  className={inputCls}
+                  inputClassName={inputCls}
                 />
                 {headerHasVar && (
-                  <input
+                  <TextField
                     value={headerExample}
-                    onChange={(e) => setHeaderExample(e.target.value)}
+                    onValueChange={setHeaderExample}
                     placeholder="Sample value for header {{1}}"
-                    className={inputCls + " text-xs"}
+                    inputClassName={inputCls + " text-xs"}
                   />
                 )}
               </div>
@@ -362,12 +366,13 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
 
             {/* Body */}
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Body Text *</label>
-              <textarea
+              <TextAreaField
+                label="Body Text"
+                required
                 value={body}
-                onChange={(e) => setBody(e.target.value)}
+                onValueChange={setBody}
                 rows={6}
-                className={inputCls + " text-xs"}
+                textareaClassName={inputCls + " text-xs"}
                 placeholder={"Hi {{1}}, thank you for your interest in {{2}} at NIMT."}
               />
               <p className="text-[10px] text-muted-foreground mt-1">{placeholderCount} variable(s) detected</p>
@@ -377,27 +382,25 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
               <div className="space-y-2">
                 <p className="text-[11px] font-medium text-muted-foreground">Sample values</p>
                 {Array.from({ length: placeholderCount }, (_, i) => (
-                  <input
+                  <TextField
                     key={i}
                     value={bodyExamples[i] ?? ""}
-                    onChange={(e) => setExampleAt(i, e.target.value)}
+                    onValueChange={(value) => setExampleAt(i, value)}
                     placeholder={`Sample value for {{${i + 1}}}`}
-                    className={inputCls + " text-xs"}
+                    inputClassName={inputCls + " text-xs"}
                   />
                 ))}
               </div>
             )}
 
             {/* Footer */}
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Footer (optional)</label>
-              <input
-                value={footer}
-                onChange={(e) => setFooter(e.target.value)}
-                placeholder="e.g. NIMT Educational Institutions"
-                className={inputCls + " text-xs"}
-              />
-            </div>
+            <TextField
+              label="Footer (optional)"
+              value={footer}
+              onValueChange={setFooter}
+              placeholder="e.g. NIMT Educational Institutions"
+              inputClassName={inputCls + " text-xs"}
+            />
 
             {/* Buttons */}
             <div className="space-y-2">
@@ -410,39 +413,43 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
               {buttons.map((b, i) => (
                 <div key={i} className="rounded-lg border border-border p-2 space-y-2">
                   <div className="flex items-center gap-2">
-                    <select
+                    <SelectField
                       value={b.type}
-                      onChange={(e) => updateButton(i, { type: e.target.value as ButtonType })}
-                      className={inputCls + " text-xs py-1.5"}
-                    >
-                      <option value="QUICK_REPLY">Quick reply</option>
-                      <option value="URL">URL</option>
-                      <option value="PHONE_NUMBER">Call</option>
-                    </select>
-                    <input
+                      onValueChange={(value) => updateButton(i, { type: value as ButtonType })}
+                      options={[
+                        { value: "QUICK_REPLY", label: "Quick reply" },
+                        { value: "URL", label: "URL" },
+                        { value: "PHONE_NUMBER", label: "Call" },
+                      ]}
+                      allowEmpty={false}
+                      className="flex-1"
+                      triggerClassName={inputCls + " text-xs py-1.5"}
+                    />
+                    <TextField
                       value={b.text}
-                      onChange={(e) => updateButton(i, { text: e.target.value })}
+                      onValueChange={(value) => updateButton(i, { text: value })}
                       placeholder="Button text"
-                      className={inputCls + " text-xs py-1.5"}
+                      containerClassName="flex-1"
+                      inputClassName={inputCls + " text-xs py-1.5"}
                     />
                     <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeButton(i)}>
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                   {b.type === "URL" && (
-                    <input
+                    <TextField
                       value={b.url ?? ""}
-                      onChange={(e) => updateButton(i, { url: e.target.value })}
+                      onValueChange={(value) => updateButton(i, { url: value })}
                       placeholder="https://uni.nimt.ac.in/…"
-                      className={inputCls + " text-xs py-1.5"}
+                      inputClassName={inputCls + " text-xs py-1.5"}
                     />
                   )}
                   {b.type === "PHONE_NUMBER" && (
-                    <input
+                    <TextField
                       value={b.phone_number ?? ""}
-                      onChange={(e) => updateButton(i, { phone_number: e.target.value })}
+                      onValueChange={(value) => updateButton(i, { phone_number: value })}
                       placeholder="+91…"
-                      className={inputCls + " text-xs py-1.5"}
+                      inputClassName={inputCls + " text-xs py-1.5"}
                     />
                   )}
                 </div>

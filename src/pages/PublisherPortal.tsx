@@ -5,9 +5,11 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
   Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
@@ -459,16 +461,14 @@ export default function PublisherPortal() {
         </div>
         {isSuperAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
-            <select
+            <SelectField
               value={impersonatingId}
-              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setFromDate(""); setToDate(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
-              className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              <option value="">— Switch Publisher —</option>
-              {allPublishers.map(p => (
-                <option key={p.id} value={p.id}>{p.display_name} ({p.source})</option>
-              ))}
-            </select>
+              onValueChange={value => { setImpersonatingId(value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setFromDate(""); setToDate(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
+              placeholder="Switch Publisher"
+              options={allPublishers.map(p => ({ value: p.id, label: `${p.display_name} (${p.source})` }))}
+              triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+              ariaLabel="Switch publisher"
+            />
             {impersonatingId && (() => {
               const pub = allPublishers.find(p => p.id === impersonatingId);
               return pub?.user_id ? (
@@ -694,14 +694,17 @@ export default function PublisherPortal() {
                       Best: {bestCourse.course} ({(bestCourse.ratio * 100).toFixed(0)}% int/called)
                     </span>
                   )}
-                  <select
+                  <SelectField
                     value={courseSortBy}
-                    onChange={e => setCourseSortBy(e.target.value as "total"|"ratio")}
-                    className="rounded-lg border border-input bg-background px-2 py-1 text-[11px] font-medium text-foreground focus:outline-none"
-                  >
-                    <option value="total">Sort: Total Leads</option>
-                    <option value="ratio">Sort: Interested/Called ↓</option>
-                  </select>
+                    onValueChange={value => setCourseSortBy(value as "total"|"ratio")}
+                    options={[
+                      { value: "total", label: "Sort: Total Leads" },
+                      { value: "ratio", label: "Sort: Interested/Called ↓" },
+                    ]}
+                    allowEmpty={false}
+                    triggerClassName="h-7 rounded-lg border border-input bg-background px-2 py-1 text-[11px] font-medium text-foreground focus:ring-0"
+                    ariaLabel="Sort course-wise lead stages"
+                  />
                 </div>
               </div>
             </CardHeader>
@@ -868,7 +871,7 @@ export default function PublisherPortal() {
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
+          <Input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search by name, phone, course…"
@@ -885,35 +888,41 @@ export default function PublisherPortal() {
           className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
           ariaPrefix="Publisher leads"
         />
-        <select
+        <SelectField
           value={stageFilter}
-          onChange={e => setStageFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        >
-          <option value="all">All Stages</option>
-          {Object.entries(STAGE_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
-        <select
+          onValueChange={setStageFilter}
+          options={[
+            { value: "all", label: "All Stages" },
+            ...Object.entries(STAGE_LABELS).map(([key, label]) => ({ value: key, label })),
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+          ariaLabel="Filter by stage"
+        />
+        <SelectField
           value={aiFilter}
-          onChange={e => setAiFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        >
-          <option value="all">All AI Call Status</option>
-          <option value="called">AI Called</option>
-          <option value="not_called">Not Called</option>
-        </select>
+          onValueChange={setAiFilter}
+          options={[
+            { value: "all", label: "All AI Call Status" },
+            { value: "called", label: "AI Called" },
+            { value: "not_called", label: "Not Called" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+          ariaLabel="Filter by AI call status"
+        />
         {contractIds.length > 0 && (
-          <select
+          <SelectField
             value={contractFilter}
-            onChange={e => setContractFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            title="JustDial contract ID"
-          >
-            <option value="all">All Contracts</option>
-            {contractIds.map(c => <option key={c} value={c}>Contract {c}</option>)}
-          </select>
+            onValueChange={setContractFilter}
+            options={[
+              { value: "all", label: "All Contracts" },
+              ...contractIds.map(c => ({ value: c, label: `Contract ${c}` })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+            ariaLabel="Filter by JustDial contract ID"
+          />
         )}
       </div>
 
