@@ -1210,6 +1210,15 @@ Deno.serve(async (req) => {
               .update(updates)
               .eq("wa_message_id", waMessageId);
 
+            await admin
+              .from("whatsapp_otps")
+              .update({
+                wa_status: newStatus,
+                wa_status_error: status.errors || null,
+                wa_status_updated_at: new Date().toISOString(),
+              })
+              .eq("wa_message_id", waMessageId);
+
             if (["sent", "delivered", "read", "failed"].includes(newStatus)) {
               const recipientPatch: Record<string, unknown> = {
                 status: newStatus,
