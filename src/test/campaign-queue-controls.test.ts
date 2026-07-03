@@ -6,6 +6,7 @@ const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/i
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
+const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -65,5 +66,14 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain('from("whatsapp_templates")');
     expect(leadLists).toContain("row.placeholder_count === 0");
     expect(leadLists).toContain("hasDynamicUrlButton");
+  });
+
+  it("exposes the enabled admission payment nudge in Marketing Hub bulk campaigns", () => {
+    expect(marketingPage).toContain("WA_BULK_TEMPLATES");
+    expect(leadLists).toContain("WA_BULK_TEMPLATES");
+    expect(bulkTemplates).toContain('key: "admission_payment_nudge"');
+    expect(whatsappSender).toContain("admission_payment_nudge");
+    expect(whatsappSender).toContain('"an_amount"');
+    expect(whatsappSender).toContain('"year1_amount"');
   });
 });
