@@ -243,12 +243,6 @@ const renderTemplatePreview = (
     return typed || sampleValueForParam(paramName);
   });
 
-const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
-  (components || []).some((component) =>
-    component.type === "BUTTONS" &&
-    (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
-  );
-
 const WhatsAppBusinessIdentity = ({
   sender,
   selected,
@@ -604,10 +598,7 @@ export default function LeadLists() {
         .filter((row) =>
           row.name &&
           enabledKeys.has(row.name) &&
-          !knownKeys.has(row.name) &&
-          row.has_media !== true &&
-          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
-          !hasDynamicUrlButton(row.components)
+          !knownKeys.has(row.name)
         )
         .map((row) => {
           const setting = settingsByKey.get(row.name);

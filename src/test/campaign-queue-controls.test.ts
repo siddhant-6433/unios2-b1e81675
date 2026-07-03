@@ -60,14 +60,17 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain("919555192192");
   });
 
-  it("can load enabled zero-parameter approved templates dynamically", () => {
+  it("can load enabled approved templates dynamically for bulk campaigns", () => {
     expect(leadLists).toContain("dynamicWaBulkTemplates");
     expect(leadLists).toContain("availableWaBulkTemplates");
     expect(leadLists).toContain('from("whatsapp_templates")');
     expect(leadLists).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
     expect(marketingPage).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
-    expect(leadLists).toContain("hasDynamicUrlButton");
-    expect(whatsappSender).toContain("dynamicTemplateParamNames");
+    expect(bulkTemplates).toContain("template_header_media_url");
+    expect(bulkTemplates).toContain("template_button_${buttonIndex}_url_value_${position}");
+    expect(whatsappSender).toContain("dynamicTemplateComponents");
+    expect(whatsappSender).toContain("bodyTemplateParamNames");
+    expect(whatsappSender).toContain('sub_type: "url"');
     expect(whatsappSender).toContain("placeholder_count");
   });
 
