@@ -40,12 +40,10 @@ import {
   Users,
 } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 // Derive up to two-letter initials from a partner's company/display name,
 // used as the logo fallback when no logo has been uploaded.
-const formatTermName = (term: string): string =>
-  term.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
 const getPartnerInitials = (name: string): string => {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
@@ -1808,7 +1806,7 @@ export default function AcademicPartnerPortal() {
               <tbody>
                 {feeDetailsRows.map((fee) => (
                   <tr key={fee.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${formatTermName(fee.term)}` : formatTermName(fee.term)}</td>
+                    <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${defaultFeeTermLabel(fee.term)}` : defaultFeeTermLabel(fee.term)}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{fee.due_date ? new Date(fee.due_date).toLocaleDateString("en-IN") : "-"}</td>
                     <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
                     <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>

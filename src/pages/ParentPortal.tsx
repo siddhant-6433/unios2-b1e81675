@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
@@ -88,7 +89,7 @@ export default function ParentPortal() {
       if (feeData) {
         setFees(feeData.map((f: any) => ({
           id: f.id,
-          fee_code_name: f.fee_codes?.name || f.term || "Fee",
+          fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
           category: f.fee_codes?.category || "other",
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
