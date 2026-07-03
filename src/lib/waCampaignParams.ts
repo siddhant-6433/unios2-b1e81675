@@ -42,7 +42,7 @@ export const defaultWaParamValue = (name: string) =>
   name === "template_value_1" ? encodeWaParamFieldMapping("student_name") : "";
 
 export const effectiveWaParamValue = (params: Record<string, string>, name: string) =>
-  params[name] || defaultWaParamValue(name);
+  Object.prototype.hasOwnProperty.call(params, name) ? params[name] : defaultWaParamValue(name);
 
 export const waBodyPreviewParams = (params: WaBulkTemplate["params"]) =>
   params.filter((param) => isWaBodyTemplateParam(param.name));
