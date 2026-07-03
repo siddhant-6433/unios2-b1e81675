@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -104,8 +104,17 @@ const FUNNEL_ORDER: FunnelStage[] = [
 ];
 
 const funnelStageOf = applicationFunnelStageOf;
-const RELATED_QUERY_BATCH_SIZE = 50;
+const RELATED_QUERY_BATCH_SIZE = 100;
+const APPLICATION_TABLE_PAGE_SIZE = 100;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 const FUNNEL_META: Record<FunnelStage, {
   label: string; icon: any;
@@ -193,6 +202,7 @@ export default function Applications() {
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -327,83 +337,94 @@ export default function Applications() {
       const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
-        for (let i = 0; i < leadIds.length; i += RELATED_QUERY_BATCH_SIZE) {
-          const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);
+        const leadBatches = chunkArray(leadIds, RELATED_QUERY_BATCH_SIZE);
 
+        await Promise.all(leadBatches.map(async (batch) => {
           // Offer-letter existence — one row per lead is enough to flag.
           // Keep this batched; admins can have 700+ applications, and a single
           // huge `.in(...)` URL silently starves downstream token/PAN status.
-          const { data: offers, error: offersError } = await supabase.from("offer_letters")
-            .select("lead_id")
-            .in("lead_id", batch);
-          if (offersError) {
-            console.error("offer_letters batch failed:", offersError);
+          const [offersResult, paymentsResult] = await Promise.all([
+            supabase.from("offer_letters")
+              .select("lead_id")
+              .in("lead_id", batch),
+            supabase.from("lead_payments")
+              .select("lead_id, amount, type")
+              .in("lead_id", batch)
+              .in("type", ["application_fee", "token_fee"])
+              .eq("status", "confirmed"),
+          ]);
+
+          if (offersResult.error) {
+            console.error("offer_letters batch failed:", offersResult.error);
           }
-          (offers || []).forEach((o: { lead_id: string }) => { leadOfferMap[o.lead_id] = true; });
+          (offersResult.data || []).forEach((o: { lead_id: string }) => { leadOfferMap[o.lead_id] = true; });
 
           // Confirmed application_fee + token_fee payments — track per lead.
           // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
           // receipts. Course-fee lump-sum payments are recorded as `other`, so
           // the authoritative token-complete flag comes from lead_fee_status
           // below once the offer/threshold is known.
-          const { data: pmts, error: pmtsError } = await supabase.from("lead_payments")
-            .select("lead_id, amount, type")
-            .in("lead_id", batch)
-            .in("type", ["application_fee", "token_fee"])
-            .eq("status", "confirmed");
-          if (pmtsError) {
-            console.error("lead_payments batch failed:", pmtsError);
+          if (paymentsResult.error) {
+            console.error("lead_payments batch failed:", paymentsResult.error);
           }
-          (pmts || []).forEach((p: { lead_id: string; amount: number | string | null; type: string }) => {
+          (paymentsResult.data || []).forEach((p: { lead_id: string; amount: number | string | null; type: string }) => {
             if (p.type === "application_fee") {
               appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
             } else if (p.type === "token_fee") {
               leadTokenFeePaidSet.add(p.lead_id);
             }
           });
-        }
+        }));
 
-        for (let i = 0; i < leadIds.length; i += RELATED_QUERY_BATCH_SIZE) {
-          const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);
-          const { data: leads, error: leadsError } = await supabase.from("leads")
+        const leadResults = await Promise.all(leadBatches.map(async (batch) => {
+          const { data, error } = await supabase.from("leads")
             .select("id, counsellor_id, stage, pre_admission_no, admission_no")
             .in("id", batch);
-          if (leadsError) {
-            console.error("leads batch failed:", leadsError);
+          if (error) {
+            console.error("leads batch failed:", error);
           }
-          (leads || []).forEach((l: {
-            id: string;
-            counsellor_id: string | null;
-            stage: string;
-            pre_admission_no: string | null;
-            admission_no: string | null;
-          }) => {
-            leadStageMap[l.id] = l.stage;
-            leadCounsellorIdMap[l.id] = l.counsellor_id;
-            leadPanMap[l.id] = l.pre_admission_no;
-            leadAnMap[l.id] = l.admission_no;
-          });
-          const counsellorIds = [...new Set((leads || []).map((l: any) => l.counsellor_id).filter(Boolean))];
-          if (counsellorIds.length > 0) {
-            const { data: profiles } = await supabase.from("profiles")
+          return data || [];
+        }));
+
+        const leads = leadResults.flat() as {
+          id: string;
+          counsellor_id: string | null;
+          stage: string;
+          pre_admission_no: string | null;
+          admission_no: string | null;
+        }[];
+        leads.forEach((l) => {
+          leadStageMap[l.id] = l.stage;
+          leadCounsellorIdMap[l.id] = l.counsellor_id;
+          leadPanMap[l.id] = l.pre_admission_no;
+          leadAnMap[l.id] = l.admission_no;
+        });
+
+        const counsellorIds = [...new Set(leads.map((l) => l.counsellor_id).filter(Boolean))] as string[];
+        if (counsellorIds.length > 0) {
+          const profileResults = await Promise.all(chunkArray(counsellorIds, RELATED_QUERY_BATCH_SIZE).map(async (batch) => {
+            const { data, error } = await supabase.from("profiles")
               .select("id, display_name")
-              .in("id", counsellorIds);
-            const profileMap: Record<string, string> = {};
-            (profiles || []).forEach((p: any) => { profileMap[p.id] = p.display_name || ""; });
-            (leads || []).forEach((l: any) => {
-              if (l.counsellor_id && profileMap[l.counsellor_id]) {
-                counsellorMap[l.id] = profileMap[l.counsellor_id];
-              }
-            });
-          }
+              .in("id", batch);
+            if (error) {
+              console.error("profiles batch failed:", error);
+            }
+            return data || [];
+          }));
+          const profileMap: Record<string, string> = {};
+          profileResults.flat().forEach((p: any) => { profileMap[p.id] = p.display_name || ""; });
+          leads.forEach((l) => {
+            if (l.counsellor_id && profileMap[l.counsellor_id]) {
+              counsellorMap[l.id] = profileMap[l.counsellor_id];
+            }
+          });
         }
       }
 
       // Document review counts per application — used by the mini lifecycle
       // stepper. Keep this batched for the same reason as lead-side lookups.
       if (appIdsForReview.length > 0) {
-        for (let i = 0; i < appIdsForReview.length; i += RELATED_QUERY_BATCH_SIZE) {
-          const batch = appIdsForReview.slice(i, i + RELATED_QUERY_BATCH_SIZE);
+        await Promise.all(chunkArray(appIdsForReview, RELATED_QUERY_BATCH_SIZE).map(async (batch) => {
           const { data: reviews, error: reviewsError } = await supabase.from("application_doc_reviews" as any)
             .select("application_id, status")
             .in("application_id", batch);
@@ -420,7 +441,7 @@ export default function Applications() {
             else if (r.status === "rejected") c.rejected++;
             else c.pending++;
           });
-        }
+        }));
       }
 
       // Pull PAN/AN amounts due from the server-side `lead_fee_status` RPC
@@ -523,7 +544,7 @@ export default function Applications() {
   const totalCount = (cs: Record<string, boolean>) => Object.keys(cs || {}).length;
   const completionPct = (cs: Record<string, boolean>) => { const t = totalCount(cs); return t > 0 ? completedCount(cs) / t : 0; };
 
-  const filtered = apps.filter(a => {
+  const filtered = useMemo(() => apps.filter(a => {
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -585,7 +606,18 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  });
+  }), [apps, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, pageCount);
+  const pageStart = (safeCurrentPage - 1) * APPLICATION_TABLE_PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + APPLICATION_TABLE_PAGE_SIZE, filtered.length);
+  const visibleApps = filtered.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setExpandedId(null);
+  }, [fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
 
   const fetchDocs = async (appId: string, applicationId: string) => {
     setDocsDialog({ appId, applicationId });
@@ -926,7 +958,7 @@ export default function Applications() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(app => {
+              {visibleApps.map(app => {
                 const isExpanded = expandedId === app.id;
                 const courses = (app.course_selections || []).map((c: any) => c.course_name).join(", ");
                 const cc = completedCount(app.completed_sections);
@@ -1205,6 +1237,36 @@ export default function Applications() {
             </tbody>
           </table>
         </div>
+        {filtered.length > APPLICATION_TABLE_PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-border/60 px-4 py-3 text-xs text-muted-foreground">
+            <span>
+              Showing {pageStart + 1}-{pageEnd} of {filtered.length} applications
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={safeCurrentPage <= 1}
+              >
+                Previous
+              </Button>
+              <span className="tabular-nums">
+                Page {safeCurrentPage} / {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}
+                disabled={safeCurrentPage >= pageCount}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Documents Dialog */}
