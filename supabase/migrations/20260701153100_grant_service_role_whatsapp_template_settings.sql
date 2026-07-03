@@ -3,4 +3,3 @@
 -- RLS bypass does not grant table privileges, so grant explicit access.
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.whatsapp_template_settings TO service_role;
-
