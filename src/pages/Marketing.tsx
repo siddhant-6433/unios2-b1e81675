@@ -38,6 +38,10 @@ import {
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import {
+  enrichApprovedWhatsAppTemplateMetadata,
+  type ApprovedWhatsAppTemplateMetadata,
+} from "@/lib/whatsappTemplateMeta";
 
 type Channel = "whatsapp" | "email";
 
@@ -409,26 +413,24 @@ export default function Marketing() {
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
         .eq("status", "APPROVED");
+      const dynamicTemplateKeys = settingsRows
+        .map((setting) => setting.template_key)
+        .filter((templateKey) => templateKey && !knownKeys.has(templateKey));
+      const approvedTemplateRows = await enrichApprovedWhatsAppTemplateMetadata(
+        ((approvedRows || []) as ApprovedWhatsAppTemplateMetadata[]),
+        dynamicTemplateKeys,
+      );
 
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
       const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
-      ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-      }>).forEach((row) => {
+      approvedTemplateRows.forEach((row) => {
         if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
         const preview = templateTextPreviewFromComponents(row.components);
         if (preview) overrides[row.name] = { preview };
       });
 
-      const approvedTemplateByName = new Map(((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-        placeholder_count?: number | null;
-        has_media?: boolean | null;
-        header_format?: string | null;
-      }>).map((row) => [row.name, row] as const));
+      const approvedTemplateByName = new Map(approvedTemplateRows.map((row) => [row.name, row] as const));
       const dynamic = settingsRows
         .filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))
         .map((setting) => {
