@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -186,6 +186,8 @@ export default function Applications() {
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
+  const [courseFilter, setCourseFilter] = useState("all");
+  const [counsellorFilter, setCounsellorFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
@@ -551,7 +553,57 @@ export default function Applications() {
   const totalCount = (cs: Record<string, boolean>) => Object.keys(cs || {}).length;
   const completionPct = (cs: Record<string, boolean>) => { const t = totalCount(cs); return t > 0 ? completedCount(cs) / t : 0; };
 
+  const courseOptions = useMemo(() => {
+    const courses = new Set<string>();
+    apps.forEach((app) => {
+      (app.course_selections || []).forEach((course: any) => {
+        const name = String(course?.course_name || "").trim();
+        if (name) courses.add(name);
+      });
+    });
+    return Array.from(courses).sort((a, b) => a.localeCompare(b));
+  }, [apps]);
+
+  const counsellorOptions = useMemo(() => {
+    const counsellors = new Map<string, string>();
+    let hasUnassigned = false;
+    apps.forEach((app) => {
+      if (app.lead_counsellor_id) {
+        counsellors.set(
+          app.lead_counsellor_id,
+          app.counsellor_name || "Assigned counsellor",
+        );
+      } else {
+        hasUnassigned = true;
+      }
+    });
+    const options = Array.from(counsellors, ([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return hasUnassigned
+      ? [{ id: "__unassigned", name: "Unassigned" }, ...options]
+      : options;
+  }, [apps]);
+
+  const matchesCourseFilter = useCallback((app: AppRow) =>
+    courseFilter === "all" ||
+    app.course_selections?.some((course: any) => course?.course_name === courseFilter),
+    [courseFilter],
+  );
+
+  const matchesCounsellorFilter = useCallback((app: AppRow) => {
+    if (isCounsellor || counsellorFilter === "all") return true;
+    if (counsellorFilter === "__unassigned") return !app.lead_counsellor_id;
+    return app.lead_counsellor_id === counsellorFilter;
+  }, [counsellorFilter, isCounsellor]);
+
+  const dashboardApps = useMemo(
+    () => apps.filter((app) => matchesCourseFilter(app) && matchesCounsellorFilter(app)),
+    [apps, matchesCourseFilter, matchesCounsellorFilter],
+  );
+
   const filtered = useMemo(() => apps.filter(a => {
+    if (!matchesCourseFilter(a)) return false;
+    if (!matchesCounsellorFilter(a)) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -613,7 +665,7 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
@@ -624,7 +676,7 @@ export default function Applications() {
   useEffect(() => {
     setCurrentPage(1);
     setExpandedId(null);
-  }, [fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }, [courseFilter, counsellorFilter, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
 
   const fetchDocs = async (appId: string, applicationId: string) => {
     setDocsDialog({ appId, applicationId });
@@ -653,18 +705,18 @@ export default function Applications() {
     in_progress: 0, submitted: 0, paid: 0, approved: 0,
     offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
   };
-  for (const a of apps) stageBucket[funnelStageOf(a)]++;
+  for (const a of dashboardApps) stageBucket[funnelStageOf(a)]++;
 
   const stageReached: Record<FunnelStage, number> = {} as any;
   {
-    let cum = apps.length;
+    let cum = dashboardApps.length;
     for (const s of FUNNEL_ORDER) {
       stageReached[s] = cum;
       cum -= stageBucket[s];
     }
   }
-  const totalApps = apps.length;
-  const paidNoOffer = apps.filter(isPaidBeforeOfferStage).length;
+  const totalApps = dashboardApps.length;
+  const paidNoOffer = dashboardApps.filter(isPaidBeforeOfferStage).length;
 
   const handleDelete = async () => {
     if (!deleteTarget || !isSuperAdmin) return;
@@ -884,13 +936,29 @@ export default function Applications() {
       </Card>
 
       {/* Search + Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name, phone, app ID, course..."
             className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
         </div>
+        <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}
+          className="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm">
+          <option value="all">All Courses</option>
+          {courseOptions.map(course => (
+            <option key={course} value={course}>{course}</option>
+          ))}
+        </select>
+        {!isCounsellor && (
+          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
+            className="min-w-[170px] max-w-[240px] rounded-xl border border-input bg-background px-3 py-2 text-sm">
+            <option value="all">All Counsellors</option>
+            {counsellorOptions.map(counsellor => (
+              <option key={counsellor.id} value={counsellor.id}>{counsellor.name}</option>
+            ))}
+          </select>
+        )}
         <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value as any)}
           className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
           <option value="all">All Payments</option>
@@ -912,8 +980,8 @@ export default function Applications() {
           onToDateChange={setToDate}
           ariaPrefix="Application created"
         />
-        {(paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
