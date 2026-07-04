@@ -19,6 +19,12 @@ describe("Inbox offer waiver badge and reload behavior", () => {
     expect(inbox).toContain('.from("whatsapp_conversations" as any)\n            .select("phone")');
   });
 
+  it("loads pending waiver rows before resolving related offer data", () => {
+    expect(inbox).toContain("const waiverRows = (data || []) as any[]");
+    expect(inbox).toContain(".from(\"offer_letters\")\n            .select(\"id, lead_id, course_id, session_id\")");
+    expect(inbox).not.toContain("offer_letters!offer_letter_id");
+  });
+
   it("lets WhatsApp inbox notifications be marked read from the detail pane", () => {
     expect(inbox).toContain('("mark_whatsapp_conversation_read"');
     expect(inbox).toContain("const markWhatsAppRead = async");
