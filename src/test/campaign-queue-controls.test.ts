@@ -89,6 +89,9 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain("bodyTemplateParamNames");
     expect(whatsappSender).toContain('sub_type: "url"');
     expect(whatsappSender).toContain("placeholder_count");
+    expect(whatsappSender).toContain("fetchApprovedMetaCampaignTemplate");
+    expect(whatsappSender).toContain("message_templates?fields=");
+    expect(whatsappSender).toContain('onConflict: "name,language"');
   });
 
   it("supports mapped template variables and scheduled campaign starts", () => {

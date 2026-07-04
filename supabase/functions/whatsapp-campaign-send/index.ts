@@ -27,6 +27,15 @@ type TemplateDef = {
   headerImageUrl?: string;
   dynamicComponents?: DynamicTemplateComponents;
 };
+type MetaCampaignTemplate = {
+  id?: string | null;
+  name?: string | null;
+  status?: string | null;
+  category?: string | null;
+  language?: string | null;
+  components?: unknown;
+  quality_score?: unknown;
+};
 
 // Same template definitions as whatsapp-send
 const TEMPLATES: Record<string, TemplateDef> = {
@@ -194,6 +203,93 @@ function dynamicTemplateComponents(
   return dynamicComponents;
 }
 
+function normalizeTemplateStatus(status: unknown): string {
+  const value = String(status || "PENDING").toUpperCase();
+  const known = new Set([
+    "PENDING",
+    "APPROVED",
+    "REJECTED",
+    "PAUSED",
+    "DISABLED",
+    "IN_APPEAL",
+    "FLAGGED",
+  ]);
+  return known.has(value) ? value : "FLAGGED";
+}
+
+function headerFormatFromTemplate(components: unknown): string {
+  if (!Array.isArray(components)) return "NONE";
+  const header = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "HEADER";
+  }) as Record<string, unknown> | undefined;
+  const format = String(header?.format || "NONE").toUpperCase();
+  return ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(format) ? format : "NONE";
+}
+
+function placeholderCountFromTemplate(components: unknown): number {
+  const body = Array.isArray(components)
+    ? components.find((component) => {
+        const data = component as Record<string, unknown>;
+        return data.type === "BODY";
+      }) as Record<string, unknown> | undefined
+    : undefined;
+  return numberedPlaceholders(body?.text).length;
+}
+
+function qualityScoreValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const score = (value as Record<string, unknown>).score;
+    return typeof score === "string" ? score : null;
+  }
+  return null;
+}
+
+async function fetchApprovedMetaCampaignTemplate(adminClient: any, templateKey: string): Promise<MetaCampaignTemplate | null> {
+  const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
+  const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+  if (!wabaId || !waToken) {
+    console.warn("Cannot fetch dynamic campaign template from Meta: WHATSAPP_WABA_ID or WHATSAPP_API_TOKEN is missing");
+    return null;
+  }
+
+  const fields = "id,name,status,category,language,components,quality_score";
+  const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=${fields}&limit=200&name=${encodeURIComponent(templateKey)}&access_token=${waToken}`;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error("Meta campaign template lookup failed:", data?.error?.message || res.statusText);
+    return null;
+  }
+
+  const template = ((data?.data || []) as MetaCampaignTemplate[]).find((row) =>
+    row.name === templateKey && normalizeTemplateStatus(row.status) === "APPROVED"
+  );
+  if (!template?.name) return null;
+
+  const headerFormat = headerFormatFromTemplate(template.components);
+  const placeholderCount = placeholderCountFromTemplate(template.components);
+  const { error: upsertErr } = await adminClient
+    .from("whatsapp_templates")
+    .upsert({
+      meta_template_id: template.id ? String(template.id) : null,
+      name: template.name,
+      language: template.language || "en",
+      category: template.category || null,
+      status: "APPROVED",
+      header_format: headerFormat,
+      has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
+      placeholder_count: placeholderCount,
+      components: template.components || null,
+      quality_score: qualityScoreValue(template.quality_score),
+      status_updated_at: new Date().toISOString(),
+    }, { onConflict: "name,language" });
+  if (upsertErr) console.error("Dynamic campaign template mirror upsert failed:", upsertErr.message);
+
+  return template;
+}
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function syncCampaignCounts(admin: any, campaignId: string) {
@@ -318,13 +414,16 @@ Deno.serve(async (req) => {
     let dynamicTemplateBody: string | null = null;
     let templateDef = TEMPLATES[campaign.template_key];
     if (!templateDef) {
-      const { data: dynamicTemplate, error: dynamicErr } = await adminClient
+      let { data: dynamicTemplate, error: dynamicErr } = await adminClient
         .from("whatsapp_templates")
         .select("name, status, placeholder_count, has_media, header_format, components")
         .eq("name", campaign.template_key)
         .eq("status", "APPROVED")
         .maybeSingle();
       if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
+      if (!dynamicTemplate) {
+        dynamicTemplate = await fetchApprovedMetaCampaignTemplate(adminClient, campaign.template_key);
+      }
       const canSendDynamic = !!dynamicTemplate;
       if (!canSendDynamic) {
         return new Response(
