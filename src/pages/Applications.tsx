@@ -45,7 +45,41 @@ import {
 import type { DatePreset } from "@/lib/datePresets";
 import { compareCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
+import { cahetRegistrationFromApplication, isBptOrBmritCourseName } from "@/lib/cahet";
+import { isDeledCourseName, updeledRegistrationFromApplication } from "@/lib/updeled";
 import { useToast } from "@/hooks/use-toast";
+
+type RegistrationExamKey = "cahet" | "upget" | "updeled";
+type RegistrationStatusKind = "registered" | "not_registered" | "unknown";
+type RegistrationStatus = {
+  label: string;
+  status: RegistrationStatusKind;
+  registrationNo?: string | null;
+};
+type RegistrationStatuses = Record<RegistrationExamKey, RegistrationStatus>;
+type RegistrationCourseSelection = {
+  course_name?: string | null;
+  name?: string | null;
+};
+type RegistrationEntranceExam = {
+  exam_name?: string | null;
+  status?: string | null;
+  registration_no?: string | null;
+};
+type RegistrationLookupRow = {
+  lead_id: string;
+  registration_no: string | null;
+};
+type RegistrationLookupClient = {
+  from(table: "cahet_registrations" | "updeled_registrations"): {
+    select(columns: string): {
+      in(column: "lead_id", values: string[]): Promise<{
+        data: RegistrationLookupRow[] | null;
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+};
 
 interface AppRow {
   id: string;
@@ -89,6 +123,7 @@ interface AppRow {
   an_due?: number | null;
   /** Remaining balance for the full first-year fee — needed by the nudge dialog. */
   year1_due?: number | null;
+  registration_statuses?: RegistrationStatuses;
   dossier?: ApplicationDossier;
 }
 
@@ -114,6 +149,13 @@ const funnelStageOf = applicationFunnelStageOf;
 const RELATED_QUERY_BATCH_SIZE = 100;
 const APPLICATION_TABLE_PAGE_SIZE = 100;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
+const REGISTRATION_EXAM_ORDER: RegistrationExamKey[] = ["cahet", "upget", "updeled"];
+const REGISTRATION_EXAM_LABELS: Record<RegistrationExamKey, string> = {
+  cahet: "CAHET",
+  upget: "UPGET",
+  updeled: "UPDELED",
+};
+const UPGET_REGISTERED_STATUSES = new Set(["registered", "declared", "not_declared"]);
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -198,6 +240,99 @@ const primaryCourseSelection = (app: Pick<AppRow, "course_selections">) => {
     course: String(firstNamed?.course_name || "No course").trim(),
     campus: String(firstNamed?.campus_name || "No campus").trim(),
   };
+};
+
+const isUpgetExamName = (name: string | null | undefined) =>
+  /up\s*gnm\s*entrance|upget|gnm\s*entrance/i.test(String(name || ""));
+
+const isGnmCourseName = (courseName: string | null | undefined) => {
+  const c = String(courseName || "").toLowerCase();
+  return c.includes("gnm") || c.includes("general nursing");
+};
+
+const appHasCourseMatching = (
+  app: Pick<AppRow, "course_selections">,
+  predicate: (courseName: string | null | undefined) => boolean,
+) =>
+  (app.course_selections || []).some((course: RegistrationCourseSelection) =>
+    predicate(course?.course_name || course?.name || "")
+  );
+
+const entranceExamsFor = (app: Pick<AppRow, "academic_details">) => {
+  const academic = app.academic_details as { entrance_exams?: unknown } | null | undefined;
+  const exams = academic?.entrance_exams;
+  return Array.isArray(exams) ? (exams as RegistrationEntranceExam[]) : [];
+};
+
+const examRegistrationStatus = (
+  app: Pick<AppRow, "academic_details">,
+  matcher: (name: string | null | undefined) => boolean,
+  required: boolean,
+  registeredStatuses = new Set<string>(["registered"]),
+): { status: RegistrationStatusKind; registrationNo: string | null } => {
+  const exam = entranceExamsFor(app).find((entry) => matcher(entry?.exam_name));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (registrationNo || registeredStatuses.has(String(exam?.status || ""))) {
+    return { status: "registered", registrationNo: registrationNo || null };
+  }
+  if (exam || required) {
+    return { status: "not_registered", registrationNo: null };
+  }
+  return { status: "unknown", registrationNo: null };
+};
+
+const buildRegistrationStatuses = (
+  app: AppRow,
+  registeredByLead: {
+    cahet: Record<string, string | null>;
+    updeled: Record<string, string | null>;
+  },
+): RegistrationStatuses => {
+  const leadId = app.lead_id || "";
+  const requiresCahet = appHasCourseMatching(app, isBptOrBmritCourseName);
+  const requiresUpget = appHasCourseMatching(app, isGnmCourseName);
+  const requiresUpdeled = appHasCourseMatching(app, isDeledCourseName);
+
+  const appCahetRegistration = cahetRegistrationFromApplication(app, app.lead_id);
+  const appUpdeledRegistration = updeledRegistrationFromApplication(app, app.lead_id);
+  const cahetRegistrationNo = registeredByLead.cahet[leadId] || appCahetRegistration?.registration_no || null;
+  const updeledRegistrationNo = registeredByLead.updeled[leadId] || appUpdeledRegistration?.registration_no || null;
+  const upget = examRegistrationStatus(
+    app,
+    isUpgetExamName,
+    requiresUpget,
+    UPGET_REGISTERED_STATUSES,
+  );
+
+  return {
+    cahet: {
+      label: REGISTRATION_EXAM_LABELS.cahet,
+      status: cahetRegistrationNo ? "registered" : requiresCahet ? "not_registered" : "unknown",
+      registrationNo: cahetRegistrationNo,
+    },
+    upget: {
+      label: REGISTRATION_EXAM_LABELS.upget,
+      status: upget.status,
+      registrationNo: upget.registrationNo,
+    },
+    updeled: {
+      label: REGISTRATION_EXAM_LABELS.updeled,
+      status: updeledRegistrationNo ? "registered" : requiresUpdeled ? "not_registered" : "unknown",
+      registrationNo: updeledRegistrationNo,
+    },
+  };
+};
+
+const registrationStatusClass = (status: RegistrationStatusKind) => {
+  if (status === "registered") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "not_registered") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-border bg-muted/40 text-muted-foreground";
+};
+
+const registrationStatusText = (status: RegistrationStatusKind) => {
+  if (status === "registered") return "Yes";
+  if (status === "not_registered") return "No";
+  return "N/A";
 };
 
 export default function Applications() {
@@ -382,6 +517,9 @@ export default function Applications() {
       const panDueMap: Record<string, number | null> = {};
       const anDueMap: Record<string, number | null> = {};
       const year1DueMap: Record<string, number | null> = {};
+      const cahetRegistrationMap: Record<string, string | null> = {};
+      const updeledRegistrationMap: Record<string, string | null> = {};
+      const registrationClient = supabase as unknown as RegistrationLookupClient;
 
       const mapRows = () => rows.map((a: any) => {
         const leadId = a.lead_id || "";
@@ -407,7 +545,13 @@ export default function Applications() {
           anDue: anDueMap[leadId] ?? null,
           year1Due: year1DueMap[leadId] ?? null,
         });
-        return applyApplicationDossierToRow(a, dossier);
+        return {
+          ...applyApplicationDossierToRow(a, dossier),
+          registration_statuses: buildRegistrationStatuses(a, {
+            cahet: cahetRegistrationMap,
+            updeled: updeledRegistrationMap,
+          }),
+        };
       });
 
       // Render the base application rows before secondary dashboard enrichment.
@@ -423,7 +567,7 @@ export default function Applications() {
           // Offer-letter existence — one row per lead is enough to flag.
           // Keep this batched; admins can have 700+ applications, and a single
           // huge `.in(...)` URL silently starves downstream token/PAN status.
-          const [offersResult, paymentsResult] = await Promise.all([
+          const [offersResult, paymentsResult, cahetResult, updeledResult] = await Promise.all([
             supabase.from("offer_letters")
               .select("lead_id")
               .in("lead_id", batch),
@@ -432,12 +576,32 @@ export default function Applications() {
               .in("lead_id", batch)
               .in("type", ["application_fee", "token_fee"])
               .eq("status", "confirmed"),
+            registrationClient.from("cahet_registrations")
+              .select("lead_id, registration_no")
+              .in("lead_id", batch),
+            registrationClient.from("updeled_registrations")
+              .select("lead_id, registration_no")
+              .in("lead_id", batch),
           ]);
 
           if (offersResult.error) {
             console.error("offer_letters batch failed:", offersResult.error);
           }
           (offersResult.data || []).forEach((o: { lead_id: string }) => { leadOfferMap[o.lead_id] = true; });
+
+          if (cahetResult.error) {
+            console.error("cahet_registrations batch failed:", cahetResult.error);
+          }
+          (cahetResult.data || []).forEach((r: { lead_id: string; registration_no: string | null }) => {
+            cahetRegistrationMap[r.lead_id] = r.registration_no || null;
+          });
+
+          if (updeledResult.error) {
+            console.error("updeled_registrations batch failed:", updeledResult.error);
+          }
+          (updeledResult.data || []).forEach((r: { lead_id: string; registration_no: string | null }) => {
+            updeledRegistrationMap[r.lead_id] = r.registration_no || null;
+          });
 
           // Confirmed application_fee + token_fee payments — track per lead.
           // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
@@ -1494,7 +1658,7 @@ export default function Applications() {
                   </th>
                 )}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">App ID</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground max-w-[160px]">Name</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[240px] max-w-[280px]">Name</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
                 {/* Form-fill progress is meaningless on the Submitted tab — every
@@ -1554,10 +1718,32 @@ export default function Applications() {
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
-                    <td className="px-3 py-2.5 max-w-[160px]">
+                    <td className="px-3 py-2.5 min-w-[240px] max-w-[280px]">
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {REGISTRATION_EXAM_ORDER.map((key) => {
+                          const status = app.registration_statuses?.[key] || {
+                            label: REGISTRATION_EXAM_LABELS[key],
+                            status: "unknown" as const,
+                            registrationNo: null,
+                          };
+                          const title = `${status.label}: ${registrationStatusText(status.status)}${
+                            status.registrationNo ? ` (${status.registrationNo})` : ""
+                          }`;
+                          return (
+                            <span
+                              key={key}
+                              title={title}
+                              className={`inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold leading-none ${registrationStatusClass(status.status)}`}
+                            >
+                              <span>{status.label}</span>
+                              <span>{registrationStatusText(status.status)}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
