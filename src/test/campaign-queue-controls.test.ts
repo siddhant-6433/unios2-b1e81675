@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 const migration = readFileSync("supabase/migrations/20260619114500_campaign_queue_controls.sql", "utf8");
 const cronAuthMigration = readFileSync("supabase/migrations/20260624100100_campaign_queue_controls_and_cron_auth.sql", "utf8");
 const dispatcherTimeoutMigration = readFileSync("supabase/migrations/20260701093100_extend_marketing_dispatcher_timeout.sql", "utf8");
+const dispatcherGatewayAuthMigration = readFileSync(
+  "supabase/migrations/20260704121000_add_auth_headers_to_campaign_dispatcher_cron.sql",
+  "utf8",
+);
 const campaignDispatcher = readFileSync("supabase/functions/campaign-dispatcher/index.ts", "utf8");
 const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
@@ -97,6 +101,8 @@ describe("campaign queue controls", () => {
     expect(whatsappTemplatePreview).toContain("scontent\\.whatsapp\\.net");
     expect(whatsappSender).toContain("missingRequiredMediaUrl");
     expect(whatsappSender).toContain("requires a public header media URL");
+    expect(whatsappSender).toContain("mirrorTemplateHeaderMediaUrl");
+    expect(whatsappSender).toContain(".upload(path, body, { contentType, upsert: true");
   });
 
   it("supports mapped template variables and scheduled campaign starts", () => {
@@ -136,6 +142,9 @@ describe("campaign queue controls", () => {
     expect(cronAuthMigration).toContain("'* * * * *'");
     expect(cronAuthMigration).toContain("'x-cron-secret'");
     expect(dispatcherTimeoutMigration).toContain("timeout_milliseconds := 55000");
+    expect(dispatcherGatewayAuthMigration).toContain("'Authorization', 'Bearer ' || config.service_role_key");
+    expect(dispatcherGatewayAuthMigration).toContain("'apikey',        config.service_role_key");
+    expect(dispatcherGatewayAuthMigration).toContain("'x-cron-secret', config.cron_secret");
     expect(campaignDispatcher).toContain('admin.rpc("claim_due_marketing_campaigns"');
     expect(campaignDispatcher).toContain('next_attempt_at: payload?.done ? null : new Date(Date.now() + 60 * 1000).toISOString()');
     expect(campaignDispatcher).toContain('next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()');

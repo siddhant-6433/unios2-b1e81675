@@ -11,6 +11,8 @@ const corsHeaders = {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const PUBLIC_MEDIA_BUCKET = "whatsapp-media";
+const TEMPLATE_ASSET_PREFIX = "template-assets";
 
 type DynamicHeaderComponent =
   | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
@@ -134,16 +136,24 @@ function templateBodyFromComponents(components: unknown): string | null {
   return typeof body?.text === "string" ? body.text : null;
 }
 
-function templateMediaUrlFromComponents(templateKey: string, components: unknown): string | null {
-  if (KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
+function templateHeaderHandleFromComponents(components: unknown): string | null {
   if (!Array.isArray(components)) return null;
   const header = components.find((component) => {
     const data = component as Record<string, unknown>;
     return data.type === "HEADER";
   }) as Record<string, any> | undefined;
   const handle = header?.example?.header_handle?.[0];
-  if (typeof handle !== "string" || !/^https?:\/\//i.test(handle)) return null;
-  return /\/\/scontent\.whatsapp\.net\//i.test(handle) ? null : handle;
+  return typeof handle === "string" ? handle.trim() : null;
+}
+
+function isDurablePublicMediaUrl(value: string | null): boolean {
+  return !!value && /^https?:\/\//i.test(value) && !/\/\/scontent\.whatsapp\.net\//i.test(value);
+}
+
+function templateMediaUrlFromComponents(templateKey: string, components: unknown): string | null {
+  if (KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
+  const handle = templateHeaderHandleFromComponents(components);
+  return isDurablePublicMediaUrl(handle) ? handle : null;
 }
 
 function numberedPlaceholders(text: unknown): number[] {
@@ -245,6 +255,52 @@ function qualityScoreValue(value: unknown): string | null {
     return typeof score === "string" ? score : null;
   }
   return null;
+}
+
+function extensionForMedia(contentType: string, format: string): string {
+  const normalizedContentType = contentType.toLowerCase();
+  if (normalizedContentType.includes("png")) return "png";
+  if (normalizedContentType.includes("webp")) return "webp";
+  if (normalizedContentType.includes("gif")) return "gif";
+  if (normalizedContentType.includes("pdf")) return "pdf";
+  if (normalizedContentType.includes("mp4")) return "mp4";
+  if (format === "document") return "pdf";
+  if (format === "video") return "mp4";
+  return "jpg";
+}
+
+async function mirrorTemplateHeaderMediaUrl(
+  adminClient: any,
+  supabaseUrl: string,
+  templateKey: string,
+  components: unknown,
+  format: "image" | "video" | "document",
+): Promise<string | null> {
+  const existingUrl = templateMediaUrlFromComponents(templateKey, components);
+  if (existingUrl) return existingUrl;
+
+  const sourceUrl = templateHeaderHandleFromComponents(components);
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return null;
+
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    console.error(`Template header media mirror failed for ${templateKey}: HTTP ${response.status}`);
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") || (format === "image" ? "image/jpeg" : "application/octet-stream");
+  const extension = extensionForMedia(contentType, format);
+  const path = `${TEMPLATE_ASSET_PREFIX}/${templateKey}_header.${extension}`;
+  const body = await response.arrayBuffer();
+  const { error } = await adminClient.storage
+    .from(PUBLIC_MEDIA_BUCKET)
+    .upload(path, body, { contentType, upsert: true, cacheControl: "31536000" });
+  if (error) {
+    console.error(`Template header media upload failed for ${templateKey}:`, error.message);
+    return null;
+  }
+
+  return `${supabaseUrl}/storage/v1/object/public/${PUBLIC_MEDIA_BUCKET}/${path}`;
 }
 
 async function fetchApprovedMetaCampaignTemplate(adminClient: any, templateKey: string): Promise<MetaCampaignTemplate | null> {
@@ -452,6 +508,16 @@ Deno.serve(async (req) => {
           campaign.template_key,
         ),
       };
+      const dynamicHeader = templateDef.dynamicComponents?.header;
+      if (dynamicHeader?.kind === "media" && !dynamicHeader.defaultUrl) {
+        dynamicHeader.defaultUrl = await mirrorTemplateHeaderMediaUrl(
+          adminClient,
+          supabaseUrl,
+          campaign.template_key,
+          (dynamicTemplate as any).components,
+          dynamicHeader.format,
+        );
+      }
     }
 
     if (campaign.status === "paused" || campaign.status === "terminated") {
