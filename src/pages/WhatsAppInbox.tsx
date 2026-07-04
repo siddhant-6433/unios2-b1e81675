@@ -30,6 +30,7 @@ import { resolveLeadTransitionCommand, type WorkflowLeadTransitionCommandName } 
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import {
   inferWhatsAppTemplateCategory,
+  normalizeRenderedWhatsAppTemplate,
   renderWhatsAppTemplate,
   type RenderedWhatsAppTemplate,
   type WhatsAppTemplateDefinition,
@@ -2150,9 +2151,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
   const getRenderedMessageTemplate = (m: Message): RenderedWhatsAppTemplate | null => {
     const metadata = (m as any).render_metadata;
-    if (metadata && typeof metadata === "object" && typeof metadata.body === "string") {
-      return metadata as RenderedWhatsAppTemplate;
-    }
+    const normalizedMetadata = normalizeRenderedWhatsAppTemplate(metadata);
+    if (normalizedMetadata) return normalizedMetadata;
     if (!m.template_key) return null;
     const template = getTemplateDefinition(m.template_key);
     if (!template) return null;
