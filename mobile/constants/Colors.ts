@@ -1,57 +1,56 @@
-// Design tokens matching the web Tailwind config
-// Primary: indigo #0035C5 (HSL 224 100% 39%)
-// Secondary: warm #954919
+// Legacy bridge — existing screens import from here.
+// Values now come from the design system (mobile/DESIGN.md, theme/tokens.ts).
+// New code should use useTheme() from theme/ThemeContext instead.
+import { lightColors, spacing as themeSpacing, radius as themeRadius } from '../theme/tokens';
 
 export const colors = {
-  primary: '#0035C5',
-  primaryLight: '#E8EDFB',
+  primary: lightColors.accent,
+  primaryLight: lightColors.accentSoft,
   secondary: '#954919',
 
-  background: '#FAFAFA',
-  card: '#FFFFFF',
-  cardBorder: '#F0F0F0',
-  border: '#E5E7EB',
+  background: lightColors.canvas,
+  card: lightColors.card,
+  cardBorder: lightColors.line,
+  border: lightColors.line,
 
-  text: '#111827',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
+  text: lightColors.ink,
+  textSecondary: lightColors.inkSecondary,
+  textMuted: lightColors.inkMuted,
 
-  success: '#16A34A',
-  successLight: '#F0FDF4',
-  warning: '#F59E0B',
-  warningLight: '#FFFBEB',
-  destructive: '#EF4444',
-  destructiveLight: '#FEF2F2',
+  success: lightColors.tint.green.fg,
+  successLight: lightColors.tint.green.bg,
+  warning: lightColors.tint.orange.fg,
+  warningLight: lightColors.tint.orange.bg,
+  destructive: lightColors.tint.red.fg,
+  destructiveLight: lightColors.tint.red.bg,
 
-  // Pastel palette (from web)
-  pastelGreen: '#E8F5E9',
-  pastelBlue: '#E3F2FD',
-  pastelYellow: '#FFF8E1',
-  pastelRed: '#FFEBEE',
-  pastelPurple: '#F3E5F5',
-  pastelOrange: '#FFF3E0',
-  pastelMint: '#E0F7FA',
+  pastelGreen: lightColors.tint.green.bg,
+  pastelBlue: lightColors.tint.blue.bg,
+  pastelYellow: lightColors.tint.yellow.bg,
+  pastelRed: lightColors.tint.red.bg,
+  pastelPurple: lightColors.tint.purple.bg,
+  pastelOrange: lightColors.tint.orange.bg,
+  pastelMint: lightColors.tint.green.bg,
 };
 
 export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 12,
-  lg: 16,
-  xl: 24,
-  xxl: 32,
+  xs: themeSpacing.xxs,
+  sm: themeSpacing.xs,
+  md: themeSpacing.sm,
+  lg: themeSpacing.md,
+  xl: themeSpacing.xl,
+  xxl: themeSpacing.xxl,
 };
 
 export const radius = {
-  sm: 4,
-  md: 8,
-  lg: 12,
-  xl: 16,
-  full: 9999,
+  sm: themeRadius.sm,
+  md: themeRadius.md,
+  lg: themeRadius.lg,
+  xl: themeRadius.xl,
+  full: themeRadius.full,
 };
 
 export const typography = {
-  // Will use Inter + Manrope via expo-font
   h1: { fontSize: 24, fontWeight: '700' as const, letterSpacing: -0.5 },
   h2: { fontSize: 20, fontWeight: '700' as const, letterSpacing: -0.3 },
   h3: { fontSize: 16, fontWeight: '600' as const },
@@ -72,10 +71,10 @@ export default {
     tabIconSelected: colors.primary,
   },
   dark: {
-    text: '#FFFFFF',
-    background: '#000000',
-    tint: '#FFFFFF',
-    tabIconDefault: '#6B7280',
-    tabIconSelected: '#FFFFFF',
+    text: '#F4F3F1',
+    background: '#0D0D0F',
+    tint: '#F4F3F1',
+    tabIconDefault: '#6B6965',
+    tabIconSelected: '#F4F3F1',
   },
 };

@@ -1,0 +1,367 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useEffect } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, SafeAreaView,
+  TouchableOpacity, ActivityIndicator, Alert, Image,
+} from 'react-native';
+import { useAuth } from '../../../contexts/AuthContext';
+import { supabase } from '../../../lib/supabase';
+import { colors, radius, spacing, typography } from '../../../constants/Colors';
+import {
+  Clock, UserCheck, CalendarOff,
+  Check, X, Inbox as InboxIcon, Bell,
+} from 'lucide-react-native';
+import { PillFilter, ScreenHeader } from '../../../components/ui/DashboardPrimitives';
+import { useMarkNotificationRead, useNotifications } from '../../../api/inbox';
+
+interface ApprovalItem {
+  id: string;
+  type: 'leave' | 'face' | 'attendance_reg';
+  source: 'HR' | 'Attendance' | 'Gatepass' | 'Messages' | 'WhatsApp';
+  priority: 'normal' | 'urgent';
+  user_name: string;
+  user_phone: string;
+  date: string;
+  detail: string;
+  image_url?: string;
+}
+
+export default function InboxScreen() {
+  const { user } = useAuth();
+  const [items, setItems] = useState<ApprovalItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'approvals' | 'updates'>('all');
+  const notifications = useNotifications();
+  const markNotificationRead = useMarkNotificationRead();
+
+  useEffect(() => { fetchApprovals(); }, []);
+
+  const fetchApprovals = async () => {
+    setLoading(true);
+    const allItems: ApprovalItem[] = [];
+
+    // Leave requests
+    const { data: leaves } = await supabase
+      .from('employee_leave_requests')
+      .select('id, leave_type, start_date, end_date, days, reason, created_at, user_id')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (leaves) {
+      const userIds = leaves.map(l => l.user_id);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, display_name, phone')
+        .in('user_id', userIds);
+      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
+
+      for (const l of leaves) {
+        const p = profileMap.get(l.user_id);
+        allItems.push({
+          id: l.id,
+          type: 'leave',
+          source: 'HR',
+          priority: 'normal',
+          user_name: p?.display_name || 'Unknown',
+          user_phone: p?.phone || '',
+          date: l.start_date,
+          detail: `${l.leave_type} leave — ${l.days} day${l.days > 1 ? 's' : ''} (${new Date(l.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${l.start_date !== l.end_date ? ` - ${new Date(l.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''})`,
+        });
+      }
+    }
+
+    // Face registrations
+    const { data: faces } = await supabase
+      .from('employee_face_registrations')
+      .select('id, user_id, image_url, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (faces) {
+      const userIds = faces.map(f => f.user_id);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, display_name, phone')
+        .in('user_id', userIds);
+      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
+
+      for (const f of faces) {
+        const p = profileMap.get(f.user_id);
+        allItems.push({
+          id: f.id,
+          type: 'face',
+          source: 'Attendance',
+          priority: 'urgent',
+          user_name: p?.display_name || 'Unknown',
+          user_phone: p?.phone || '',
+          date: f.created_at ?? new Date().toISOString(),
+          detail: 'Face Registration',
+          image_url: f.image_url,
+        });
+      }
+    }
+
+    setItems(allItems.sort((a, b) => Number(b.priority === 'urgent') - Number(a.priority === 'urgent')));
+    setLoading(false);
+  };
+
+  const handleApprove = async (item: ApprovalItem) => {
+    setProcessing(item.id);
+    if (item.type === 'leave') {
+      await supabase.from('employee_leave_requests')
+        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
+        .eq('id', item.id);
+    } else if (item.type === 'face') {
+      await supabase.from('employee_face_registrations')
+        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
+        .eq('id', item.id);
+    }
+    setProcessing(null);
+    fetchApprovals();
+  };
+
+  const handleReject = async (item: ApprovalItem) => {
+    Alert.alert('Reject', `Reject ${item.user_name}'s request?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reject', style: 'destructive',
+        onPress: async () => {
+          setProcessing(item.id);
+          if (item.type === 'leave') {
+            await supabase.from('employee_leave_requests')
+              .update({ status: 'rejected' }).eq('id', item.id);
+          } else if (item.type === 'face') {
+            await supabase.from('employee_face_registrations')
+              .update({ status: 'rejected', rejected_reason: 'Rejected by admin' }).eq('id', item.id);
+          }
+          setProcessing(null);
+          fetchApprovals();
+        },
+      },
+    ]);
+  };
+
+  const typeIcon = (type: string) => {
+    if (type === 'leave') return <CalendarOff size={20} color="#7c3aed" />;
+    if (type === 'face') return <UserCheck size={20} color="#0284c7" />;
+    return <Clock size={20} color={colors.textMuted} />;
+  };
+
+  const typeBg = (type: string) => {
+    if (type === 'leave') return '#f5f3ff';
+    if (type === 'face') return '#f0f9ff';
+    return colors.background;
+  };
+
+  const visibleItems = filter === 'updates'
+    ? []
+    : items.filter((item) => {
+        if (filter === 'approvals') return ['leave', 'face', 'attendance_reg'].includes(item.type);
+        return true;
+      });
+
+  const visibleNotifications = filter === 'approvals' ? [] : (notifications.data ?? []);
+  const unreadCount = (notifications.data ?? []).filter((n) => !n.isRead).length;
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScreenHeader
+          title="Inbox"
+          subtitle={`${items.length} approval${items.length !== 1 ? 's' : ''} · ${unreadCount} unread update${unreadCount !== 1 ? 's' : ''}`}
+        />
+        <PillFilter
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'approvals', label: 'Approvals' },
+            { value: 'updates', label: 'Updates' },
+          ]}
+        />
+
+        {visibleItems.length === 0 && visibleNotifications.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <InboxIcon size={32} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>All caught up!</Text>
+            <Text style={styles.emptyText}>No pending items in this queue</Text>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {visibleItems.map((item) => (
+              <View key={`${item.type}-${item.id}`} style={styles.card}>
+                <View style={styles.badgeRow}>
+                  <Text style={styles.sourceBadge}>{item.source}</Text>
+                  <Text style={[styles.priorityBadge, item.priority === 'urgent' && styles.priorityUrgent]}>
+                    {item.priority}
+                  </Text>
+                </View>
+                {/* Face registration: show selfie prominently */}
+                {item.type === 'face' && item.image_url ? (
+                  <>
+                    <Image source={{ uri: item.image_url }} style={styles.faceImage} />
+                    <View style={styles.faceInfo}>
+                      <Text style={styles.userName}>{item.user_name}</Text>
+                      <Text style={styles.detail}>Face Registration</Text>
+                      <Text style={styles.detailMono}>ID: {item.id.slice(0, 8).toUpperCase()}</Text>
+                      <Text style={styles.detailDate}>
+                        {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.cardHeader}>
+                    <View style={[styles.typeIcon, { backgroundColor: typeBg(item.type) }]}>
+                      {typeIcon(item.type)}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.userName}>{item.user_name}</Text>
+                      <Text style={styles.detail}>{item.detail}</Text>
+                    </View>
+                  </View>
+                )}
+                <View style={styles.cardActions}>
+                  <TouchableOpacity
+                    style={styles.approveBtn}
+                    onPress={() => handleApprove(item)}
+                    disabled={processing === item.id}
+                    activeOpacity={0.7}
+                  >
+                    <Check size={16} color="#fff" />
+                    <Text style={styles.approveBtnText}>Approve</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.rejectBtn}
+                    onPress={() => handleReject(item)}
+                    disabled={processing === item.id}
+                    activeOpacity={0.7}
+                  >
+                    <X size={16} color={colors.textSecondary} />
+                    <Text style={styles.rejectBtnText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            {/* Updates — notifications feed (read-only; actions arrive with the approvals engine) */}
+            {visibleNotifications.length > 0 && (
+              <View style={{ gap: 10 }}>
+                {visibleItems.length > 0 && <Text style={styles.sectionLabel}>Updates</Text>}
+                {visibleNotifications.map((n) => (
+                  <TouchableOpacity
+                    key={n.id}
+                    style={[styles.notificationRow, !n.isRead && styles.notificationUnread]}
+                    activeOpacity={0.7}
+                    onPress={() => { if (!n.isRead) markNotificationRead.mutate(n.id); }}
+                  >
+                    <View style={styles.notificationIcon}>
+                      <Bell size={16} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.userName, !n.isRead && { fontWeight: '700' }]} numberOfLines={2}>
+                        {n.title}
+                      </Text>
+                      {n.body ? <Text style={styles.detail} numberOfLines={2}>{n.body}</Text> : null}
+                      <Text style={styles.detailDate}>
+                        {new Date(n.createdAt).toLocaleString('en-IN', {
+                          day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                        })}
+                      </Text>
+                    </View>
+                    {!n.isRead && <View style={styles.unreadDot} />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  scroll: { padding: spacing.lg, paddingBottom: 110, gap: spacing.lg },
+  title: { fontSize: 24, fontWeight: '700', color: colors.text, paddingTop: 8 },
+  subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2, marginBottom: 16 },
+  list: { gap: 12 },
+  card: {
+    backgroundColor: colors.card, borderRadius: 24, padding: 16,
+    borderWidth: 1, borderColor: colors.cardBorder, gap: 14,
+  },
+  badgeRow: { flexDirection: 'row', gap: spacing.sm },
+  sourceBadge: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '700',
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+  },
+  priorityBadge: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: '700',
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+    textTransform: 'capitalize',
+  },
+  priorityUrgent: { color: '#BE123C', backgroundColor: '#FFE4E6' },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  typeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  userName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  detail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  faceImage: {
+    width: '100%' as any, height: 200, borderRadius: 12,
+    backgroundColor: colors.border,
+  },
+  faceInfo: { gap: 2 },
+  detailMono: { fontSize: 11, color: colors.textMuted, fontFamily: 'monospace' as any },
+  detailDate: { fontSize: 11, color: colors.textMuted },
+  cardActions: { flexDirection: 'row', gap: 10 },
+  approveBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10,
+  },
+  approveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  rejectBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: colors.background, borderRadius: 10, paddingVertical: 10,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  rejectBtnText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
+  sectionLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', marginTop: 4 },
+  notificationRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: colors.card, borderRadius: 18, padding: 14,
+  },
+  notificationUnread: { backgroundColor: colors.primaryLight },
+  notificationIcon: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: colors.background,
+    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+  },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 },
+  emptyCard: {
+    backgroundColor: colors.card, borderRadius: 16, padding: 40,
+    alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.cardBorder,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
+  emptyText: { fontSize: 13, color: colors.textMuted },
+});

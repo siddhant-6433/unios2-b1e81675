@@ -13,7 +13,8 @@ export type AppRole =
   | 'super_admin' | 'campus_admin' | 'principal' | 'admission_head'
   | 'counsellor' | 'accountant' | 'faculty' | 'teacher' | 'ib_coordinator'
   | 'data_entry' | 'office_admin' | 'office_assistant' | 'hostel_warden'
-  | 'librarian' | 'student' | 'parent';
+  | 'librarian' | 'consultant' | 'publisher' | 'academic_partner'
+  | 'video_editor' | 'student' | 'parent';
 
 interface Profile {
   id: string;
@@ -29,7 +30,10 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   role: AppRole | null;
+  /** Every role the user holds — multi-role staff get the union of Work modules. */
+  roles: AppRole[];
   loading: boolean;
+  signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<{ error: string | null }>;
   sendWhatsAppOtp: (phone: string) => Promise<{ error: string | null }>;
   verifyWhatsAppOtp: (phone: string, otp: string) => Promise<{ error: string | null }>;
@@ -43,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
+  const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,12 +79,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = async (userId: string) => {
     console.log('[Auth] Fetching profile for:', userId);
     try {
-      const [profileRes, roleRes] = await Promise.all([
+      const [profileRes, roleRes, rolesRes] = await Promise.all([
         supabase.from('profiles')
           .select('id, display_name, phone, avatar_url, campus, department, institution, employee_id')
           .eq('user_id', userId)
           .single(),
         supabase.rpc('get_user_role', { _user_id: userId }),
+        supabase.from('user_roles').select('role').eq('user_id', userId),
       ]);
 
       console.log('[Auth] Profile result:', profileRes.data ? 'found' : 'not found', 'error:', profileRes.error?.message);
@@ -96,10 +102,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
       if (roleRes.data) setRole(roleRes.data as AppRole);
+      if (rolesRes.data) setRoles(rolesRes.data.map((row) => row.role as AppRole));
     } catch (err) {
       console.error('[Auth] fetchProfile error:', err);
     }
     setLoading(false);
+  };
+
+  // ── Email / password (staff) ──────────────────────────────────────────────
+  const signInWithPassword = async (email: string, password: string): Promise<{ error: string | null }> => {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (error) {
+        const friendly = error.message === 'Invalid login credentials'
+          ? 'Incorrect email or password.'
+          : error.message;
+        return { error: friendly };
+      }
+      return { error: null };
+    } catch (err: any) {
+      return { error: err.message || 'Sign-in failed' };
+    }
   };
 
   // ── Google OAuth ──────────────────────────────────────────────────────────
@@ -249,15 +275,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Disable this device's push token first (shared-device safety).
+    const { unregisterPushDevice } = await import('../lib/push');
+    await unregisterPushDevice();
     await supabase.auth.signOut();
     setProfile(null);
     setRole(null);
+    setRoles([]);
   };
 
   return (
     <AuthContext.Provider value={{
-      user, session, profile, role, loading,
-      signInWithGoogle, sendWhatsAppOtp, verifyWhatsAppOtp, signOut,
+      user, session, profile, role, roles, loading,
+      signInWithPassword, signInWithGoogle, sendWhatsAppOtp, verifyWhatsAppOtp, signOut,
     }}>
       {children}
     </AuthContext.Provider>
