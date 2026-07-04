@@ -54,6 +54,9 @@ export interface RenderedWhatsAppTemplate {
   footer?: string;
 }
 
+const TEMPLATE_CATEGORIES = new Set<WhatsAppTemplateCategory>(["admissions", "followup", "knowledge", "payment", "visit", "utility"]);
+const TEMPLATE_STATUSES = new Set<WhatsAppTemplateStatus>(["approved", "pending", "rejected"]);
+
 const HUMAN_PARAM_LABELS: Record<string, string> = {
   student_name: "Student name",
   course_name: "Course",
@@ -107,6 +110,39 @@ export const inferWhatsAppTemplateCategory = (key: string): WhatsAppTemplateCate
   if (/application|lead|course|welcome|cahet|cnet/i.test(key)) return "admissions";
   return "utility";
 };
+
+export function normalizeRenderedWhatsAppTemplate(value: unknown): RenderedWhatsAppTemplate | null {
+  if (!value || typeof value !== "object") return null;
+  const metadata = value as Partial<RenderedWhatsAppTemplate>;
+  if (typeof metadata.body !== "string") return null;
+
+  const key = typeof metadata.key === "string" && metadata.key.trim()
+    ? metadata.key
+    : "template";
+  const category = metadata.category && TEMPLATE_CATEGORIES.has(metadata.category)
+    ? metadata.category
+    : inferWhatsAppTemplateCategory(key);
+  const status = metadata.status && TEMPLATE_STATUSES.has(metadata.status)
+    ? metadata.status
+    : "approved";
+
+  return {
+    key,
+    label: typeof metadata.label === "string" && metadata.label.trim()
+      ? metadata.label
+      : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    language: typeof metadata.language === "string" && metadata.language.trim()
+      ? metadata.language
+      : "en",
+    category,
+    status,
+    body: metadata.body,
+    params: Array.isArray(metadata.params) ? metadata.params : [],
+    unresolved: Array.isArray(metadata.unresolved) ? metadata.unresolved : [],
+    buttons: Array.isArray(metadata.buttons) ? metadata.buttons : [],
+    footer: typeof metadata.footer === "string" ? metadata.footer : undefined,
+  };
+}
 
 export function renderWhatsAppTemplate(
   template: WhatsAppTemplateDefinition,

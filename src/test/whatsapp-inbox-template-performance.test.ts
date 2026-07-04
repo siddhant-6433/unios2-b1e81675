@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { renderWhatsAppTemplate } from "@/lib/whatsappTemplateRender";
+import { normalizeRenderedWhatsAppTemplate, renderWhatsAppTemplate } from "@/lib/whatsappTemplateRender";
 
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
 const templateRenderer = readFileSync("src/lib/whatsappTemplateRender.ts", "utf8");
@@ -58,6 +58,19 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("offer_letter_issued");
     expect(whatsappSend).toContain("course_info_v4:");
     expect(whatsappSend).toContain("Course video: {{6}}");
+  });
+
+  it("normalizes old partial render_metadata so the inbox can render template buttons safely", () => {
+    const normalized = normalizeRenderedWhatsAppTemplate({
+      key: "course_info_v4",
+      body: "Hi Riya, here are the course details.",
+    });
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.buttons).toEqual([]);
+    expect(normalized?.params).toEqual([]);
+    expect(normalized?.unresolved).toEqual([]);
+    expect(normalized?.label).toBe("Course Info V4");
   });
 
   it("shows backend sender names for authenticated outbound WhatsApp messages", () => {
