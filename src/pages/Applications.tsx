@@ -335,6 +335,13 @@ const registrationStatusText = (status: RegistrationStatusKind) => {
   return "N/A";
 };
 
+const exportFileSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "course";
+
 export default function Applications() {
   const { role, profile } = useAuth();
   const { toast } = useToast();
@@ -369,6 +376,7 @@ export default function Applications() {
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingCourseSplit, setExportingCourseSplit] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showCourseBreakup, setShowCourseBreakup] = useState(true);
   const [showAddToList, setShowAddToList] = useState(false);
@@ -899,6 +907,11 @@ export default function Applications() {
   const allSelectableAppsSelected = selectableApps.length > 0 &&
     selectableApps.every((app) => selectedIds.has(app.id));
 
+  const courseExportApps = useMemo(
+    () => apps.filter((app) => matchesCourseFilter(app) && matchesCounsellorFilter(app)),
+    [apps, matchesCourseFilter, matchesCounsellorFilter],
+  );
+
   const courseStatusRows = useMemo(() => {
     const courseMap = new Map<string, {
       campus: string;
@@ -1251,6 +1264,80 @@ export default function Applications() {
     }
   };
 
+  const applicationCourseExportRow = (app: AppRow) => {
+    const { course, campus } = primaryCourseSelection(app);
+    const currentStatus = FUNNEL_META[funnelStageOf(app)].label;
+    const registrationStatuses = app.registration_statuses || buildRegistrationStatuses(app, {
+      cahet: {},
+      updeled: {},
+    });
+    return {
+      "Applicant Name": app.full_name || "",
+      "Mobile No": app.phone || "",
+      "Email ID": app.email || "",
+      "Application ID": app.application_id,
+      "Current Status": currentStatus,
+      "Application Status": app.status || "",
+      "Payment Status": app.payment_status || "pending",
+      "Lead Stage": app.lead_stage ? (LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage) : "",
+      Course: course === "No course" ? "" : course,
+      Campus: campus === "No campus" ? "" : campus,
+      "UPGET Registration Status": registrationStatusText(registrationStatuses.upget.status),
+      "UPGET Registration No": registrationStatuses.upget.registrationNo || "",
+      "CAHET Registration Status": registrationStatusText(registrationStatuses.cahet.status),
+      "CAHET Registration No": registrationStatuses.cahet.registrationNo || "",
+      "UPDELED Registration Status": registrationStatusText(registrationStatuses.updeled.status),
+      "UPDELED Registration No": registrationStatuses.updeled.registrationNo || "",
+      PAN: app.lead_pre_admission_no || "",
+      AN: app.lead_admission_no || "",
+      Counsellor: app.counsellor_name || "",
+      "Submitted At": formatExportDateTime(app.submitted_at),
+      "Created At": formatExportDateTime(app.created_at),
+    };
+  };
+
+  const handleExportCourseSplitCsv = async () => {
+    if (courseFilter === "all") {
+      toast({
+        title: "Choose a course first",
+        description: "Select a course filter before downloading the split course CSVs.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExportingCourseSplit(true);
+    try {
+      const inProgressRows = courseExportApps.filter((app) => funnelStageOf(app) === "in_progress");
+      const paidAndOtherRows = courseExportApps.filter((app) => funnelStageOf(app) !== "in_progress");
+      const slug = exportFileSlug(courseFilter);
+      const inProgress = exportRowsCsv(
+        inProgressRows.map((app) => applicationCourseExportRow(app)),
+        `applications-${slug}-in-progress`,
+      );
+      const paidAndOther = exportRowsCsv(
+        paidAndOtherRows.map((app) => applicationCourseExportRow(app)),
+        `applications-${slug}-paid-and-other-states`,
+      );
+      const total = inProgress.count + paidAndOther.count;
+
+      toast({
+        title: total > 0 ? "Course CSVs exported" : "No applications to export",
+        description: total > 0
+          ? `${inProgress.count} in-progress and ${paidAndOther.count} paid/other application${paidAndOther.count === 1 ? "" : "s"} exported for ${courseFilter}.`
+          : `No applications found for ${courseFilter}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Course export failed",
+        description: error instanceof Error ? error.message : "Unable to export course applications.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCourseSplit(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -1532,6 +1619,21 @@ export default function Applications() {
           triggerClassName="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
           ariaLabel="Filter applications by course"
         />
+        {canExportApplications && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            disabled={courseFilter === "all" || exportingCourseSplit}
+            onClick={handleExportCourseSplitCsv}
+            title={courseFilter === "all"
+              ? "Select a course first to export in-progress and paid/other CSV files"
+              : "Download two CSV files for the selected course: in-progress and paid/other states"}
+          >
+            {exportingCourseSplit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Course CSVs
+          </Button>
+        )}
         {!isCounsellor && (
           <SelectField
             value={counsellorFilter}
