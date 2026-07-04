@@ -11,6 +11,7 @@ const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 const whatsappTemplateMeta = readFileSync("src/lib/whatsappTemplateMeta.ts", "utf8");
+const whatsappTemplatePreview = readFileSync("src/components/templates/WhatsAppTemplatePreviewBubble.tsx", "utf8");
 const waCampaignParams = readFileSync("src/lib/waCampaignParams.ts", "utf8");
 
 describe("campaign queue controls", () => {
@@ -92,6 +93,10 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain("fetchApprovedMetaCampaignTemplate");
     expect(whatsappSender).toContain("message_templates?fields=");
     expect(whatsappSender).toContain('onConflict: "name,language"');
+    expect(whatsappTemplatePreview).toContain("isPublicSendMediaUrl");
+    expect(whatsappTemplatePreview).toContain("scontent\\.whatsapp\\.net");
+    expect(whatsappSender).toContain("missingRequiredMediaUrl");
+    expect(whatsappSender).toContain("requires a public header media URL");
   });
 
   it("supports mapped template variables and scheduled campaign starts", () => {

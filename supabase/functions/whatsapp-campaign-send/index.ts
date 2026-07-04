@@ -142,7 +142,8 @@ function templateMediaUrlFromComponents(templateKey: string, components: unknown
     return data.type === "HEADER";
   }) as Record<string, any> | undefined;
   const handle = header?.example?.header_handle?.[0];
-  return typeof handle === "string" && /^https?:\/\//i.test(handle) ? handle : null;
+  if (typeof handle !== "string" || !/^https?:\/\//i.test(handle)) return null;
+  return /\/\/scontent\.whatsapp\.net\//i.test(handle) ? null : handle;
 }
 
 function numberedPlaceholders(text: unknown): number[] {
@@ -291,6 +292,15 @@ async function fetchApprovedMetaCampaignTemplate(adminClient: any, templateKey: 
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function missingRequiredMediaUrl(templateDef: TemplateDef, staticParams: Record<string, string>): string | null {
+  const header = templateDef.dynamicComponents?.header;
+  if (!header || header.kind !== "media") return null;
+  const configuredUrl = String(staticParams[header.paramName] || "").trim();
+  const defaultUrl = String(header.defaultUrl || "").trim();
+  if (configuredUrl || defaultUrl) return null;
+  return header.paramName;
+}
 
 async function syncCampaignCounts(admin: any, campaignId: string) {
   const [
@@ -542,6 +552,22 @@ Deno.serve(async (req) => {
     // due_date, application_id, etc. Auto-filled per-lead from the leads
     // join: student_name, course_name, campus_name.
     const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
+    const missingMediaParam = missingRequiredMediaUrl(templateDef, staticParams);
+    if (missingMediaParam) {
+      const message = `Template ${campaign.template_key} requires a public header media URL (${missingMediaParam}) before campaign send.`;
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          status: "failed",
+          worker_error: message,
+          worker_locked_at: null,
+        })
+        .eq("id", campaign_id);
+      return new Response(
+        JSON.stringify({ error: message }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     for (const recipient of recipients) {
       const lead = (recipient as any).leads || {};

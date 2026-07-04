@@ -28,6 +28,10 @@ const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
 };
 
 const normalizeType = (value?: string | null) => String(value || "").toUpperCase();
+const isPublicSendMediaUrl = (value?: string | null) => {
+  const url = String(value || "");
+  return /^https?:\/\//i.test(url) && !/\/\/scontent\.whatsapp\.net\//i.test(url);
+};
 
 export const templateBodyFromComponents = (components?: WhatsAppTemplateComponent[] | null) =>
   components?.find((component) => normalizeType(component.type) === "BODY")?.text || "";
@@ -47,7 +51,7 @@ export const templateTextPreviewFromComponents = (components?: WhatsAppTemplateC
 export const resolveTemplateMediaUrl = (templateKey?: string | null, header?: WhatsAppTemplateComponent) => {
   if (templateKey && KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
   const handle = header?.example?.header_handle?.[0];
-  if (handle && /^https?:\/\//i.test(handle)) return handle;
+  if (isPublicSendMediaUrl(handle)) return handle;
   return null;
 };
 
