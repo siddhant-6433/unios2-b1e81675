@@ -386,29 +386,62 @@ export default function Inbox() {
 
     try {
       if (cat === "offer_waivers") {
-        // offer_letters has course_id → courses FK; use that directly — no applications join needed
+        // Keep the pending waiver row as the source of truth for this inbox.
+        // Related offer/lead/course data is resolved separately so a relationship
+        // shape change cannot make the badge count include a row that the list
+        // then fails to show.
         const { data, error } = await supabase
           .from("offer_waivers")
           .select(`
             id, offer_letter_id, term, amount, reason, status,
-            requested_by_name, requested_by_role, created_at,
-            offer_letters!offer_letter_id (
-              lead_id, course_id, session_id,
-              leads!lead_id ( name ),
-              courses!course_id ( name )
-            )
+            requested_by_name, requested_by_role, created_at
           `)
           .eq("status", "pending")
           .order("created_at", { ascending: false });
 
         if (error) throw error;
+        const waiverRows = (data || []) as any[];
+        const offerIds = Array.from(new Set(waiverRows.map((w) => w.offer_letter_id).filter(Boolean)));
+        const offersById = new Map<string, any>();
+        const leadsById = new Map<string, any>();
+        const coursesById = new Map<string, any>();
+
+        if (offerIds.length > 0) {
+          const { data: offerRows, error: offerError } = await (supabase as any)
+            .from("offer_letters")
+            .select("id, lead_id, course_id, session_id")
+            .in("id", offerIds);
+          if (offerError) throw offerError;
+
+          for (const offer of (offerRows || []) as any[]) {
+            offersById.set(offer.id, offer);
+          }
+
+          const leadIds = Array.from(new Set((offerRows || []).map((o: any) => o.lead_id).filter(Boolean)));
+          const courseIdsFromOffers = Array.from(new Set((offerRows || []).map((o: any) => o.course_id).filter(Boolean)));
+
+          const [leadRes, courseRes] = await Promise.all([
+            leadIds.length > 0
+              ? supabase.from("leads").select("id, name").in("id", leadIds)
+              : Promise.resolve({ data: [], error: null }),
+            courseIdsFromOffers.length > 0
+              ? supabase.from("courses").select("id, name").in("id", courseIdsFromOffers)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+          if (leadRes.error) throw leadRes.error;
+          if (courseRes.error) throw courseRes.error;
+
+          for (const lead of (leadRes.data || []) as any[]) leadsById.set(lead.id, lead);
+          for (const course of (courseRes.data || []) as any[]) coursesById.set(course.id, course);
+        }
 
         // Resolve gross year fee per (course, session, term) from active fee
         // structures so the detail card can show Amount + Applicable-after-waiver.
         const offerKeys = new Set<string>();
-        for (const w of (data || []) as any[]) {
-          const c = w.offer_letters?.course_id;
-          const s = w.offer_letters?.session_id;
+        for (const w of waiverRows) {
+          const offer = offersById.get(w.offer_letter_id);
+          const c = offer?.course_id;
+          const s = offer?.session_id;
           if (c && s) offerKeys.add(`${c}::${s}`);
         }
         const yearAmountByKey = new Map<string, number>();
@@ -440,9 +473,12 @@ export default function Inbox() {
           }
         }
 
-        const nextItems = (data || []).map((w: any) => {
-            const courseId = w.offer_letters?.course_id;
-            const sessionId = w.offer_letters?.session_id;
+        const nextItems = waiverRows.map((w: any) => {
+            const offer = offersById.get(w.offer_letter_id);
+            const lead = offer?.lead_id ? leadsById.get(offer.lead_id) : null;
+            const course = offer?.course_id ? coursesById.get(offer.course_id) : null;
+            const courseId = offer?.course_id;
+            const sessionId = offer?.session_id;
             const yearAmount = (courseId && sessionId)
               ? yearAmountByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? null
               : null;
@@ -460,9 +496,9 @@ export default function Inbox() {
               requested_by_name: w.requested_by_name,
               requested_by_role: w.requested_by_role,
               created_at: w.created_at,
-              lead_name: w.offer_letters?.leads?.name || "—",
-              lead_id: w.offer_letters?.lead_id || "",
-              course_name: w.offer_letters?.courses?.name || null,
+              lead_name: lead?.name || "—",
+              lead_id: offer?.lead_id || "",
+              course_name: course?.name || null,
               year_amount: yearAmount,
             } as WaiverItem;
           });
