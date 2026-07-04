@@ -200,6 +200,40 @@ const primaryCourseSelection = (app: Pick<AppRow, "course_selections">) => {
   };
 };
 
+type EntranceRegistrationMap = {
+  cahet: Map<string, string>;
+  updeled: Map<string, string>;
+};
+
+const entranceExamRegistrationNo = (
+  app: Pick<AppRow, "academic_details">,
+  matcher: (examName: string) => boolean,
+) => {
+  const exams = app.academic_details?.entrance_exams;
+  if (!Array.isArray(exams)) return "";
+
+  const exam = exams.find((entry: any) => matcher(String(entry?.exam_name || "")));
+  return String(exam?.registration_no || "").trim();
+};
+
+const upgetRegistrationNo = (app: Pick<AppRow, "academic_details">) =>
+  entranceExamRegistrationNo(app, (examName) => /upget|up\s*gnm|gnm.*entrance/i.test(examName));
+
+const cahetRegistrationNoFromApplication = (app: Pick<AppRow, "academic_details">) =>
+  entranceExamRegistrationNo(app, (examName) => /cahet/i.test(examName));
+
+const updeledRegistrationNoFromApplication = (app: Pick<AppRow, "academic_details">) =>
+  entranceExamRegistrationNo(app, (examName) =>
+    /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(examName)
+  );
+
+const exportFileSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "course";
+
 export default function Applications() {
   const { role, profile } = useAuth();
   const { toast } = useToast();
@@ -234,6 +268,7 @@ export default function Applications() {
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingCourseSplit, setExportingCourseSplit] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showCourseBreakup, setShowCourseBreakup] = useState(true);
   const [showAddToList, setShowAddToList] = useState(false);
@@ -735,6 +770,11 @@ export default function Applications() {
   const allSelectableAppsSelected = selectableApps.length > 0 &&
     selectableApps.every((app) => selectedIds.has(app.id));
 
+  const courseExportApps = useMemo(
+    () => apps.filter((app) => matchesCourseFilter(app) && matchesCounsellorFilter(app)),
+    [apps, matchesCourseFilter, matchesCounsellorFilter],
+  );
+
   const courseStatusRows = useMemo(() => {
     const courseMap = new Map<string, {
       campus: string;
@@ -1087,6 +1127,115 @@ export default function Applications() {
     }
   };
 
+  const fetchEntranceRegistrationMap = async (rows: AppRow[]): Promise<EntranceRegistrationMap> => {
+    const leadIds = Array.from(new Set(rows.map((app) => app.lead_id).filter(Boolean))) as string[];
+    const cahet = new Map<string, string>();
+    const updeled = new Map<string, string>();
+
+    if (leadIds.length === 0) return { cahet, updeled };
+
+    await Promise.all(chunkArray(leadIds, RELATED_QUERY_BATCH_SIZE).map(async (batch) => {
+      const [cahetResult, updeledResult] = await Promise.all([
+        supabase.from("cahet_registrations" as any)
+          .select("lead_id, registration_no")
+          .in("lead_id", batch),
+        supabase.from("updeled_registrations" as any)
+          .select("lead_id, registration_no")
+          .in("lead_id", batch),
+      ]);
+
+      if (cahetResult.error) {
+        console.warn("cahet registrations export lookup failed:", cahetResult.error);
+      }
+      if (updeledResult.error) {
+        console.warn("updeled registrations export lookup failed:", updeledResult.error);
+      }
+
+      (cahetResult.data || []).forEach((row: any) => {
+        const registrationNo = String(row.registration_no || "").trim();
+        if (row.lead_id && registrationNo) cahet.set(row.lead_id, registrationNo);
+      });
+      (updeledResult.data || []).forEach((row: any) => {
+        const registrationNo = String(row.registration_no || "").trim();
+        if (row.lead_id && registrationNo) updeled.set(row.lead_id, registrationNo);
+      });
+    }));
+
+    return { cahet, updeled };
+  };
+
+  const applicationCourseExportRow = (app: AppRow, registrations: EntranceRegistrationMap) => {
+    const { course, campus } = primaryCourseSelection(app);
+    const currentStatus = FUNNEL_META[funnelStageOf(app)].label;
+    return {
+      "Applicant Name": app.full_name || "",
+      "Mobile No": app.phone || "",
+      "Email ID": app.email || "",
+      "Application ID": app.application_id,
+      "Current Status": currentStatus,
+      "Application Status": app.status || "",
+      "Payment Status": app.payment_status || "pending",
+      "Lead Stage": app.lead_stage ? (LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage) : "",
+      Course: course === "No course" ? "" : course,
+      Campus: campus === "No campus" ? "" : campus,
+      "UPGET Registration No": upgetRegistrationNo(app),
+      "CAHET Registration No": app.lead_id
+        ? registrations.cahet.get(app.lead_id) || cahetRegistrationNoFromApplication(app)
+        : cahetRegistrationNoFromApplication(app),
+      "UPDELED Registration No": app.lead_id
+        ? registrations.updeled.get(app.lead_id) || updeledRegistrationNoFromApplication(app)
+        : updeledRegistrationNoFromApplication(app),
+      PAN: app.lead_pre_admission_no || "",
+      AN: app.lead_admission_no || "",
+      Counsellor: app.counsellor_name || "",
+      "Submitted At": formatExportDateTime(app.submitted_at),
+      "Created At": formatExportDateTime(app.created_at),
+    };
+  };
+
+  const handleExportCourseSplitCsv = async () => {
+    if (courseFilter === "all") {
+      toast({
+        title: "Choose a course first",
+        description: "Select a course filter before downloading the split course CSVs.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExportingCourseSplit(true);
+    try {
+      const registrations = await fetchEntranceRegistrationMap(courseExportApps);
+      const inProgressRows = courseExportApps.filter((app) => funnelStageOf(app) === "in_progress");
+      const paidAndOtherRows = courseExportApps.filter((app) => funnelStageOf(app) !== "in_progress");
+      const slug = exportFileSlug(courseFilter);
+      const inProgress = exportRowsCsv(
+        inProgressRows.map((app) => applicationCourseExportRow(app, registrations)),
+        `applications-${slug}-in-progress`,
+      );
+      const paidAndOther = exportRowsCsv(
+        paidAndOtherRows.map((app) => applicationCourseExportRow(app, registrations)),
+        `applications-${slug}-paid-and-other-states`,
+      );
+      const total = inProgress.count + paidAndOther.count;
+
+      toast({
+        title: total > 0 ? "Course CSVs exported" : "No applications to export",
+        description: total > 0
+          ? `${inProgress.count} in-progress and ${paidAndOther.count} paid/other application${paidAndOther.count === 1 ? "" : "s"} exported for ${courseFilter}.`
+          : `No applications found for ${courseFilter}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Course export failed",
+        description: error instanceof Error ? error.message : "Unable to export course applications.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCourseSplit(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -1368,6 +1517,21 @@ export default function Applications() {
           triggerClassName="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
           ariaLabel="Filter applications by course"
         />
+        {canExportApplications && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            disabled={courseFilter === "all" || exportingCourseSplit}
+            onClick={handleExportCourseSplitCsv}
+            title={courseFilter === "all"
+              ? "Select a course first to export in-progress and paid/other CSV files"
+              : "Download two CSV files for the selected course: in-progress and paid/other states"}
+          >
+            {exportingCourseSplit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Course CSVs
+          </Button>
+        )}
         {!isCounsellor && (
           <SelectField
             value={counsellorFilter}
