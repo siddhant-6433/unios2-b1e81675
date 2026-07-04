@@ -28,7 +28,7 @@ export type SelectFieldOption = {
 
 export type SelectFieldGroup = {
   label: string;
-  options: SelectFieldOption[];
+  options?: SelectFieldOption[];
 };
 
 type FieldShellProps = {
@@ -165,7 +165,7 @@ TextAreaField.displayName = "TextAreaField";
 type SelectFieldProps = {
   value: string;
   onValueChange: (value: string) => void;
-  options: SelectFieldOption[];
+  options?: SelectFieldOption[];
   groups?: SelectFieldGroup[];
   placeholder?: string;
   label?: React.ReactNode;
@@ -183,7 +183,7 @@ type SelectFieldProps = {
 function SelectField({
   value,
   onValueChange,
-  options,
+  options = [],
   groups,
   placeholder = "Select",
   label,
@@ -197,13 +197,30 @@ function SelectField({
   contentClassName,
   ariaLabel,
 }: SelectFieldProps) {
-  const selectValue = allowEmpty && value === "" ? EMPTY_SELECT_VALUE : value;
+  const hasExplicitEmptyOption =
+    options.some((option) => option.value === "") ||
+    (groups ?? []).some((group) => (group.options ?? []).some((option) => option.value === ""));
+  const selectValue = value === "" && (allowEmpty || hasExplicitEmptyOption) ? EMPTY_SELECT_VALUE : value;
+  let renderedEmptyOption = false;
+
+  const renderOption = (option: SelectFieldOption) => {
+    const itemValue = option.value === "" ? EMPTY_SELECT_VALUE : option.value;
+    if (option.value === "") {
+      if (renderedEmptyOption) return null;
+      renderedEmptyOption = true;
+    }
+    return (
+      <SelectItem key={itemValue} value={itemValue} disabled={option.disabled}>
+        {option.label}
+      </SelectItem>
+    );
+  };
 
   return (
     <FieldShell label={label} required={required} error={error} description={description} className={className}>
       <Select
         value={selectValue}
-        onValueChange={(nextValue) => onValueChange(allowEmpty && nextValue === EMPTY_SELECT_VALUE ? "" : nextValue)}
+        onValueChange={(nextValue) => onValueChange(nextValue === EMPTY_SELECT_VALUE ? "" : nextValue)}
         disabled={disabled}
       >
         <SelectTrigger
@@ -214,20 +231,12 @@ function SelectField({
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent className={contentClassName}>
-          {allowEmpty && <SelectItem value={EMPTY_SELECT_VALUE}>{placeholder}</SelectItem>}
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-              {option.label}
-            </SelectItem>
-          ))}
+          {allowEmpty && !hasExplicitEmptyOption && renderOption({ value: "", label: placeholder })}
+          {options.map(renderOption)}
           {groups?.map((group) => (
             <SelectGroup key={group.label}>
               <SelectLabel>{group.label}</SelectLabel>
-              {group.options.map((option) => (
-                <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-                  {option.label}
-                </SelectItem>
-              ))}
+              {(group.options ?? []).map(renderOption)}
             </SelectGroup>
           ))}
         </SelectContent>

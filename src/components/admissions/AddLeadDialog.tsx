@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -47,7 +47,11 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
   const skipNextAutosave = useRef(false);
 
   const filteredCampuses = getCampusesForCourse(form.course_id || null);
-  const selectedCourse = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === form.course_id);
+  const courseChoices = useMemo(
+    () => coursesByDepartment.flatMap(g => g.courses ?? []),
+    [coursesByDepartment],
+  );
+  const selectedCourse = courseChoices.find(c => c.id === form.course_id);
   const asksCnetAppeared = isBscNursingCourse(selectedCourse || null);
   const asksCahetRegistered = isBptOrBmritCourseName(selectedCourse?.name);
 
@@ -110,7 +114,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     const handle = setTimeout(async () => {
       if (!user?.id) return;
       setDraftStatus("saving");
-      const courseEntry = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === form.course_id);
+      const courseEntry = courseChoices.find(c => c.id === form.course_id);
       const payload = {
         created_by: user.id,
         data: form,
@@ -132,12 +136,12 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     }, 800);
 
     return () => clearTimeout(handle);
-  }, [form, open, user?.id, coursesByDepartment, saving, onDraftChange]);
+  }, [form, open, user?.id, courseChoices, saving, onDraftChange]);
 
   // Auto-select campus when course changes
   const handleCourseChange = (courseId: string) => {
     const campuses = getCampusesForCourse(courseId || null);
-    const course = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === courseId);
+    const course = courseChoices.find(c => c.id === courseId);
     setForm(p => ({
       ...p,
       course_id: courseId,
@@ -274,7 +278,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
               onValueChange={handleCourseChange}
               groups={coursesByDepartment.map(g => ({
                 label: g.department,
-                options: g.courses.map(c => ({ value: c.id, label: c.name })),
+                options: (g.courses ?? []).map(c => ({ value: c.id, label: c.name })),
               }))}
               label="Course"
               placeholder="Select course"
