@@ -10,6 +10,22 @@ describe("Inbox offer waiver badge and reload behavior", () => {
     expect(inbox).toContain("(r.value as any).count ?? (r.value as any).data?.length ?? 0");
   });
 
+  it("keeps sidebar counts tied to the fetched inbox rows", () => {
+    expect(inbox).not.toContain('{ count: "planned", head: true }');
+    expect(inbox).toContain("const commitItems = useCallback");
+    expect(inbox).toContain("setCounts((prev) => prev[cat] === nextItems.length");
+    expect(inbox).toContain("const categoryDisplayCount = (cat: InboxCategory)");
+    expect(inbox).toContain("cat.id === selected && !loading ? items.length : cat.count");
+    expect(inbox).toContain('.from("whatsapp_conversations" as any)\n            .select("phone")');
+  });
+
+  it("lets WhatsApp inbox notifications be marked read from the detail pane", () => {
+    expect(inbox).toContain('("mark_whatsapp_conversation_read"');
+    expect(inbox).toContain("const markWhatsAppRead = async");
+    expect(inbox).toContain("Mark read");
+    expect(inbox).toContain("setCounts((prev) => ({ ...prev, whatsapp: Math.max(0, prev.whatsapp - 1) }))");
+  });
+
   it("reloads the selected category when it is clicked again", () => {
     expect(inbox).toContain("if (selected === cat.id)");
     expect(inbox).toContain("loadItems(cat.id);");

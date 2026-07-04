@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
   Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
-  Video, Mic, Play, Pause,
+  Video, Mic, Play, Pause, CheckCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
@@ -152,6 +152,8 @@ const fmtTime = (s: string | null | undefined) => {
   return fmtDate(s);
 };
 
+const formatBadgeCount = (n: number) => n > 99 ? "99+" : String(n);
+
 const ADMISSIONS_ROLES = [
   "super_admin", "campus_admin", "principal", "admission_head", "counsellor", "data_entry",
 ];
@@ -261,6 +263,16 @@ export default function Inbox() {
   const visibleCategories = allCategories.filter((c) =>
     c.roles.includes(role || "")
   );
+  const selectedCategory = visibleCategories.find((c) => c.id === selected);
+  const categoryDisplayCount = (cat: InboxCategory) =>
+    cat.id === selected && !loading ? items.length : cat.count;
+  const selectedDisplayCount = selectedCategory ? categoryDisplayCount(selectedCategory) : 0;
+  const totalVisibleCount = visibleCategories.reduce((sum, c) => sum + categoryDisplayCount(c), 0);
+
+  const commitItems = useCallback((cat: CategoryId, nextItems: InboxItem[]) => {
+    setItems(nextItems);
+    setCounts((prev) => prev[cat] === nextItems.length ? prev : { ...prev, [cat]: nextItems.length });
+  }, []);
 
   // ── Counts ────────────────────────────────────────────────────────────────
 
@@ -279,7 +291,7 @@ export default function Inbox() {
       isApprover
         ? supabase
             .from("offer_letters")
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("approval_status", "pending_principal")
         : Promise.resolve({ count: 0 }),
 
@@ -287,7 +299,7 @@ export default function Inbox() {
       (isSuperAdmin || isPrincipal)
         ? supabase
             .from("student_contact_change_requests" as any)
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -295,7 +307,7 @@ export default function Inbox() {
       isAdmissions
         ? supabase
             .from("applications" as any)
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "submitted")
         : Promise.resolve({ count: 0 }),
 
@@ -304,7 +316,7 @@ export default function Inbox() {
         ? (() => {
             const q = supabase
               .from("lead_followups")
-              .select("id", { count: "planned", head: true })
+              .select("id")
               .eq("status", "pending")
               .lte("scheduled_at", `${today}T23:59:59`);
             return q;
@@ -314,26 +326,25 @@ export default function Inbox() {
       // whatsapp unreplied
       isAdmissions
         ? supabase
-            .from("whatsapp_messages")
-            .select("id", { count: "planned", head: true })
-            .eq("direction", "inbound")
-            .eq("is_read", false)
+            .from("whatsapp_conversations" as any)
+            .select("phone")
+            .gt("unread_count", 0)
         : Promise.resolve({ count: 0 }),
 
       // video approvals — super_admin only (videos awaiting approval)
       isSuperAdmin
         ? supabase
             .from("videos" as any)
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "pending_approval")
         : Promise.resolve({ count: 0 }),
 
-      // voice messages — approvers (unread messages from consultants)
+      // voice messages — approvers (unresolved messages from consultants)
       isApprover
         ? supabase
             .from("consultant_voice_messages" as any)
-            .select("id", { count: "planned", head: true })
-            .eq("status", "unread")
+            .select("id")
+            .neq("status", "resolved")
         : Promise.resolve({ count: 0 }),
     ]);
 
@@ -429,8 +440,7 @@ export default function Inbox() {
           }
         }
 
-        setItems(
-          (data || []).map((w: any) => {
+        const nextItems = (data || []).map((w: any) => {
             const courseId = w.offer_letters?.course_id;
             const sessionId = w.offer_letters?.session_id;
             const yearAmount = (courseId && sessionId)
@@ -455,8 +465,8 @@ export default function Inbox() {
               course_name: w.offer_letters?.courses?.name || null,
               year_amount: yearAmount,
             } as WaiverItem;
-          })
-        );
+          });
+        commitItems(cat, nextItems);
       } else if (cat === "offer_approvals") {
         // offer_letters has course_id → courses FK; join directly
         const { data, error } = await supabase
@@ -470,8 +480,7 @@ export default function Inbox() {
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        setItems(
-          (data || []).map((o: any) => ({
+        const nextItems = (data || []).map((o: any) => ({
             id: o.id,
             lead_id: o.lead_id,
             lead_name: o.leads?.name || "—",
@@ -480,8 +489,8 @@ export default function Inbox() {
             created_at: o.created_at || null,
             requested_by_name: null,
             application_id: null,
-          } as OfferApprovalItem))
-        );
+          } as OfferApprovalItem));
+        commitItems(cat, nextItems);
       } else if (cat === "contact_changes") {
         const { data, error } = await supabase
           .from("student_contact_change_requests" as any)
@@ -495,8 +504,7 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((r: any) => ({
+        const nextItems = (data || []).map((r: any) => ({
             id: r.id,
             student_id: r.student_id,
             student_name: r.students?.name || "—",
@@ -508,8 +516,8 @@ export default function Inbox() {
             requested_by_name: r.requested_by_name,
             requested_by_role: r.requested_by_role,
             created_at: r.created_at,
-          } as ContactChangeItem))
-        );
+          } as ContactChangeItem));
+        commitItems(cat, nextItems);
       } else if (cat === "applications") {
         const { data, error } = await (supabase as any)
           .from("applications")
@@ -519,8 +527,7 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((a: any) => ({
+        const nextItems = (data || []).map((a: any) => ({
             id: a.id,
             application_id: a.application_id,
             lead_name: a.leads?.name || a.full_name || "—",
@@ -529,8 +536,8 @@ export default function Inbox() {
             stage: a.status,
             phone: a.leads?.phone || a.phone || null,
             app_status: a.status || null,
-          } as ApplicationItem))
-        );
+          } as ApplicationItem));
+        commitItems(cat, nextItems);
       } else if (cat === "followups") {
         const today = new Date().toISOString().slice(0, 10);
         // user_id is FK to auth.users (not profiles); just fetch lead data
@@ -543,8 +550,7 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((f: any) => ({
+        const nextItems = (data || []).map((f: any) => ({
             id: f.id,
             lead_id: f.lead_id,
             lead_name: f.leads?.name || "—",
@@ -552,8 +558,8 @@ export default function Inbox() {
             scheduled_at: f.scheduled_at,
             notes: f.notes,
             counsellor_name: null,
-          } as FollowupItem))
-        );
+          } as FollowupItem));
+        commitItems(cat, nextItems);
       } else if (cat === "whatsapp") {
         // Use whatsapp_conversations view if available, else aggregate
         const { data, error } = await supabase
@@ -564,16 +570,15 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((c: any) => ({
+        const nextItems = (data || []).map((c: any) => ({
             phone: c.phone,
             lead_id: c.lead_id,
             lead_name: c.lead_name,
             last_message: c.last_message,
             last_message_at: c.last_message_at,
             unread_count: c.unread_count,
-          } as WhatsAppItem))
-        );
+          } as WhatsAppItem));
+        commitItems(cat, nextItems);
       } else if (cat === "video_approvals") {
         const { data, error } = await supabase
           .from("videos" as any)
@@ -592,8 +597,7 @@ export default function Inbox() {
             .in("id", editorIds);
           for (const e of (eds as any[]) || []) nameById[e.id] = e.name;
         }
-        setItems(
-          rows.map((v: any) => ({
+        const nextItems = rows.map((v: any) => ({
             id: v.id,
             title: v.title,
             drive_url: v.drive_url,
@@ -601,8 +605,8 @@ export default function Inbox() {
             content_type: v.content_type,
             editor_name: nameById[v.editor_id] || "—",
             created_at: v.created_at,
-          } as VideoApprovalInboxItem))
-        );
+          } as VideoApprovalInboxItem));
+        commitItems(cat, nextItems);
       } else if (cat === "voice_messages") {
         const { data, error } = await supabase
           .from("consultant_voice_messages" as any)
@@ -621,8 +625,7 @@ export default function Inbox() {
             .in("user_id", senderIds);
           for (const p of (profs || []) as any[]) nameMap[p.user_id] = p.display_name || "";
         }
-        setItems(
-          rows.map((r: any) => ({
+        const nextItems = rows.map((r: any) => ({
             id: r.id,
             consultant_id: r.consultant_id,
             sender_user_id: r.sender_user_id,
@@ -632,8 +635,8 @@ export default function Inbox() {
             status: r.status,
             created_at: r.created_at,
             sender_name: r.consultants?.name || nameMap[r.sender_user_id] || "Unknown consultant",
-          } as VoiceMessageItem))
-        );
+          } as VoiceMessageItem));
+        commitItems(cat, nextItems);
       }
     } catch (e: any) {
       toast({ title: "Failed to load items", description: e.message, variant: "destructive" });
@@ -641,7 +644,7 @@ export default function Inbox() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, commitItems]);
 
   useEffect(() => {
     if (selected) loadItems(selected);
@@ -784,6 +787,29 @@ export default function Inbox() {
     }
   };
 
+  const markWhatsAppRead = async (item: WhatsAppItem) => {
+    if (!item.phone || item.unread_count <= 0) return;
+    setProcessing(item.phone);
+    try {
+      const { error } = await (supabase.rpc as any)("mark_whatsapp_conversation_read", {
+        p_phone: item.phone,
+        p_provider: null,
+        p_business_phone_number_id: null,
+        p_business_phone_number: null,
+      });
+      if (error) throw error;
+      setItems((prev) => prev.filter((row) => (row as WhatsAppItem).phone !== item.phone));
+      setSelectedItem(null);
+      setCounts((prev) => ({ ...prev, whatsapp: Math.max(0, prev.whatsapp - 1) }));
+      toast({ title: "Marked read", description: "WhatsApp notification removed from the inbox." });
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Could not mark read", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const markVoiceResolved = async (id: string) => {
     const { error } = await supabase
       .from("consultant_voice_messages" as any)
@@ -802,10 +828,10 @@ export default function Inbox() {
   const renderMiddleItem = (item: InboxItem) => {
     const isSelected = selectedItem === item;
     const baseClass = cn(
-      "w-full text-left px-4 py-3 border-b border-border/40 transition-colors cursor-pointer",
+      "group w-full text-left px-4 py-3.5 border-b border-border/50 transition-all cursor-pointer",
       isSelected
-        ? "bg-primary/5 border-l-2 border-l-primary"
-        : "hover:bg-muted/30"
+        ? "bg-card shadow-sm ring-1 ring-border border-l-2 border-l-primary"
+        : "hover:bg-card/80"
     );
 
     if (selected === "offer_waivers") {
@@ -915,7 +941,7 @@ export default function Inbox() {
               )}
             </div>
             <Badge className="bg-green-100 text-green-700 border-0 text-[10px] shrink-0">
-              {w.unread_count}
+              {formatBadgeCount(w.unread_count)}
             </Badge>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(w.last_message_at)}</p>
@@ -1244,6 +1270,20 @@ export default function Inbox() {
 
           <div className="flex flex-col gap-2">
             <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={processing === w.phone}
+              onClick={() => markWhatsAppRead(w)}
+            >
+              {processing === w.phone ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Mark read
+            </Button>
+            <Button
               size="sm"
               className="w-full"
               onClick={() => navigate(`/whatsapp-inbox?phone=${encodeURIComponent(w.phone)}`)}
@@ -1369,24 +1409,42 @@ export default function Inbox() {
   // ── Layout ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-[hsl(var(--muted)/0.35)]">
       {/* Left: Category list */}
-      <div className="w-56 shrink-0 border-r border-border bg-muted/20 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground">Inbox</h2>
-          <button
-            onClick={() => { fetchCounts(); if (selected) loadItems(selected); }}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground"
-            title="Refresh"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
+      <div className="w-[300px] shrink-0 border-r border-border/70 bg-background/95 flex flex-col">
+        <div className="px-5 py-5 border-b border-border/70">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Command center</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">Inbox</h2>
+            </div>
+            <button
+              onClick={() => { fetchCounts(); if (selected) loadItems(selected); }}
+              className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+              title="Refresh"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">{totalVisibleCount}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">{selectedDisplayCount}</p>
+            </div>
+          </div>
         </div>
-        <nav className="flex-1 overflow-y-auto py-2">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {visibleCategories.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">No categories available</p>
+            <p className="px-3 py-3 text-xs text-muted-foreground">No categories available</p>
           )}
-          {visibleCategories.map((cat) => (
+          {visibleCategories.map((cat) => {
+            const active = selected === cat.id;
+            const displayCount = categoryDisplayCount(cat);
+            return (
             <button
               key={cat.id}
               onClick={() => {
@@ -1398,48 +1456,64 @@ export default function Inbox() {
                 setSelected(cat.id);
               }}
               className={cn(
-                "w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors text-left",
-                selected === cat.id
-                  ? "bg-primary/8 text-foreground border-l-2 border-l-primary"
-                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                "w-full flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium transition-all text-left",
+                active
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-border"
+                  : "text-muted-foreground hover:bg-card/80 hover:text-foreground"
               )}
             >
-              <cat.icon className={cn("h-4 w-4 shrink-0", cat.color)} />
-              <span className="flex-1 truncate">{cat.label}</span>
-              {cat.count > 0 && (
+              <span className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
+                active ? "border-primary/15 bg-primary/10" : "border-border bg-muted/50"
+              )}>
+                <cat.icon className={cn("h-4 w-4", cat.color)} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{cat.label}</span>
+                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                  {displayCount === 0 ? "All clear" : `${displayCount} open item${displayCount === 1 ? "" : "s"}`}
+                </span>
+              </span>
+              {displayCount > 0 && (
                 <span className={cn(
-                  "flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold text-white px-1",
+                  "flex h-6 min-w-6 items-center justify-center rounded-full text-[10px] font-bold text-white px-1.5",
                   cat.id === "whatsapp" ? "bg-green-500"
                   : cat.id === "followups" ? "bg-orange-500"
                   : "bg-primary"
                 )}>
-                  {cat.count > 99 ? "99+" : cat.count}
+                  {formatBadgeCount(displayCount)}
                 </span>
               )}
             </button>
-          ))}
+          );})}
         </nav>
       </div>
 
       {/* Middle: Item list */}
-      <div className="w-72 shrink-0 border-r border-border bg-background flex flex-col">
-        <div className="px-4 py-3 border-b border-border">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {visibleCategories.find((c) => c.id === selected)?.label || ""}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {items.length} item{items.length !== 1 ? "s" : ""}
-          </p>
+      <div className="w-[380px] shrink-0 border-r border-border/70 bg-background/80 flex flex-col">
+        <div className="px-5 py-4 border-b border-border/70 bg-background/95">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                {selectedCategory?.label || ""}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {items.length} item{items.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex h-32 items-center justify-center">
+        <div className="flex-1 overflow-y-auto bg-background/60">
+          {loading && items.length === 0 ? (
+            <div className="flex h-40 items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground">
-              <CheckCircle className="h-8 w-8 opacity-20" />
-              <p className="text-xs">All clear!</p>
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">
+              <CheckCircle className="h-9 w-9 opacity-20" />
+              <p className="text-sm font-medium">All clear</p>
+              <p className="text-xs">No open items in this queue.</p>
             </div>
           ) : (
             items.map((item) => renderMiddleItem(item))
@@ -1448,7 +1522,7 @@ export default function Inbox() {
       </div>
 
       {/* Right: Detail pane */}
-      <div className="flex-1 overflow-y-auto bg-muted/10">
+      <div className="flex-1 overflow-y-auto bg-background">
         {renderDetail()}
       </div>
     </div>
