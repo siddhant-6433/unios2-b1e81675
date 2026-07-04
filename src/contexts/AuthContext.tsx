@@ -66,6 +66,21 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 const IMPERSONATION_KEY = "unios_impersonation";
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 8_000;
+
+function withTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${AUTH_BOOTSTRAP_TIMEOUT_MS}ms`));
+    }, AUTH_BOOTSTRAP_TIMEOUT_MS);
+  });
+
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -86,18 +101,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchUserData = async (userId: string, authUser?: User) => {
     if (fetchedUserDataForRef.current === userId) return;
     fetchedUserDataForRef.current = userId;
+    setRoleLoaded(false);
     try {
-      const [profileRes, roleRes] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
-        supabase.rpc("get_user_role", { _user_id: userId }),
-      ]);
+      const [profileRes, roleRes] = await withTimeout(
+        Promise.all([
+          supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
+          supabase.rpc("get_user_role", { _user_id: userId }),
+        ]),
+        "User profile and role load",
+      );
 
       if (profileRes.data) {
         // Sync phone from auth if profile phone is empty but auth user has one
         const existingProfile = profileRes.data;
         const authPhone = authUser?.phone || null;
         if (!existingProfile.phone && authPhone) {
-          await supabase.from("profiles").update({ phone: authPhone }).eq("user_id", userId);
+          await withTimeout(
+            supabase.from("profiles").update({ phone: authPhone }).eq("user_id", userId),
+            "Profile phone sync",
+          );
           existingProfile.phone = authPhone;
         }
         setProfile(existingProfile);
@@ -106,11 +128,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const meta = authUser?.user_metadata ?? {};
         const displayName = meta.display_name || meta.full_name || authUser?.email || userId;
         const phone = authUser?.phone || null;
-        const { data: upserted } = await supabase
-          .from("profiles")
-          .upsert({ user_id: userId, display_name: displayName, ...(phone && { phone }) }, { onConflict: "user_id" })
-          .select("id, display_name, phone, avatar_url, campus, department, institution")
-          .single();
+        const { data: upserted } = await withTimeout(
+          supabase
+            .from("profiles")
+            .upsert({ user_id: userId, display_name: displayName, ...(phone && { phone }) }, { onConflict: "user_id" })
+            .select("id, display_name, phone, avatar_url, campus, department, institution")
+            .single(),
+          "Profile creation",
+        );
         if (upserted) setProfile(upserted);
       }
 
@@ -163,22 +188,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const nextUserId = session?.user?.id ?? null;
-      if (lastRealUserIdRef.current && lastRealUserIdRef.current !== nextUserId) {
-        setImpersonation(null);
-        sessionStorage.removeItem(IMPERSONATION_KEY);
-      }
-      lastRealUserIdRef.current = nextUserId;
-      setSession(session);
-      if (session?.user) {
-        fetchUserData(session.user.id, session.user);
-      } else {
+    withTimeout(supabase.auth.getSession(), "Initial auth session load")
+      .then(({ data: { session } }) => {
+        const nextUserId = session?.user?.id ?? null;
+        if (lastRealUserIdRef.current && lastRealUserIdRef.current !== nextUserId) {
+          setImpersonation(null);
+          sessionStorage.removeItem(IMPERSONATION_KEY);
+        }
+        lastRealUserIdRef.current = nextUserId;
+        setSession(session);
+        if (session?.user) {
+          fetchUserData(session.user.id, session.user);
+        } else {
+          fetchedUserDataForRef.current = null;
+          setRoleLoaded(true); // no user = no role to load
+        }
+      })
+      .catch((err) => {
+        console.error("Initial auth session load failed:", err);
         fetchedUserDataForRef.current = null;
-        setRoleLoaded(true); // no user = no role to load
-      }
-      setLoading(false);
-    });
+        setSession(null);
+        setProfile(null);
+        setRole(null);
+        setPermissions([]);
+        setRoleLoaded(true);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     return () => subscription.unsubscribe();
   }, []);
