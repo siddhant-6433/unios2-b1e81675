@@ -20,8 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
-import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
+import { ExamPendingBadge } from "@/components/leads/ExamPendingBadge";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
 import { type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
@@ -2671,19 +2670,12 @@ const Admissions = () => {
                         <span className="font-medium text-foreground text-sm truncate">{lead.name}</span>
                         <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
                         <span onClick={(e) => e.stopPropagation()}>
-                          <CahetPendingBadge
+                          <ExamPendingBadge
                             leadId={lead.id}
                             leadName={lead.name}
                             phone={lead.phone}
                             courseName={lead.course_name}
-                          />
-                        </span>
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <UpdeledPendingBadge
-                            leadId={lead.id}
-                            leadName={lead.name}
-                            phone={lead.phone}
-                            courseName={lead.course_name}
+                            campusName={lead.campus_name}
                           />
                         </span>
                         {lead.ai_called && (

@@ -24,8 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 // Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
-import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
+import { ExamPendingBadge } from "@/components/leads/ExamPendingBadge";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { recordCallDisposition } from "@/lib/callDisposition";
 
@@ -1111,19 +1110,12 @@ const LeadDetail = () => {
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
         <span className="shrink-0">
-          <CahetPendingBadge
+          <ExamPendingBadge
             leadId={lead.id}
             leadName={lead.name}
             phone={lead.phone}
             courseName={courseName}
-          />
-        </span>
-        <span className="shrink-0">
-          <UpdeledPendingBadge
-            leadId={lead.id}
-            leadName={lead.name}
-            phone={lead.phone}
-            courseName={courseName}
+            campusName={campusName}
           />
         </span>
         {/* Assigned counsellor badge */}

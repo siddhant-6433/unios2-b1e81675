@@ -301,15 +301,13 @@ export function ApplyMagicLinkButton({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button variant="pill-outline" size="pill" onClick={openGeneratedLink}>
                   <ExternalLink className="h-4 w-4" /> Open
                 </Button>
                 <Button variant="pill-outline" size="pill" onClick={copy}>
                   {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
                 </Button>
-                {/* WhatsApp brand green is preserved by overriding bg/hover via
-                    className while keeping the pill shape from variant="pill". */}
                 <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-green-600 hover:bg-green-700">
                   <MessageCircle className="h-4 w-4" /> Send via WhatsApp
                 </Button>

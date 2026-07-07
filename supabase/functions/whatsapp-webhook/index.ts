@@ -6,6 +6,7 @@ import {
 } from "../_shared/whatsapp-inbound-events.ts";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
 import { loadLatestOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
+import { handleExamRegistrationIntakeReply } from "../_shared/exam-registration-intake.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1010,6 +1011,48 @@ Deno.serve(async (req) => {
                   }
                 }
               }
+            }
+          }
+
+          // ── Entrance-exam registration check reply ─────────────────────────
+          // Handles replies to the automated `exam_registration_check` template:
+          // Yes/No quick-reply buttons, and the follow-up registration number.
+          // Runs before DNC/AI so a valid intake reply isn't misrouted.
+          if (!feedbackHandled && lead?.id) {
+            try {
+              const intake = await handleExamRegistrationIntakeReply(admin, {
+                leadId: lead.id,
+                buttonId: buttonReply?.id || null,
+                buttonTitle: buttonReply?.title || null,
+                text: msgType === "text" ? content : null,
+                messageType: msgType,
+              });
+              if (intake.handled) {
+                if (intake.reply) {
+                  const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(businessPnId);
+                  if (waToken && pnId) {
+                    const rgRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ messaging_product: "whatsapp", to: phone.replace(/[^0-9]/g, ""), type: "text", text: { body: intake.reply } }),
+                    });
+                    if (rgRes.ok) {
+                      const rgResult = await rgRes.json();
+                      await admin.from("whatsapp_messages").insert({
+                        lead_id: lead.id,
+                        wa_message_id: rgResult?.messages?.[0]?.id || null,
+                        direction: "outbound", phone,
+                        message_type: "text", content: intake.reply, status: "sent", is_read: true,
+                        business_phone_number_id: pnId,
+                        template_key: "exam_registration_intake_ack",
+                      });
+                    }
+                  }
+                }
+                feedbackHandled = true; // skip DNC/keyword/AI auto-replies
+              }
+            } catch (e) {
+              console.error("exam registration intake handling error:", e);
             }
           }
 
