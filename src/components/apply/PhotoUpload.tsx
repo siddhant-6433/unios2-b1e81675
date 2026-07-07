@@ -71,7 +71,7 @@ export function PhotoUpload({ applicationId, phone, onUploaded, existingUrl, sto
         if (!base64) throw err;
         const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
         const blob = new Blob([bytes], { type: 'image/png' });
-        const path = await uploadViaEdgeFn(blob, 'passport_photo.png');
+        const path = await uploadViaEdgeFn(blob, 'passport_photo.png', true);
         setPreview(imageDataUrl);
         onUploaded(path);
         toast({ title: 'Passport photo uploaded successfully' });
