@@ -16,7 +16,7 @@ import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
   Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
-  ListPlus,
+  ListPlus, PauseCircle,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -47,6 +47,15 @@ import { compareCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
 import { cahetRegistrationFromApplication, isBptOrBmritCourseName } from "@/lib/cahet";
 import { isDeledCourseName, updeledRegistrationFromApplication } from "@/lib/updeled";
+import {
+  examCodeForApplication,
+  type ExamCode,
+  type ExamRegistrationStatus,
+} from "@/lib/examRegistration";
+import { fetchExamRegistrationsForLeads } from "@/lib/examRegistrationClient";
+import { ExamRegistrationBadge } from "@/components/leads/ExamRegistrationBadge";
+import { ExamRegisterDialog, type ExamRegisterTarget } from "@/components/leads/ExamRegisterDialog";
+import { HoldApplicationDialog, type HoldApplicationTarget } from "@/components/admissions/HoldApplicationDialog";
 import { useToast } from "@/hooks/use-toast";
 
 type RegistrationExamKey = "cahet" | "upget" | "updeled";
@@ -91,6 +100,7 @@ interface AppRow {
   status: string;
   payment_status: string | null;
   payment_ref: string | null;
+  hold_reason?: string | null;
   fee_amount: number | null;
   program_category: string | null;
   course_selections: any[];
@@ -124,6 +134,13 @@ interface AppRow {
   /** Remaining balance for the full first-year fee — needed by the nudge dialog. */
   year1_due?: number | null;
   registration_statuses?: RegistrationStatuses;
+  /** The single entrance exam this application's course requires, plus its
+   *  live registration status. Null when the course has no exam gate. */
+  exam_registration?: {
+    examCode: ExamCode;
+    status: ExamRegistrationStatus;
+    registrationNo: string | null;
+  } | null;
   dossier?: ApplicationDossier;
 }
 
@@ -375,6 +392,9 @@ export default function Applications() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
+  const [examRegTarget, setExamRegTarget] = useState<ExamRegisterTarget | null>(null);
+  const [holdTarget, setHoldTarget] = useState<HoldApplicationTarget | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportingCourseSplit, setExportingCourseSplit] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -527,6 +547,8 @@ export default function Applications() {
       const year1DueMap: Record<string, number | null> = {};
       const cahetRegistrationMap: Record<string, string | null> = {};
       const updeledRegistrationMap: Record<string, string | null> = {};
+      // Generalized per-lead exam registrations: lead_id → exam_code → {status, no}.
+      const examRegByLead: Record<string, Partial<Record<ExamCode, { status: ExamRegistrationStatus; registration_no: string | null }>>> = {};
       const registrationClient = supabase as unknown as RegistrationLookupClient;
 
       const mapRows = () => rows.map((a: any) => {
@@ -559,6 +581,16 @@ export default function Applications() {
             cahet: cahetRegistrationMap,
             updeled: updeledRegistrationMap,
           }),
+          exam_registration: (() => {
+            const code = examCodeForApplication(a);
+            if (!code) return null;
+            const rec = examRegByLead[leadId]?.[code];
+            return {
+              examCode: code,
+              status: (rec?.status || "unknown") as ExamRegistrationStatus,
+              registrationNo: rec?.registration_no || null,
+            };
+          })(),
         };
       });
 
@@ -575,7 +607,7 @@ export default function Applications() {
           // Offer-letter existence — one row per lead is enough to flag.
           // Keep this batched; admins can have 700+ applications, and a single
           // huge `.in(...)` URL silently starves downstream token/PAN status.
-          const [offersResult, paymentsResult, cahetResult, updeledResult] = await Promise.all([
+          const [offersResult, paymentsResult, cahetResult, updeledResult, examRegResult] = await Promise.all([
             supabase.from("offer_letters")
               .select("lead_id")
               .in("lead_id", batch),
@@ -590,7 +622,20 @@ export default function Applications() {
             registrationClient.from("updeled_registrations")
               .select("lead_id, registration_no")
               .in("lead_id", batch),
+            (supabase.from("exam_registrations" as any) as any)
+              .select("lead_id, exam_code, status, registration_no")
+              .in("lead_id", batch),
           ]);
+
+          if (examRegResult.error) {
+            console.error("exam_registrations batch failed:", examRegResult.error);
+          }
+          (examRegResult.data || []).forEach((r: { lead_id: string; exam_code: ExamCode; status: ExamRegistrationStatus; registration_no: string | null }) => {
+            (examRegByLead[r.lead_id] ||= {})[r.exam_code] = {
+              status: r.status,
+              registration_no: r.registration_no || null,
+            };
+          });
 
           if (offersResult.error) {
             console.error("offer_letters batch failed:", offersResult.error);
@@ -759,7 +804,7 @@ export default function Applications() {
       void enrichFeeStatus();
     };
     fetchApps();
-  }, [profile?.id, isCounsellor, toast]);
+  }, [profile?.id, isCounsellor, toast, refreshKey]);
 
   const completedCount = (cs: Record<string, boolean>) => Object.values(cs || {}).filter(Boolean).length;
   const totalCount = (cs: Record<string, boolean>) => Object.keys(cs || {}).length;
@@ -1824,28 +1869,22 @@ export default function Applications() {
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {REGISTRATION_EXAM_ORDER.map((key) => {
-                          const status = app.registration_statuses?.[key] || {
-                            label: REGISTRATION_EXAM_LABELS[key],
-                            status: "unknown" as const,
-                            registrationNo: null,
-                          };
-                          const title = `${status.label}: ${registrationStatusText(status.status)}${
-                            status.registrationNo ? ` (${status.registrationNo})` : ""
-                          }`;
-                          return (
-                            <span
-                              key={key}
-                              title={title}
-                              className={`inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold leading-none ${registrationStatusClass(status.status)}`}
-                            >
-                              <span>{status.label}</span>
-                              <span>{registrationStatusText(status.status)}</span>
-                            </span>
-                          );
-                        })}
-                      </div>
+                      {app.exam_registration && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          <ExamRegistrationBadge
+                            examCode={app.exam_registration.examCode}
+                            status={app.exam_registration.status}
+                            registrationNo={app.exam_registration.registrationNo}
+                            onClick={app.lead_id ? () => setExamRegTarget({
+                              lead_id: app.lead_id as string,
+                              lead_name: app.full_name || "Applicant",
+                              exam_code: app.exam_registration!.examCode,
+                              phone: app.phone,
+                              course_name: primaryCourseName(app),
+                            }) : undefined}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
@@ -1923,6 +1962,41 @@ export default function Applications() {
                             <MessageCircle className="h-3.5 w-3.5" />
                             Nudge
                           </button>
+                        )}
+                        {/* Put on hold / release — for applications that can't
+                            be processed (fails eligibility / entrance-exam
+                            registration and no alternative course). */}
+                        {!isCounsellor && (
+                          app.status === "on_hold" ? (
+                            <button
+                              onClick={() => setHoldTarget({
+                                id: app.id, application_id: app.application_id, lead_id: app.lead_id,
+                                full_name: app.full_name, phone: app.phone,
+                                course_name: primaryCourseName(app),
+                                exam_code: app.exam_registration?.examCode ?? null,
+                                on_hold: true, hold_reason: app.hold_reason ?? null,
+                              })}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 whitespace-nowrap"
+                              title="This application is on hold — click to release"
+                            >
+                              <PauseCircle className="h-3.5 w-3.5" />
+                              On hold
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setHoldTarget({
+                                id: app.id, application_id: app.application_id, lead_id: app.lead_id,
+                                full_name: app.full_name, phone: app.phone,
+                                course_name: primaryCourseName(app),
+                                exam_code: app.exam_registration?.examCode ?? null,
+                                on_hold: false,
+                              })}
+                              className="p-1.5 rounded text-muted-foreground hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                              title="Put application on hold (ineligible)"
+                            >
+                              <PauseCircle className="h-3.5 w-3.5" />
+                            </button>
+                          )
                         )}
                         {isSuperAdmin && (
                           <button
@@ -2300,6 +2374,18 @@ export default function Applications() {
           an_due: nudgeTarget.an_due ?? null,
           year1_due: nudgeTarget.year1_due ?? null,
         } : null}
+      />
+
+      <ExamRegisterDialog
+        target={examRegTarget}
+        onClose={() => setExamRegTarget(null)}
+        onSaved={() => { setExamRegTarget(null); setRefreshKey((k) => k + 1); }}
+      />
+
+      <HoldApplicationDialog
+        target={holdTarget}
+        onClose={() => setHoldTarget(null)}
+        onSaved={() => { setHoldTarget(null); setRefreshKey((k) => k + 1); }}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => {

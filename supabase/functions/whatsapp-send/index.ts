@@ -171,6 +171,26 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
     params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"],
   },
 
+  // Entrance-exam registration check — asks the candidate whether they've
+  // registered/cleared the entrance exam / counselling their course requires.
+  // Submit to Meta as UTILITY with TWO quick-reply buttons whose payloads MUST
+  // be "Yes, registered" and "Not registered yet" (the webhook matches on the
+  // title/id via regcheck handling). Body params:
+  //   {{1}} student_name  {{2}} course_name  {{3}} exam_name (display name)
+  exam_registration_check: {
+    name: "exam_registration_check",
+    params: ["student_name", "course_name", "exam_name"],
+  },
+
+  // Application put on hold for eligibility — the candidate can't be processed
+  // (fails the entrance-exam-registration / eligibility gate and isn't
+  // interested in an alternative course). UTILITY. Body params:
+  //   {{1}} student_name  {{2}} course_name  {{3}} exam_name (display name)
+  application_on_hold_eligibility: {
+    name: "application_on_hold_eligibility",
+    params: ["student_name", "course_name", "exam_name"],
+  },
+
   // 5. Token / other fee paid — uses the pre-existing APPROVED template
   // in Meta whose body is:
   //   "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}.

@@ -170,6 +170,12 @@ verify_jwt = false
 [functions.personal-doc-reminder-cron]
 verify_jwt = false
 
+# Entrance-exam registration check — sends exam_registration_check to unknown
+# leads. Intended daily via pg_cron; kept UNSCHEDULED until the Meta templates
+# are approved. Supports POST { dry_run: true } for a no-send preview.
+[functions.exam-registration-check-cron]
+verify_jwt = false
+
 # Called by pg_cron every 30 min during business hours IST.
 [functions.lead-bucket-backlog-cron]
 verify_jwt = false

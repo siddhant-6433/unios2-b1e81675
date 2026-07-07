@@ -100,14 +100,20 @@ export function computeStages(p: LifecycleInput): Stage[] {
   const allDocsReviewed = p.docs.total > 0 && p.docs.pending === 0;
   const isApproved = a.status === "approved";
   const isRejectedApp = a.status === "rejected";
+  // On-hold is a deviation from the main flow: the candidate can't be
+  // processed (fails an eligibility / entrance-exam-registration gate and
+  // isn't interested in an alternative course). We surface it as a blocked
+  // "On Hold" node at the approval position — earlier stages keep their real
+  // done/current state so admins still see how far the file got.
+  const isOnHold = a.status === "on_hold";
   const hasOffer = p.hasOffer;
   const hasPan = !!p.lead?.pre_admission_no;
   const hasAn = !!p.lead?.admission_no;
   // Once the application has been decided (approved/rejected), the admin has
   // accepted the doc state — don't keep marking docs as a blocker or "current"
   // action, since the next real step is offer issuance / rejection handling.
-  const decided = isApproved || isRejectedApp;
-  const docsBlocked = p.docs.rejected > 0 && !isRejectedApp && !isApproved;
+  const decided = isApproved || isRejectedApp || isOnHold;
+  const docsBlocked = p.docs.rejected > 0 && !isRejectedApp && !isApproved && !isOnHold;
 
   // Labels are neutral stage NAMES, not state claims — the dot color tells
   // you whether the stage is done/current/future/blocked. Past-tense labels
@@ -117,7 +123,7 @@ export function computeStages(p: LifecycleInput): Stage[] {
     { key: "fee",       label: "Fee",           Icon: CreditCard,    isDone: isFeePaid,   hint: p.appFeePaid > 0 ? `₹${p.appFeePaid.toLocaleString("en-IN")}` : undefined },
     { key: "docs",      label: "Docs",          Icon: ShieldCheck,   isDone: (allDocsReviewed && !docsBlocked) || decided, isBlocked: docsBlocked, hint: p.docs.total > 0 ? `${p.docs.verified}/${p.docs.total} verified` : "no docs" },
     { key: "submitted", label: "Submission",    Icon: FileCheck2,    isDone: isSubmitted, hint: a.status },
-    { key: "approved",  label: isRejectedApp ? "Rejected" : "Approval", Icon: ShieldCheck, isDone: isApproved, isBlocked: isRejectedApp },
+    { key: "approved",  label: isOnHold ? "On Hold" : isRejectedApp ? "Rejected" : "Approval", Icon: ShieldCheck, isDone: isApproved, isBlocked: isRejectedApp || isOnHold, hint: isOnHold ? (a.rejection_reason ? undefined : "eligibility") : undefined },
     { key: "offer",     label: "Offer",         Icon: Gift,          isDone: hasOffer },
     { key: "token",     label: "Token / PAN",   Icon: Coins,         isDone: hasPan,      hint: p.lead?.pre_admission_no || undefined, amountDue: !hasPan ? (p.panDue ?? null) : null },
     { key: "admitted",  label: "Admission",     Icon: GraduationCap, isDone: hasAn,       hint: p.lead?.admission_no || undefined, amountDue: !hasAn ? (p.anDue ?? null) : null },

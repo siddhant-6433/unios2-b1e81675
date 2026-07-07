@@ -50,7 +50,9 @@ describe("UPDELED registration flow", () => {
   });
 
   it("wires counsellor entry points and sprint RPCs", () => {
-    expect(leadDetailPage).toContain("<UpdeledPendingBadge");
+    // UPDELED (and CAHET) pending badges on the lead page were unified into the
+    // generalized, course-scoped ExamPendingBadge (src/lib/examRegistration.ts).
+    expect(leadDetailPage).toContain("<ExamPendingBadge");
     expect(counsellorDashboard).toContain("<UpdeledSprintLeaderboard />");
     expect(updeledLeaderboard).toContain('"updeled_sprint_leaderboard"');
     expect(appRoutes).toContain('path="/updeled-sprint"');
