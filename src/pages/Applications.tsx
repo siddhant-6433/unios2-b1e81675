@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { SelectField } from "@/components/ui/state-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -15,9 +16,11 @@ import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
   Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
+  ListPlus,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -40,8 +43,43 @@ import {
   type ApplicationDossier,
 } from "@/lib/applicationDossier";
 import type { DatePreset } from "@/lib/datePresets";
+import { compareCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
+import { cahetRegistrationFromApplication, isBptOrBmritCourseName } from "@/lib/cahet";
+import { isDeledCourseName, updeledRegistrationFromApplication } from "@/lib/updeled";
 import { useToast } from "@/hooks/use-toast";
+
+type RegistrationExamKey = "cahet" | "upget" | "updeled";
+type RegistrationStatusKind = "registered" | "not_registered" | "unknown";
+type RegistrationStatus = {
+  label: string;
+  status: RegistrationStatusKind;
+  registrationNo?: string | null;
+};
+type RegistrationStatuses = Record<RegistrationExamKey, RegistrationStatus>;
+type RegistrationCourseSelection = {
+  course_name?: string | null;
+  name?: string | null;
+};
+type RegistrationEntranceExam = {
+  exam_name?: string | null;
+  status?: string | null;
+  registration_no?: string | null;
+};
+type RegistrationLookupRow = {
+  lead_id: string;
+  registration_no: string | null;
+};
+type RegistrationLookupClient = {
+  from(table: "cahet_registrations" | "updeled_registrations"): {
+    select(columns: string): {
+      in(column: "lead_id", values: string[]): Promise<{
+        data: RegistrationLookupRow[] | null;
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+};
 
 interface AppRow {
   id: string;
@@ -85,8 +123,12 @@ interface AppRow {
   an_due?: number | null;
   /** Remaining balance for the full first-year fee — needed by the nudge dialog. */
   year1_due?: number | null;
+  registration_statuses?: RegistrationStatuses;
   dossier?: ApplicationDossier;
 }
+
+type ExistingList = { id: string; name: string; member_count: number };
+type ApplicationListScope = "selected" | "filtered";
 
 // Mutually-exclusive funnel stages. Each app is bucketed by the FURTHEST
 // stage it has reached, so counts never overlap. The funnel below renders
@@ -107,6 +149,13 @@ const funnelStageOf = applicationFunnelStageOf;
 const RELATED_QUERY_BATCH_SIZE = 100;
 const APPLICATION_TABLE_PAGE_SIZE = 100;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
+const REGISTRATION_EXAM_ORDER: RegistrationExamKey[] = ["cahet", "upget", "updeled"];
+const REGISTRATION_EXAM_LABELS: Record<RegistrationExamKey, string> = {
+  cahet: "CAHET",
+  upget: "UPGET",
+  updeled: "UPDELED",
+};
+const UPGET_REGISTERED_STATUSES = new Set(["registered", "declared", "not_declared"]);
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -173,11 +222,133 @@ const LEAD_STAGE_BADGE: Record<string, string> = {
 const applicationActivityTime = (app: Pick<AppRow, "updated_at" | "submitted_at" | "created_at">) =>
   new Date(app.updated_at || app.submitted_at || app.created_at).getTime();
 
+const canRegenerateFormPdf = (app: Pick<AppRow, "status">) =>
+  app.status === "submitted" || app.status === "under_review" || app.status === "approved";
+
+const primaryCourseName = (app: Pick<AppRow, "course_selections">) => {
+  const firstNamed = (app.course_selections || []).find((course: any) =>
+    String(course?.course_name || "").trim()
+  );
+  return String(firstNamed?.course_name || "No course").trim();
+};
+
+const primaryCourseSelection = (app: Pick<AppRow, "course_selections">) => {
+  const firstNamed = (app.course_selections || []).find((course: any) =>
+    String(course?.course_name || "").trim()
+  );
+  return {
+    course: String(firstNamed?.course_name || "No course").trim(),
+    campus: String(firstNamed?.campus_name || "No campus").trim(),
+  };
+};
+
+const isUpgetExamName = (name: string | null | undefined) =>
+  /up\s*gnm\s*entrance|upget|gnm\s*entrance/i.test(String(name || ""));
+
+const isGnmCourseName = (courseName: string | null | undefined) => {
+  const c = String(courseName || "").toLowerCase();
+  return c.includes("gnm") || c.includes("general nursing");
+};
+
+const appHasCourseMatching = (
+  app: Pick<AppRow, "course_selections">,
+  predicate: (courseName: string | null | undefined) => boolean,
+) =>
+  (app.course_selections || []).some((course: RegistrationCourseSelection) =>
+    predicate(course?.course_name || course?.name || "")
+  );
+
+const entranceExamsFor = (app: Pick<AppRow, "academic_details">) => {
+  const academic = app.academic_details as { entrance_exams?: unknown } | null | undefined;
+  const exams = academic?.entrance_exams;
+  return Array.isArray(exams) ? (exams as RegistrationEntranceExam[]) : [];
+};
+
+const examRegistrationStatus = (
+  app: Pick<AppRow, "academic_details">,
+  matcher: (name: string | null | undefined) => boolean,
+  required: boolean,
+  registeredStatuses = new Set<string>(["registered"]),
+): { status: RegistrationStatusKind; registrationNo: string | null } => {
+  const exam = entranceExamsFor(app).find((entry) => matcher(entry?.exam_name));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (registrationNo || registeredStatuses.has(String(exam?.status || ""))) {
+    return { status: "registered", registrationNo: registrationNo || null };
+  }
+  if (exam || required) {
+    return { status: "not_registered", registrationNo: null };
+  }
+  return { status: "unknown", registrationNo: null };
+};
+
+const buildRegistrationStatuses = (
+  app: AppRow,
+  registeredByLead: {
+    cahet: Record<string, string | null>;
+    updeled: Record<string, string | null>;
+  },
+): RegistrationStatuses => {
+  const leadId = app.lead_id || "";
+  const requiresCahet = appHasCourseMatching(app, isBptOrBmritCourseName);
+  const requiresUpget = appHasCourseMatching(app, isGnmCourseName);
+  const requiresUpdeled = appHasCourseMatching(app, isDeledCourseName);
+
+  const appCahetRegistration = cahetRegistrationFromApplication(app, app.lead_id);
+  const appUpdeledRegistration = updeledRegistrationFromApplication(app, app.lead_id);
+  const cahetRegistrationNo = registeredByLead.cahet[leadId] || appCahetRegistration?.registration_no || null;
+  const updeledRegistrationNo = registeredByLead.updeled[leadId] || appUpdeledRegistration?.registration_no || null;
+  const upget = examRegistrationStatus(
+    app,
+    isUpgetExamName,
+    requiresUpget,
+    UPGET_REGISTERED_STATUSES,
+  );
+
+  return {
+    cahet: {
+      label: REGISTRATION_EXAM_LABELS.cahet,
+      status: cahetRegistrationNo ? "registered" : requiresCahet ? "not_registered" : "unknown",
+      registrationNo: cahetRegistrationNo,
+    },
+    upget: {
+      label: REGISTRATION_EXAM_LABELS.upget,
+      status: upget.status,
+      registrationNo: upget.registrationNo,
+    },
+    updeled: {
+      label: REGISTRATION_EXAM_LABELS.updeled,
+      status: updeledRegistrationNo ? "registered" : requiresUpdeled ? "not_registered" : "unknown",
+      registrationNo: updeledRegistrationNo,
+    },
+  };
+};
+
+const registrationStatusClass = (status: RegistrationStatusKind) => {
+  if (status === "registered") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "not_registered") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-border bg-muted/40 text-muted-foreground";
+};
+
+const registrationStatusText = (status: RegistrationStatusKind) => {
+  if (status === "registered") return "Yes";
+  if (status === "not_registered") return "No";
+  return "N/A";
+};
+
+const exportFileSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "course";
+
 export default function Applications() {
   const { role, profile } = useAuth();
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
+  const canManageApplicationLists = role === "super_admin" || role === "admission_head";
+  const canViewCourseBreakup = canManageApplicationLists;
   const canExportApplications = isSuperAdmin || role === "principal";
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
@@ -186,6 +357,8 @@ export default function Applications() {
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
+  const [courseFilter, setCourseFilter] = useState("all");
+  const [counsellorFilter, setCounsellorFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
@@ -203,7 +376,18 @@ export default function Applications() {
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingCourseSplit, setExportingCourseSplit] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showCourseBreakup, setShowCourseBreakup] = useState(true);
+  const [showAddToList, setShowAddToList] = useState(false);
+  const [listMode, setListMode] = useState<"new" | "existing">("new");
+  const [listScope, setListScope] = useState<ApplicationListScope>("selected");
+  const [newListName, setNewListName] = useState("");
+  const [existingListId, setExistingListId] = useState("");
+  const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
+  const [savingList, setSavingList] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -237,11 +421,12 @@ export default function Applications() {
 
   const regenerateAll = async () => {
     const eligible = (a: AppRow) => a.status === "submitted" || a.status === "under_review" || a.status === "approved";
-    const targets = selectedIds.size > 0
-      ? apps.filter(a => selectedIds.has(a.id) && eligible(a))
+    const selectedPdfIds = new Set(selectedPdfApps.map((app) => app.id));
+    const targets = selectedPdfIds.size > 0
+      ? apps.filter(a => selectedPdfIds.has(a.id) && eligible(a))
       : apps.filter(eligible);
     if (!targets.length) return;
-    const scope = selectedIds.size > 0 ? "selected" : "all";
+    const scope = selectedPdfIds.size > 0 ? "selected" : "all";
     if (!window.confirm(`Regenerate ${targets.length} ${scope} application form PDFs? This may take a few minutes.`)) return;
     setBulkRegen({ done: 0, total: targets.length });
     for (let i = 0; i < targets.length; i++) {
@@ -340,6 +525,9 @@ export default function Applications() {
       const panDueMap: Record<string, number | null> = {};
       const anDueMap: Record<string, number | null> = {};
       const year1DueMap: Record<string, number | null> = {};
+      const cahetRegistrationMap: Record<string, string | null> = {};
+      const updeledRegistrationMap: Record<string, string | null> = {};
+      const registrationClient = supabase as unknown as RegistrationLookupClient;
 
       const mapRows = () => rows.map((a: any) => {
         const leadId = a.lead_id || "";
@@ -365,7 +553,13 @@ export default function Applications() {
           anDue: anDueMap[leadId] ?? null,
           year1Due: year1DueMap[leadId] ?? null,
         });
-        return applyApplicationDossierToRow(a, dossier);
+        return {
+          ...applyApplicationDossierToRow(a, dossier),
+          registration_statuses: buildRegistrationStatuses(a, {
+            cahet: cahetRegistrationMap,
+            updeled: updeledRegistrationMap,
+          }),
+        };
       });
 
       // Render the base application rows before secondary dashboard enrichment.
@@ -381,7 +575,7 @@ export default function Applications() {
           // Offer-letter existence — one row per lead is enough to flag.
           // Keep this batched; admins can have 700+ applications, and a single
           // huge `.in(...)` URL silently starves downstream token/PAN status.
-          const [offersResult, paymentsResult] = await Promise.all([
+          const [offersResult, paymentsResult, cahetResult, updeledResult] = await Promise.all([
             supabase.from("offer_letters")
               .select("lead_id")
               .in("lead_id", batch),
@@ -390,12 +584,32 @@ export default function Applications() {
               .in("lead_id", batch)
               .in("type", ["application_fee", "token_fee"])
               .eq("status", "confirmed"),
+            registrationClient.from("cahet_registrations")
+              .select("lead_id, registration_no")
+              .in("lead_id", batch),
+            registrationClient.from("updeled_registrations")
+              .select("lead_id, registration_no")
+              .in("lead_id", batch),
           ]);
 
           if (offersResult.error) {
             console.error("offer_letters batch failed:", offersResult.error);
           }
           (offersResult.data || []).forEach((o: { lead_id: string }) => { leadOfferMap[o.lead_id] = true; });
+
+          if (cahetResult.error) {
+            console.error("cahet_registrations batch failed:", cahetResult.error);
+          }
+          (cahetResult.data || []).forEach((r: { lead_id: string; registration_no: string | null }) => {
+            cahetRegistrationMap[r.lead_id] = r.registration_no || null;
+          });
+
+          if (updeledResult.error) {
+            console.error("updeled_registrations batch failed:", updeledResult.error);
+          }
+          (updeledResult.data || []).forEach((r: { lead_id: string; registration_no: string | null }) => {
+            updeledRegistrationMap[r.lead_id] = r.registration_no || null;
+          });
 
           // Confirmed application_fee + token_fee payments — track per lead.
           // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
@@ -551,7 +765,61 @@ export default function Applications() {
   const totalCount = (cs: Record<string, boolean>) => Object.keys(cs || {}).length;
   const completionPct = (cs: Record<string, boolean>) => { const t = totalCount(cs); return t > 0 ? completedCount(cs) / t : 0; };
 
+  const courseOptions = useMemo(() => {
+    const courses = new Set<string>();
+    let hasNoCourse = false;
+    apps.forEach((app) => {
+      if (primaryCourseName(app) === "No course") hasNoCourse = true;
+      (app.course_selections || []).forEach((course: any) => {
+        const name = String(course?.course_name || "").trim();
+        if (name) courses.add(name);
+      });
+    });
+    const sorted = Array.from(courses).sort((a, b) => a.localeCompare(b));
+    return hasNoCourse ? ["No course", ...sorted] : sorted;
+  }, [apps]);
+
+  const counsellorOptions = useMemo(() => {
+    const counsellors = new Map<string, string>();
+    let hasUnassigned = false;
+    apps.forEach((app) => {
+      if (app.lead_counsellor_id) {
+        counsellors.set(
+          app.lead_counsellor_id,
+          app.counsellor_name || "Assigned counsellor",
+        );
+      } else {
+        hasUnassigned = true;
+      }
+    });
+    const options = Array.from(counsellors, ([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return hasUnassigned
+      ? [{ id: "__unassigned", name: "Unassigned" }, ...options]
+      : options;
+  }, [apps]);
+
+  const matchesCourseFilter = useCallback((app: AppRow) =>
+    courseFilter === "all" ||
+    (courseFilter === "No course" && primaryCourseName(app) === "No course") ||
+    app.course_selections?.some((course: any) => course?.course_name === courseFilter),
+    [courseFilter],
+  );
+
+  const matchesCounsellorFilter = useCallback((app: AppRow) => {
+    if (isCounsellor || counsellorFilter === "all") return true;
+    if (counsellorFilter === "__unassigned") return !app.lead_counsellor_id;
+    return app.lead_counsellor_id === counsellorFilter;
+  }, [counsellorFilter, isCounsellor]);
+
+  const dashboardApps = useMemo(
+    () => apps.filter((app) => matchesCourseFilter(app) && matchesCounsellorFilter(app)),
+    [apps, matchesCourseFilter, matchesCounsellorFilter],
+  );
+
   const filtered = useMemo(() => apps.filter(a => {
+    if (!matchesCourseFilter(a)) return false;
+    if (!matchesCounsellorFilter(a)) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -613,18 +881,227 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
   const pageStart = (safeCurrentPage - 1) * APPLICATION_TABLE_PAGE_SIZE;
   const pageEnd = Math.min(pageStart + APPLICATION_TABLE_PAGE_SIZE, filtered.length);
   const visibleApps = filtered.slice(pageStart, pageEnd);
+  const selectedListApps = useMemo(
+    () => apps.filter((app) => selectedIds.has(app.id) && !!app.lead_id),
+    [apps, selectedIds],
+  );
+  const selectedPdfApps = useMemo(
+    () => apps.filter((app) => selectedIds.has(app.id) && canRegenerateFormPdf(app)),
+    [apps, selectedIds],
+  );
+  const filteredListApps = useMemo(
+    () => filtered.filter((app) => !!app.lead_id),
+    [filtered],
+  );
+  const selectableApps = useMemo(
+    () => canManageApplicationLists ? filteredListApps : filtered.filter(canRegenerateFormPdf),
+    [canManageApplicationLists, filtered, filteredListApps],
+  );
+  const allSelectableAppsSelected = selectableApps.length > 0 &&
+    selectableApps.every((app) => selectedIds.has(app.id));
+
+  const courseExportApps = useMemo(
+    () => apps.filter((app) => matchesCourseFilter(app) && matchesCounsellorFilter(app)),
+    [apps, matchesCourseFilter, matchesCounsellorFilter],
+  );
+
+  const courseStatusRows = useMemo(() => {
+    const courseMap = new Map<string, {
+      campus: string;
+      course: string;
+      stageCounts: Record<FunnelStage, number>;
+      stageApps: Record<FunnelStage, AppRow[]>;
+      totalBeyondInProgress: number;
+    }>();
+
+    for (const app of dashboardApps) {
+      const { campus, course } = primaryCourseSelection(app);
+      const key = `${campus}::${course}`;
+      const existing = courseMap.get(key) || {
+        campus,
+        course,
+        stageCounts: {
+          in_progress: 0, submitted: 0, paid: 0, approved: 0,
+          offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
+        },
+        stageApps: {
+          in_progress: [], submitted: [], paid: [], approved: [],
+          offer_sent: [], token_paid: [], pre_admitted: [], admitted: [],
+        },
+        totalBeyondInProgress: 0,
+      };
+      const stage = funnelStageOf(app);
+      existing.stageCounts[stage]++;
+      existing.stageApps[stage].push(app);
+      if (stage !== "in_progress") existing.totalBeyondInProgress++;
+      courseMap.set(key, existing);
+    }
+
+    return Array.from(courseMap.values()).sort((a, b) => {
+      if (a.campus !== b.campus) return a.campus.localeCompare(b.campus);
+      const courseOrder = compareCourses(
+        { id: `${a.campus}-${a.course}`, name: a.course, campus_name: a.campus } satisfies CourseLike,
+        { id: `${b.campus}-${b.course}`, name: b.course, campus_name: b.campus } satisfies CourseLike,
+      );
+      return courseOrder ||
+        b.totalBeyondInProgress - a.totalBeyondInProgress ||
+        b.stageCounts.in_progress - a.stageCounts.in_progress;
+    });
+  }, [dashboardApps]);
 
   useEffect(() => {
     setCurrentPage(1);
     setExpandedId(null);
-  }, [fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }, [courseFilter, counsellorFilter, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+
+  const selectApplicationCohort = (rows: AppRow[], label: string) => {
+    if (!canManageApplicationLists) return;
+    const ids = rows.filter((app) => !!app.lead_id).map((app) => app.id);
+    setSelectedIds(new Set(ids));
+    toast({
+      title: "Applications selected",
+      description: ids.length > 0
+        ? `${ids.length} lead-linked application${ids.length === 1 ? "" : "s"} selected from ${label}.`
+        : `No lead-linked applications found in ${label}.`,
+    });
+  };
+
+  const resetListDialog = () => {
+    setNewListName("");
+    setExistingListId("");
+    setListMode("new");
+    setListScope("selected");
+  };
+
+  const openAddToListDialog = async (scope: ApplicationListScope) => {
+    if (!canManageApplicationLists) return;
+    setListScope(scope);
+    setShowAddToList(true);
+
+    const { data, error } = await supabase
+      .from("lead_lists" as any)
+      .select("id, name, member_count")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast({ title: "Lists could not load", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setExistingLists(((data || []) as any[]).map((list) => ({
+      id: list.id,
+      name: list.name,
+      member_count: list.member_count || 0,
+    })));
+  };
+
+  const listRowsForScope = () => listScope === "filtered" ? filteredListApps : selectedListApps;
+
+  const currentFilterSnapshot = () => ({
+    source: "applications_dashboard",
+    courseFilter,
+    counsellorFilter,
+    paymentFilter,
+    statusFilter,
+    stageFilter,
+    fromDate: fromDate || null,
+    toDate: toDate || null,
+    search: search || null,
+    sortMode,
+  });
+
+  const handleAddApplicationsToList = async () => {
+    if (!canManageApplicationLists) return;
+    const rows = listRowsForScope();
+    const leadIds = Array.from(new Set(rows.map((app) => app.lead_id).filter(Boolean))) as string[];
+
+    if (!leadIds.length) {
+      toast({
+        title: "No applications to add",
+        description: listScope === "filtered"
+          ? "The current filters do not match any applications with linked leads."
+          : "Select at least one application with a linked lead first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let listId = existingListId;
+    let listName = existingLists.find((list) => list.id === existingListId)?.name || "";
+    setSavingList(true);
+
+    if (listMode === "new") {
+      const name = newListName.trim();
+      if (!name) {
+        toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      const { data: list, error: listErr } = await supabase
+        .from("lead_lists" as any)
+        .insert({
+          name,
+          source: listScope === "filtered" ? "filter" : "manual",
+          filters_snapshot: listScope === "filtered" ? currentFilterSnapshot() : { source: "applications_dashboard_selection" },
+          description: `Saved from Applications — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} applications`,
+          created_by: profile?.id || null,
+        })
+        .select("id, name")
+        .single();
+
+      if (listErr || !list) {
+        toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      listId = (list as any).id;
+      listName = (list as any).name;
+    } else if (!listId) {
+      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memberErr } = await supabase
+        .from("lead_list_members" as any)
+        .upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true } as any);
+      if (memberErr) {
+        memberErrors++;
+        console.error("Application list member insert failed:", memberErr);
+      }
+    }
+
+    setSavingList(false);
+    if (memberErrors > 0) {
+      toast({
+        title: "List partially updated",
+        description: `"${listName}" was saved, but some applications could not be added. Check console.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: listMode === "new" ? "List created" : "List updated",
+      description: `"${listName}" — ${leadIds.length} application lead${leadIds.length === 1 ? "" : "s"} added. Use Lists for bulk WhatsApp or email.`,
+    });
+    setShowAddToList(false);
+    resetListDialog();
+    if (listScope === "selected") setSelectedIds(new Set());
+  };
 
   const fetchDocs = async (appId: string, applicationId: string) => {
     setDocsDialog({ appId, applicationId });
@@ -653,18 +1130,18 @@ export default function Applications() {
     in_progress: 0, submitted: 0, paid: 0, approved: 0,
     offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
   };
-  for (const a of apps) stageBucket[funnelStageOf(a)]++;
+  for (const a of dashboardApps) stageBucket[funnelStageOf(a)]++;
 
   const stageReached: Record<FunnelStage, number> = {} as any;
   {
-    let cum = apps.length;
+    let cum = dashboardApps.length;
     for (const s of FUNNEL_ORDER) {
       stageReached[s] = cum;
       cum -= stageBucket[s];
     }
   }
-  const totalApps = apps.length;
-  const paidNoOffer = apps.filter(isPaidBeforeOfferStage).length;
+  const totalApps = dashboardApps.length;
+  const paidNoOffer = dashboardApps.filter(isPaidBeforeOfferStage).length;
 
   const handleDelete = async () => {
     if (!deleteTarget || !isSuperAdmin) return;
@@ -691,6 +1168,47 @@ export default function Applications() {
       description: data
         ? `${data.application_id} deleted with ${data.deleted_storage_files} storage files cleaned up.`
         : undefined,
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (!isSuperAdmin) return;
+    const targetIds = new Set(selectedIds);
+    const targets = apps.filter(a => targetIds.has(a.id));
+    if (!targets.length) return;
+    setBulkDeleting(true);
+    let deleted = 0;
+    let failed = 0;
+    let skippedPaid = 0;
+    for (const app of targets) {
+      if (app.payment_status === "paid") {
+        skippedPaid++;
+        continue;
+      }
+      const { error } = await deleteApplicationRequest({
+        id: app.id,
+        applicationId: app.application_id,
+        paymentStatus: app.payment_status,
+      });
+      if (error) {
+        failed++;
+        console.error("Bulk delete failed:", app.application_id, error);
+      } else {
+        deleted++;
+      }
+    }
+    setBulkDeleting(false);
+    setBulkDeleteConfirmOpen(false);
+    setSelectedIds(new Set());
+    setApps(prev => prev.filter(a => !targetIds.has(a.id) || a.payment_status === "paid"));
+    const parts: string[] = [];
+    if (deleted > 0) parts.push(`${deleted} deleted`);
+    if (skippedPaid > 0) parts.push(`${skippedPaid} paid skipped`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    toast({
+      title: "Bulk delete complete",
+      description: parts.join(" · ") || "Nothing to delete.",
+      variant: failed > 0 ? "destructive" : undefined,
     });
   };
 
@@ -746,6 +1264,80 @@ export default function Applications() {
     }
   };
 
+  const applicationCourseExportRow = (app: AppRow) => {
+    const { course, campus } = primaryCourseSelection(app);
+    const currentStatus = FUNNEL_META[funnelStageOf(app)].label;
+    const registrationStatuses = app.registration_statuses || buildRegistrationStatuses(app, {
+      cahet: {},
+      updeled: {},
+    });
+    return {
+      "Applicant Name": app.full_name || "",
+      "Mobile No": app.phone || "",
+      "Email ID": app.email || "",
+      "Application ID": app.application_id,
+      "Current Status": currentStatus,
+      "Application Status": app.status || "",
+      "Payment Status": app.payment_status || "pending",
+      "Lead Stage": app.lead_stage ? (LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage) : "",
+      Course: course === "No course" ? "" : course,
+      Campus: campus === "No campus" ? "" : campus,
+      "UPGET Registration Status": registrationStatusText(registrationStatuses.upget.status),
+      "UPGET Registration No": registrationStatuses.upget.registrationNo || "",
+      "CAHET Registration Status": registrationStatusText(registrationStatuses.cahet.status),
+      "CAHET Registration No": registrationStatuses.cahet.registrationNo || "",
+      "UPDELED Registration Status": registrationStatusText(registrationStatuses.updeled.status),
+      "UPDELED Registration No": registrationStatuses.updeled.registrationNo || "",
+      PAN: app.lead_pre_admission_no || "",
+      AN: app.lead_admission_no || "",
+      Counsellor: app.counsellor_name || "",
+      "Submitted At": formatExportDateTime(app.submitted_at),
+      "Created At": formatExportDateTime(app.created_at),
+    };
+  };
+
+  const handleExportCourseSplitCsv = async () => {
+    if (courseFilter === "all") {
+      toast({
+        title: "Choose a course first",
+        description: "Select a course filter before downloading the split course CSVs.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExportingCourseSplit(true);
+    try {
+      const inProgressRows = courseExportApps.filter((app) => funnelStageOf(app) === "in_progress");
+      const paidAndOtherRows = courseExportApps.filter((app) => funnelStageOf(app) !== "in_progress");
+      const slug = exportFileSlug(courseFilter);
+      const inProgress = exportRowsCsv(
+        inProgressRows.map((app) => applicationCourseExportRow(app)),
+        `applications-${slug}-in-progress`,
+      );
+      const paidAndOther = exportRowsCsv(
+        paidAndOtherRows.map((app) => applicationCourseExportRow(app)),
+        `applications-${slug}-paid-and-other-states`,
+      );
+      const total = inProgress.count + paidAndOther.count;
+
+      toast({
+        title: total > 0 ? "Course CSVs exported" : "No applications to export",
+        description: total > 0
+          ? `${inProgress.count} in-progress and ${paidAndOther.count} paid/other application${paidAndOther.count === 1 ? "" : "s"} exported for ${courseFilter}.`
+          : `No applications found for ${courseFilter}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Course export failed",
+        description: error instanceof Error ? error.message : "Unable to export course applications.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCourseSplit(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -774,8 +1366,8 @@ export default function Applications() {
               {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
-                : selectedIds.size > 0
-                  ? `Regenerate Selected (${selectedIds.size})`
+                : selectedPdfApps.length > 0
+                  ? `Regenerate Selected (${selectedPdfApps.length})`
                   : "Regenerate All PDFs"}
             </button>
           )}
@@ -804,20 +1396,30 @@ export default function Applications() {
               <h2 className="text-sm font-semibold text-foreground">Application Pipeline</h2>
               <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · click to see who's stuck</span>
             </div>
-            {paidNoOffer > 0 && (
-              <button
-                onClick={() => { setStageFilter(stageFilter === "paid_no_offer" ? null : "paid_no_offer"); setPaymentFilter("all"); setStatusFilter("all"); }}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
-                  stageFilter === "paid_no_offer"
-                    ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                    : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
-                }`}
-                title="Paid candidates with no offer letter yet — counsellor action needed"
-              >
-                <AlertCircle className="h-3.5 w-3.5" />
-                {paidNoOffer} paid · offer not issued
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {paidNoOffer > 0 && (
+                <button
+                  onClick={() => {
+                    const isActive = stageFilter === "paid_no_offer";
+                    setStageFilter(isActive ? null : "paid_no_offer");
+                    setPaymentFilter("all");
+                    setStatusFilter("all");
+                    if (!isActive) {
+                      selectApplicationCohort(dashboardApps.filter(isPaidBeforeOfferStage), "paid applications without offer");
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
+                    stageFilter === "paid_no_offer"
+                      ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
+                      : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
+                  }`}
+                  title="Paid candidates with no offer letter yet — counsellor action needed"
+                >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {paidNoOffer} paid · offer not issued
+                </button>
+              )}
+            </div>
           </div>
 
           {/* `overflow-x-auto` also clips Y in CSS, so the ring-2 on the active
@@ -853,7 +1455,14 @@ export default function Applications() {
                     </div>
                   )}
                   <button
-                    onClick={() => { setStageFilter(isActive ? null : stage); setPaymentFilter("all"); setStatusFilter("all"); }}
+                    onClick={() => {
+                      setStageFilter(isActive ? null : stage);
+                      setPaymentFilter("all");
+                      setStatusFilter("all");
+                      if (!isActive) {
+                        selectApplicationCohort(dashboardApps.filter((app) => funnelStageOf(app) === stage), meta.label);
+                      }
+                    }}
                     className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
@@ -880,29 +1489,191 @@ export default function Applications() {
               );
             })}
           </div>
+
+          {canViewCourseBreakup && (
+            <div className="mt-4 rounded-xl border border-border/60 bg-muted/10 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Course-wise application status</p>
+                  <p className="text-[11px] text-muted-foreground">Campus-wise courses. Total excludes In Progress. Click any count to select that cohort for a lead list.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedListApps.length > 0 && (
+                    <Button
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => openAddToListDialog("selected")}
+                    >
+                      <ListPlus className="h-3.5 w-3.5" />
+                      Add selected ({selectedListApps.length})
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => setShowCourseBreakup((current) => !current)}
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    {showCourseBreakup ? "Hide course status" : "Show course status"}
+                  </Button>
+                </div>
+              </div>
+              {showCourseBreakup && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/50 bg-background/70">
+                        <th className="sticky left-0 z-10 min-w-[190px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Campus</th>
+                        <th className="sticky left-[190px] z-10 min-w-[220px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Course</th>
+                        <th className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Total excl. In Progress</th>
+                        {FUNNEL_ORDER.map((stage) => (
+                          <th key={stage} className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">
+                            {FUNNEL_META[stage].label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {courseStatusRows.map((row) => (
+                        <tr key={`${row.campus}::${row.course}`} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                          <td className="sticky left-0 z-10 max-w-[220px] bg-background/95 px-3 py-2 text-muted-foreground">
+                            <span className="block truncate" title={row.campus}>{row.campus}</span>
+                          </td>
+                          <td className="sticky left-[190px] z-10 max-w-[260px] bg-background/95 px-3 py-2 font-medium text-foreground">
+                            <span className="block truncate" title={row.course}>{row.course}</span>
+                          </td>
+                          <td className="px-2 py-2 text-right">
+                            <button
+                              disabled={row.totalBeyondInProgress === 0}
+                              onClick={() => {
+                                const rows = FUNNEL_ORDER
+                                  .filter((stage) => stage !== "in_progress")
+                                  .flatMap((stage) => row.stageApps[stage]);
+                                selectApplicationCohort(rows, `${row.course} beyond In Progress`);
+                                setCourseFilter(row.course);
+                                setStageFilter(null);
+                              }}
+                              className="rounded-md px-2 py-1 font-semibold tabular-nums text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:text-muted-foreground/40"
+                              title={`Select ${row.course} applications beyond In Progress`}
+                            >
+                              {row.totalBeyondInProgress}
+                            </button>
+                          </td>
+                          {FUNNEL_ORDER.map((stage) => {
+                            const count = row.stageCounts[stage];
+                            const meta = FUNNEL_META[stage];
+                            return (
+                              <td key={stage} className="px-2 py-2 text-right">
+                                <button
+                                  disabled={count === 0}
+                                  onClick={() => {
+                                    selectApplicationCohort(row.stageApps[stage], `${row.course} · ${meta.label}`);
+                                    setCourseFilter(row.course);
+                                    setStageFilter(stage);
+                                    setPaymentFilter("all");
+                                    setStatusFilter("all");
+                                  }}
+                                  className={`rounded-md px-2 py-1 font-medium tabular-nums hover:bg-muted disabled:pointer-events-none disabled:text-muted-foreground/30 ${count > 0 ? "text-foreground" : "text-muted-foreground/30"}`}
+                                  title={`Select ${count} ${row.course} application${count === 1 ? "" : "s"} at ${meta.label}`}
+                                >
+                                  {count}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      {courseStatusRows.length === 0 && (
+                        <tr>
+                          <td colSpan={FUNNEL_ORDER.length + 3} className="px-3 py-8 text-center text-muted-foreground">
+                            No applications match the current dashboard scope.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Search + Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name, phone, app ID, course..."
             className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Payments</option>
-          <option value="paid">Paid</option>
-          <option value="pending">Pending</option>
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="submitted">Submitted</option>
-        </select>
+        <SelectField
+          value={courseFilter}
+          onValueChange={setCourseFilter}
+          options={[
+            { value: "all", label: "All Courses" },
+            ...courseOptions.map((course) => ({ value: course, label: course })),
+          ]}
+          allowEmpty={false}
+          triggerClassName="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by course"
+        />
+        {canExportApplications && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            disabled={courseFilter === "all" || exportingCourseSplit}
+            onClick={handleExportCourseSplitCsv}
+            title={courseFilter === "all"
+              ? "Select a course first to export in-progress and paid/other CSV files"
+              : "Download two CSV files for the selected course: in-progress and paid/other states"}
+          >
+            {exportingCourseSplit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Course CSVs
+          </Button>
+        )}
+        {!isCounsellor && (
+          <SelectField
+            value={counsellorFilter}
+            onValueChange={setCounsellorFilter}
+            options={[
+              { value: "all", label: "All Counsellors" },
+              ...counsellorOptions.map((counsellor) => ({
+                value: counsellor.id,
+                label: counsellor.name,
+              })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="min-w-[170px] max-w-[240px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
+            ariaLabel="Filter applications by counsellor"
+          />
+        )}
+        <SelectField
+          value={paymentFilter}
+          onValueChange={(value) => setPaymentFilter(value as any)}
+          options={[
+            { value: "all", label: "All Payments" },
+            { value: "paid", label: "Paid" },
+            { value: "pending", label: "Pending" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by payment status"
+        />
+        <SelectField
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as any)}
+          options={[
+            { value: "all", label: "All Status" },
+            { value: "draft", label: "Draft" },
+            { value: "submitted", label: "Submitted" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by application status"
+        />
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}
@@ -912,12 +1683,56 @@ export default function Applications() {
           onToDateChange={setToDate}
           ariaPrefix="Application created"
         />
-        {(paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {canManageApplicationLists && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            disabled={filteredListApps.length === 0}
+            onClick={() => openAddToListDialog("filtered")}
+            title="Save the current filtered application view as a reusable lead list for bulk WhatsApp/email"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Save filter ({filteredListApps.length})
+          </Button>
+        )}
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
       </div>
+
+      {/* Bulk action bar — appears when applications are selected */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} application{selectedIds.size > 1 ? "s" : ""} selected</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {canManageApplicationLists && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={selectedListApps.length === 0}
+                onClick={() => openAddToListDialog("selected")}
+              >
+                <ListPlus className="h-4 w-4" /> Add to List
+              </Button>
+            )}
+            {isSuperAdmin && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-2"
+                onClick={() => setBulkDeleteConfirmOpen(true)}
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <Card className="border-border/60 shadow-none">
@@ -931,17 +1746,13 @@ export default function Applications() {
                     <input
                       type="checkbox"
                       className="cursor-pointer accent-primary"
-                      title="Select all eligible"
-                      checked={(() => {
-                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
-                        return eligible.length > 0 && eligible.every(a => selectedIds.has(a.id));
-                      })()}
+                      title={canManageApplicationLists ? "Select all filtered lead-linked applications" : "Select all eligible for PDF regeneration"}
+                      checked={allSelectableAppsSelected}
                       onChange={(e) => {
-                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
                         setSelectedIds(prev => {
                           const next = new Set(prev);
-                          if (e.target.checked) eligible.forEach(a => next.add(a.id));
-                          else eligible.forEach(a => next.delete(a.id));
+                          if (e.target.checked) selectableApps.forEach(a => next.add(a.id));
+                          else selectableApps.forEach(a => next.delete(a.id));
                           return next;
                         });
                       }}
@@ -949,7 +1760,7 @@ export default function Applications() {
                   </th>
                 )}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">App ID</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground max-w-[160px]">Name</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[240px] max-w-[280px]">Name</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
                 {/* Form-fill progress is meaningless on the Submitted tab — every
@@ -989,7 +1800,7 @@ export default function Applications() {
                     </td>
                     {!isCounsellor && (
                       <td className="px-2 py-2.5">
-                        {(app.status === "submitted" || app.status === "under_review" || app.status === "approved") ? (
+                        {(canManageApplicationLists ? !!app.lead_id : canRegenerateFormPdf(app)) ? (
                           <input
                             type="checkbox"
                             className="cursor-pointer accent-primary"
@@ -1009,10 +1820,32 @@ export default function Applications() {
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
-                    <td className="px-3 py-2.5 max-w-[160px]">
+                    <td className="px-3 py-2.5 min-w-[240px] max-w-[280px]">
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {REGISTRATION_EXAM_ORDER.map((key) => {
+                          const status = app.registration_statuses?.[key] || {
+                            label: REGISTRATION_EXAM_LABELS[key],
+                            status: "unknown" as const,
+                            registrationNo: null,
+                          };
+                          const title = `${status.label}: ${registrationStatusText(status.status)}${
+                            status.registrationNo ? ` (${status.registrationNo})` : ""
+                          }`;
+                          return (
+                            <span
+                              key={key}
+                              title={title}
+                              className={`inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold leading-none ${registrationStatusClass(status.status)}`}
+                            >
+                              <span>{status.label}</span>
+                              <span>{registrationStatusText(status.status)}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
@@ -1275,6 +2108,107 @@ export default function Applications() {
         )}
       </Card>
 
+      {/* Add selected / filtered applications to a reusable lead list */}
+      <Dialog open={showAddToList} onOpenChange={(open) => {
+        if (savingList) return;
+        setShowAddToList(open);
+        if (!open) resetListDialog();
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ListPlus className="h-4 w-4" />
+              Add applications to list
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {listScope === "filtered"
+                ? `${filteredListApps.length} currently filtered application lead${filteredListApps.length === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`
+                : `${selectedListApps.length} selected application lead${selectedListApps.length === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`}
+            </p>
+            {filteredListApps.length > 0 && selectedListApps.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={listScope === "selected" ? "default" : "outline"}
+                  onClick={() => setListScope("selected")}
+                >
+                  Selected ({selectedListApps.length})
+                </Button>
+                <Button
+                  type="button"
+                  variant={listScope === "filtered" ? "default" : "outline"}
+                  onClick={() => setListScope("filtered")}
+                >
+                  Current filter ({filteredListApps.length})
+                </Button>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={listMode === "new" ? "default" : "outline"}
+                onClick={() => setListMode("new")}
+              >
+                New list
+              </Button>
+              <Button
+                type="button"
+                variant={listMode === "existing" ? "default" : "outline"}
+                onClick={() => setListMode("existing")}
+              >
+                Existing list
+              </Button>
+            </div>
+            {listMode === "new" ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">List name</label>
+                <input
+                  type="text"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder={`Applications — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Choose list</label>
+                <select
+                  value={existingListId}
+                  onChange={(e) => setExistingListId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="">Select a list...</option>
+                  {existingLists.map((list) => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.member_count})</option>
+                  ))}
+                </select>
+                {existingLists.length === 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">No existing lists yet. Create a new list instead.</p>
+                )}
+              </div>
+            )}
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              After saving, open <a href="/lists" className="font-medium text-primary underline">Lists</a> to preview recipients and send bulk WhatsApp or email.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddToList(false)} disabled={savingList}>Cancel</Button>
+            <Button
+              onClick={handleAddApplicationsToList}
+              disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
+              className="gap-2"
+            >
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {listMode === "new" ? "Create List" : "Add to List"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Documents Dialog */}
       <Dialog open={!!docsDialog} onOpenChange={() => setDocsDialog(null)}>
         <DialogContent className="max-w-lg">
@@ -1412,6 +2346,40 @@ export default function Applications() {
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
               Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete confirmation dialog */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={(o) => {
+        if (!o && !bulkDeleting) setBulkDeleteConfirmOpen(false);
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} application{selectedIds.size > 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedIds.size} selected application{selectedIds.size > 1 ? "s" : ""}.
+              This action cannot be undone. Paid applications will be skipped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <p className="text-xs text-muted-foreground">
+              Only non-paid applications will be deleted. Paid applications require individual confirmation and will be skipped in bulk mode.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={bulkDeleting}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleBulkDelete();
+              }}
+            >
+              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete {selectedIds.size} application{selectedIds.size > 1 ? "s" : ""}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

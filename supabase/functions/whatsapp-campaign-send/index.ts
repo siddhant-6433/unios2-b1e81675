@@ -13,7 +13,7 @@ const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
 
 type DynamicHeaderComponent =
-  | { kind: "media"; format: "image" | "video" | "document"; paramName: string }
+  | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
   | { kind: "text"; params: string[] };
 type DynamicButtonComponent = { index: number; params: string[] };
 type DynamicTemplateComponents = {
@@ -26,6 +26,15 @@ type TemplateDef = {
   params: string[];
   headerImageUrl?: string;
   dynamicComponents?: DynamicTemplateComponents;
+};
+type MetaCampaignTemplate = {
+  id?: string | null;
+  name?: string | null;
+  status?: string | null;
+  category?: string | null;
+  language?: string | null;
+  components?: unknown;
+  quality_score?: unknown;
 };
 
 // Same template definitions as whatsapp-send
@@ -53,6 +62,13 @@ const TEMPLATES: Record<string, TemplateDef> = {
 const DEAR_STUDENT_NAME_TEMPLATES = new Set([
   "cnet_not_qualified_bpt_bmrit",
 ]);
+
+const WA_PARAM_MAPPING_PREFIX = "__lead_field__:";
+
+const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
+  cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
+  cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
+};
 
 function cleanPersonName(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -95,6 +111,20 @@ function resolveDearRecipientName(lead: any, application: any): string {
   return `${prefix} ${displayName}`;
 }
 
+function resolveMappedCampaignField(token: string, lead: any, application: any, recipientPhone: string): string {
+  const leadName = resolveLeadDisplayName(lead, application);
+  if (token === "student_name") return leadName;
+  if (token === "phone") return recipientPhone || lead?.phone || "";
+  if (token === "email") return lead?.email || "";
+  if (token === "course_name") return lead?.courses?.name || "";
+  if (token === "campus_name") return lead?.campuses?.name || "";
+  if (token === "lead_stage") return lead?.stage || "";
+  if (token === "lead_source") return lead?.source || "";
+  if (token === "guardian_name") return lead?.guardian_name || "";
+  if (token === "guardian_phone") return lead?.guardian_phone || "";
+  return "";
+}
+
 function templateBodyFromComponents(components: unknown): string | null {
   if (!Array.isArray(components)) return null;
   const body = components.find((component) => {
@@ -102,6 +132,17 @@ function templateBodyFromComponents(components: unknown): string | null {
     return data.type === "BODY";
   }) as Record<string, unknown> | undefined;
   return typeof body?.text === "string" ? body.text : null;
+}
+
+function templateMediaUrlFromComponents(templateKey: string, components: unknown): string | null {
+  if (KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
+  if (!Array.isArray(components)) return null;
+  const header = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "HEADER";
+  }) as Record<string, any> | undefined;
+  const handle = header?.example?.header_handle?.[0];
+  return typeof handle === "string" && /^https?:\/\//i.test(handle) ? handle : null;
 }
 
 function numberedPlaceholders(text: unknown): number[] {
@@ -129,6 +170,7 @@ function dynamicTemplateComponents(
   components: unknown,
   placeholderCount?: unknown,
   fallbackHeaderFormat?: unknown,
+  templateKey = "",
 ): DynamicTemplateComponents {
   const rows = Array.isArray(components) ? components as Record<string, unknown>[] : [];
   const header = rows.find((component) => component.type === "HEADER");
@@ -143,6 +185,7 @@ function dynamicTemplateComponents(
       kind: "media",
       format: headerFormat.toLowerCase() as "image" | "video" | "document",
       paramName: "template_header_media_url",
+      defaultUrl: templateMediaUrlFromComponents(templateKey, components),
     };
   } else {
     const headerParams = numberedPlaceholders(header?.text).map((position) => `template_header_value_${position}`);
@@ -158,6 +201,93 @@ function dynamicTemplateComponents(
   });
 
   return dynamicComponents;
+}
+
+function normalizeTemplateStatus(status: unknown): string {
+  const value = String(status || "PENDING").toUpperCase();
+  const known = new Set([
+    "PENDING",
+    "APPROVED",
+    "REJECTED",
+    "PAUSED",
+    "DISABLED",
+    "IN_APPEAL",
+    "FLAGGED",
+  ]);
+  return known.has(value) ? value : "FLAGGED";
+}
+
+function headerFormatFromTemplate(components: unknown): string {
+  if (!Array.isArray(components)) return "NONE";
+  const header = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "HEADER";
+  }) as Record<string, unknown> | undefined;
+  const format = String(header?.format || "NONE").toUpperCase();
+  return ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(format) ? format : "NONE";
+}
+
+function placeholderCountFromTemplate(components: unknown): number {
+  const body = Array.isArray(components)
+    ? components.find((component) => {
+        const data = component as Record<string, unknown>;
+        return data.type === "BODY";
+      }) as Record<string, unknown> | undefined
+    : undefined;
+  return numberedPlaceholders(body?.text).length;
+}
+
+function qualityScoreValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const score = (value as Record<string, unknown>).score;
+    return typeof score === "string" ? score : null;
+  }
+  return null;
+}
+
+async function fetchApprovedMetaCampaignTemplate(adminClient: any, templateKey: string): Promise<MetaCampaignTemplate | null> {
+  const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
+  const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+  if (!wabaId || !waToken) {
+    console.warn("Cannot fetch dynamic campaign template from Meta: WHATSAPP_WABA_ID or WHATSAPP_API_TOKEN is missing");
+    return null;
+  }
+
+  const fields = "id,name,status,category,language,components,quality_score";
+  const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=${fields}&limit=200&name=${encodeURIComponent(templateKey)}&access_token=${waToken}`;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error("Meta campaign template lookup failed:", data?.error?.message || res.statusText);
+    return null;
+  }
+
+  const template = ((data?.data || []) as MetaCampaignTemplate[]).find((row) =>
+    row.name === templateKey && normalizeTemplateStatus(row.status) === "APPROVED"
+  );
+  if (!template?.name) return null;
+
+  const headerFormat = headerFormatFromTemplate(template.components);
+  const placeholderCount = placeholderCountFromTemplate(template.components);
+  const { error: upsertErr } = await adminClient
+    .from("whatsapp_templates")
+    .upsert({
+      meta_template_id: template.id ? String(template.id) : null,
+      name: template.name,
+      language: template.language || "en",
+      category: template.category || null,
+      status: "APPROVED",
+      header_format: headerFormat,
+      has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
+      placeholder_count: placeholderCount,
+      components: template.components || null,
+      quality_score: qualityScoreValue(template.quality_score),
+      status_updated_at: new Date().toISOString(),
+    }, { onConflict: "name,language" });
+  if (upsertErr) console.error("Dynamic campaign template mirror upsert failed:", upsertErr.message);
+
+  return template;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -284,13 +414,16 @@ Deno.serve(async (req) => {
     let dynamicTemplateBody: string | null = null;
     let templateDef = TEMPLATES[campaign.template_key];
     if (!templateDef) {
-      const { data: dynamicTemplate, error: dynamicErr } = await adminClient
+      let { data: dynamicTemplate, error: dynamicErr } = await adminClient
         .from("whatsapp_templates")
         .select("name, status, placeholder_count, has_media, header_format, components")
         .eq("name", campaign.template_key)
         .eq("status", "APPROVED")
         .maybeSingle();
       if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
+      if (!dynamicTemplate) {
+        dynamicTemplate = await fetchApprovedMetaCampaignTemplate(adminClient, campaign.template_key);
+      }
       const canSendDynamic = !!dynamicTemplate;
       if (!canSendDynamic) {
         return new Response(
@@ -306,6 +439,7 @@ Deno.serve(async (req) => {
           (dynamicTemplate as any).components,
           (dynamicTemplate as any).placeholder_count,
           (dynamicTemplate as any).header_format,
+          campaign.template_key,
         ),
       };
     }
@@ -334,7 +468,7 @@ Deno.serve(async (req) => {
     // template params per recipient — see substitution loop below.
     const { data: recipients, error: recipientsError } = await adminClient
       .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, lead_institution_type, courses(name), campuses(name))")
+      .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -428,7 +562,12 @@ Deno.serve(async (req) => {
         }
         if (name === "course_name")  return courseName || staticParams[name] || "";
         if (name === "campus_name")  return campusName || staticParams[name] || "";
-        return staticParams[name] || "";
+        const configuredValue = staticParams[name] || "";
+        if (configuredValue.startsWith(WA_PARAM_MAPPING_PREFIX)) {
+          const token = configuredValue.slice(WA_PARAM_MAPPING_PREFIX.length);
+          return resolveMappedCampaignField(token, lead, latestApplication, waPhone);
+        }
+        return configuredValue;
       };
       const bodyParams = templateDef.params.map(p => ({ type: "text", text: resolveParam(p) }));
       const components: any[] = [];
@@ -441,7 +580,7 @@ Deno.serve(async (req) => {
       if (templateDef.dynamicComponents?.header) {
         const header = templateDef.dynamicComponents.header;
         if (header.kind === "media") {
-          const mediaUrl = resolveParam(header.paramName);
+          const mediaUrl = resolveParam(header.paramName) || header.defaultUrl || "";
           components.push({
             type: "header",
             parameters: [{ type: header.format, [header.format]: { link: mediaUrl } }],

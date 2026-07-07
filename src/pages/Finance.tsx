@@ -18,6 +18,7 @@ import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { usePermissions } from "@/contexts/PermissionContext";
 
 const statusStyles: Record<string, string> = {
@@ -225,7 +226,7 @@ const Finance = () => {
                         <td className="px-4 py-3">
                           <Badge className={`text-[10px] font-medium border-0 capitalize ${categoryBadge[fee.fee_codes?.category] || "bg-muted"}`}>{fee.fee_codes?.category || "—"}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{fee.term}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(fee.term)}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.total_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.paid_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(fee.balance || 0).toLocaleString()}</td>

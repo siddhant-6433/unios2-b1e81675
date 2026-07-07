@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
@@ -31,13 +32,30 @@ import {
   XCircle,
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
-import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
+import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
+  templateMediaUrlFromComponents,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import {
+  enrichApprovedWhatsAppTemplateMetadata,
+  type ApprovedWhatsAppTemplateMetadata,
+} from "@/lib/whatsappTemplateMeta";
+import {
+  WA_COMMON_VALUE,
+  WA_PARAM_FIELD_OPTIONS,
+  decodeWaParamFieldMapping,
+  effectiveWaParamValue,
+  encodeWaParamFieldMapping,
+  isWaMappableTemplateParam,
+  isWaMediaTemplateParam,
+  sampleValueForWaMappedField,
+  waBodyPreviewParams,
+  waParamFieldLabel,
+} from "@/lib/waCampaignParams";
 
 type Channel = "whatsapp" | "email";
 
@@ -58,6 +76,7 @@ interface CampaignRow {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  nextAttemptAt: string | null;
   workerError: string | null;
 }
 
@@ -93,6 +112,7 @@ interface RecipientRow {
 }
 
 const statusTone = (status: string) => {
+  if (status === "scheduled") return "bg-sky-100 text-sky-700";
   if (status === "completed") return "bg-emerald-100 text-emerald-700";
   if (status === "failed") return "bg-red-100 text-red-700";
   if (status === "sending") return "bg-blue-100 text-blue-700";
@@ -100,6 +120,29 @@ const statusTone = (status: string) => {
   if (status === "terminated") return "bg-zinc-200 text-zinc-700";
   return "bg-amber-100 text-amber-700";
 };
+
+function scheduledDatePart(value: string) {
+  return value.match(/^(\d{4}-\d{2}-\d{2})T/)?.[1] || "";
+}
+
+function scheduledTimePart(value: string) {
+  const match = value.match(/T(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
+function defaultFutureTime() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function defaultFutureDateTime() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-") + `T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
 
 const pct = (num: number, den: number) => {
   if (!den) return "0.0%";
@@ -109,11 +152,23 @@ const pct = (num: number, den: number) => {
 const fmtDate = (value: string | null) => {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-IN", {
+    year: "numeric",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const isFutureAttempt = (value: string | null) => {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) && time > Date.now();
+};
+
+const campaignDisplayStatus = (campaign: Pick<CampaignRow, "status" | "nextAttemptAt">) => {
+  if (campaign.status === "pending" && isFutureAttempt(campaign.nextAttemptAt)) return "scheduled";
+  return campaign.status;
 };
 
 const csvCell = (value: unknown) => {
@@ -163,8 +218,12 @@ const renderTemplatePreview = (
   params: WaBulkTemplate["params"] = [],
 ) =>
   preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
-    const typed = staticParams[paramName]?.trim();
+    const bodyParams = waBodyPreviewParams(params);
+    const paramName = /^\d+$/.test(name) ? bodyParams[Number(name) - 1]?.name || name : name;
+    const value = effectiveWaParamValue(staticParams, paramName);
+    const mappedToken = decodeWaParamFieldMapping(value);
+    if (mappedToken) return sampleValueForWaMappedField(mappedToken);
+    const typed = value.trim();
     return typed || sampleValueForParam(paramName);
   });
 
@@ -205,6 +264,8 @@ export default function Marketing() {
   const [selectedListId, setSelectedListId] = useState("");
   const [campaignChannel, setCampaignChannel] = useState<Channel>("whatsapp");
   const [campaignName, setCampaignName] = useState("");
+  const [campaignScheduleMode, setCampaignScheduleMode] = useState<"now" | "scheduled">("now");
+  const [campaignScheduledAt, setCampaignScheduledAt] = useState("");
   const [waTemplate, setWaTemplate] = useState(WA_BULK_TEMPLATES[0]?.key || "");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
@@ -221,6 +282,24 @@ export default function Marketing() {
   const [deletingList, setDeletingList] = useState(false);
   const requestedListId = searchParams.get("listId") || "";
   const canDeleteLists = role === "super_admin";
+  const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
+  const scheduledTimeValue = scheduledTimePart(campaignScheduledAt);
+
+  const setScheduledDate = (date: string) => {
+    if (!date) {
+      setCampaignScheduledAt(scheduledTimeValue ? `T${scheduledTimeValue}` : "");
+      return;
+    }
+    setCampaignScheduledAt(`${date}T${scheduledTimeValue || defaultFutureTime()}`);
+  };
+
+  const setScheduledTime = (time: string) => {
+    if (!time) {
+      setCampaignScheduledAt(scheduledDateValue ? `${scheduledDateValue}T` : "");
+      return;
+    }
+    setCampaignScheduledAt(`${scheduledDateValue ? `${scheduledDateValue}T` : "T"}${time}`);
+  };
 
   const selectedList = useMemo(
     () => lists.find((list) => list.id === selectedListId) || null,
@@ -241,7 +320,18 @@ export default function Marketing() {
     () => (selectedWaTemplate?.params || []).filter((param) => param.source === "static" && !AUTO_FILLED_PARAMS.includes(param.name as any)),
     [selectedWaTemplate],
   );
-  const waMissingStatic = waStaticFields.some((param) => !waStaticParams[param.name]?.trim());
+  const selectedWaTemplateDefaultMediaUrl = useMemo(
+    () => templateMediaUrlFromComponents(
+      selectedWaTemplate?.key,
+      waTemplateComponentsByKey[selectedWaTemplate?.key || ""],
+    ),
+    [selectedWaTemplate?.key, waTemplateComponentsByKey],
+  );
+  const waMissingStatic = waStaticFields.some((param) => {
+    const value = effectiveWaParamValue(waStaticParams, param.name);
+    if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
+    return !decodeWaParamFieldMapping(value) && !value.trim();
+  });
   const waRenderedPreview = useMemo(
     () => renderTemplatePreview(selectedWaTemplate?.preview || "", waStaticParams, selectedWaTemplate?.params || []),
     [selectedWaTemplate, waStaticParams],
@@ -278,7 +368,7 @@ export default function Marketing() {
   }, [dateFrom, datePreset, dateTo]);
 
   const load = useCallback(async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setCampaigns([]);
       setLoading(false);
       return;
@@ -286,12 +376,12 @@ export default function Marketing() {
     setLoading(true);
     let whatsappQuery = supabase
       .from("whatsapp_campaigns" as any)
-      .select("id,name,template_key,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_key,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,next_attempt_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
     let emailQuery = supabase
       .from("email_campaigns" as any)
-      .select("id,name,template_slug,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_slug,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,next_attempt_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -330,6 +420,7 @@ export default function Marketing() {
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
+        nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
       };
     });
@@ -355,6 +446,7 @@ export default function Marketing() {
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
+        nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
       };
     });
@@ -366,7 +458,7 @@ export default function Marketing() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     (async () => {
       const [listsRes, templatesRes] = await Promise.all([
         supabase
@@ -393,7 +485,7 @@ export default function Marketing() {
   }, [requestedListId, role]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     (async () => {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
@@ -405,45 +497,39 @@ export default function Marketing() {
         display_name?: string | null;
         description?: string | null;
       }>);
-      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
-      const enabledKeys = new Set(settingsRows.map((row) => row.template_key));
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
         .eq("status", "APPROVED");
+      const dynamicTemplateKeys = settingsRows
+        .map((setting) => setting.template_key)
+        .filter((templateKey) => templateKey && !knownKeys.has(templateKey));
+      const approvedTemplateRows = await enrichApprovedWhatsAppTemplateMetadata(
+        ((approvedRows || []) as ApprovedWhatsAppTemplateMetadata[]),
+        dynamicTemplateKeys,
+      );
 
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
       const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
-      ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-      }>).forEach((row) => {
+      approvedTemplateRows.forEach((row) => {
         if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
         const preview = templateTextPreviewFromComponents(row.components);
         if (preview) overrides[row.name] = { preview };
       });
 
-      const dynamic = ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-        placeholder_count?: number | null;
-        has_media?: boolean | null;
-        header_format?: string | null;
-      }>)
-        .filter((row) =>
-          row.name &&
-          enabledKeys.has(row.name) &&
-          !knownKeys.has(row.name)
-        )
-        .map((row) => {
-          const setting = settingsByKey.get(row.name);
+      const approvedTemplateByName = new Map(approvedTemplateRows.map((row) => [row.name, row] as const));
+      const dynamic = settingsRows
+        .filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))
+        .map((setting) => {
+          const row = approvedTemplateByName.get(setting.template_key);
+          const metaMissingDescription = "Enabled in Template Visibility. Meta details are not available locally; dispatch will validate approval before sending.";
           return {
-            key: row.name,
-            label: setting?.display_name || row.name.replace(/_/g, " "),
-            description: setting?.description || "Approved Meta template",
-            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
-            params: dynamicWaTemplateParams(row.components, row.placeholder_count),
+            key: setting.template_key,
+            label: setting.display_name || setting.template_key.replace(/_/g, " "),
+            description: row ? setting.description || "Approved Meta template" : setting.description || metaMissingDescription,
+            preview: templateTextPreviewFromComponents(row?.components) || setting.description || setting.template_key,
+            params: row ? dynamicWaTemplateParams(row.components, row.placeholder_count) : [],
           };
         });
 
@@ -481,6 +567,19 @@ export default function Marketing() {
     setLaunchError(null);
 
     try {
+      let nextAttemptAt = new Date().toISOString();
+      const isScheduled = campaignScheduleMode === "scheduled";
+      if (isScheduled) {
+        const scheduledDate = new Date(campaignScheduledAt);
+        if (!campaignScheduledAt || Number.isNaN(scheduledDate.getTime())) {
+          throw new Error("Choose a valid scheduled send time.");
+        }
+        if (scheduledDate.getTime() <= Date.now()) {
+          throw new Error("Scheduled send time must be in the future.");
+        }
+        nextAttemptAt = scheduledDate.toISOString();
+      }
+
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
@@ -498,7 +597,7 @@ export default function Marketing() {
 
         const staticParamsToSend: Record<string, string> = {};
         for (const field of waStaticFields) {
-          const value = (waStaticParams[field.name] || "").trim();
+          const value = effectiveWaParamValue(waStaticParams, field.name).trim();
           if (value) staticParamsToSend[field.name] = value;
         }
 
@@ -511,7 +610,7 @@ export default function Marketing() {
             total_recipients: valid.length,
             static_params: staticParamsToSend,
             created_by: profile?.id || null,
-            next_attempt_at: new Date().toISOString(),
+            next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
           })
@@ -555,7 +654,7 @@ export default function Marketing() {
             custom_body: emailMode === "custom" ? emailBody : null,
             total_recipients: valid.length,
             created_by: profile?.id || null,
-            next_attempt_at: new Date().toISOString(),
+            next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
           })
@@ -574,9 +673,18 @@ export default function Marketing() {
         }
       }
 
-      await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
-      toast({ title: "Campaign queued", description: "Progress is tracked below in Executed Campaigns." });
+      if (!isScheduled) {
+        await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+      }
+      toast({
+        title: isScheduled ? "Campaign scheduled" : "Campaign queued",
+        description: isScheduled
+          ? `This campaign will start at ${new Date(nextAttemptAt).toLocaleString()}.`
+          : "Progress is tracked below in Executed Campaigns.",
+      });
       setCampaignName("");
+      setCampaignScheduleMode("now");
+      setCampaignScheduledAt("");
       await load();
     } catch (error: any) {
       setLaunchError(error?.message || "Could not queue campaign.");
@@ -710,6 +818,7 @@ export default function Marketing() {
         "Campaign",
         "Channel",
         "Status",
+        "Scheduled at",
         "List",
         "Template",
         "Total recipients",
@@ -730,7 +839,8 @@ export default function Marketing() {
       campaigns.map((campaign) => [
         campaign.name,
         campaign.channel,
-        campaign.status,
+        campaignDisplayStatus(campaign),
+        campaign.nextAttemptAt || "",
         campaign.listName || "",
         campaign.template || "",
         campaign.total,
@@ -830,18 +940,16 @@ export default function Marketing() {
             <div>
               <label className="text-xs font-medium text-muted-foreground">Lead list</label>
               <div className="mt-1 flex gap-2">
-                <select
+                <SelectField
                   value={selectedListId}
-                  onChange={(event) => setSelectedListId(event.target.value)}
-                  className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  {lists.length === 0 && <option value="">No lists available</option>}
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.name} ({list.member_count})
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setSelectedListId}
+                  placeholder={lists.length === 0 ? "No lists available" : "Select lead list"}
+                  options={lists.map((list) => ({ value: list.id, label: `${list.name} (${list.member_count})` }))}
+                  disabled={lists.length === 0}
+                  triggerClassName="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                  className="min-w-0 flex-1"
+                  ariaLabel="Select lead list"
+                />
                 {canDeleteLists && selectedList && (
                   <Button
                     type="button"
@@ -857,15 +965,17 @@ export default function Marketing() {
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Channel</label>
-              <select
+              <SelectField
+                label="Channel"
                 value={campaignChannel}
-                onChange={(event) => setCampaignChannel(event.target.value as Channel)}
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="whatsapp">WhatsApp</option>
-                <option value="email">Email</option>
-              </select>
+                onValueChange={(value) => setCampaignChannel(value as Channel)}
+                options={[
+                  { value: "whatsapp", label: "WhatsApp" },
+                  { value: "email", label: "Email" },
+                ]}
+                allowEmpty={false}
+                triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Campaign name</label>
@@ -878,23 +988,63 @@ export default function Marketing() {
             </div>
           </div>
 
+          <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
+            <SelectField
+              label="Send time"
+              value={campaignScheduleMode}
+              onValueChange={(value) => {
+                const nextMode = value as "now" | "scheduled";
+                setCampaignScheduleMode(nextMode);
+                if (nextMode === "scheduled" && !campaignScheduledAt) {
+                  setCampaignScheduledAt(defaultFutureDateTime());
+                }
+              }}
+              options={[
+                { value: "now", label: "Send now" },
+                { value: "scheduled", label: "Schedule for later" },
+              ]}
+              allowEmpty={false}
+              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            />
+            {campaignScheduleMode === "scheduled" && (
+              <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
+                <DatePickerField
+                  label="Scheduled date"
+                  value={scheduledDateValue}
+                  onValueChange={setScheduledDate}
+                  placeholder="Pick date"
+                  minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                  triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  ariaLabel="Scheduled campaign date"
+                />
+                <FieldShell label="Time">
+                  <Input
+                    type="time"
+                    value={scheduledTimeValue || defaultFutureTime()}
+                    onChange={(event) => setScheduledTime(event.target.value)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    aria-label="Scheduled campaign time"
+                  />
+                </FieldShell>
+              </div>
+            )}
+          </div>
+
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">WhatsApp template</label>
-                  <select
+                  <SelectField
+                    label="WhatsApp template"
                     value={waTemplate}
-                    onChange={(event) => {
-                      setWaTemplate(event.target.value);
+                    onValueChange={(value) => {
+                      setWaTemplate(value);
                       setWaStaticParams({});
                     }}
-                    className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    {availableWaBulkTemplates.map((template) => (
-                      <option key={template.key} value={template.key}>{template.label}</option>
-                    ))}
-                  </select>
+                    options={availableWaBulkTemplates.map((template) => ({ value: template.key, label: template.label }))}
+                    allowEmpty={false}
+                    triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
                   {selectedWaTemplate?.description && (
                     <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
                   )}
@@ -905,17 +1055,60 @@ export default function Marketing() {
                       This template uses only per-lead values.
                     </div>
                   ) : (
-                    waStaticFields.map((field) => (
-                      <div key={field.name}>
-                        <label className="text-xs font-medium text-muted-foreground">{field.name.replace(/_/g, " ")}</label>
-                        <Input
-                          value={waStaticParams[field.name] || ""}
-                          onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                          placeholder={field.placeholder || field.name}
-                          className="mt-1"
-                        />
-                      </div>
-                    ))
+                    waStaticFields.map((field) => {
+                      const value = effectiveWaParamValue(waStaticParams, field.name);
+                      const mappedToken = decodeWaParamFieldMapping(value);
+                      const canMap = isWaMappableTemplateParam(field.name);
+                      const isMediaParam = isWaMediaTemplateParam(field.name);
+                      const hasDefaultMedia = isMediaParam && !!selectedWaTemplateDefaultMediaUrl;
+                      const label = isMediaParam
+                        ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
+                        : field.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
+                      return (
+                        <div key={field.name}>
+                          <label className="text-xs font-medium text-muted-foreground">{label}</label>
+                          {canMap && (
+                            <SelectField
+                              value={mappedToken ? value : WA_COMMON_VALUE}
+                              onValueChange={(nextValue) => {
+                                setWaStaticParams((current) => ({
+                                  ...current,
+                                  [field.name]: nextValue === WA_COMMON_VALUE ? "" : nextValue,
+                                }));
+                              }}
+                              options={[
+                                ...WA_PARAM_FIELD_OPTIONS.map((option) => ({
+                                  value: encodeWaParamFieldMapping(option.token),
+                                  label: `Use list column: ${option.label}`,
+                                })),
+                                { value: WA_COMMON_VALUE, label: "Use one common value" },
+                              ]}
+                              allowEmpty={false}
+                              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            />
+                          )}
+                          {(!canMap || !mappedToken) && (
+                            <Input
+                              value={canMap ? (waStaticParams[field.name] || "") : value}
+                              onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
+                              placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : field.placeholder || field.name}
+                              className="mt-1"
+                            />
+                          )}
+                          {mappedToken && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Filled per recipient from {waParamFieldLabel(mappedToken)}.
+                            </p>
+                          )}
+                          {hasDefaultMedia && !value.trim() && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                            </p>
+                          )}
+                          {field.help && !hasDefaultMedia && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -942,19 +1135,15 @@ export default function Marketing() {
                   </Button>
                 </div>
                 {emailMode === "template" ? (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Email template</label>
-                    <select
-                      value={emailSlug}
-                      onChange={(event) => setEmailSlug(event.target.value)}
-                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      {emailTemplates.length === 0 && <option value="">No active templates</option>}
-                      {emailTemplates.map((template) => (
-                        <option key={template.id} value={template.slug}>{template.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <SelectField
+                    label="Email template"
+                    value={emailSlug}
+                    onValueChange={setEmailSlug}
+                    placeholder={emailTemplates.length === 0 ? "No active templates" : "Select email template"}
+                    options={emailTemplates.map((template) => ({ value: template.slug, label: template.name }))}
+                    disabled={emailTemplates.length === 0}
+                    triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
                 ) : (
                   <div className="space-y-3">
                     <div>
@@ -1124,7 +1313,7 @@ export default function Marketing() {
                     <th className="px-4 py-3 text-right">Called</th>
                     <th className="px-4 py-3 text-right">Clicks</th>
                     <th className="px-4 py-3 text-right">Success</th>
-                    <th className="px-4 py-3 text-left">Created</th>
+                    <th className="px-4 py-3 text-left">Scheduled / Created</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1144,7 +1333,10 @@ export default function Marketing() {
                         <Badge variant="outline" className="capitalize">{campaign.channel}</Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`border-0 ${statusTone(campaign.status)}`}>{campaign.status}</Badge>
+                        {(() => {
+                          const displayStatus = campaignDisplayStatus(campaign);
+                          return <Badge className={`border-0 ${statusTone(displayStatus)}`}>{displayStatus}</Badge>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-emerald-700">{campaign.sent.toLocaleString("en-IN")}</td>
@@ -1164,7 +1356,16 @@ export default function Marketing() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(campaign.createdAt)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {campaignDisplayStatus(campaign) === "scheduled" ? (
+                          <div>
+                            <div className="font-medium text-foreground">{fmtDate(campaign.nextAttemptAt)}</div>
+                            <div className="text-[11px]">Created {fmtDate(campaign.createdAt)}</div>
+                          </div>
+                        ) : (
+                          fmtDate(campaign.createdAt)
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                         {campaign.pending > 0 && campaign.status !== "paused" && (
@@ -1175,7 +1376,7 @@ export default function Marketing() {
                             disabled={queueingId === campaign.id}
                           >
                             {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                            Queue
+                            {campaignDisplayStatus(campaign) === "scheduled" ? "Queue now" : "Queue"}
                           </Button>
                         )}
                         {campaign.status === "paused" && (

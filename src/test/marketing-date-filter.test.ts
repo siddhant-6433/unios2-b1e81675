@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 const dateRangeFilter = readFileSync("src/components/filters/DateRangeFilter.tsx", "utf8");
+const stateFields = readFileSync("src/components/ui/state-fields.tsx", "utf8");
 const datePresets = readFileSync("src/lib/datePresets.ts", "utf8");
 const appTsx = readFileSync("src/App.tsx", "utf8");
 
@@ -19,9 +20,9 @@ describe("marketing date filter", () => {
     expect(datePresets).toContain("Last 30 days");
     expect(datePresets).toContain("Last 90 days");
     expect(datePresets).toContain("Custom range");
-    expect(dateRangeFilter).toContain('type="date"');
-    expect(dateRangeFilter).toContain('aria-label={`${ariaPrefix} start date`}');
-    expect(dateRangeFilter).toContain('aria-label={`${ariaPrefix} end date`}');
+    expect(dateRangeFilter).toContain("<DateRangeField");
+    expect(stateFields).toContain('ariaLabel={`${ariaPrefix} start date`}');
+    expect(stateFields).toContain('ariaLabel={`${ariaPrefix} end date`}');
   });
 
   it("applies created_at bounds to both WhatsApp and email campaign queries", () => {

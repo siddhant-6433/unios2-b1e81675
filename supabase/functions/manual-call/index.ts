@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     if (["student", "parent"].includes(String(callerRole))) {
       return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
     }
-    if (callerRole === "academic_partner") {
+    if (callerRole === "academic_partner" || callerRole === "academic_partner_offer_letter") {
       const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
         _user_id: userId,
         _lead_id: lead_id,

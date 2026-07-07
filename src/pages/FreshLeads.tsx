@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Sparkles, Search, Loader2, Phone, ChevronRight, ChevronLeft, Clock, Users,
 } from "lucide-react";
@@ -161,18 +162,28 @@ const FreshLeads = () => {
       <div className="flex flex-wrap items-center gap-3">
         {!isCounsellor && (
           <>
-            <select value={assignmentFilter} onChange={e => { setAssignmentFilter(e.target.value as any); if (e.target.value === "unassigned") setCounsellorFilter("all"); }}
-              className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
-              <option value="all">All Leads</option>
-              <option value="assigned">Assigned Only</option>
-              <option value="unassigned">Unassigned Only</option>
-            </select>
+            <SelectField
+              value={assignmentFilter}
+              onValueChange={(v) => { setAssignmentFilter(v as any); if (v === "unassigned") setCounsellorFilter("all"); }}
+              options={[
+                { value: "all", label: "All Leads" },
+                { value: "assigned", label: "Assigned Only" },
+                { value: "unassigned", label: "Unassigned Only" },
+              ]}
+              hideLabel
+              placeholder="All Leads"
+            />
             {assignmentFilter !== "unassigned" && (
-              <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
-                className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
-                <option value="all">All Counsellors</option>
-                {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <SelectField
+                value={counsellorFilter}
+                onValueChange={setCounsellorFilter}
+                options={[
+                  { value: "all", label: "All Counsellors" },
+                  ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+                ]}
+                hideLabel
+                placeholder="All Counsellors"
+              />
             )}
           </>
         )}

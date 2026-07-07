@@ -57,6 +57,6 @@ describe("manual external owner assignment", () => {
   });
 
   it("routes academic partners directly to their portal", () => {
-    expect(dashboard).toContain('if (role === "academic_partner") return <Navigate to="/academic-partner-portal" replace />');
+    expect(dashboard).toContain("isAcademicPartnerPortalRole(role)");
   });
 });

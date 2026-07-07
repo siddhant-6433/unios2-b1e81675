@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
+import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed, Flame, MessageCircle, Timer } from "lucide-react";
 
 interface ActionItem {
@@ -39,7 +40,7 @@ export function GlobalActionBar() {
 
   useEffect(() => {
     if (!role || ["student", "parent"].includes(role)) return;
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setItems([]);
       return;
     }

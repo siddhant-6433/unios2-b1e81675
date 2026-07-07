@@ -44,6 +44,7 @@ interface OfferLetterDialogProps {
   leadId: string;
   leadName: string;
   applicationId?: string | null;
+  academicPartnerId?: string | null;
   courseId: string | null;
   courseName?: string | null;
   campusId: string | null;
@@ -173,13 +174,14 @@ function parseTokenFeeFromEditReason(reason: string | null | undefined): number 
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applicationId, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
-  const { user, role } = useAuth();
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applicationId, academicPartnerId, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+  const { user, role, realRole, isImpersonating } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
   const isApprover = role === "super_admin" || role === "principal";
   const isPrincipalOrAbove = isApprover;
   const isSuperAdmin = role === "super_admin";
+  const isAcademicPartnerOfferIssuer = role === "academic_partner_offer_letter";
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -685,42 +687,74 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     }
 
     setSaving(true);
-    // If super_admin or principal issues directly, it's auto-approved.
-    // Otherwise (counsellor, admission_head, campus_admin) it needs principal approval.
-    const autoApproved = isPrincipalOrAbove;
+    // If super_admin, principal, or the scoped academic partner offer role issues
+    // directly, the offer is auto-approved. Other staff still need principal approval.
+    const autoApproved = isPrincipalOrAbove || isAcademicPartnerOfferIssuer;
     const approvalStatus = autoApproved ? "approved" : "pending_principal";
 
     if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
 
-    const { data: insertedOffer, error } = await supabase.from("offer_letters").insert({
-      lead_id: leadId,
-      total_fee: totalFee,
-      // Scholarship is no longer collected at offer creation — apply
-      // discounts via year-wise waivers (with super-admin approval). We
-      // persist 0 so legacy code paths reading scholarship_amount get a
-      // sensible value.
-      scholarship_amount: 0,
-      net_fee: totalFee,
-      token_fee_amount: tokenFeeNum,
-      token_fee_user_edited: tokenFeeEdited,
-      admission_mode: form.admission_mode,
-      entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
-      acceptance_deadline: form.acceptance_deadline || null,
-      course_id: courseId,
-      campus_id: campusId,
-      session_id: form.session_id,
-      issued_by: user?.id || null,
-      approval_status: approvalStatus,
-      approved_by: autoApproved ? user?.id || null : null,
-      approved_at: autoApproved ? new Date().toISOString() : null,
-      source_fee_proposal_id: selectedFeeProposal && selectedProposalChildOption ? selectedFeeProposal.id : null,
-      source_fee_proposal_child_key: selectedFeeProposal && selectedProposalChildOption ? selectedProposalChildOption.key : null,
-    } as any).select("id").single();
+    let insertedOffer: { id: string } | null = null;
+    let error: { message: string } | null = null;
+
+    if (isAcademicPartnerOfferIssuer) {
+      if (preWaivers.length > 0 || importedProposalWaivers.length > 0) {
+        toast({
+          title: "Waivers unavailable",
+          description: "Academic partners can issue the base approved offer. Internal staff must apply waivers.",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+      const result = await supabase.rpc("academic_partner_issue_offer", {
+        _application_id: applicationId || "",
+        _acceptance_deadline: form.acceptance_deadline,
+        _session_id: form.session_id,
+        _total_fee: totalFee,
+        _net_fee: totalFee,
+        _token_fee_amount: tokenFeeNum,
+        _token_fee_user_edited: tokenFeeEdited,
+        _admission_mode: form.admission_mode,
+        _entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
+        _partner_id: isImpersonating && realRole === "super_admin" ? academicPartnerId || null : null,
+      } as any);
+      error = result.error;
+      const resultData = result.data as { offer_letter_id?: string } | null;
+      insertedOffer = resultData?.offer_letter_id ? { id: resultData.offer_letter_id } : null;
+    } else {
+      const result = await supabase.from("offer_letters").insert({
+        lead_id: leadId,
+        total_fee: totalFee,
+        // Scholarship is no longer collected at offer creation — apply
+        // discounts via year-wise waivers (with super-admin approval). We
+        // persist 0 so legacy code paths reading scholarship_amount get a
+        // sensible value.
+        scholarship_amount: 0,
+        net_fee: totalFee,
+        token_fee_amount: tokenFeeNum,
+        token_fee_user_edited: tokenFeeEdited,
+        admission_mode: form.admission_mode,
+        entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
+        acceptance_deadline: form.acceptance_deadline || null,
+        course_id: courseId,
+        campus_id: campusId,
+        session_id: form.session_id,
+        issued_by: user?.id || null,
+        approval_status: approvalStatus,
+        approved_by: autoApproved ? user?.id || null : null,
+        approved_at: autoApproved ? new Date().toISOString() : null,
+        source_fee_proposal_id: selectedFeeProposal && selectedProposalChildOption ? selectedFeeProposal.id : null,
+        source_fee_proposal_child_key: selectedFeeProposal && selectedProposalChildOption ? selectedProposalChildOption.key : null,
+      } as any).select("id").single();
+      insertedOffer = result.data;
+      error = result.error;
+    }
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
       // Bulk-insert any pre-issuance waivers the user staged in the form.
-      if (insertedOffer?.id && preWaivers.length > 0) {
+      if (!isAcademicPartnerOfferIssuer && insertedOffer?.id && preWaivers.length > 0) {
         await supabase.from("offer_waivers").insert(
           preWaivers.map(w => ({
             offer_letter_id: insertedOffer.id,
@@ -730,7 +764,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           })) as any
         );
       }
-      if (insertedOffer?.id && importedProposalWaivers.length > 0) {
+      if (!isAcademicPartnerOfferIssuer && insertedOffer?.id && importedProposalWaivers.length > 0) {
         const { error: proposalWaiverError } = await supabase.from("offer_waivers").insert(
           importedProposalWaivers.map(w => ({
             offer_letter_id: insertedOffer.id,
@@ -753,7 +787,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
         }
       }
       // Only advance lead stage if the offer is approved (not pending)
-      if (autoApproved) {
+      if (autoApproved && !isAcademicPartnerOfferIssuer) {
         const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
         try {
           await applyResolvedLeadTransition(supabase as any, {
@@ -765,12 +799,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           console.warn("[OfferLetterDialog] lead stage transition failed after offer create:", e);
         }
       }
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: user?.id || null, type: "offer",
-        description: autoApproved
-          ? `Offer letter issued: ₹${totalFee.toLocaleString("en-IN")}`
-          : `Offer letter submitted for principal approval: ₹${totalFee.toLocaleString("en-IN")}`,
-      });
+      if (!isAcademicPartnerOfferIssuer) {
+        await supabase.from("lead_activities").insert({
+          lead_id: leadId, user_id: user?.id || null, type: "offer",
+          description: autoApproved
+            ? `Offer letter issued: ₹${totalFee.toLocaleString("en-IN")}`
+            : `Offer letter submitted for principal approval: ₹${totalFee.toLocaleString("en-IN")}`,
+        });
+      }
       // If approved on create, generate the PDF immediately and poll for it
       // so the preview pane lights up without needing a manual refresh.
       if (autoApproved && insertedOffer?.id) {

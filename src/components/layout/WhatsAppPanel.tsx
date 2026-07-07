@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { CheckCheck, Loader2, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -52,7 +53,7 @@ export function WhatsAppPanel() {
   // every counsellor lead ID here; this component is mounted on every CRM page.
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return;
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     setLoading(true);
 
     const q = supabase
@@ -76,7 +77,7 @@ export function WhatsAppPanel() {
   // their lead IDs in the client.
   const fetchUnreplied = useCallback(async () => {
     if (!role || (isCounsellor && !profile?.id)) return;
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setUnrepliedCount(0);
       return;
     }
@@ -92,7 +93,7 @@ export function WhatsAppPanel() {
   }, [role, isCounsellor, profile?.id]);
 
   useEffect(() => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setNotifications([]);
       setUnreadNotifCount(0);
       setUnrepliedCount(0);
@@ -105,7 +106,7 @@ export function WhatsAppPanel() {
   // Realtime: new whatsapp_message notifications
   useEffect(() => {
     if (!user?.id) return;
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     const notifChannel = supabase
       .channel("wa-notifications-realtime")
       .on("postgres_changes", {
@@ -189,6 +190,14 @@ export function WhatsAppPanel() {
     await supabase.from("notifications" as never).update({ is_read: true } as never).in("id", unreadIds);
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     setUnreadNotifCount(0);
+  };
+
+  const markNotificationRead = async (e: React.MouseEvent, notif: Notification) => {
+    e.stopPropagation();
+    if (notif.is_read) return;
+    await supabase.from("notifications" as never).update({ is_read: true } as never).eq("id", notif.id);
+    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
+    setUnreadNotifCount(prev => Math.max(0, prev - 1));
   };
 
   const deleteNotif = async (e: React.MouseEvent, id: string) => {
@@ -303,12 +312,24 @@ export function WhatsAppPanel() {
                     {notif.body && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{notif.body}</p>}
                     <p className="mt-1 text-[10px] text-muted-foreground/70">{timeAgo(notif.created_at)}</p>
                   </div>
-                  <button
-                    onClick={(e) => deleteNotif(e, notif.id)}
-                    className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {!notif.is_read && (
+                      <button
+                        onClick={(e) => markNotificationRead(e, notif)}
+                        className="rounded-md p-1 text-muted-foreground hover:bg-green-100 hover:text-green-700"
+                        title="Mark read"
+                      >
+                        <CheckCheck className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => deleteNotif(e, notif.id)}
+                      className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      title="Delete notification"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}

@@ -6,6 +6,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TextField, SelectField, DatePickerField } from "@/components/ui/state-fields";
 import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 
@@ -352,9 +353,6 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     onSuccess();
   };
 
-  const inp = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50";
-  const sel = `${inp} cursor-pointer`;
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -399,94 +397,99 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <School className="h-3.5 w-3.5" /> Student Details
             </div>
 
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Full Name <span className="text-destructive">*</span></label>
-              <input className={inp} placeholder="Student's full name" value={form.name} onChange={e => set("name", e.target.value)} />
-            </div>
+            <TextField
+              value={form.name}
+              onValueChange={value => set("name", value)}
+              label="Full Name"
+              required
+              placeholder="Student's full name"
+            />
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date of Birth <span className="text-destructive">*</span></label>
-                <input type="date" className={inp} value={form.dob} onChange={e => set("dob", e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Gender <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.gender} onChange={e => set("gender", e.target.value)}>
-                  <option value="">Select</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
+              <DatePickerField
+                value={form.dob}
+                onValueChange={value => set("dob", value)}
+                label="Date of Birth"
+                required
+              />
+              <SelectField
+                value={form.gender}
+                onValueChange={value => set("gender", value)}
+                options={[
+                  { value: "", label: "Select" },
+                  { value: "male", label: "Male" },
+                  { value: "female", label: "Female" },
+                  { value: "other", label: "Other" },
+                ]}
+                label="Gender"
+                required
+                allowEmpty={false}
+              />
             </div>
 
             {/* Campus → Institution → Course cascade */}
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus <span className="text-destructive">*</span></label>
-              {noCampusAssigned ? (
-                <p className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
-                  No campus is assigned to your account, so a student can't be added. Contact an administrator.
-                </p>
-              ) : (
-                <select
-                  className={sel}
-                  value={form.campus_id}
-                  onChange={e => set("campus_id", e.target.value)}
-                  disabled={!campusesLoaded || campusLocked}
-                >
-                  <option value="">{campusesLoaded ? "Select campus" : "Loading campuses..."}</option>
-                  {allowedCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              )}
-            </div>
+            <SelectField
+              value={form.campus_id}
+              onValueChange={value => set("campus_id", value)}
+              options={allowedCampuses.map(c => ({ value: c.id, label: c.name }))}
+              label="Campus"
+              required
+              disabled={!campusesLoaded || campusLocked}
+              placeholder={campusesLoaded ? "Select campus" : "Loading campuses..."}
+            />
+            {noCampusAssigned && (
+              <p className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+                No campus is assigned to your account, so a student can't be added. Contact an administrator.
+              </p>
+            )}
 
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Institution <span className="text-destructive">*</span></label>
-              <select className={sel} value={form.institution_id} onChange={e => set("institution_id", e.target.value)}
-                disabled={!form.campus_id}>
-                <option value="">{form.campus_id ? "Select institution" : "Select campus first"}</option>
-                {institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
+            <SelectField
+              value={form.institution_id}
+              onValueChange={value => set("institution_id", value)}
+              options={institutions.map(i => ({ value: i.id, label: i.name }))}
+              label="Institution"
+              required
+              disabled={!form.campus_id}
+              placeholder={form.campus_id ? "Select institution" : "Select campus first"}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <SelectField
+                value={form.course_id}
+                onValueChange={value => set("course_id", value)}
+                options={courses.map(c => ({ value: c.id, label: courseLabel(c) }))}
+                label={isSchool ? "Class / Grade" : "Programme"}
+                required
+                disabled={!form.institution_id}
+                placeholder={form.institution_id ? "Select" : "Select institution first"}
+              />
+              <TextField
+                value={form.section}
+                onValueChange={value => set("section", value)}
+                label={isSchool ? "Section" : "Batch / Section"}
+                placeholder="e.g. A, B"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Class / Grade" : "Programme"} <span className="text-destructive">*</span>
-                </label>
-                <select className={sel} value={form.course_id} onChange={e => set("course_id", e.target.value)}
-                  disabled={!form.institution_id}>
-                  <option value="">{form.institution_id ? "Select" : "Select institution first"}</option>
-                  {courses.map(c => <option key={c.id} value={c.id}>{courseLabel(c)}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Section" : "Batch / Section"}
-                </label>
-                <input className={inp} placeholder="e.g. A, B" value={form.section} onChange={e => set("section", e.target.value)} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Existing Admission No." : "Previous Institution Admission No."}
-                  <span className="ml-1 text-muted-foreground/50 text-[10px]">(if migrating)</span>
-                </label>
-                <input className={inp}
-                  placeholder={isSchool ? "e.g. 1803188" : "Optional"}
+                <TextField
                   value={form.school_admission_no}
-                  onChange={e => set("school_admission_no", e.target.value)} />
+                  onValueChange={value => set("school_admission_no", value)}
+                  label={isSchool ? "Existing Admission No." : "Previous Institution Admission No."}
+                  placeholder={isSchool ? "e.g. 1803188" : "Optional"}
+                />
                 {form.school_admission_no.trim() && isSchool && (
                   <p className="text-[10px] text-primary mt-1">✓ Existing student — existing parent fee rates will apply</p>
                 )}
               </div>
               {isSchool && (
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Class Roll No.</label>
-                  <input className={inp} placeholder="Optional" value={form.class_roll_no} onChange={e => set("class_roll_no", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.class_roll_no}
+                  onValueChange={value => set("class_roll_no", value)}
+                  label="Class Roll No."
+                  placeholder="Optional"
+                />
               )}
             </div>
 
@@ -523,28 +526,36 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             <div>
               <p className="text-[11px] font-semibold text-foreground mb-2">Father</p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name</label>
-                  <input className={inp} placeholder="Full name" value={form.father_name} onChange={e => set("father_name", e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Mobile</label>
-                  <input className={inp} placeholder="10-digit" value={form.father_phone} onChange={e => set("father_phone", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.father_name}
+                  onValueChange={value => set("father_name", value)}
+                  label="Name"
+                  placeholder="Full name"
+                />
+                <TextField
+                  value={form.father_phone}
+                  onValueChange={value => set("father_phone", value)}
+                  label="Mobile"
+                  placeholder="10-digit"
+                />
               </div>
             </div>
 
             <div>
               <p className="text-[11px] font-semibold text-foreground mb-2">Mother</p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name</label>
-                  <input className={inp} placeholder="Full name" value={form.mother_name} onChange={e => set("mother_name", e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Mobile</label>
-                  <input className={inp} placeholder="10-digit" value={form.mother_phone} onChange={e => set("mother_phone", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.mother_name}
+                  onValueChange={value => set("mother_name", value)}
+                  label="Name"
+                  placeholder="Full name"
+                />
+                <TextField
+                  value={form.mother_phone}
+                  onValueChange={value => set("mother_phone", value)}
+                  label="Mobile"
+                  placeholder="10-digit"
+                />
               </div>
             </div>
 
@@ -563,35 +574,40 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Session <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.session_id} onChange={e => set("session_id", e.target.value)}>
-                  <option value="">Select session</option>
-                  {sessions.map(s => <option key={s.id} value={s.id}>{sessionYearLabel(s.name)}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date {isSchool && <span className="text-destructive">*</span>}</label>
-                <input type="date" className={inp} value={form.admission_date} onChange={e => set("admission_date", e.target.value)} />
-              </div>
+              <SelectField
+                value={form.session_id}
+                onValueChange={value => set("session_id", value)}
+                options={sessions.map(s => ({ value: s.id, label: sessionYearLabel(s.name) }))}
+                label="Session"
+                required
+                placeholder="Select session"
+              />
+              <DatePickerField
+                value={form.admission_date}
+                onValueChange={value => set("admission_date", value)}
+                label="Admission Date"
+                required={isSchool}
+              />
             </div>
 
             {isSchool ? (
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.joining_academic_year} onChange={e => set("joining_academic_year", e.target.value)}>
-                  <option value="">Select admission year</option>
-                  {SCHOOL_SESSION_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
-                </select>
-              </div>
+              <SelectField
+                value={form.joining_academic_year}
+                onValueChange={value => set("joining_academic_year", value)}
+                options={SCHOOL_SESSION_YEARS.map(year => ({ value: year, label: year }))}
+                label="Admission Year"
+                required
+                placeholder="Select admission year"
+              />
             ) : (
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Current Semester / Year <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.semester} onChange={e => set("semester", e.target.value)}>
-                  <option value="">Select current semester/year</option>
-                  {HIGHER_ED_TERMS.map(term => <option key={term} value={term}>{term}</option>)}
-                </select>
-              </div>
+              <SelectField
+                value={form.semester}
+                onValueChange={value => set("semester", value)}
+                options={HIGHER_ED_TERMS.map(term => ({ value: term, label: term }))}
+                label="Current Semester / Year"
+                required
+                placeholder="Select current semester/year"
+              />
             )}
 
             {/* Fee structure — school gets 2-option toggle, DAOTT gets Stetho Batch */}

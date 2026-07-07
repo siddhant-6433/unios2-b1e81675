@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import { Loader2, Plus, FileText, ExternalLink, Trash2, Search, Upload, CloudUpload } from "lucide-react";
 
 const R2_HOST = "r2.dev";
@@ -287,21 +288,36 @@ export default function ApprovalLettersPanel() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <select value={filterBody} onChange={e => setFilterBody(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Bodies ({bodies.length})</option>
-          {bodies.map(b => <option key={b.id} value={b.short_name}>{b.short_name} — {b.name}</option>)}
-        </select>
-        <select value={filterCourse} onChange={e => setFilterCourse(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Courses</option>
-          {allCourseNames.map(cn => <option key={cn} value={cn}>{cn}</option>)}
-        </select>
-        <select value={filterInstitution} onChange={e => setFilterInstitution(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Institutions</option>
-          {institutions.map(inst => <option key={inst} value={inst}>{(inst || "").replace(/-/g, " ")}</option>)}
-        </select>
+        <SelectField
+          value={filterBody}
+          onValueChange={setFilterBody}
+          options={[
+            { value: "all", label: `All Bodies (${bodies.length})` },
+            ...bodies.map(b => ({ value: b.short_name, label: `${b.short_name} — ${b.name}` })),
+          ]}
+          hideLabel
+          placeholder={`All Bodies (${bodies.length})`}
+        />
+        <SelectField
+          value={filterCourse}
+          onValueChange={setFilterCourse}
+          options={[
+            { value: "all", label: "All Courses" },
+            ...allCourseNames.map(cn => ({ value: cn, label: cn })),
+          ]}
+          hideLabel
+          placeholder="All Courses"
+        />
+        <SelectField
+          value={filterInstitution}
+          onValueChange={setFilterInstitution}
+          options={[
+            { value: "all", label: "All Institutions" },
+            ...institutions.map(inst => ({ value: inst, label: (inst || "").replace(/-/g, " ") })),
+          ]}
+          hideLabel
+          placeholder="All Institutions"
+        />
         {(filterBody !== "all" || filterCourse !== "all" || filterInstitution !== "all") && (
           <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setFilterBody("all"); setFilterCourse("all"); setFilterInstitution("all"); }}>
             Clear Filters

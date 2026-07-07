@@ -44,12 +44,17 @@ export const templateButtonsFromComponents = (components?: WhatsAppTemplateCompo
 export const templateTextPreviewFromComponents = (components?: WhatsAppTemplateComponent[] | null) =>
   templateBodyFromComponents(components);
 
-const resolveTemplateMediaUrl = (templateKey?: string | null, header?: WhatsAppTemplateComponent) => {
+export const resolveTemplateMediaUrl = (templateKey?: string | null, header?: WhatsAppTemplateComponent) => {
   if (templateKey && KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
   const handle = header?.example?.header_handle?.[0];
   if (handle && /^https?:\/\//i.test(handle)) return handle;
   return null;
 };
+
+export const templateMediaUrlFromComponents = (
+  templateKey?: string | null,
+  components?: WhatsAppTemplateComponent[] | null,
+) => resolveTemplateMediaUrl(templateKey, templateHeaderFromComponents(components));
 
 const buttonIcon = (type?: string) => {
   const normalized = normalizeType(type);

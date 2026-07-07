@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Loader2, Search,
   ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock,
@@ -575,12 +576,17 @@ const PendingFollowups = () => {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         {!isCounsellor && (
-          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
-            <option value="all">All Counsellors</option>
-            <option value="unassigned">Unassigned</option>
-            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <SelectField
+            value={counsellorFilter}
+            onValueChange={setCounsellorFilter}
+            options={[
+              { value: "all", label: "All Counsellors" },
+              { value: "unassigned", label: "Unassigned" },
+              ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+            ]}
+            hideLabel
+            placeholder="All Counsellors"
+          />
         )}
         <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

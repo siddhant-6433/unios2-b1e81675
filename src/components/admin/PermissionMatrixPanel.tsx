@@ -28,7 +28,7 @@ interface UserOverride {
 const ROLES = [
   "campus_admin", "principal", "admission_head", "counsellor", "accountant",
   "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden",
-  "ib_coordinator", "librarian", "consultant", "academic_partner", "student", "parent",
+  "ib_coordinator", "librarian", "consultant", "academic_partner", "academic_partner_offer_letter", "student", "parent",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -38,6 +38,7 @@ const ROLE_LABELS: Record<string, string> = {
   hostel_warden: "Hostel", ib_coordinator: "IB Coord.", consultant: "Consultant",
   librarian: "Librarian",
   academic_partner: "Acad. Partner",
+  academic_partner_offer_letter: "Partner + Offers",
   student: "Student", parent: "Parent",
 };
 
@@ -47,6 +48,7 @@ const MODULE_LABELS: Record<string, string> = {
   whatsapp: "WhatsApp", performance: "Performance", lead_buckets: "Lead Buckets",
   lead_allocation: "Lead Allocation", automation: "Automation", consultants: "Consultants",
   academic_partners: "Academic Partners", academic_partner_portal: "Academic Partner Portal",
+  academic_partner_offer_letters: "Partner Offer Letters",
   templates: "Templates", courses_fees: "Courses & Fees", consultant_portal: "Consultant Portal",
   analytics: "Analytics", ib_poi: "IB POI", ib_units: "IB Units", ib_gradebook: "IB Gradebook",
   ib_portfolios: "IB Portfolios", ib_action: "IB Action", ib_reports: "IB Reports",

@@ -21,11 +21,28 @@ import {
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
+  templateMediaUrlFromComponents,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import {
+  enrichApprovedWhatsAppTemplateMetadata,
+  type ApprovedWhatsAppTemplateMetadata,
+} from "@/lib/whatsappTemplateMeta";
+import {
+  WA_COMMON_VALUE,
+  WA_PARAM_FIELD_OPTIONS,
+  decodeWaParamFieldMapping,
+  effectiveWaParamValue,
+  encodeWaParamFieldMapping,
+  isWaMappableTemplateParam,
+  isWaMediaTemplateParam,
+  sampleValueForWaMappedField,
+  waBodyPreviewParams,
+  waParamFieldLabel,
+} from "@/lib/waCampaignParams";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
-import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
+import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -238,10 +255,26 @@ const renderTemplatePreview = (
   params: WaBulkTemplate["params"] = [],
 ) =>
   preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
-    const typed = staticParams[paramName]?.trim();
+    const bodyParams = waBodyPreviewParams(params);
+    const paramName = /^\d+$/.test(name) ? bodyParams[Number(name) - 1]?.name || name : name;
+    const value = effectiveWaParamValue(staticParams, paramName);
+    const mappedToken = decodeWaParamFieldMapping(value);
+    if (mappedToken) return sampleValueForWaMappedField(mappedToken);
+    const typed = value.trim();
     return typed || sampleValueForParam(paramName);
   });
+
+const resolveCampaignNextAttemptAt = (mode: "now" | "scheduled", scheduledAt: string) => {
+  if (mode === "now") return { nextAttemptAt: new Date().toISOString(), scheduled: false };
+  const scheduledDate = new Date(scheduledAt);
+  if (!scheduledAt || Number.isNaN(scheduledDate.getTime())) {
+    throw new Error("Choose a valid scheduled send time.");
+  }
+  if (scheduledDate.getTime() <= Date.now()) {
+    throw new Error("Scheduled send time must be in the future.");
+  }
+  return { nextAttemptAt: scheduledDate.toISOString(), scheduled: true };
+};
 
 const WhatsAppBusinessIdentity = ({
   sender,
@@ -311,6 +344,8 @@ export default function LeadLists() {
   const [waTemplate, setWaTemplate] = useState<string>(WA_BULK_TEMPLATES[0].key);
   const [waCampaignName, setWaCampaignName] = useState("");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
+  const [waScheduleMode, setWaScheduleMode] = useState<"now" | "scheduled">("now");
+  const [waScheduledAt, setWaScheduledAt] = useState("");
   const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waSenderLoading, setWaSenderLoading] = useState(false);
@@ -336,7 +371,18 @@ export default function LeadLists() {
     () => waTemplateDef.params.filter(p => p.source === "static"),
     [waTemplateDef]
   );
-  const waMissingStatic = waStaticFields.some(p => !waStaticParams[p.name]?.trim());
+  const waTemplateDefaultMediaUrl = useMemo(
+    () => templateMediaUrlFromComponents(
+      waTemplateDef.key,
+      waTemplateComponentsByKey[waTemplateDef.key],
+    ),
+    [waTemplateDef.key, waTemplateComponentsByKey]
+  );
+  const waMissingStatic = waStaticFields.some((p) => {
+    const value = effectiveWaParamValue(waStaticParams, p.name);
+    if (isWaMediaTemplateParam(p.name) && waTemplateDefaultMediaUrl) return false;
+    return !decodeWaParamFieldMapping(value) && !value.trim();
+  });
   const waSelectedSender = useMemo(
     () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
     [waSenderOptions, waSenderValue]
@@ -355,6 +401,8 @@ export default function LeadLists() {
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [emailCampaignName, setEmailCampaignName] = useState("");
+  const [emailScheduleMode, setEmailScheduleMode] = useState<"now" | "scheduled">("now");
+  const [emailScheduledAt, setEmailScheduledAt] = useState("");
   const [emailSending, setEmailSending] = useState(false);
 
   // Members preview
@@ -381,7 +429,7 @@ export default function LeadLists() {
   const canDeleteLists = role === "super_admin";
 
   const fetchLists = async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setLists([]);
       setLoading(false);
       return;
@@ -397,7 +445,7 @@ export default function LeadLists() {
   };
 
   const fetchCampaignQueue = async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setCampaignQueue([]);
       setQueueLoading(false);
       return;
@@ -455,7 +503,7 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
   }, [role]);
 
@@ -545,12 +593,12 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (waOpen) loadWaSenders();
   }, [role, waOpen]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (!waOpen) {
       setDynamicWaBulkTemplates([]);
       setWaMetaTemplateOverrides({});
@@ -569,18 +617,20 @@ export default function LeadLists() {
         description?: string | null;
         category?: string | null;
       }>);
-      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
-      const enabledKeys = new Set(settingsRows.map((row) => row.template_key));
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
         .eq("status", "APPROVED");
+      const dynamicTemplateKeys = settingsRows
+        .map((setting) => setting.template_key)
+        .filter((templateKey) => templateKey && !knownKeys.has(templateKey));
+      const approvedTemplateRows = await enrichApprovedWhatsAppTemplateMetadata(
+        ((approvedRows || []) as ApprovedWhatsAppTemplateMetadata[]),
+        dynamicTemplateKeys,
+      );
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
       const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
-      ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-      }>).forEach((row) => {
+      approvedTemplateRows.forEach((row) => {
         if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
         const preview = templateTextPreviewFromComponents(row.components);
@@ -588,26 +638,18 @@ export default function LeadLists() {
       });
       setWaMetaTemplateOverrides(overrides);
       setWaTemplateComponentsByKey(componentsByKey);
-      const dynamic = ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-        placeholder_count?: number | null;
-        has_media?: boolean | null;
-        header_format?: string | null;
-      }>)
-        .filter((row) =>
-          row.name &&
-          enabledKeys.has(row.name) &&
-          !knownKeys.has(row.name)
-        )
-        .map((row) => {
-          const setting = settingsByKey.get(row.name);
+      const approvedTemplateByName = new Map(approvedTemplateRows.map((row) => [row.name, row] as const));
+      const dynamic = settingsRows
+        .filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))
+        .map((setting) => {
+          const row = approvedTemplateByName.get(setting.template_key);
+          const metaMissingDescription = "Enabled in Template Visibility. Meta details are not available locally; dispatch will validate approval before sending.";
           return {
-            key: row.name,
-            label: setting?.display_name || row.name.replace(/_/g, " "),
-            description: setting?.description || "Approved Meta template",
-            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
-            params: dynamicWaTemplateParams(row.components, row.placeholder_count),
+            key: setting.template_key,
+            label: setting.display_name || setting.template_key.replace(/_/g, " "),
+            description: row ? setting.description || "Approved Meta template" : setting.description || metaMissingDescription,
+            preview: templateTextPreviewFromComponents(row?.components) || setting.description || setting.template_key,
+            params: row ? dynamicWaTemplateParams(row.components, row.placeholder_count) : [],
           };
         });
       setDynamicWaBulkTemplates(dynamic);
@@ -615,7 +657,7 @@ export default function LeadLists() {
   }, [role, waOpen]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (!emailOpen) return;
     (async () => {
       const { data } = await supabase
@@ -633,6 +675,8 @@ export default function LeadLists() {
     setWaCampaignName(`${list.name} — WhatsApp`);
     setWaTemplate(WA_BULK_TEMPLATES[0].key);
     setWaStaticParams({});
+    setWaScheduleMode("now");
+    setWaScheduledAt("");
     setWaSenderValue(DEFAULT_WA_SENDER);
     setWaOpen(true);
   };
@@ -643,6 +687,8 @@ export default function LeadLists() {
     setEmailMode("template");
     setEmailSubject("");
     setEmailBody("");
+    setEmailScheduleMode("now");
+    setEmailScheduledAt("");
     setEmailOpen(true);
   };
 
@@ -772,6 +818,14 @@ export default function LeadLists() {
   const handleSendWhatsApp = async () => {
     if (!waList) return;
     setWaSending(true);
+    let schedule: { nextAttemptAt: string; scheduled: boolean };
+    try {
+      schedule = resolveCampaignNextAttemptAt(waScheduleMode, waScheduledAt);
+    } catch (error: any) {
+      toast({ title: "Invalid schedule", description: error?.message, variant: "destructive" });
+      setWaSending(false);
+      return;
+    }
 
     // Fetch members + lead phone/stage so we can materialize recipients with
     // the same shape whatsapp-campaign-send expects, skipping DNC leads.
@@ -799,7 +853,7 @@ export default function LeadLists() {
     // against stray values the user may have typed under a previous selection.
     const staticParamsToSend: Record<string, string> = {};
     for (const f of waStaticFields) {
-      const v = (waStaticParams[f.name] || "").trim();
+      const v = effectiveWaParamValue(waStaticParams, f.name).trim();
       if (v) staticParamsToSend[f.name] = v;
     }
 
@@ -814,7 +868,7 @@ export default function LeadLists() {
         business_phone_number_id: waSelectedSender?.phoneNumberId || null,
         business_phone_number: waSelectedSender?.businessNumber || null,
         created_by: profile?.id || null,
-        next_attempt_at: new Date().toISOString(),
+        next_attempt_at: schedule.nextAttemptAt,
         worker_locked_at: null,
         status: "pending",
       })
@@ -844,10 +898,14 @@ export default function LeadLists() {
     setWaSending(false);
     setWaOpen(false);
     toast({
-      title: "WhatsApp campaign queued",
-      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+      title: schedule.scheduled ? "WhatsApp campaign scheduled" : "WhatsApp campaign queued",
+      description: schedule.scheduled
+        ? `${valid.length} recipients scheduled for ${new Date(schedule.nextAttemptAt).toLocaleString()}.`
+        : `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
     });
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    if (!schedule.scheduled) {
+      supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    }
     await fetchLists();
     await fetchCampaignQueue();
   };
@@ -863,6 +921,14 @@ export default function LeadLists() {
       return;
     }
     setEmailSending(true);
+    let schedule: { nextAttemptAt: string; scheduled: boolean };
+    try {
+      schedule = resolveCampaignNextAttemptAt(emailScheduleMode, emailScheduledAt);
+    } catch (error: any) {
+      toast({ title: "Invalid schedule", description: error?.message, variant: "destructive" });
+      setEmailSending(false);
+      return;
+    }
 
     const { data: members, error: memErr } = await supabase
       .from("lead_list_members" as any)
@@ -893,7 +959,7 @@ export default function LeadLists() {
         custom_body: emailMode === "custom" ? emailBody : null,
         total_recipients: valid.length,
         created_by: profile?.id || null,
-        next_attempt_at: new Date().toISOString(),
+        next_attempt_at: schedule.nextAttemptAt,
         worker_locked_at: null,
         status: "pending",
       })
@@ -921,10 +987,14 @@ export default function LeadLists() {
     setEmailSending(false);
     setEmailOpen(false);
     toast({
-      title: "Email campaign queued",
-      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+      title: schedule.scheduled ? "Email campaign scheduled" : "Email campaign queued",
+      description: schedule.scheduled
+        ? `${valid.length} recipients scheduled for ${new Date(schedule.nextAttemptAt).toLocaleString()}.`
+        : `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
     });
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    if (!schedule.scheduled) {
+      supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    }
     await fetchLists();
     await fetchCampaignQueue();
   };
@@ -1182,6 +1252,30 @@ export default function LeadLists() {
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
             </div>
+            <div className="grid max-w-xl gap-3 sm:grid-cols-[170px_240px]">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Send time</label>
+                <select
+                  value={waScheduleMode}
+                  onChange={(e) => setWaScheduleMode(e.target.value as "now" | "scheduled")}
+                  className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="now">Send now</option>
+                  <option value="scheduled">Schedule for later</option>
+                </select>
+              </div>
+              {waScheduleMode === "scheduled" && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Scheduled date and time</label>
+                  <input
+                    type="datetime-local"
+                    value={waScheduledAt}
+                    onChange={(e) => setWaScheduledAt(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  />
+                </div>
+              )}
+            </div>
             <div>
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-medium text-muted-foreground">Outgoing WhatsApp number</label>
@@ -1266,21 +1360,63 @@ export default function LeadLists() {
             {waStaticFields.length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
                 <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">Template values</p>
-                {waStaticFields.map(p => (
-                  <div key={p.name}>
-                    <label className="text-xs font-medium text-muted-foreground capitalize">
-                      {p.name.replace(/_/g, " ")} <span className="text-rose-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={waStaticParams[p.name] || ""}
-                      onChange={(e) => setWaStaticParams(s => ({ ...s, [p.name]: e.target.value }))}
-                      placeholder={p.placeholder || ""}
-                      className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    />
-                    {p.help && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
-                  </div>
-                ))}
+                {waStaticFields.map((p) => {
+                  const value = effectiveWaParamValue(waStaticParams, p.name);
+                  const mappedToken = decodeWaParamFieldMapping(value);
+                  const canMap = isWaMappableTemplateParam(p.name);
+                  const isMediaParam = isWaMediaTemplateParam(p.name);
+                  const hasDefaultMedia = isMediaParam && !!waTemplateDefaultMediaUrl;
+                  const label = isMediaParam
+                    ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
+                    : p.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
+                  return (
+                    <div key={p.name}>
+                      <label className="text-xs font-medium text-muted-foreground capitalize">
+                        {label} {!hasDefaultMedia && <span className="text-rose-600">*</span>}
+                      </label>
+                      {canMap && (
+                        <select
+                          value={mappedToken ? value : WA_COMMON_VALUE}
+                          onChange={(e) => {
+                            const nextValue = e.target.value;
+                            setWaStaticParams((current) => ({
+                              ...current,
+                              [p.name]: nextValue === WA_COMMON_VALUE ? "" : nextValue,
+                            }));
+                          }}
+                          className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        >
+                          {WA_PARAM_FIELD_OPTIONS.map((option) => (
+                            <option key={option.token} value={encodeWaParamFieldMapping(option.token)}>
+                              Use list column: {option.label}
+                            </option>
+                          ))}
+                          <option value={WA_COMMON_VALUE}>Use one common value</option>
+                        </select>
+                      )}
+                      {(!canMap || !mappedToken) && (
+                        <input
+                          type="text"
+                          value={canMap ? (waStaticParams[p.name] || "") : value}
+                          onChange={(e) => setWaStaticParams(s => ({ ...s, [p.name]: e.target.value }))}
+                          placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : p.placeholder || ""}
+                          className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      )}
+                      {mappedToken && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Filled per recipient from {waParamFieldLabel(mappedToken)}.
+                        </p>
+                      )}
+                      {hasDefaultMedia && !value.trim() && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                        </p>
+                      )}
+                      {p.help && !hasDefaultMedia && !mappedToken && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
+                    </div>
+                  );
+                })}
                 <p className="text-[11px] text-muted-foreground">
                   Per-lead values (name, course, campus) are filled automatically from each lead's record.
                 </p>
@@ -1330,6 +1466,30 @@ export default function LeadLists() {
                 onChange={(e) => setEmailCampaignName(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
+            </div>
+            <div className="grid max-w-xl gap-3 sm:grid-cols-[170px_240px]">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Send time</label>
+                <select
+                  value={emailScheduleMode}
+                  onChange={(e) => setEmailScheduleMode(e.target.value as "now" | "scheduled")}
+                  className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="now">Send now</option>
+                  <option value="scheduled">Schedule for later</option>
+                </select>
+              </div>
+              {emailScheduleMode === "scheduled" && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Scheduled date and time</label>
+                  <input
+                    type="datetime-local"
+                    value={emailScheduledAt}
+                    onChange={(e) => setEmailScheduledAt(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  />
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button

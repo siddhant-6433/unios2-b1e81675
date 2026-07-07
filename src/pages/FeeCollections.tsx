@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Search, IndianRupee, Plus, Loader2, Receipt, CheckCircle,
   Clock, AlertTriangle, Filter, Calendar,
@@ -163,22 +165,24 @@ const FeeCollections = () => {
           <div className="flex items-center gap-2">
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input
-                type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}
-                className="rounded-xl border border-input bg-card py-2.5 pl-10 pr-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-              />
+              <FieldShell hideLabel>
+                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10" />
+              </FieldShell>
             </div>
-            <select
-              value={modeFilter} onChange={(e) => setModeFilter(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              <option value="all">All Modes</option>
-              <option value="cash">Cash</option>
-              <option value="online">Online</option>
-              <option value="upi">UPI</option>
-              <option value="cheque">Cheque</option>
-              <option value="bank_transfer">Bank Transfer</option>
-            </select>
+            <SelectField
+              value={modeFilter}
+              onValueChange={setModeFilter}
+              options={[
+                { value: "all", label: "All Modes" },
+                { value: "cash", label: "Cash" },
+                { value: "online", label: "Online" },
+                { value: "upi", label: "UPI" },
+                { value: "cheque", label: "Cheque" },
+                { value: "bank_transfer", label: "Bank Transfer" },
+              ]}
+              hideLabel
+              placeholder="All Modes"
+            />
           </div>
         </div>
 

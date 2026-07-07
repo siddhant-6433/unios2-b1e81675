@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, CheckCircle, XCircle, Clock, HandCoins } from "lucide-react";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
   pending_principal: "bg-amber-100 text-amber-700",
@@ -208,7 +209,7 @@ export function ConcessionApprovalPanel() {
                         <div className="text-[10px] font-mono text-muted-foreground">{admNo}</div>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.fee_ledger?.fee_codes?.code || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{c.fee_ledger?.term || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(c.fee_ledger?.term || "—")}</td>
                       <td className="px-4 py-3 text-right text-foreground">
                         {c.fee_ledger?.total_amount ? `₹${Number(c.fee_ledger.total_amount).toLocaleString("en-IN")}` : "—"}
                       </td>

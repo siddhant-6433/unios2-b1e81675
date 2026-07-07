@@ -82,6 +82,8 @@ const stageIndex = (stage: string) => {
   return idx === -1 ? -1 : idx;
 };
 
+const FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 12);
+
 type FollowupQueueState = {
   ids: string[];
   index: number;
@@ -1223,6 +1225,7 @@ const LeadDetail = () => {
           : !canIssueOffer
           ? "You do not have permission to issue offers"
           : undefined;
+        const showFeeProposalNewBadge = new Date() < FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL;
 
         const actions = [
           // Manual "Call" action removed — it opened the disposition dialog
@@ -1259,6 +1262,7 @@ const LeadDetail = () => {
             action: () => setShowFeeProposal(true),
             disabled: !canCreateProposal,
             tooltip: canCreateProposal ? undefined : "You do not have permission to create fee proposals",
+            badge: showFeeProposalNewBadge ? "New" : undefined,
           },
           // Payment only visible for super_admin
           ...(canRecordPayment ? [{
@@ -1271,7 +1275,7 @@ const LeadDetail = () => {
 
         return (
           <div className="flex items-center gap-1 overflow-x-auto pb-1">
-            {actions.map(({ icon: Icon, label, color, action, disabled, tooltip }: any) => (
+            {actions.map(({ icon: Icon, label, color, action, disabled, tooltip, badge }: any) => (
               <button
                 key={label}
                 onClick={action}
@@ -1282,7 +1286,14 @@ const LeadDetail = () => {
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
                   {disabled && (label === "AI Call" || label === "Cloud Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
-                <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                <div className="flex min-h-4 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                  <span>{label}</span>
+                  {badge && (
+                    <Badge className="h-3.5 rounded-full border-0 bg-emerald-100 px-1.5 text-[8px] font-semibold leading-none text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      {badge}
+                    </Badge>
+                  )}
+                </div>
               </button>
             ))}
           </div>
