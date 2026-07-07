@@ -354,6 +354,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Implicit feedback on previous AI reply ──────────────────────────────
+    if (messageType === "text" && content.trim()) {
+      try {
+        const { data: prevAiReply } = await admin
+          .from("whatsapp_messages")
+          .select("id, content")
+          .eq("phone", phone)
+          .eq("direction", "outbound")
+          .eq("template_key", "ai_auto_reply")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (prevAiReply?.id) {
+          const trimmedLower = content.trim().toLowerCase();
+          const isPositive = /^(ok|okay|thanks?|thank\s*you|got\s*it|theek\s*hai|acha|accha|shukriya|dhanyawad|great|perfect|nice|good)[\s!.]*$/i.test(trimmedLower);
+          if (isPositive) {
+            await admin.from("whatsapp_messages").update({ ai_feedback: "helpful" }).eq("id", prevAiReply.id);
+          }
+        }
+      } catch (e) {
+        console.warn("Implicit feedback detection error:", (e as Error).message);
+      }
+    }
+
     if (dispatchReply && messageType === "text" && content.trim()) {
       if (await isLikelyFeedbackReply(admin, leadId, content)) {
         await logWhatsAppAutomationEvent(admin, {
@@ -474,7 +499,7 @@ Deno.serve(async (req) => {
         .select("direction, content")
         .eq("phone", phone)
         .order("created_at", { ascending: false })
-        .limit(6);
+        .limit(12);
 
       const aiRes = await fetch(`${supabaseUrl}/functions/v1/whatsapp-ai-reply`, {
         method: "POST",
