@@ -87,6 +87,11 @@ export default function PaymentPortal() {
   const [error, setError]       = useState<string | null>(null);
   const [student, setStudent]   = useState<StudentInfo | null>(null);
   const [fees, setFees]         = useState<StudentFee[]>([]);
+  // Consultant-managed fee hiding: the student-role fee_ledger SELECT returns
+  // zero rows for flagged students. In that mode we show a single due total
+  // (via the student_fee_due_summary RPC) and let the gateway compute the
+  // authoritative amount server-side (payment_scope='due', no fee_ids).
+  const [hiddenDueMode, setHiddenDueMode] = useState(false);
   const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
   const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
   const [receiptSnapshot, setReceiptSnapshot] = useState<StudentFeeReceiptSnapshot | null>(null);
@@ -148,9 +153,19 @@ export default function PaymentPortal() {
       Array.isArray(paymentHandoff.fees)
     ) {
       setStudent(paymentHandoff.student);
-      setFees(paymentHandoff.fees);
-      setStep("fees");
-      setLoading(false);
+      if (paymentHandoff.fees.length > 0) {
+        setFees(paymentHandoff.fees);
+        setStep("fees");
+        setLoading(false);
+      } else {
+        // Hidden-fee students hand off an empty list — resolve the due total
+        // through the hidden-mode fallback in fetchFees.
+        void (async () => {
+          await fetchFees(paymentHandoff.student!.id);
+          setStep("fees");
+          setLoading(false);
+        })();
+      }
       return;
     }
 
@@ -331,11 +346,46 @@ export default function PaymentPortal() {
       return fee.due_date <= todayKey;
     });
 
+    // Hidden-fee fallback: no visible ledger rows can also mean the fee
+    // structure is consultant-managed and hidden from this student. The RPC
+    // returns just the due total (no structure); errors (e.g. unauthenticated
+    // OTP flow) leave the empty state untouched.
+    if (mapped.length === 0 && !feeParam) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentId });
+      const dueTotal = Number((summary as any)?.due_total || 0);
+      if (dueTotal > 0) {
+        setHiddenDueMode(true);
+        setFees([{
+          id: "hidden-due",
+          fee_head: "Fee due",
+          amount: dueTotal,
+          balance: dueTotal,
+          status: "due",
+          due_date: todayKey,
+        }]);
+        return;
+      }
+    }
+
+    setHiddenDueMode(false);
     setFees(mapped);
   };
 
   const checkFeesPaid = async (): Promise<boolean> => {
     if (!student) return false;
+
+    // Hidden-fee mode: the student can't read fee_ledger rows, so settle-state
+    // comes from the due-summary RPC instead.
+    if (hiddenDueMode) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: student.id });
+      const stillDue = Number((summary as any)?.due_total || 0);
+      if (stillDue > 0) return false;
+      setReceiptSnapshot((current) => current ?? buildReceiptSnapshot(paidTxnId, activeGateway));
+      setStep("receipt");
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      return true;
+    }
+
     const { data } = await supabase
       .from("fee_ledger")
       .select("id")
@@ -353,6 +403,9 @@ export default function PaymentPortal() {
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
+  // Only real ledger UUIDs go to the gateways; the hidden-mode synthetic row is
+  // excluded so the server falls back to computing the 'due' selection itself.
+  const realFeeIds = fees.map((fee) => fee.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   const waiverAmount = paymentScope === "all" ? Math.round(totalDue * 0.05) : 0;
   const payableAmount = Math.max(totalDue - waiverAmount, 0);
   const paymentTitle = paymentScope === "all"
@@ -392,7 +445,7 @@ export default function PaymentPortal() {
           description: paymentTitle,
           studentId: student.id,
           paymentScope,
-          feeIds: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          feeIds: paymentScope === "all" ? [] : realFeeIds,
           waiverAmount,
           customerName: student.name,
           customerPhone: student.parent_phone || phone || "9999999999",
@@ -418,7 +471,7 @@ export default function PaymentPortal() {
           txnid,
           amount: totalDue,
           payment_scope: paymentScope,
-          fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          fee_ids: paymentScope === "all" ? [] : realFeeIds,
           waiver_amount: waiverAmount,
           productinfo: "Fee Payment",
           firstname: nameParts[0],
@@ -460,7 +513,7 @@ export default function PaymentPortal() {
                 txnid: gatewayTxnId,
                 application_id: "",
                 student_id: student.id,
-                fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+                fee_ids: paymentScope === "all" ? [] : realFeeIds,
                 payment_scope: paymentScope,
                 waiver_amount: waiverAmount,
               },

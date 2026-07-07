@@ -157,6 +157,8 @@ export default function TransactionHistoryPanel() {
   const [reconciling, setReconciling]     = useState(false);
   const [iciciVerifyingId, setIciciVerifyingId] = useState<string | null>(null);
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
+  // Admission numbers of students whose fee is consultant-managed (cashier note).
+  const [consultantManagedNos, setConsultantManagedNos] = useState<Set<string>>(new Set());
 
   const { selectedCampusId } = useCampus();
 
@@ -342,6 +344,31 @@ export default function TransactionHistoryPanel() {
     );
     setStudentPmts(merged);
     setLoadingStudent(false);
+
+    // Cashier note: resolve consultant-managed students → their admission /
+    // pre-admission numbers (rows here don't carry student_id uniformly).
+    try {
+      const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
+        .select("student_id, effective_hidden");
+      const flaggedIds = ((flags || []) as any[])
+        .filter((f) => f.effective_hidden)
+        .map((f) => f.student_id);
+      if (flaggedIds.length > 0) {
+        const { data: studs } = await (supabase.from("students") as any)
+          .select("id, admission_no, pre_admission_no")
+          .in("id", flaggedIds);
+        const nos = new Set<string>();
+        ((studs || []) as any[]).forEach((s) => {
+          if (s.admission_no) nos.add(s.admission_no);
+          if (s.pre_admission_no) nos.add(s.pre_admission_no);
+        });
+        setConsultantManagedNos(nos);
+      } else {
+        setConsultantManagedNos(new Set());
+      }
+    } catch {
+      // Non-critical decoration; ignore lookup failures.
+    }
   };
 
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
@@ -1073,6 +1100,15 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground">{p.students?.name || "—"}</p>
                         {p.students?.email && <p className="text-xs text-muted-foreground">{p.students.email}</p>}
+                        {((p.students?.admission_no && consultantManagedNos.has(p.students.admission_no)) ||
+                          (p.students?.pre_admission_no && consultantManagedNos.has(p.students.pre_admission_no))) && (
+                          <span
+                            className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                            title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
+                          >
+                            Consultant-managed fee
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{p.students?.phone || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground whitespace-nowrap">

@@ -42,6 +42,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [concessionOpen, setConcessionOpen] = useState(false);
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
+  const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
@@ -54,8 +55,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     if (student?.id) {
       fetchFees();
       fetchPayments();
+      fetchConsultantFlag();
     }
   }, [student?.id, student?.lead_id]);
+
+  // Cashier note: is this candidate's fee consultant-managed (structure hidden
+  // from the student login)? Staff-readable via v_student_fee_visibility.
+  const fetchConsultantFlag = async () => {
+    const { data } = await (supabase.from("v_student_fee_visibility") as any)
+      .select("effective_hidden, consultant_name")
+      .eq("student_id", student.id)
+      .maybeSingle();
+    setConsultantManaged(data?.effective_hidden ? (data.consultant_name || "consultant") : null);
+  };
 
   const fetchFees = async () => {
     setLoading(true);
@@ -184,6 +196,17 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </Badge>
         )}
       </div>
+
+      {/* Cashier note — consultant-managed fee */}
+      {consultantManaged && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/20 px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-900 dark:text-amber-200">
+            Fee for this candidate is managed via consultant login / consultant-sent payment links
+            <span className="font-medium"> ({consultantManaged})</span>. The fee structure is hidden from the student&rsquo;s login.
+          </p>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex flex-wrap items-center gap-2">

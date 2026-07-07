@@ -32,6 +32,7 @@ const FeeCollections = () => {
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
   const [modeFilter, setModeFilter] = useState("all");
   const [payments, setPayments] = useState<any[]>([]);
+  const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const { selectedCampusId } = useCampus();
@@ -73,6 +74,19 @@ const FeeCollections = () => {
         students: { name: p.person_name, admission_no: p.admission_no, campus_id: p.campus_id },
         profiles: p.recorded_by ? { display_name: profMap[p.recorded_by] || null } : null,
       })));
+
+      // Cashier note: flag rows whose candidate's fee is consultant-managed.
+      const studentIds = [...new Set(raw.map((p) => p.student_id).filter(Boolean))];
+      if (studentIds.length > 0) {
+        const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
+          .select("student_id, effective_hidden")
+          .in("student_id", studentIds);
+        setConsultantManagedIds(new Set(
+          ((flags || []) as any[]).filter((f) => f.effective_hidden).map((f) => f.student_id),
+        ));
+      } else {
+        setConsultantManagedIds(new Set());
+      }
     }
     setLoading(false);
   };
@@ -219,6 +233,14 @@ const FeeCollections = () => {
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{p.students?.name || "—"}</div>
                         <div className="text-xs text-muted-foreground font-mono">{p.students?.admission_no || "—"}</div>
+                        {p.student_id && consultantManagedIds.has(p.student_id) && (
+                          <Badge
+                            className="mt-1 border-0 bg-amber-100 text-amber-700 text-[10px]"
+                            title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
+                          >
+                            Consultant-managed fee
+                          </Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{p.fee_description || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
