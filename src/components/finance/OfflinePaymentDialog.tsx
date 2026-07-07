@@ -17,10 +17,11 @@ import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/
 import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
-  { value: "application_fee", label: "Application Fee" },
-  { value: "token_fee",       label: "Token Fee" },
-  { value: "registration_fee",label: "Registration Fee" },
-  { value: "other",           label: "Other Charges" },
+  { value: "application_fee",     label: "Application Fee" },
+  { value: "pre_admission_token", label: "Token Fee (prior to admission)" },
+  { value: "token_fee",           label: "Token Fee" },
+  { value: "registration_fee",    label: "Registration Fee" },
+  { value: "other",               label: "Other Charges" },
 ];
 
 // Payment modes the candidate's offline channel might use. The DB CHECK
@@ -71,7 +72,9 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const allowedRole = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  // Owner decision: offline cash recording is cashier (accountant) + super_admin
+  // only — no counsellors, no campus admins, no consultants.
+  const allowedRole = ["super_admin", "accountant"].includes(role || "");
 
   if (!allowedRole) return null;
 

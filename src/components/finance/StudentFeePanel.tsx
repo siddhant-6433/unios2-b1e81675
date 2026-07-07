@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2,
+  Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
   Receipt, FileText, RefreshCw,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
+import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
@@ -39,6 +40,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
+  const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
@@ -201,6 +203,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {canRequestConcession && fees.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
             <HandCoins className="h-3.5 w-3.5" /> Request Concession
+          </Button>
+        )}
+        {isFinanceRole && student?.id && (
+          <Button size="sm" variant="outline" onClick={() => setSendLinkOpen(true)} className="gap-1.5">
+            <LinkIcon className="h-3.5 w-3.5" /> Send Payment Link
           </Button>
         )}
         {isFinanceRole && isDaott && !isStethoBatch && (
@@ -398,6 +405,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         studentId={student.id}
         feeItems={fees}
         onSuccess={() => { fetchFees(); onRefresh?.(); }}
+      />
+
+      <SendPaymentLinkDialog
+        open={sendLinkOpen}
+        onOpenChange={setSendLinkOpen}
+        studentId={student.id}
+        leadId={student.lead_id || undefined}
+        defaultAmount={totalBalance > 0 ? Math.round(totalBalance) : null}
+        defaultPurpose="fee_due"
+        onCreated={() => { fetchPayments(); onRefresh?.(); }}
       />
     </div>
   );

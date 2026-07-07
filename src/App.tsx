@@ -92,6 +92,7 @@ const FeeCollections       = lazy(() => import("./pages/FeeCollections"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
 const PaymentPortal        = lazy(() => import("./pages/PaymentPortal"));
+const PayLink              = lazy(() => import("./pages/PayLink"));
 const Library              = lazy(() => import("./pages/Library"));
 // IB Academics pages
 const ProgrammeOfInquiry    = lazy(() => import("./pages/ib/ProgrammeOfInquiry"));
@@ -251,6 +252,7 @@ const App = () => (
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/alumni-verification" element={<AlumniVerification />} />
             <Route path="/pay" element={<PaymentPortal />} />
+            <Route path="/pay/:token" element={<PayLink />} />
             <Route
               path="/my-applications"
               element={

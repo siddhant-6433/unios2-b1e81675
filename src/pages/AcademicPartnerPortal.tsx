@@ -13,6 +13,7 @@ import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { LeadPipeline } from "@/components/admissions/LeadPipeline";
 import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
+import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
 import {
   type LeadFunnelStage,
   leadStagesForBucket,
@@ -31,6 +32,7 @@ import {
   IndianRupee,
   Loader2,
   PhoneCall,
+  Link as LinkIcon,
   Plus,
   FileText,
   Gift,
@@ -473,6 +475,7 @@ export default function AcademicPartnerPortal() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [savingAgentPhone, setSavingAgentPhone] = useState(false);
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
+  const [payLinkLead, setPayLinkLead] = useState<{ id: string; name: string } | null>(null);
   const [agentPhone, setAgentPhone] = useState("");
   const [leadForm, setLeadForm] = useState({ name: "", phone: "", email: "", course_id: "", notes: "" });
   const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
@@ -1329,6 +1332,10 @@ export default function AcademicPartnerPortal() {
                         {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
                         Call
                       </Button>
+                      <Button size="sm" variant="outline" className="gap-2" onClick={() => setPayLinkLead({ id: lead.id, name: lead.name })}>
+                        <LinkIcon className="h-3.5 w-3.5" />
+                        Payment Link
+                      </Button>
                       </div>
                     </td>
                   </tr>
@@ -1838,6 +1845,16 @@ export default function AcademicPartnerPortal() {
             setOfferLead(null);
             void fetchPortal(partner.id);
           }}
+        />
+      )}
+
+      {payLinkLead && (
+        <SendPaymentLinkDialog
+          open={!!payLinkLead}
+          onOpenChange={(open) => !open && setPayLinkLead(null)}
+          leadId={payLinkLead.id}
+          defaultPurpose="pre_admission_token"
+          onCreated={() => { void fetchPortal(partner.id); }}
         />
       )}
 
