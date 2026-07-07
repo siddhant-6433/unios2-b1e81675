@@ -230,9 +230,13 @@ Deno.serve(async (req) => {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const processed = await processPhoto(apiKey, file.type, buf);
-      buf = processed.bytes;
-      contentType = processed.mimeType;
+      try {
+        const processed = await processPhoto(apiKey, file.type, buf);
+        buf = processed.bytes;
+        contentType = processed.mimeType;
+      } catch (photoErr) {
+        console.error("[apply-portal-upload-doc] photo processing failed, uploading original:", (photoErr as Error).message);
+      }
     }
 
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
