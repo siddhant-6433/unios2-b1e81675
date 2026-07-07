@@ -3,8 +3,15 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import type { Database } from './database.types';
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+
+if (__DEV__ && (!SUPABASE_URL || !SUPABASE_ANON_KEY)) {
+  console.error(
+    '[supabase] EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY is missing.\n' +
+    'Start Metro from the mobile/ directory: cd mobile && npx expo start --tunnel'
+  );
+}
 
 // SecureStore values are capped (~2KB advisory; hard failures above it on
 // some Android keystores) and Supabase sessions routinely exceed that.
