@@ -43,6 +43,7 @@ const AdminApplicationView = lazy(() => import("./pages/AdminApplicationView"));
 const PendingFollowups     = lazy(() => import("./pages/PendingFollowups"));
 const FreshLeads           = lazy(() => import("./pages/FreshLeads"));
 const VisitMonitor         = lazy(() => import("./pages/VisitMonitor"));
+const VisitCenter          = lazy(() => import("./pages/VisitCenter"));
 const StudentReferrals     = lazy(() => import("./pages/StudentReferrals"));
 const GlobalSearch         = lazy(() => import("./pages/GlobalSearch"));
 const Students             = lazy(() => import("./pages/Students"));
@@ -297,6 +298,7 @@ const App = () => (
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
                       <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
+                      <Route path="/visit-center" element={<RequirePermission module="leads" action="view"><VisitCenter /></RequirePermission>} />
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
                       <Route path="/cloud-dialer" element={<RequirePermission module="call_log" action="view"><CloudDialer /></RequirePermission>} />
