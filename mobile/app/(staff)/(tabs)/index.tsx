@@ -10,7 +10,7 @@ import { colors, spacing, radius, typography } from '../../../constants/Colors';
 import { router } from 'expo-router';
 import {
   Fingerprint, IndianRupee, ChevronRight, CheckCircle,
-  CalendarOff, Clock, Bell, Search, Megaphone, Gift, AlertCircle,
+  CalendarOff, Calendar, Clock, Bell, Search, Megaphone, Gift, AlertCircle,
   ClipboardCheck, Users, FileText, Briefcase, Cake, BadgeCheck,
 } from 'lucide-react-native';
 import {
@@ -68,6 +68,7 @@ function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string
   const [newLeads, setNewLeads] = useState(0);
   const [totalStudents, setTotalStudents] = useState(0);
   const [pendingFollowups, setPendingFollowups] = useState(0);
+  const [visitsToday, setVisitsToday] = useState(0);
 
   const fetchStatus = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -87,18 +88,21 @@ function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string
 
     if (isAdmin) {
       // Platform stats
-      const [faceRes, leaveRes, leadsRes, studentsRes, followupsRes] = await Promise.all([
+      const [faceRes, leaveRes, leadsRes, studentsRes, followupsRes, visitsRes] = await Promise.all([
         supabase.from('employee_face_registrations').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('employee_leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('leads').select('id', { count: 'exact', head: true }).eq('stage', 'new_lead'),
         supabase.from('students').select('id', { count: 'exact', head: true }).in('status', ['active', 'pre_admitted']),
         supabase.from('lead_followups').select('id', { count: 'exact', head: true })
           .eq('status', 'pending').lte('scheduled_at', `${today}T23:59:59`),
+        supabase.from('campus_visits').select('id', { count: 'exact', head: true })
+          .gte('visit_date', `${today}T00:00:00`).lte('visit_date', `${today}T23:59:59`),
       ]);
       setPendingApprovals((faceRes.count || 0) + (leaveRes.count || 0));
       setNewLeads(leadsRes.count || 0);
       setTotalStudents(studentsRes.count || 0);
       setPendingFollowups(followupsRes.count || 0);
+      setVisitsToday(visitsRes.count || 0);
     }
   }, [isAdmin, userId]);
 
@@ -124,7 +128,7 @@ function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string
       {isAdmin && (
         <View style={styles.metricRow}>
           <MetricCard icon={Users} label="New leads" value={String(newLeads)} tone="purple" />
-          <MetricCard icon={Users} label="Students" value={String(totalStudents)} tone="green" />
+          <MetricCard icon={Calendar} label="Visits today" value={String(visitsToday)} tone="yellow" />
           <MetricCard icon={Clock} label="Follow-ups" value={String(pendingFollowups)} tone="yellow" />
         </View>
       )}
@@ -150,6 +154,7 @@ function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string
         <ActionTile icon={ClipboardCheck} label="Attendance" subtitle="Logs and shifts" tone="green" onPress={() => router.push('/(staff)/work/hr' as any)} />
         <ActionTile icon={FileText} label="Pay slips" subtitle="Salary documents" tone="blue" onPress={() => router.push('/(staff)/work/hr' as any)} />
         <ActionTile icon={Bell} label="Notices" subtitle="Announcements" tone="yellow" onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} />
+        <ActionTile icon={Calendar} label="Visits" subtitle="Today’s campus visits" tone="yellow" onPress={() => router.push('/(staff)/work/visits' as any)} />
         <ActionTile icon={Search} label="Directory" subtitle="Find people" tone="pink" onPress={() => router.push('/(staff)/work/team' as any)} />
         <ActionTile icon={Briefcase} label="My work" subtitle={role === 'librarian' ? 'Library desk' : 'Role workspace'} tone="orange" onPress={() => router.push('/(staff)/(tabs)/work' as any)} />
       </View>

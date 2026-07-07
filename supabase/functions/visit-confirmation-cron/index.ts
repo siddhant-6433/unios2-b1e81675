@@ -58,6 +58,8 @@ Deno.serve(async (req) => {
         title: `Confirm visit: ${visit.lead_name}`,
         body: `Visit ${urgencyLabel} (${visitDate}) at ${visit.campus_name || "campus"}. Call to confirm attendance.`,
         link: `/admissions/${visit.lead_id}`,
+        // Mobile deep-link → the Visit Center visit detail (web push falls back to `link`).
+        data: { url: `/(staff)/work/visit/${visit.id}` },
         lead_id: visit.lead_id,
       });
 
