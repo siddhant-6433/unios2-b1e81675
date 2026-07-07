@@ -5,13 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
+import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -62,6 +63,23 @@ type LeadCourse = {
   entrance_exam: string | null;
   entrance_mandatory: boolean | null;
 };
+
+interface LeadPaymentRow {
+  id: string;
+  type: string;
+  amount: number;
+  payment_mode: string | null;
+  gateway: string | null;
+  transaction_ref: string | null;
+  receipt_no: string | null;
+  receipt_url: string | null;
+  proof_url: string | null;
+  status: string;
+  payment_date: string | null;
+  notes: string | null;
+  created_at: string;
+  recorded_by_name?: string | null;
+}
 
 const COURSE_SELECT = "name,code,duration_years,eligibility,entrance_exam,entrance_mandatory";
 const APPROVABLE_APPLICATION_STATUSES = new Set(["submitted", "under_review"]);
@@ -205,6 +223,8 @@ export default function AdminApplicationView() {
   const [programDialogOpen, setProgramDialogOpen] = useState(false);
   const [editCourseId, setEditCourseId] = useState("");
   const [savingProgram, setSavingProgram] = useState(false);
+  const [leadPayments, setLeadPayments] = useState<LeadPaymentRow[]>([]);
+  const [offlinePaymentOpen, setOfflinePaymentOpen] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -254,7 +274,7 @@ export default function AdminApplicationView() {
       // Also pulls PAN/AN for the lifecycle stepper.
       if (appRow?.lead_id) {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
-        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow, updeledRow] = await Promise.all([
+        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, { data: allPmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, phone, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
@@ -264,6 +284,10 @@ export default function AdminApplicationView() {
             .eq("lead_id", appRow.lead_id)
             .eq("type", "application_fee")
             .eq("status", "confirmed"),
+          supabase.from("lead_payments")
+            .select("id,type,amount,payment_mode,gateway,transaction_ref,receipt_no,receipt_url,proof_url,status,payment_date,notes,created_at,recorded_by")
+            .eq("lead_id", appRow.lead_id)
+            .order("created_at", { ascending: false }),
           fetchCahetRegistration(supabase, appRow.lead_id),
           fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, appRow.lead_id),
         ]);
@@ -309,6 +333,27 @@ export default function AdminApplicationView() {
         const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
         setUpdeledRegistration(isDeledCourseName(courseName) ? (updeledRow || applicationUpdeled) : null);
+
+        // Resolve recorded_by names for payments
+        const rawPayments = (allPmtRows || []) as any[];
+        const recorderIds = rawPayments.map((p: any) => p.recorded_by).filter(Boolean) as string[];
+        const recorderNames: Record<string, string> = {};
+        if (recorderIds.length > 0) {
+          const uniqueIds = [...new Set(recorderIds)];
+          const missing = uniqueIds.filter(id => !profileNames[id]);
+          if (missing.length > 0) {
+            const { data: recProfiles } = await supabase
+              .from("profiles")
+              .select("id, display_name")
+              .in("id", missing);
+            (recProfiles || []).forEach((p: any) => { recorderNames[p.id] = p.display_name || "Staff"; });
+          }
+        }
+        const allNames = { ...profileNames, ...recorderNames };
+        setLeadPayments(rawPayments.map((p: any) => ({
+          ...p,
+          recorded_by_name: p.recorded_by ? allNames[p.recorded_by] || null : null,
+        })));
       } else {
         setLead(null);
         setEligibilityRule(null);
@@ -316,6 +361,7 @@ export default function AdminApplicationView() {
         setAppFeePaid(0);
         setCahetRegistration(null);
         setUpdeledRegistration(null);
+        setLeadPayments([]);
       }
     } catch (e: any) {
       console.error("[AdminApplicationView] refresh failed:", e);
@@ -1016,6 +1062,120 @@ export default function AdminApplicationView() {
         />
       </SectionErrorBoundary>
 
+      {/* Fee receipts / payment history */}
+      {lead?.id && leadPayments.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">Fee Receipts</h3>
+              <span className="text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                {leadPayments.length}
+              </span>
+            </div>
+            {role === "super_admin" && (
+              <button
+                onClick={() => setOfflinePaymentOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />Add Offline Receipt
+              </button>
+            )}
+          </div>
+          <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+            {leadPayments.map((pmt) => {
+              const feeLabel =
+                pmt.type === "application_fee" ? "Application Fee"
+                : pmt.type === "token_fee" ? "Token Fee"
+                : pmt.type === "registration_fee" ? "Registration Fee"
+                : "Other";
+              const isConfirmed = pmt.status === "confirmed";
+              return (
+                <div key={pmt.id} className="flex items-center gap-3 px-3 py-2.5 text-xs bg-background hover:bg-muted/30 transition-colors">
+                  <div className={`shrink-0 rounded-full p-1.5 ${isConfirmed ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}>
+                    {isConfirmed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-foreground">{feeLabel}</span>
+                      <span className="font-semibold text-foreground">
+                        ₹{Number(pmt.amount).toLocaleString("en-IN")}
+                      </span>
+                      {pmt.receipt_no && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          #{pmt.receipt_no}
+                        </span>
+                      )}
+                      {pmt.gateway === "offline" && (
+                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                          Offline
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-muted-foreground flex-wrap">
+                      {pmt.payment_mode && <span className="capitalize">{pmt.payment_mode.replace(/_/g, " ")}</span>}
+                      {pmt.transaction_ref && <span>· Ref: {pmt.transaction_ref}</span>}
+                      {pmt.payment_date && (
+                        <span>
+                          · {new Date(pmt.payment_date).toLocaleString("en-IN", {
+                            day: "2-digit", month: "short", year: "numeric",
+                            hour: "2-digit", minute: "2-digit", hour12: true,
+                          })}
+                        </span>
+                      )}
+                      {pmt.recorded_by_name && <span>· by {pmt.recorded_by_name}</span>}
+                    </div>
+                    {pmt.notes && <p className="text-muted-foreground mt-0.5 truncate max-w-md" title={pmt.notes}>{pmt.notes}</p>}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {pmt.receipt_url && (
+                      <a
+                        href={pmt.receipt_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                        title="View receipt PDF"
+                      >
+                        <FileDown className="h-3 w-3" />Receipt
+                      </a>
+                    )}
+                    {pmt.proof_url && (
+                      <a
+                        href={pmt.proof_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        title="View payment proof"
+                      >
+                        <ExternalLink className="h-3 w-3" />Proof
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Empty-state: no payments yet but superadmin can add one */}
+      {lead?.id && leadPayments.length === 0 && role === "super_admin" && (
+        <div className="rounded-xl border border-dashed border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No fee payments recorded yet.</p>
+            </div>
+            <button
+              onClick={() => setOfflinePaymentOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />Add Offline Receipt
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Review summary + application-level decision */}
       {(canDecideCurrentApplication || decided) && (
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -1286,6 +1446,17 @@ export default function AdminApplicationView() {
           cahetRegistration={cahetRegistration}
           updeledRegistration={updeledRegistration}
           onSuccess={() => { setShowOfferLetter(false); refresh(); }}
+        />
+      )}
+
+      {/* Offline payment recorder — superadmin only */}
+      {lead?.id && (
+        <OfflinePaymentDialog
+          open={offlinePaymentOpen}
+          onOpenChange={setOfflinePaymentOpen}
+          leadId={lead.id}
+          applicationId={app.application_id}
+          onRecorded={refresh}
         />
       )}
     </div>
