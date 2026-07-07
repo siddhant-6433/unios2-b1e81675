@@ -11,15 +11,6 @@ import { router } from 'expo-router';
 import { supabase } from './supabase';
 import { APP_VARIANT } from './appVariant';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: true,
-  }),
-});
-
 const ANDROID_CHANNELS: Array<{ id: string; name: string; importance: Notifications.AndroidImportance }> = [
   { id: 'default', name: 'General', importance: Notifications.AndroidImportance.DEFAULT },
   { id: 'approvals', name: 'Approvals', importance: Notifications.AndroidImportance.HIGH },
@@ -48,6 +39,15 @@ export async function registerPushDevice(userId: string): Promise<boolean> {
   if (!Device.isDevice) return false;
 
   try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: false,
+        shouldSetBadge: true,
+      }),
+    });
+
     const { status: existing } = await Notifications.getPermissionsAsync();
     let status = existing;
     if (existing !== 'granted') {
@@ -105,6 +105,7 @@ export async function unregisterPushDevice(): Promise<void> {
 
 /** Notification taps deep-link via the push payload's data.url. */
 export function attachNotificationRouter(): () => void {
+  if (!Device.isDevice) return () => {};
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const url = response.notification.request.content.data?.url;
     if (typeof url === 'string' && url.startsWith('/')) {
