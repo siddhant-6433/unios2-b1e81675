@@ -1647,7 +1647,7 @@ export default function Applications() {
 
       {/* Search + Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name, phone, app ID, course..."
@@ -1804,19 +1804,19 @@ export default function Applications() {
                     />
                   </th>
                 )}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">App ID</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[240px] max-w-[280px]">Name</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[120px]">App ID</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground min-w-[180px] max-w-[240px]">Name</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Phone</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Course</th>
                 {/* Form-fill progress is meaningless on the Submitted tab — every
                     row is 7/7 by definition — so we drop the column there. */}
                 {statusFilter !== "submitted" && (
-                  <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Form</th>
+                  <th className="px-2 py-2 text-left font-medium text-muted-foreground">Form</th>
                 )}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[420px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
-                {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Active</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground min-w-[380px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
+                {!isCounsellor && <th className="px-2 py-2 text-left font-medium text-muted-foreground">Counsellor</th>}
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Active</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1838,13 +1838,13 @@ export default function Applications() {
                 return (
                   <Fragment key={app.id}>
                   <tr className="border-b border-border/40 hover:bg-muted/20">
-                    <td className="px-4 py-2.5">
+                    <td className="px-2 py-2">
                       <button onClick={() => setExpandedId(isExpanded ? null : app.id)} className="text-muted-foreground hover:text-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
                     </td>
                     {!isCounsellor && (
-                      <td className="px-2 py-2.5">
+                      <td className="px-2 py-2">
                         {(canManageApplicationLists ? !!app.lead_id : canRegenerateFormPdf(app)) ? (
                           <input
                             type="checkbox"
@@ -1862,10 +1862,10 @@ export default function Applications() {
                         ) : null}
                       </td>
                     )}
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td className="px-2 py-2 whitespace-nowrap">
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
-                    <td className="px-3 py-2.5 min-w-[240px] max-w-[280px]">
+                    <td className="px-2 py-2 min-w-[180px] max-w-[240px]">
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
@@ -1886,11 +1886,11 @@ export default function Applications() {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
-                    <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
+                    <td className="px-2 py-2 text-muted-foreground text-xs">{app.phone}</td>
+                    <td className="px-2 py-2 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
                     {/* Form-fill progress (sections completed in apply portal) — hidden on Submitted tab. */}
                     {statusFilter !== "submitted" && (
-                      <td className="px-3 py-2.5">
+                      <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
                           <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
                             <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
@@ -1901,7 +1901,7 @@ export default function Applications() {
                       </td>
                     )}
                     {/* Lifecycle stepper — labeled variant so each stage is readable at a glance. */}
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2">
                       <MiniLifecycleStepper
                         showLabels
                         app={app.dossier?.lifecycle.app || { status: app.status, payment_status: app.payment_status }}
@@ -1914,11 +1914,11 @@ export default function Applications() {
                         anDue={app.dossier?.lifecycle.anDue ?? app.an_due}
                       />
                     </td>
-                    {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
-                    <td className="px-3 py-2.5 text-[10px] text-muted-foreground">
+                    {!isCounsellor && <td className="px-2 py-2 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
+                    <td className="px-2 py-2 text-[10px] text-muted-foreground">
                       {new Date(applicationActivityTime(app)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2">
                       <div className="inline-flex items-center gap-2">
                         {/* Single "View" CTA — opens AdminApplicationView, which is the
                             unified surface for the application PDF, fee receipt,
