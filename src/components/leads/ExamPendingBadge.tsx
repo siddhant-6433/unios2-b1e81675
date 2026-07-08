@@ -43,7 +43,7 @@ export function ExamPendingBadge({ leadId, leadName, phone, courseName, campusNa
     fetchExamRegistrationsForLead(leadId).then(async (byCode) => {
       if (cancelled) return;
       const row = byCode[examCode];
-      setStatus(row?.status || "unknown");
+      setStatus(row?.status ?? "unknown");
       setRegNo(row?.registration_no || null);
       setDocUrl(row?.document_url ? await signExamRegistrationDoc(row.document_url) : null);
       setLoaded(true);

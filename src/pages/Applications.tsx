@@ -587,7 +587,7 @@ export default function Applications() {
             const rec = examRegByLead[leadId]?.[code];
             return {
               examCode: code,
-              status: (rec?.status || "unknown") as ExamRegistrationStatus,
+              status: (rec?.status ?? "unknown") as ExamRegistrationStatus,
               registrationNo: rec?.registration_no || null,
             };
           })(),
