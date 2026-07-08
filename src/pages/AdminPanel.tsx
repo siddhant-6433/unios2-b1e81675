@@ -113,6 +113,7 @@ const AdminPanel = () => {
   const [search, setSearch] = useState("");
   const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "academic_partners" | "publishers" | "families" | "leads">("employees");
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -139,7 +140,7 @@ const AdminPanel = () => {
     try {
       const { data, error } = await supabase.rpc("admin_user_directory" as any, {
         _show_archived: showArchivedUsers,
-      });
+      }).limit(10000);
 
       if (error) {
         toast({ title: "Error loading users", description: error.message, variant: "destructive" });
@@ -422,7 +423,11 @@ const AdminPanel = () => {
       roleFilter === "all" ||
       (roleFilter === "none" ? !u.role : u.role === roleFilter);
 
-    return matchesSearch && matchesRole;
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "active" ? !u.login_disabled : u.login_disabled);
+
+    return matchesSearch && matchesRole && matchesStatus;
   });
 
   const getRoleBadgeClass = (r: AppRole | null) => {
@@ -501,7 +506,10 @@ const AdminPanel = () => {
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-muted-foreground mr-1">
+                {users.length} total users
+              </span>
               {([
                 { key: "employees" as const, label: "Employees" },
                 { key: "consultants" as const, label: "Consultants" },
@@ -512,7 +520,7 @@ const AdminPanel = () => {
               ]).map((tab) => (
                 <button
                   key={tab.key}
-                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); }}
+                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}
                   className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                     userSubTab === tab.key
                       ? "border-primary bg-primary text-primary-foreground"
@@ -531,6 +539,15 @@ const AdminPanel = () => {
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
+                className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active ({users.filter((u) => !u.login_disabled).length})</option>
+                <option value="inactive">Inactive ({users.filter((u) => u.login_disabled).length})</option>
+              </select>
               {userSubTab === "employees" && (
                 <select
                   value={roleFilter}
