@@ -37,21 +37,33 @@ CREATE INDEX IF NOT EXISTS idx_push_devices_user_active
 ALTER TABLE public.push_devices ENABLE ROW LEVEL SECURITY;
 
 -- Own-row CRUD only; the push-send edge fn reads with service role (bypasses RLS).
-CREATE POLICY "push_devices_select_own"
-  ON public.push_devices FOR SELECT TO authenticated
-  USING (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "push_devices_select_own"
+    ON public.push_devices FOR SELECT TO authenticated
+    USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE POLICY "push_devices_insert_own"
-  ON public.push_devices FOR INSERT TO authenticated
-  WITH CHECK (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "push_devices_insert_own"
+    ON public.push_devices FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE POLICY "push_devices_update_own"
-  ON public.push_devices FOR UPDATE TO authenticated
-  USING (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "push_devices_update_own"
+    ON public.push_devices FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE POLICY "push_devices_delete_own"
-  ON public.push_devices FOR DELETE TO authenticated
-  USING (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "push_devices_delete_own"
+    ON public.push_devices FOR DELETE TO authenticated
+    USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ────────────────────────────────────────────────────────────────────
 -- 2. notice_reads — unread badges for the EXISTING public.notices
@@ -65,10 +77,13 @@ CREATE TABLE IF NOT EXISTS public.notice_reads (
 
 ALTER TABLE public.notice_reads ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "notice_reads_all_own"
-  ON public.notice_reads FOR ALL TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "notice_reads_all_own"
+    ON public.notice_reads FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ────────────────────────────────────────────────────────────────────
 -- 3. notifications: widen type CHECK + deep-link payload column
