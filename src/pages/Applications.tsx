@@ -373,7 +373,7 @@ export default function Applications() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted" | "on_hold">("all");
   const [courseFilter, setCourseFilter] = useState("all");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -1714,6 +1714,7 @@ export default function Applications() {
             { value: "all", label: "All Status" },
             { value: "draft", label: "Draft" },
             { value: "submitted", label: "Submitted" },
+            { value: "on_hold", label: "On Hold" },
           ]}
           allowEmpty={false}
           triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
@@ -1883,6 +1884,17 @@ export default function Applications() {
                               course_name: primaryCourseName(app),
                             }) : undefined}
                           />
+                        </div>
+                      )}
+                      {app.status === "on_hold" && (
+                        <div className="mt-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700 max-w-[260px]"
+                            title={app.hold_reason || "No reason provided"}
+                          >
+                            <PauseCircle className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{app.hold_reason || "No reason provided"}</span>
+                          </span>
                         </div>
                       )}
                     </td>
