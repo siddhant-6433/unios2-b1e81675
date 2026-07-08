@@ -833,6 +833,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferLeadIds, setTransferLeadIds] = useState<string[]>([]);
   const [transferLeadNames, setTransferLeadNames] = useState<string[]>([]);
+  const [transferTotalMatching, setTransferTotalMatching] = useState<number>(0);
+  const transferFetchLeadIds = useCallback(async (scope: { mode: "pages" | "all"; pageCount?: number }): Promise<string[]> => {
+    if (scope.mode === "all") {
+      return filtered.map(c => c.lead_id).filter(Boolean) as string[];
+    }
+    const pageCount = scope.pageCount || 1;
+    return filtered.slice(0, pageCount * 50).map(c => c.lead_id).filter(Boolean) as string[];
+  }, [filtered]);
 
   // Per-conversation AI/human guard. 'human' means the bot stays silent and a
   // counsellor handles the chat (inbox or WhatsApp Business app). Read by the
@@ -2578,6 +2586,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     }
                     setTransferLeadIds(ids);
                     setTransferLeadNames([]);
+                    setTransferTotalMatching(filtered.length);
                     setTransferOpen(true);
                   }}
                   className="shrink-0 inline-flex items-center gap-1 rounded-md border border-violet-300 bg-violet-50 px-2 py-1.5 text-[10px] font-medium text-violet-700 hover:bg-violet-100 transition-colors whitespace-nowrap"
@@ -3695,6 +3704,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         onOpenChange={setTransferOpen}
         leadIds={transferLeadIds}
         leadNames={transferLeadNames}
+        totalMatchingLeads={transferTotalMatching}
+        fetchLeadIdsForTransfer={transferFetchLeadIds}
         onSuccess={() => {
           void fetchConversationPage(true, null);
         }}
