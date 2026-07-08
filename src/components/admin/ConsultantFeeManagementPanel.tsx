@@ -148,6 +148,7 @@ export default function ConsultantFeeManagementPanel() {
         ) : rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">No consultant fee management configured yet.</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
@@ -179,6 +180,7 @@ export default function ConsultantFeeManagementPanel() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

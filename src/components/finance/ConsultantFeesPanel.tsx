@@ -121,6 +121,7 @@ export function ConsultantFeesPanel() {
               No students in an enabled course/session yet. Ask the admissions office to enable fee management for your courses.
             </p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -164,6 +165,7 @@ export function ConsultantFeesPanel() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </CardContent>
       </Card>
