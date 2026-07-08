@@ -197,3 +197,6 @@ verify_jwt = false
 # applications row, so JWT verification at the gateway is redundant.
 [functions.apply-portal-upload-doc]
 verify_jwt = false
+
+[functions.pay-link]
+verify_jwt = false

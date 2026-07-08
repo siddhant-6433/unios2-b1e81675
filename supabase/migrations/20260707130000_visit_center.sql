@@ -32,6 +32,9 @@ COMMENT ON COLUMN public.campus_visits.outcome IS 'Structured outcome captured a
 -- 2. Extend visit_funnel_leads with checked_in_at + outcome ---------------
 -- Reproduced from 20260617100200_visit_funnel_and_scoring_fix.sql with the
 -- two new columns surfaced from the latest visit; funnel logic unchanged.
+-- New columns appended AFTER funnel_box: CREATE OR REPLACE VIEW only allows
+-- appending columns at the end, and admissions_overview depends on this view
+-- so DROP+CREATE would cascade.
 CREATE OR REPLACE VIEW public.visit_funnel_leads  -- lint-allow: invoker view unchanged from 20260617100200; staff-facing funnel, RLS-scoping to the caller's own leads is intentional
 WITH (security_invoker = on) AS
 WITH latest_visit AS (
@@ -50,8 +53,6 @@ SELECT
   l.counsellor_id,
   lv.visit_status,
   lv.visit_date,
-  lv.checked_in_at,
-  lv.outcome,
   CASE
     WHEN l.admitted_at IS NOT NULL OR l.stage = 'admitted'              THEN 'admitted'
     WHEN l.applied_at IS NOT NULL                                       THEN 'applied'
@@ -64,7 +65,9 @@ SELECT
     WHEN lv.visit_status = 'scheduled'                                  THEN 'scheduled'
     WHEN lv.visit_status IN ('no_show','cancelled')                     THEN 'leakage'
     ELSE 'leakage'
-  END AS funnel_box
+  END AS funnel_box,
+  lv.checked_in_at,
+  lv.outcome
 FROM latest_visit lv
 JOIN public.leads l ON l.id = lv.lead_id;
 

@@ -84,8 +84,10 @@ BEGIN
 
   INSERT INTO public.consultants (name, stage) VALUES ('VERIFY consultant', 'active')
   RETURNING id INTO v_consultant_id;
-  INSERT INTO public.students (name, phone, course_id, session_id)
-  VALUES ('VERIFY hidden-student', '0000000002', v_course_id, v_session_id)
+  -- admission_date + joining_academic_year satisfy the school-student trigger
+  -- (enforce_school_student_academic_fields) when the seed course is a school.
+  INSERT INTO public.students (name, phone, course_id, session_id, admission_date, joining_academic_year)
+  VALUES ('VERIFY hidden-student', '0000000002', v_course_id, v_session_id, CURRENT_DATE, '2026-27')
   RETURNING id INTO v_student_id;
 
   -- 3a. No visibility row at all → visible.
@@ -142,8 +144,8 @@ BEGIN
     RAISE EXCEPTION 'ROLLBACK 4 (skipped — no course/session seed rows available)';
   END IF;
 
-  INSERT INTO public.students (name, phone, course_id, session_id)
-  VALUES ('VERIFY reject-student', '0000000003', v_course_id, v_session_id)
+  INSERT INTO public.students (name, phone, course_id, session_id, admission_date, joining_academic_year)
+  VALUES ('VERIFY reject-student', '0000000003', v_course_id, v_session_id, CURRENT_DATE, '2026-27')
   RETURNING id INTO v_student_id;
 
   BEGIN
