@@ -244,6 +244,19 @@ Deno.serve(async (req) => {
       lead = newLead || null;
     }
 
+    // Assign unassigned leads via round-robin (same as Meta webhook)
+    if (lead?.id && !lead.counsellor_id && lead.stage !== "dnc") {
+      try {
+        const { data: assignedId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: lead.id });
+        if (assignedId) {
+          lead.counsellor_id = assignedId as string;
+          console.log(`Plivo intake round-robin assigned lead ${lead.id} → ${assignedId}`);
+        }
+      } catch (e) {
+        console.error("Plivo intake round-robin assign failed:", (e as Error).message);
+      }
+    }
+
     // ── Log the inbound message ──────────────────────────────────────────────
     const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
       lead_id: lead?.id || null,

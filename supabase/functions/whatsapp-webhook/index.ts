@@ -611,20 +611,19 @@ Deno.serve(async (req) => {
               console.error("Webhook auto-create lead failed:", leadInsertErr.message);
             }
             lead = newLead || null;
+          }
 
-            // Distribute brand-new WhatsApp leads across the same admin-maintained
-            // intake round-robin pool that inbound voice calls use (prefers
-            // online counsellors). No-op when no pool is configured.
-            if (lead?.id && !lead.counsellor_id) {
-              try {
-                const { data: assignedId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: lead.id });
-                if (assignedId) {
-                  lead.counsellor_id = assignedId as string;
-                  console.log(`WhatsApp intake round-robin assigned lead ${lead.id} → ${assignedId}`);
-                }
-              } catch (e) {
-                console.error("WhatsApp intake round-robin assign failed:", (e as Error).message);
+          // Assign unassigned leads via round-robin. Catches both brand-new
+          // leads AND pre-existing leads that never got a counsellor.
+          if (lead?.id && !lead.counsellor_id && lead.stage !== "dnc") {
+            try {
+              const { data: assignedId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: lead.id });
+              if (assignedId) {
+                lead.counsellor_id = assignedId as string;
+                console.log(`WhatsApp intake round-robin assigned lead ${lead.id} → ${assignedId}`);
               }
+            } catch (e) {
+              console.error("WhatsApp intake round-robin assign failed:", (e as Error).message);
             }
           }
 

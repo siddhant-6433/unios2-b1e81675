@@ -1186,7 +1186,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
     for (const row of seedRows) {
       const lead = row.lead_id ? leadById.get(row.lead_id) : null;
-      if (role === "counsellor" && profile?.id && (!lead || lead.counsellor_id !== profile.id)) {
+      if (role === "counsellor" && profile?.id && (!lead || (lead.counsellor_id && lead.counsellor_id !== profile.id))) {
         continue;
       }
       if (isAdminRole(role)) {
@@ -1281,10 +1281,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         }
 
         if (role === "counsellor" && profile?.id) {
-          // Filter via the aggregated lead_counsellor_ids array — covers the
-          // case where the latest message on a phone is a campaign blast
-          // (lead_id NULL) or a template tied to another counsellor's lead.
-          q = q.contains("lead_counsellor_ids", [profile.id]);
+          // Show counsellor's own conversations AND unassigned ones
+          // (empty lead_counsellor_ids or where counsellor_id is NULL)
+          q = q.or(`lead_counsellor_ids.cs.{${profile.id}},counsellor_id.is.null`);
         } else if (isAdminRole(role)) {
           if (counsellorFilter === "unassigned") {
             q = (q as any).is("counsellor_id", null);
@@ -1363,7 +1362,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         .limit(5000);
 
       if (role === "counsellor" && profile?.id) {
-        conversationChannelQuery = conversationChannelQuery.contains("lead_counsellor_ids", [profile.id]);
+        conversationChannelQuery = conversationChannelQuery.or(`lead_counsellor_ids.cs.{${profile.id}},counsellor_id.is.null`);
       } else if (isAdminRole(role)) {
         if (counsellorFilter === "unassigned") {
           conversationChannelQuery = (conversationChannelQuery as any).is("counsellor_id", null);
@@ -1500,7 +1499,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // Fetch unreplied breakdown for admins — separate unlimited query
   useEffect(() => {
     if (demoMode) return;
-    if (!isAdminRole(role) || counsellorList.length === 0) { setUnrepliedByCC([]); return; }
+    if (!isAdminRole(role)) { setUnrepliedByCC([]); return; }
+    let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("whatsapp_conversations" as any)
@@ -1508,24 +1508,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         .eq("last_direction", "inbound")
         .gt("unread_count", 0);
 
+      if (cancelled) return;
       if (!data || (data as any[]).length === 0) { setUnrepliedByCC([]); return; }
 
+      const ccNameMap = new Map(counsellorList.map(cc => [cc.id, cc.name]));
       const groups: Record<string, { name: string; count: number }> = {};
       for (const c of data as any[]) {
         const key = c.counsellor_id || "__unassigned__";
         const name = c.counsellor_id
-          ? (counsellorList.find(cc => cc.id === c.counsellor_id)?.name || "Unknown")
+          ? (ccNameMap.get(c.counsellor_id) || "Unknown")
           : "Unassigned";
         if (!groups[key]) groups[key] = { name, count: 0 };
         groups[key].count += c.unread_count;
       }
 
-      setUnrepliedByCC(
-        Object.entries(groups)
-          .filter(([, v]) => v.count > 0)
-          .map(([id, v]) => ({ id, name: v.name, count: v.count }))
-      );
+      if (!cancelled) {
+        setUnrepliedByCC(
+          Object.entries(groups)
+            .filter(([, v]) => v.count > 0)
+            .map(([id, v]) => ({ id, name: v.name, count: v.count }))
+        );
+      }
     })();
+    return () => { cancelled = true; };
   }, [role, counsellorList]);
 
   // Auto-select conversation from URL param (notification deep-link)
@@ -2308,7 +2313,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const isKnowledgeGap = (c: Conversation) =>
     c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
   const isUnassignedOps = (c: Conversation) =>
-    !c.owner_user_id && !c.counsellor_id && c.has_inbound;
+    !c.counsellor_id && c.has_inbound;
   const isWithinMetaReplyWindow = (iso: string | null | undefined) =>
     Boolean(iso && Date.now() - new Date(iso).getTime() < 24 * 60 * 60 * 1000);
   const isReplyWindowConversation = (c: Conversation) =>
