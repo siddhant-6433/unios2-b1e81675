@@ -17,6 +17,7 @@ import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
+  ArrowRightLeft, UserPlus,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -35,6 +36,7 @@ import {
   type RenderedWhatsAppTemplate,
   type WhatsAppTemplateDefinition,
 } from "@/lib/whatsappTemplateRender";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
@@ -826,6 +828,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [bfSecondaryNumber, setBfSecondaryNumber] = useState("");
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState<any>(null);
+
+  // Assign / reassign dialog
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferLeadIds, setTransferLeadIds] = useState<string[]>([]);
+  const [transferLeadNames, setTransferLeadNames] = useState<string[]>([]);
 
   // Per-conversation AI/human guard. 'human' means the bot stays silent and a
   // counsellor handles the chat (inbox or WhatsApp Business app). Read by the
@@ -2544,7 +2551,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
-              <div className="px-3 py-2 border-b border-border bg-muted/20">
+              <div className="px-3 py-2 border-b border-border bg-muted/20 flex items-center gap-2">
                 <SelectField
                   value={counsellorFilter}
                   onValueChange={(value) => { setCounsellorFilter(value); setUnrepliedOnly(false); }}
@@ -2557,6 +2564,22 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   triggerClassName="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:ring-1 focus:ring-ring/20"
                   ariaLabel="Filter WhatsApp conversations by counsellor"
                 />
+                <button
+                  onClick={() => {
+                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    if (ids.length === 0) {
+                      toast({ title: "No leads", description: "No leads in the current view to assign.", variant: "destructive" });
+                      return;
+                    }
+                    setTransferLeadIds(ids);
+                    setTransferLeadNames([]);
+                    setTransferOpen(true);
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-violet-300 bg-violet-50 px-2 py-1.5 text-[10px] font-medium text-violet-700 hover:bg-violet-100 transition-colors whitespace-nowrap"
+                  title="Bulk assign/reassign all leads in current filtered view"
+                >
+                  <UserPlus className="h-3 w-3" /> Bulk Assign
+                </button>
               </div>
             )}
 
@@ -2779,6 +2802,20 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       >
                         <User className="h-3 w-3" />
                         {selectedConv.counsellor_name}
+                      </button>
+                    )}
+                    {isAdminRole(role) && selectedConv?.lead_id && (
+                      <button
+                        onClick={() => {
+                          setTransferLeadIds([selectedConv.lead_id!]);
+                          setTransferLeadNames([selectedConv.lead_name || selectedPhone || ""]);
+                          setTransferOpen(true);
+                        }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 transition-colors whitespace-nowrap"
+                        title={selectedConv.counsellor_name ? "Reassign to a different counsellor" : "Assign a counsellor"}
+                      >
+                        <ArrowRightLeft className="h-3 w-3" />
+                        {selectedConv.counsellor_name ? "Reassign" : "Assign"}
                       </button>
                     )}
                     {conversationBusinessKey(selectedConv) && aiMode && (
@@ -3647,6 +3684,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TransferLeadDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        leadIds={transferLeadIds}
+        leadNames={transferLeadNames}
+        onSuccess={() => {
+          void fetchConversationPage(true, null);
+        }}
+      />
     </div>
   );
 };
