@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface StudentDocument {
@@ -1223,6 +1224,7 @@ const StudentProfile = () => {
 
         <TabsContent value="documents">
           <div className="mt-4 space-y-4">
+            <TransferCertificateSection studentId={student.id} leadId={student.lead_id} />
             {canUploadDocuments && (
               <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3">
