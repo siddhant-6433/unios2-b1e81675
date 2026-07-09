@@ -72,8 +72,28 @@ export default function PayLink() {
     if (!token) { setStep("error"); setError("Missing payment token."); return; }
     (async () => {
       try {
-        const data = (await callFn("resolve")) as Resolved;
+        let data = (await callFn("resolve")) as Resolved;
         setLink(data);
+        // Razorpay hosted-link callback: the payer lands back here with
+        // signature params. Verify + settle server-side, then re-resolve.
+        const qs = new URLSearchParams(window.location.search);
+        const cbLinkId = qs.get("razorpay_payment_link_id");
+        const cbSignature = qs.get("razorpay_signature");
+        if (data.status === "active" && cbLinkId && cbSignature) {
+          try {
+            await callFn("verify-link-callback", {
+              razorpay_payment_link_id: cbLinkId,
+              razorpay_payment_link_reference_id: qs.get("razorpay_payment_link_reference_id") || "",
+              razorpay_payment_link_status: qs.get("razorpay_payment_link_status") || "",
+              razorpay_payment_id: qs.get("razorpay_payment_id") || "",
+              razorpay_signature: cbSignature,
+            });
+          } catch (e) {
+            console.error("[PayLink] callback verification failed:", e);
+          }
+          data = (await callFn("resolve")) as Resolved;
+          setLink(data);
+        }
         if (data.status === "paid") { setStep("done"); return; }
         if (data.status !== "active") { setStep("error"); setError(`This link is ${data.status}.`); return; }
         // If the link is a Razorpay hosted link, redirect the payer there.

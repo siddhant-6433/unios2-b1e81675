@@ -117,6 +117,26 @@ async function settleStudentFeeLedger(
   }
 }
 
+// Receipt PDF + WhatsApp/email go out via notify-event. Required here because
+// the DB trigger fn_notify_payment_received skips gateway rows (the gateway
+// edge fn is expected to notify, mirroring razorpay-payment/easebuzz).
+function notifyPaymentReceived(
+  supabaseUrl: string,
+  serviceKey: string,
+  leadId: string,
+  leadPaymentId: string,
+): void {
+  fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+    body: JSON.stringify({
+      event: "payment_received",
+      lead_id: leadId,
+      context: { payment_id: leadPaymentId },
+    }),
+  }).catch((e) => console.error("[pay-link] notify payment_received failed:", e));
+}
+
 // Core idempotent settlement: guard on status transition active→paid, then
 // insert the payment row exactly once.
 async function settleLink(
@@ -158,7 +178,8 @@ async function settleLink(
       .single();
     if (error) return { ok: false, message: error.message };
     await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
-    // Triggers assign receipt no, advance stage (recompute_lead_fee_stage), notify.
+    // Triggers assign receipt no + advance stage; receipt/WA/email via notify.
+    notifyPaymentReceived(supabaseUrl, serviceKey, link.lead_id, lp.id);
     return { ok: true };
   }
 
@@ -187,6 +208,7 @@ async function settleLink(
     if (error) return { ok: false, message: error.message };
     await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
     await settleStudentFeeLedger(admin, link.student_id, paidAmount, lp.id);
+    notifyPaymentReceived(supabaseUrl, serviceKey, leadId, lp.id);
     return { ok: true };
   }
 
@@ -208,6 +230,7 @@ async function settleLink(
       .single();
     if (error) return { ok: false, message: error.message };
     await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
+    notifyPaymentReceived(supabaseUrl, serviceKey, link.lead_id, lp.id);
     return { ok: true };
   }
 
@@ -319,6 +342,33 @@ Deno.serve(async (req) => {
       }, keyId, keySecret);
       if (!res.ok) return json({ error: data?.error?.description || "Failed to create order" }, 500);
       return json({ order_id: data.id, amount: data.amount, currency: data.currency, key_id: keyId });
+    }
+
+    // Razorpay hosted Payment-Link callback (candidate lands back on
+    // /pay/<token>?razorpay_payment_link_id=...&razorpay_signature=...).
+    // Signature = HMAC_SHA256(link_id|reference_id|status|payment_id, key_secret).
+    // This settles WITHOUT the webhook, which needs separate registration.
+    if (action === "verify-link-callback") {
+      if (!keySecret) return json({ error: "Razorpay not configured" }, 500);
+      const plinkId = String(parsed.razorpay_payment_link_id || "");
+      const refId = String(parsed.razorpay_payment_link_reference_id || "");
+      const plStatus = String(parsed.razorpay_payment_link_status || "");
+      const paymentId = String(parsed.razorpay_payment_id || "");
+      const signature = String(parsed.razorpay_signature || "");
+      if (!plinkId || !paymentId || !signature) {
+        return json({ error: "payment_link_id, payment_id and signature are required" }, 400);
+      }
+      if (plStatus !== "paid") return json({ error: `Payment link status is ${plStatus || "unknown"}` }, 409);
+      if (link.gateway_link_id && link.gateway_link_id !== plinkId) {
+        return json({ error: "Payment link mismatch" }, 400);
+      }
+      const expected = await hmacSha256Hex(keySecret, `${plinkId}|${refId}|${plStatus}|${paymentId}`);
+      if (!timingSafeHexEqual(expected, signature)) {
+        return json({ error: "Invalid payment signature" }, 400);
+      }
+      const settled = await settleLink(admin, supabaseUrl, serviceKey, link, paymentId, "razorpay");
+      if (!settled.ok) return json({ error: settled.message || "Settlement failed" }, 500);
+      return json({ success: true });
     }
 
     if (action === "verify") {
