@@ -88,6 +88,46 @@ const TEMPLATES: Record<string, any> = {
       },
     ],
   },
+
+  // Payment link request — sent when staff/consultant sends a custom-amount
+  // payment link (create-payment-link, send_channel whatsapp/both). Worded as
+  // a follow-through on a conversation ("as discussed") so Meta categorises
+  // UTILITY, not MARKETING (lesson from course_info v3→v4). Button URL must
+  // be our own domain with a single {{1}} suffix (Meta constraint) — /pay/<token>
+  // redirects to the Razorpay hosted page when applicable.
+  payment_link_request: {
+    name: "payment_link_request",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, as discussed, here is your secure payment link for {{2}} of Rs. {{3}}. " +
+          "The link is valid till {{4}}. Your receipt will be generated automatically once the payment is complete.\n\n" +
+          "NIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Rohan Sharma",
+            "Token fee prior to admission",
+            "25,000",
+            "16 Jul 2026",
+          ]],
+        },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [
+          {
+            type: "URL",
+            text: "Pay Now",
+            url: "https://uni.nimt.ac.in/pay/{{1}}",
+            example: ["https://uni.nimt.ac.in/pay/0a1b2c3d4e5f60718293a4b5c6d7e8f9"],
+          },
+        ],
+      },
+    ],
+  },
 };
 
 Deno.serve(async (req) => {

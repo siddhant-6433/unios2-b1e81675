@@ -215,6 +215,28 @@ Deno.serve(async (req) => {
       .eq("id", linkRow.id);
 
     // --- Optionally notify the candidate -------------------------------------
+    // WhatsApp: approved template with a Pay Now button to /pay/<token>.
+    // Fails gracefully (logged by whatsapp-send) until Meta approves the
+    // template — Razorpay's SMS notify above covers the gap.
+    if (wantsWhatsApp && payerPhone) {
+      const purposeLabel = purpose === "pre_admission_token"
+        ? "Token fee prior to admission"
+        : purpose === "fee_due" ? "Fee due" : "Payment";
+      const validTill = new Date(Date.now() + expiresDays * 86400000)
+        .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+      fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({
+          template_key: "payment_link_request",
+          phone: payerPhone,
+          ...(leadId ? { lead_id: leadId } : {}),
+          params: [payerName, purposeLabel, amount.toLocaleString("en-IN"), validTill],
+          button_urls: [linkRow.token],
+        }),
+      }).catch((e) => console.error("[create-payment-link] whatsapp failed:", e));
+    }
+
     // Branded email with the pay URL (Razorpay's own SMS/email above covers the
     // gateway-hosted delivery; this is the institution-branded copy).
     if (wantsEmail && payerEmail) {

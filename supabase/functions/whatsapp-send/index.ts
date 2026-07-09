@@ -201,6 +201,10 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // here because the template is already approved and we don't want to
   // submit a divergent variant.
   payment_receipt:        { name: "payment_receipt",        params: ["student_name", "payment_type", "amount", "receipt_no", "download_url"] },
+
+  // Custom-amount payment link (create-payment-link). button_urls=[link token]
+  // — Meta substitutes the {{1}} suffix of https://uni.nimt.ac.in/pay/{{1}}.
+  payment_link_request:   { name: "payment_link_request",   params: ["student_name", "purpose_label", "amount", "valid_till"] },
   payment_receipt_pdf:    { name: "payment_receipt_pdf",    params: ["student_name", "payment_type", "amount", "receipt_no"] },
 
   // ── Course info (data-driven) ─────────────────────────────────────────
