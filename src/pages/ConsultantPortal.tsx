@@ -23,6 +23,7 @@ import { ConsultantTour } from "@/components/consultant/ConsultantTour";
 import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecorder";
 import { BookOpen } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
+import { ConsultantFeesPanel } from "@/components/finance/ConsultantFeesPanel";
 
 interface DashboardStats {
   consultant_id: string;
@@ -744,7 +745,7 @@ const ConsultantPortal = () => {
 
       <Tabs defaultValue="leads" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
-          {["Leads", "Payments", "Commissions", "Requests"].map(t => (
+          {["Leads", "Payments", "Fees", "Commissions", "Requests"].map(t => (
             <TabsTrigger key={t} value={t.toLowerCase()} data-tour={`${t.toLowerCase()}-tab`}
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
               {t}
@@ -804,6 +805,11 @@ const ConsultantPortal = () => {
               </table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* FEES TAB — consultant-managed fee visibility + pay/send-link */}
+        <TabsContent value="fees" className="mt-4">
+          <ConsultantFeesPanel />
         </TabsContent>
 
         {/* PAYMENTS TAB */}

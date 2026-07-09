@@ -649,10 +649,11 @@ Deno.serve(async (req) => {
       const haveReceipt = !!receiptUrl;
 
       const TYPE_LABEL: Record<string, string> = {
-        application_fee:  "Application Fee",
-        token_fee:        "Token Fee",
-        registration_fee: "Registration Fee",
-        other:            "Other Charges",
+        application_fee:     "Application Fee",
+        token_fee:           "Token Fee",
+        pre_admission_token: "Token Fee (prior to admission)",
+        registration_fee:    "Registration Fee",
+        other:               "Other Charges",
       };
       const waParams = [
         lead.name || "Student",

@@ -27,6 +27,7 @@ const TeamManagement = lazy(() => import("@/components/admin/TeamManagement"));
 const CourseCampusMaster = lazy(() => import("@/components/admin/CourseCampusMaster"));
 const FinancialGroupsPanel = lazy(() => import("@/components/admin/FinancialGroupsPanel"));
 const PaymentGatewaysPanel = lazy(() => import("@/components/admin/PaymentGatewaysPanel"));
+const ConsultantFeeManagementPanel = lazy(() => import("@/components/admin/ConsultantFeeManagementPanel"));
 const ApprovalLettersPanel = lazy(() => import("@/components/admin/ApprovalLettersPanel"));
 const BrandingPanel = lazy(() =>
   import("@/components/admin/BrandingPanel").then((m) => ({ default: m.BrandingPanel })));
@@ -478,6 +479,9 @@ const AdminPanel = () => {
           </TabsTrigger>
           <TabsTrigger value="payment-gateways" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Payment Gateways
+          </TabsTrigger>
+          <TabsTrigger value="consultant-fees" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Consultant Fees
           </TabsTrigger>
           <TabsTrigger value="approval-letters" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Approval Letters
@@ -1075,6 +1079,10 @@ const AdminPanel = () => {
 
         <TabsContent value="payment-gateways" className="mt-6">
           <Suspense fallback={<AdminLazyFallback />}><PaymentGatewaysPanel /></Suspense>
+        </TabsContent>
+
+        <TabsContent value="consultant-fees" className="mt-6">
+          <Suspense fallback={<AdminLazyFallback />}><ConsultantFeeManagementPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="approval-letters" className="mt-6">

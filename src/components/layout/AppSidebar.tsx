@@ -9,7 +9,7 @@ import {
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
-  Library, Barcode,
+  Library, Barcode, DoorOpen,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -83,6 +83,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
+  { title: "Visit Center", url: "/visit-center", icon: DoorOpen, permission: "leads:view" },
   { title: "Visit Monitor", url: "/visit-monitor", icon: Footprints, permission: "leads:view" },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },

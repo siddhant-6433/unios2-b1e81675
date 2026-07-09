@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles, Handshake, School,
+  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -54,6 +54,7 @@ const ScheduleFollowupDialog       = lazy(() => import("@/components/admissions/
 const loadCallDispositionDialog = () => import("@/components/admissions/CallDispositionDialog");
 const CallDispositionDialog        = lazy(() => loadCallDispositionDialog().then(m => ({ default: m.CallDispositionDialog })));
 const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
+const SendPaymentLinkDialog        = lazy(() => import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
 const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
@@ -140,6 +141,7 @@ const LeadDetail = () => {
   const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [showSendPaymentLink, setShowSendPaymentLink] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
   const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
@@ -1262,6 +1264,13 @@ const LeadDetail = () => {
             color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30",
             action: () => setShowRecordPayment(true),
           }] : []),
+          // Payment link — any staff with leads access (the QuickActions bar is
+          // already gated by the leads:view page permission).
+          {
+            icon: LinkIcon, label: "Payment Link",
+            color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30",
+            action: () => setShowSendPaymentLink(true),
+          },
           { icon: ThumbsDown, label: "Not Interested", color: "text-red-600 bg-red-100 dark:bg-red-900/30", action: () => setShowNotInterested(true) },
         ];
 
@@ -1648,6 +1657,15 @@ const LeadDetail = () => {
         leadId={lead.id}
         leadName={lead.name}
         onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+      />
+
+      {/* Send Payment Link — custom-amount pre-application token or dues */}
+      <SendPaymentLinkDialog
+        open={showSendPaymentLink}
+        onOpenChange={setShowSendPaymentLink}
+        leadId={lead.id}
+        defaultPurpose="pre_admission_token"
+        onCreated={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
       />
 
       {/* Super-admin manual override: Token Paid — requires transaction details + screenshot */}

@@ -114,6 +114,8 @@ Deno.serve(async (req) => {
           title: `Follow up: ${visit.lead_name}`,
           body: `Campus visit was ${daysText}. Call now to maintain momentum.`,
           link: `/admissions/${visit.lead_id}`,
+          // Mobile deep-link → the Visit Center visit detail (web push falls back to `link`).
+          data: { url: `/(staff)/work/visit/${visit.visit_id}` },
           lead_id: visit.lead_id,
         });
       }
@@ -146,6 +148,8 @@ Deno.serve(async (req) => {
           title: `Escalation: ${counsellor.display_name} — ${visit.lead_name}`,
           body: `Post-visit follow-up pending ${daysText}. ${counsellor.display_name} hasn't followed up since the campus visit.`,
           link: `/admissions/${visit.lead_id}`,
+          // Mobile deep-link → the Visit Center visit detail (web push falls back to `link`).
+          data: { url: `/(staff)/work/visit/${visit.visit_id}` },
           lead_id: visit.lead_id,
         });
       }

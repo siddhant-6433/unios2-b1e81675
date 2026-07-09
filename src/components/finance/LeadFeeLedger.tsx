@@ -11,6 +11,7 @@ import { PaymentAuditDialog } from "./PaymentAuditDialog";
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
   token_fee: "Token Fee",
+  pre_admission_token: "Token Fee (pre-admission)",
   registration_fee: "Registration Fee",
   other: "Other",
 };
@@ -197,7 +198,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     const rows = preview.map(p => ({ ...p, paid_amount: 0, paid_payment_ids: [] as string[] }));
     const confirmed = payments.filter(p => p.status === "confirmed");
     const appPayments   = confirmed.filter(p => p.type === "application_fee");
-    const tokenPayments = confirmed.filter(p => p.type === "token_fee" || p.type === "other" || p.type === "registration_fee");
+    const tokenPayments = confirmed.filter(p => p.type === "token_fee" || p.type === "pre_admission_token" || p.type === "other" || p.type === "registration_fee");
 
     const applicationCreditRow =
       rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code)) ||
@@ -319,6 +320,9 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                   <td className="px-3 py-2 font-mono text-foreground">{p.receipt_no || "—"}</td>
                   <td className="px-3 py-2 text-foreground">
                     {PAY_TYPE_LABELS[p.type] || p.type}
+                    {p.type === "pre_admission_token" && preview.length > 0 && (
+                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400">Adjusted against admission fee</p>
+                    )}
                     {p.waiver_reason && (
                       <p className="text-[10px] text-muted-foreground/70">{p.waiver_reason}</p>
                     )}
