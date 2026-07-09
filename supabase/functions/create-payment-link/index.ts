@@ -86,6 +86,8 @@ Deno.serve(async (req) => {
     const note = parsed.note ? String(parsed.note).slice(0, 500) : null;
     const expiresDays = Number.isFinite(Number(parsed.expires_days)) ? Number(parsed.expires_days) : 7;
     const sendChannel = String(parsed.send_channel || "none"); // 'whatsapp' | 'email' | 'both' | 'none'
+    const wantsWhatsApp = sendChannel === "whatsapp" || sendChannel === "both";
+    const wantsEmail = sendChannel === "email" || sendChannel === "both";
 
     if (!["pre_admission_token", "fee_due", "custom"].includes(purpose)) {
       return json({ error: "Invalid purpose" }, 400);
@@ -187,7 +189,10 @@ Deno.serve(async (req) => {
           ...(payerEmail ? { email: payerEmail } : {}),
           ...(payerPhone ? { contact: payerPhone } : {}),
         },
-        notify: { sms: false, email: false },
+        // Razorpay delivers the link natively. SMS stands in for WhatsApp until
+        // a Meta template for payment links is approved (whatsapp-send is
+        // template-only and no approved template carries an arbitrary pay URL).
+        notify: { sms: wantsWhatsApp && !!payerPhone, email: wantsEmail && !!payerEmail },
         reminder_enable: true,
         notes: { payment_link_id: linkRow.id, purpose },
         callback_url: ourUrl,
@@ -210,16 +215,27 @@ Deno.serve(async (req) => {
       .eq("id", linkRow.id);
 
     // --- Optionally notify the candidate -------------------------------------
-    if (sendChannel !== "none" && leadId) {
-      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+    // Branded email with the pay URL (Razorpay's own SMS/email above covers the
+    // gateway-hosted delivery; this is the institution-branded copy).
+    if (wantsEmail && payerEmail) {
+      fetch(`${supabaseUrl}/functions/v1/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
         body: JSON.stringify({
-          event: "payment_link_sent",
-          lead_id: leadId,
-          context: { payment_link_id: linkRow.id, pay_url: payUrl, amount, purpose, channel: sendChannel },
+          template_slug: "payment-link",
+          to_email: payerEmail,
+          ...(leadId ? { lead_id: leadId } : {}),
+          variables: {
+            student_name: payerName,
+            amount: amount.toLocaleString("en-IN"),
+            purpose_label: purpose === "pre_admission_token"
+              ? "Token fee prior to admission (adjustable against admission fee)"
+              : purpose === "fee_due" ? "Fee due" : "Payment",
+            pay_url: payUrl,
+            note: note || "",
+          },
         }),
-      }).catch((e) => console.error("[create-payment-link] notify failed:", e));
+      }).catch((e) => console.error("[create-payment-link] email failed:", e));
     }
 
     return json({
