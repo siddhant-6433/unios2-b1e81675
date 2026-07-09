@@ -18,6 +18,7 @@ interface EmployeeProfile {
   first_name: string;
   middle_name: string;
   last_name: string;
+  salutation: string;
   display_name: string;
   gender: string;
   date_of_birth: string;
@@ -47,7 +48,7 @@ interface EmployeeProfile {
 }
 
 const emptyProfile: EmployeeProfile = {
-  employee_number: "", first_name: "", middle_name: "", last_name: "", display_name: "",
+  employee_number: "", first_name: "", middle_name: "", last_name: "", salutation: "", display_name: "",
   gender: "", date_of_birth: "", marital_status: "", blood_group: "", nationality: "India",
   physically_handicapped: false, work_email: "", personal_email: "", mobile_number: "",
   work_number: "", residence_number: "",
@@ -71,7 +72,7 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
     (async () => {
       // Fetch base profile (display_name, phone) — email not fetchable from frontend (auth.users is restricted)
       const [profileRes, empRes] = await Promise.all([
-        supabase.from("profiles").select("display_name, phone, campus").eq("user_id", userId).maybeSingle(),
+        (supabase.from("profiles") as any).select("display_name, phone, campus, salutation").eq("user_id", userId).maybeSingle(),
         supabase.from("employee_profiles").select("*").eq("user_id", userId).maybeSingle(),
       ]);
 
@@ -90,6 +91,7 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
           first_name: empData.first_name || "",
           middle_name: empData.middle_name || "",
           last_name: empData.last_name || "",
+          salutation: (baseProfile as any)?.salutation || "",
           display_name: empData.display_name || baseProfile?.display_name || userName,
           gender: empData.gender || "",
           date_of_birth: empData.date_of_birth || "",
@@ -123,6 +125,7 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
         // No employee_profiles row yet — pre-fill from profiles + auth
         setProfile({
           ...emptyProfile,
+          salutation: (baseProfile as any)?.salutation || "",
           display_name: baseProfile?.display_name || userName,
           first_name: (baseProfile?.display_name || userName).split(" ")[0] || "",
           last_name: (baseProfile?.display_name || userName).split(" ").slice(1).join(" ") || "",
@@ -191,12 +194,13 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
       const normalizedPhone = profile.mobile_number
         ? (profile.mobile_number.startsWith("+") ? profile.mobile_number : `+${profile.mobile_number.replace(/\D/g, "")}`)
         : null;
-      await supabase.rpc("admin_update_profile", {
-        p_user_id:     userId,
+      await supabase.rpc("admin_update_profile" as any, {
+        p_user_id:      userId,
         p_display_name: profile.display_name || null,
-        p_email:       profile.work_email || null,
-        p_phone:       normalizedPhone,
-      });
+        p_email:        profile.work_email || null,
+        p_phone:        normalizedPhone,
+        p_salutation:   profile.salutation ?? "",
+      } as any);
 
       toast({ title: "Saved", description: "Employee profile updated successfully." });
       onSuccess?.();
@@ -290,6 +294,17 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
                     <Field label="First Name" value={profile.first_name} onChange={(v) => set("first_name", v)} />
                     <Field label="Middle Name" value={profile.middle_name} onChange={(v) => set("middle_name", v)} />
                     <Field label="Last Name" value={profile.last_name} onChange={(v) => set("last_name", v)} />
+                    <div>
+                      <label className={labelCls}>Salutation</label>
+                      <select value={profile.salutation} onChange={(e) => set("salutation", e.target.value)} className={inputCls}>
+                        <option value="">None</option>
+                        <option value="Mr">Mr</option>
+                        <option value="Mrs">Mrs</option>
+                        <option value="Ms">Ms</option>
+                        <option value="Dr">Dr</option>
+                        <option value="Prof">Prof</option>
+                      </select>
+                    </div>
                     <Field label="Display Name" value={profile.display_name} onChange={(v) => set("display_name", v)} />
                     <div>
                       <label className={labelCls}>Gender</label>
