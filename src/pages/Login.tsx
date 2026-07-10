@@ -1,4 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+
+const RazorSense = lazy(() =>
+  import("@razorpay/blade/components").then(m => ({ default: (m as any).RazorSense }))
+);
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -432,9 +436,8 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex bg-background animate-fade-in">
-      {/* Left panel */}
+      {/* Left panel — clean brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
-        {/* NIMT logo — top left */}
         <div className="absolute top-6 left-6">
           <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
         </div>
@@ -448,13 +451,13 @@ const Login = () => {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-6 relative">
+      <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
         {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
         <div className="lg:hidden absolute top-5 right-5">
           <img src={nimtLogo} alt="NIMT" className="h-7 w-auto opacity-60" />
         </div>
 
-        <div className="w-full max-w-sm space-y-6">
+        <div className="w-full max-w-sm space-y-6 relative z-10">
           {/* Mobile logo */}
           <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
             <img src={uniosLogo} alt="UniOs" className="h-16 w-16 object-contain" />
@@ -478,6 +481,9 @@ const Login = () => {
               </button>
             </div>
           )}
+
+          {/* Login method forms — keyed for RazorSense entrance animation */}
+          <div key={method + (otpSent ? "-otp" : "")} className="animate-rs-slide-up">
 
           {/* Dev Password Login (localhost only) */}
           {method === "dev_password" && import.meta.env.DEV && (
@@ -840,6 +846,8 @@ const Login = () => {
             </div>
           )}
 
+          </div>{/* end keyed animation wrapper */}
+
           <p className="text-center text-[11px] text-muted-foreground">
             By signing in, you agree to our{" "}
             <a href="/terms" className="underline hover:text-foreground transition-colors">Terms of Service</a>
@@ -853,6 +861,25 @@ const Login = () => {
             </a>
           </div>
         </div>
+
+        {/* RzpGlass — 12x scaled, UniOS primary blue tint */}
+        <Suspense fallback={null}>
+          <RazorSense
+            preset="default"
+            width="400%"
+            height="400%"
+            gradientMapSrc="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
+            gradientMap2Src="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
+            style={{
+              position: 'absolute',
+              top: '-150%',
+              left: '-150%',
+              zIndex: 0,
+              opacity: 0.35,
+              pointerEvents: 'none',
+            }}
+          />
+        </Suspense>
       </div>
     </div>
   );

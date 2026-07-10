@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -134,7 +135,7 @@ export function CourseInfoPanel({ courseId }: Props) {
     })();
   }, [courseId]);
 
-  if (loading) return <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
   if (!course) return <p className="text-xs text-muted-foreground text-center py-4">Course not found</p>;
 
   // Prefer course-level affiliations from DB; fall back to hardcoded institution defaults

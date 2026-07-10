@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -71,7 +72,7 @@ export function WaitlistPanel({ courseId, campusId, courseName }: Props) {
     fetchWaitlist();
   };
 
-  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   if (entries.length === 0) {
     return (

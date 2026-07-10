@@ -173,9 +173,8 @@ export default {
           "100%": { boxShadow: "0 0 0 0 hsl(152 69% 38% / 0)" },
         },
         "rs-error-pulse": {
-          "0%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0.3)" },
-          "70%": { boxShadow: "0 0 0 8px hsl(4 76% 50% / 0)" },
-          "100%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0)" },
+          "0%, 100%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0.4), 0 0 12px 0 hsl(4 76% 50% / 0)" },
+          "50%": { boxShadow: "0 0 0 6px hsl(4 76% 50% / 0), 0 0 20px 4px hsl(4 76% 50% / 0.25)" },
         },
         "rs-slide-up": {
           from: { opacity: "0", transform: "translateY(12px)" },
@@ -194,7 +193,7 @@ export default {
         "score-float": "score-float 2s ease-out forwards",
         "rs-shake": "rs-shake 0.4s cubic-bezier(1, 0.5, 0, 0.5)",
         "rs-success-pulse": "rs-success-pulse 0.6s cubic-bezier(0, 0, 0.2, 1)",
-        "rs-error-pulse": "rs-error-pulse 0.6s cubic-bezier(0, 0, 0.2, 1)",
+        "rs-error-pulse": "rs-error-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite",
         "rs-slide-up": "rs-slide-up 0.28s cubic-bezier(0, 0, 0.2, 1)",
         "rs-scale-in": "rs-scale-in 0.24s cubic-bezier(0, 0, 0.2, 1)",
       },

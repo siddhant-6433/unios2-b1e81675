@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -533,7 +534,7 @@ const ConsultantPortal = () => {
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
   if (!consultantId) return <div className="flex h-64 items-center justify-center"><p className="text-sm text-muted-foreground">No consultant profile linked to your account.</p></div>;
 
   const onboardingComplete = consultant?.onboarding_status === "completed";

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -132,7 +133,7 @@ const Finance = () => {
     { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
   ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <>

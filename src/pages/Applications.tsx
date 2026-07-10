@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,6 +13,7 @@ import { SelectField } from "@/components/ui/state-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
@@ -1383,38 +1385,40 @@ export default function Applications() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{isCounsellor ? "My Applications" : "Applications"}</h1>
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
           {canExportApplications && (
-            <button
+            <Button
+              variant="pill-outline"
+              size="sm"
               onClick={handleExportApplications}
               disabled={exporting}
-              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+              className="gap-1.5 text-xs font-medium text-muted-foreground"
               title="Export applications matching the current filters"
             >
               {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Download CSV
-            </button>
+            </Button>
           )}
           {!isCounsellor && (
-            <button onClick={regenerateAll} disabled={!!bulkRegen}
-              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50">
+            <Button variant="pill-outline" size="sm" onClick={regenerateAll} disabled={!!bulkRegen}
+              className="gap-1.5 text-xs font-medium text-muted-foreground">
               {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
                 : selectedPdfApps.length > 0
                   ? `Regenerate Selected (${selectedPdfApps.length})`
                   : "Regenerate All PDFs"}
-            </button>
+            </Button>
           )}
           <button onClick={() => setSortMode(sortMode === "nudge" ? "date" : "nudge")}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -1492,7 +1496,7 @@ export default function Applications() {
               return (
                 <Fragment key={stage}>
                   {i > 0 && (
-                    <div className="flex flex-col items-center justify-center shrink-0 self-center">
+                    <div className="flex flex-col items-center justify-center shrink-0 self-center animate-rs-scale-in">
                       <div className={`text-[10px] font-semibold rounded-md border px-1.5 py-0.5 leading-tight ${conversionTone(conversion)}`}>
                         {conversion != null ? `${conversion}%` : "—"}
                       </div>
@@ -1508,23 +1512,23 @@ export default function Applications() {
                         selectApplicationCohort(dashboardApps.filter((app) => funnelStageOf(app) === stage), meta.label);
                       }
                     }}
-                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
+                    className={`group relative rounded-xl border transition-all duration-240 ease-standard text-left p-3 shrink-0 overflow-hidden animate-rs-slide-up ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
-                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
+                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis, animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
                     title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
-                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
+                    <div className="flex items-center justify-between mb-1.5 min-w-0">
+                      <p className="text-[10px] font-medium text-muted-foreground truncate">{meta.label}</p>
+                      <div className={`w-5 h-5 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-2.5 w-2.5 ${meta.iconColor}`} />
                       </div>
-                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     </div>
-                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
-                      <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                      <div className={`h-full ${meta.bar} transition-all duration-480 ease-standard`} style={{ width: `${reachPct}%` }} />
                     </div>
                     <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
                       <span className="font-semibold text-foreground/70">{reached}</span> reached
@@ -1646,12 +1650,12 @@ export default function Applications() {
       </Card>
 
       {/* Search + Filters */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
         <div className="relative min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          <Input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name, phone, app ID, course..."
-            className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
+            className="w-full rounded-xl pl-9 pr-3" />
         </div>
         <SelectField
           value={courseFilter}
@@ -1781,23 +1785,22 @@ export default function Applications() {
       )}
 
       {/* Table */}
-      <Card className="border-border/60 shadow-none">
+      <Card className="border-border/60 shadow-none overflow-hidden rounded-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/30">
+              <tr className="border-b border-border bg-surface-subtle">
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-8"></th>
                 {!isCounsellor && (
                   <th className="px-2 py-2.5 text-left font-medium text-muted-foreground w-8">
-                    <input
-                      type="checkbox"
-                      className="cursor-pointer accent-primary"
+                    <Checkbox
+                      className="cursor-pointer"
                       title={canManageApplicationLists ? "Select all filtered lead-linked applications" : "Select all eligible for PDF regeneration"}
                       checked={allSelectableAppsSelected}
-                      onChange={(e) => {
+                      onCheckedChange={(checked) => {
                         setSelectedIds(prev => {
                           const next = new Set(prev);
-                          if (e.target.checked) selectableApps.forEach(a => next.add(a.id));
+                          if (checked) selectableApps.forEach(a => next.add(a.id));
                           else selectableApps.forEach(a => next.delete(a.id));
                           return next;
                         });
@@ -1838,7 +1841,7 @@ export default function Applications() {
 
                 return (
                   <Fragment key={app.id}>
-                  <tr className="border-b border-border/40 hover:bg-muted/20">
+                  <tr className="border-b border-border/40 hover:bg-muted/20 transition-colors duration-160 ease-standard">
                     <td className="px-2 py-2">
                       <button onClick={() => setExpandedId(isExpanded ? null : app.id)} className="text-muted-foreground hover:text-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -1847,14 +1850,13 @@ export default function Applications() {
                     {!isCounsellor && (
                       <td className="px-2 py-2">
                         {(canManageApplicationLists ? !!app.lead_id : canRegenerateFormPdf(app)) ? (
-                          <input
-                            type="checkbox"
-                            className="cursor-pointer accent-primary"
+                          <Checkbox
+                            className="cursor-pointer"
                             checked={selectedIds.has(app.id)}
-                            onChange={(e) => {
+                            onCheckedChange={(checked) => {
                               setSelectedIds(prev => {
                                 const next = new Set(prev);
-                                if (e.target.checked) next.add(app.id);
+                                if (checked) next.add(app.id);
                                 else next.delete(app.id);
                                 return next;
                               });
@@ -1905,7 +1907,7 @@ export default function Applications() {
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
                           <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${progressPct === 100 ? "bg-success/50" : progressPct > 0 ? "bg-info/50" : "bg-gray-300"}`}
+                            <div className={`h-full rounded-full transition-all duration-480 ease-standard ${progressPct === 100 ? "bg-success/50" : progressPct > 0 ? "bg-info/50" : "bg-gray-300"}`}
                               style={{ width: `${progressPct}%` }} />
                           </div>
                           <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
@@ -2030,7 +2032,7 @@ export default function Applications() {
                   {isExpanded && (
                     <tr className="border-b border-border/40">
                       <td colSpan={expandColSpan} className="p-0 bg-primary/5">
-                        <div className="border-l-4 border-primary/30 p-5 animate-fade-in">
+                        <div className="border-l-4 border-primary/30 p-5 animate-rs-slide-up">
                           <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                             <h3 className="text-sm font-bold text-foreground">{app.application_id} — {app.full_name}</h3>
                             <div className="flex items-center gap-2">
@@ -2305,7 +2307,7 @@ export default function Applications() {
             </DialogTitle>
           </DialogHeader>
           {docsLoading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : docs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Upload className="h-8 w-8 mx-auto mb-2 opacity-30" />

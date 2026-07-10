@@ -24,7 +24,13 @@ type DashboardAnalyticsPayload = {
   fee_total?: { assigned: number; paid: number; due: number };
 };
 
-const PIE_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#3b82f6", "#8b5cf6", "#14b8a6", "#ec4899", "#f97316"];
+const getChartColor = (n: number) => {
+  const raw = typeof document !== "undefined"
+    ? getComputedStyle(document.documentElement).getPropertyValue(`--chart-${n}`).trim()
+    : "";
+  return raw ? `hsl(${raw})` : "#6366f1";
+};
+const PIE_COLORS = Array.from({ length: 8 }, (_, i) => getChartColor((i % 5) + 1));
 const AXIS_STYLE = { fontSize: 11, fill: "hsl(var(--muted-foreground))" };
 
 function fmtAmt(val: number): string {
@@ -173,8 +179,8 @@ export default function DashboardAnalytics({
                   <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} allowDecimals={false} />
                   <Tooltip content={<CountTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
                   <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                  <Bar dataKey="total" name="Total" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  <Bar dataKey="active" name="Active" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="total" name="Total" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} maxBarSize={40} animationDuration={800} />
+                  <Bar dataKey="active" name="Active" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} maxBarSize={40} animationDuration={800} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -244,9 +250,9 @@ export default function DashboardAnalytics({
                   tickFormatter={fmtAmt} width={58} />
                 <Tooltip content={<FeeTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
                 <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                <Bar dataKey="assigned" name="Net Assigned" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                <Bar dataKey="paid" name="Paid" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                <Bar dataKey="due" name="Due" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={36} />
+                <Bar dataKey="assigned" name="Net Assigned" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} maxBarSize={36} animationDuration={800} />
+                <Bar dataKey="paid" name="Paid" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} maxBarSize={36} animationDuration={800} />
+                <Bar dataKey="due" name="Due" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} maxBarSize={36} animationDuration={800} />
               </BarChart>
             </ResponsiveContainer>
           )}

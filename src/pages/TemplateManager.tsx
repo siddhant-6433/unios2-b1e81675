@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useMemo, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -341,7 +342,7 @@ Buttons:
     ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
     : "Never";
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -459,7 +460,7 @@ Buttons:
           </div>
 
           {coursesLoading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-xs">
@@ -597,7 +598,7 @@ Buttons:
           </div>
 
           {waSettingsLoading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-xs">

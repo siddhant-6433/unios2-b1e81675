@@ -303,7 +303,7 @@ export function NotificationPanel() {
                 return (
                   <div
                     key={notif.id}
-                    className={`group relative w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${
+                    className={`group relative w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors duration-160 ease-standard border-b border-border/30 cursor-pointer animate-rs-slide-up ${
                       !notif.is_read ? "bg-primary/[0.03]" : ""
                     }`}
                     onClick={() => handleClick(notif)}

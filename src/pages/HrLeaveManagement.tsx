@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -117,7 +118,7 @@ const HrLeaveManagement = () => {
       </div>
 
       {loading ? (
-        <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        <PageLoader />
       ) : (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">

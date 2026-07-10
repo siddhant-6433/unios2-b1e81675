@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect, memo } from "react";
+import { useCountUp } from "@/hooks/useCountUp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
@@ -19,6 +20,11 @@ import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantV
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
+
+const AnimatedNumber = memo(({ value }: { value: number }) => {
+  const display = useCountUp(value);
+  return <>{display.toLocaleString("en-IN")}</>;
+});
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -75,11 +81,11 @@ function AnalyticsFallback() {
         <div className="flex-1 border-t border-border/50" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 bg-muted/20" />
-        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 bg-muted/20" />
+        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 flutes" />
+        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 flutes" />
       </div>
-      <div className="h-72 rounded-lg border border-border/60 bg-muted/20" />
-      <div className="h-48 rounded-lg border border-border/60 bg-muted/20" />
+      <div className="h-72 rounded-lg border border-border/60 flutes" />
+      <div className="h-48 rounded-lg border border-border/60 flutes" />
     </div>
   );
 }
@@ -153,10 +159,10 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
   const conversionRate  = leadCount > 0 ? Math.round((admittedCount / leadCount) * 100) : 0;
 
   const statCards = [
-    { label: "Total Leads",            value: String(leadCount),    sub: `+${todayLeads} today`,      subColor: "text-primary",   icon: Users,         iconBg: "bg-pastel-blue" },
-    { label: "Applications In Progress",value: String(appInProgress),sub: "Filling application",      subColor: "text-chart-2",   icon: FileText,      iconBg: "bg-pastel-orange" },
-    { label: "Applications Submitted",  value: String(appSubmitted), sub: "Ready for review",          subColor: "text-chart-3",   icon: ClipboardCheck,iconBg: "bg-pastel-green" },
-    { label: "Admitted",               value: String(admittedCount),sub: `${conversionRate}% conversion`,subColor: "text-primary",icon: GraduationCap, iconBg: "bg-pastel-purple" },
+    { label: "Total Leads",            value: leadCount,    trend: todayLeads > 0 ? `+${todayLeads} today` : null, trendUp: true,  icon: Users,         iconBg: "bg-pastel-blue",   link: "/admissions" },
+    { label: "Applications In Progress",value: appInProgress,trend: "Filling application",                         trendUp: null,  icon: FileText,      iconBg: "bg-pastel-orange", link: "/applications" },
+    { label: "Applications Submitted",  value: appSubmitted, trend: "Ready for review",                             trendUp: null,  icon: ClipboardCheck,iconBg: "bg-pastel-green",  link: "/applications?status=submitted" },
+    { label: "Admitted",               value: admittedCount,trend: conversionRate > 0 ? `${conversionRate}% conversion` : null, trendUp: conversionRate > 0, icon: GraduationCap, iconBg: "bg-pastel-purple", link: "/admissions?stage=admitted" },
   ];
 
   return (
@@ -169,22 +175,42 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         </div>
       )}
 
+      {/* ── Hero banner ── */}
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 mb-1">
+        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
+      </div>
+
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((stat) => (
-          <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                  <stat.icon className="h-5 w-5 text-foreground/70" />
+        {statCards.map((stat, i) => (
+          <Card key={stat.label} className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up group" style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}>
+            <CardContent className="p-5 flex flex-col h-full">
+              {/* Top: label + icon */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${stat.iconBg}`}>
+                  <stat.icon className="h-4 w-4 text-foreground/70" />
                 </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                  <ArrowUpRight className="h-4 w-4" />
-                </Button>
               </div>
-              <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
-              <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
-              <p className={`text-xs font-medium mt-1 ${stat.subColor}`}>{stat.sub}</p>
+              {/* Big number */}
+              <p className="text-3xl font-bold text-foreground mt-3 tabular-nums">
+                <AnimatedNumber value={stat.value} />
+              </p>
+              {/* Trend indicator */}
+              {stat.trend && (
+                <p className="text-xs font-medium mt-1.5 flex items-center gap-1">
+                  {stat.trendUp === true && <span className="text-success">▲</span>}
+                  {stat.trendUp === false && <span className="text-destructive">▼</span>}
+                  <span className={stat.trendUp === true ? "text-success" : stat.trendUp === false ? "text-destructive" : "text-muted-foreground"}>{stat.trend}</span>
+                </p>
+              )}
+              {/* Footer link */}
+              <div className="mt-auto pt-3">
+                <Link to={stat.link} className="text-[11px] font-medium text-primary/70 group-hover:text-primary transition-colors duration-160 ease-standard flex items-center gap-1">
+                  View details <ArrowUpRight className="h-3 w-3" />
+                </Link>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -193,23 +219,33 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
       {/* ── Funnel + Recent Leads ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 border-border/60 shadow-none">
-          <CardHeader className="pb-4">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold">Admission Funnel</CardTitle>
               <Button variant="link" size="sm" className="text-primary gap-1 px-0" asChild>
                 <Link to="/admissions">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
               </Button>
             </div>
+            {/* RazorSense segmented progress bar */}
+            <div className="flex h-2 w-full gap-0.5 mt-3 rounded-full overflow-hidden">
+              {funnel.slice(0, 6).map((item, i) => (
+                <div
+                  key={item.stage}
+                  className={`${funnelColors[i] || "bg-primary"} transition-all duration-640 ease-standard`}
+                  style={{ flex: Math.max(item.count, 1) }}
+                />
+              ))}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3.5">
             {funnel.map((item, i) => (
-              <div key={item.stage} className="flex items-center gap-4">
+              <div key={item.stage} className="flex items-center gap-4 animate-rs-slide-up cursor-pointer hover:opacity-80 transition-opacity duration-160 ease-standard" style={{ animationDelay: `${i * 50}ms`, animationFillMode: "both" }}>
                 <span className="text-sm text-muted-foreground w-28 shrink-0">{item.stage}</span>
                 <div className="flex-1 h-8 bg-muted rounded-lg overflow-hidden relative">
                   <div
-                    className={`h-full ${funnelColors[i] || "bg-primary"} rounded-lg flex items-center justify-end pr-3 transition-all duration-500`}
+                    className={`h-full ${funnelColors[i] || "bg-primary"} rounded-lg flex items-center justify-end pr-3 transition-all duration-640 ease-standard`}
                     style={{ width: `${Math.max((item.count / funnelMax) * 100, 5)}%` }}>
-                    <span className="text-xs font-semibold text-primary-foreground">{item.count}</span>
+                    <span className="text-xs font-semibold text-primary-foreground tabular-nums">{item.count}</span>
                   </div>
                 </div>
               </div>
@@ -227,10 +263,11 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
             </div>
           </CardHeader>
           <CardContent className="space-y-0">
-            {recentLeads.map((lead: any) => (
+            {recentLeads.map((lead: any, i: number) => (
               <Link to={`/admissions/${lead.id}`} key={lead.id}
-                className="flex items-center gap-3 py-3 border-b border-border/30 last:border-0 hover:bg-muted/30 transition-colors">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-pastel-purple text-xs font-bold text-foreground/70">
+                className="flex items-center gap-3 py-3 border-b border-border/30 last:border-0 hover:bg-muted/30 hover:-translate-x-0.5 transition-all duration-160 ease-standard animate-rs-slide-up"
+                style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-pastel-purple text-xs font-bold text-foreground/70 animate-rs-scale-in">
                   {lead.initials}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -243,7 +280,13 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
               </Link>
             ))}
             {recentLeads.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">No leads yet</p>
+              <div className="flex flex-col items-center justify-center py-10 animate-rs-slide-up">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted mb-3">
+                  <Users className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium text-foreground">No leads yet</p>
+                <p className="text-xs text-muted-foreground mt-1">New leads will appear here</p>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -437,10 +480,6 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
-      </div>
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}

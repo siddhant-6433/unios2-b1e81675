@@ -186,17 +186,17 @@ function StatCard({ label, value, rawValue, sub, Icon, iconBg, iconColor, muted 
   // padding, larger tinted icon chip, hero-sized value with the optional
   // sub line tucked underneath.
   return (
-    <Card className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
+    <Card className="rounded-2xl border-border/40 shadow-none transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1">
       <CardContent className="p-4 flex items-start gap-3.5">
         <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
           <Icon className={`h-[18px] w-[18px] ${iconColor}`} />
         </div>
         <div className="min-w-0">
-          <p className={`text-2xl font-bold tabular-nums truncate leading-none tracking-tight ${muted ? "text-muted-foreground" : "text-foreground"}`}>
+          <p className="text-[11px] text-muted-foreground">{label}</p>
+          <p className={`text-2xl font-bold tabular-nums truncate leading-none tracking-tight mt-1.5 ${muted ? "text-muted-foreground" : "text-foreground"}`}>
             {rawValue ?? (value ?? 0).toLocaleString("en-IN")}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1.5">{label}</p>
-          {sub && <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{sub}</p>}
+          {sub && <p className="text-[10px] text-muted-foreground/80 mt-1 truncate">{sub}</p>}
         </div>
       </CardContent>
     </Card>

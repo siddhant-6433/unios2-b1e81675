@@ -276,7 +276,7 @@ const AiCallLog = () => {
           { key: "inbound" as const, label: "Inbound (Website)", value: stats.inbound, icon: PhoneIncoming, bg: "bg-pastel-purple" },
           { key: "withRecording" as const, label: "With Recording", value: stats.withRecording, icon: Play, bg: "bg-pastel-orange" },
           { key: "highConv" as const, label: "High Conversion", value: stats.highConv, icon: AlertCircle, bg: "bg-destructive/10" },
-        ]).map((s) => {
+        ]).map((s, i) => {
           const isActive = s.key === "total" ? activeStatFilter === null : activeStatFilter === s.key;
           const handleClick = () => {
             if (s.key === "total") { setActiveStatFilter(null); return; }
@@ -286,16 +286,17 @@ const AiCallLog = () => {
             <Card
               key={s.label}
               onClick={handleClick}
-              className={`border-border/60 shadow-none cursor-pointer transition-all hover:shadow-md ${isActive ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100"}`}
+              className={`border-border/60 shadow-none cursor-pointer transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1 animate-rs-slide-up ${isActive ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100"}`}
+              style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
             >
               <CardContent className="p-4">
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${s.bg} mb-2`}>
                   <s.icon className="h-4 w-4 text-foreground/70" />
                 </div>
-                <p className="text-2xl font-bold text-foreground">{loading ? "—" : s.value.toLocaleString()}</p>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className="text-2xl font-bold text-foreground mt-1.5">{loading ? "—" : s.value.toLocaleString()}</p>
                 {isActive && s.key !== "total" && (
-                  <p className="text-[10px] text-primary font-medium mt-0.5">Filtered — click to clear</p>
+                  <p className="text-[10px] text-primary font-medium mt-1">Filtered — click to clear</p>
                 )}
               </CardContent>
             </Card>

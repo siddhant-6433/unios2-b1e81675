@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -252,7 +253,7 @@ export default function PublisherAnalytics() {
   }, [metrics]);
 
   if (!roleLoaded) {
-    return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return <PageLoader className="min-h-[40vh]" />;
   }
   if (role !== "super_admin") {
     return <Navigate to="/" replace />;
@@ -328,7 +329,7 @@ export default function PublisherAnalytics() {
       </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        <PageLoader />
       ) : metrics.length === 0 ? (
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-12 text-center text-muted-foreground text-sm">

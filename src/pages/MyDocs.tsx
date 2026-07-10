@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -127,7 +128,7 @@ const MyDocs = () => {
   );
 
   if (loading || !roleLoaded) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="animate-spin" /></div>;
+    return <PageLoader className="min-h-screen" />;
   }
 
   if (!allowed) {
@@ -201,7 +202,7 @@ const MyDocs = () => {
 
       {/* Document list */}
       {loadingDocs ? (
-        <div className="flex items-center justify-center h-40"><Loader2 className="animate-spin" /></div>
+        <PageLoader />
       ) : filtered.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-muted-foreground text-sm">

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -100,7 +101,7 @@ export function CommissionApprovalPanel() {
     setProcessing(null);
   };
 
-  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">

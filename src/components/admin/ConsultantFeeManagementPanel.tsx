@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 // ConsultantFeeManagementPanel — admin enables/disables (per consultant +
 // course + session) the ability for a consultant to hide the fee structure
 // from their linked students' logins. Disabling instantly restores the normal
@@ -144,7 +145,7 @@ export default function ConsultantFeeManagementPanel() {
           </button>
         </div>
         {loading ? (
-          <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          <PageLoader />
         ) : rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">No consultant fee management configured yet.</p>
         ) : (

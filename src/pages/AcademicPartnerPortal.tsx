@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -1049,7 +1050,7 @@ export default function AcademicPartnerPortal() {
     }
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
   if (!partner) return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">No academic partner profile is linked to this account.</div>;
 
   const partnerInitials = getPartnerInitials(partner.company_name || partner.name);

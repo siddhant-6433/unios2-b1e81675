@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
@@ -235,7 +236,7 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 }
 
 function DeferredBlock({ className = "h-24" }: { className?: string }) {
-  return <div className={`rounded-2xl border border-border/40 bg-muted/20 animate-pulse ${className}`} />;
+  return <div className={`rounded-2xl border border-border/40 bg-muted/20 flutes ${className}`} />;
 }
 
 const Admissions = () => {
@@ -1595,7 +1596,7 @@ const Admissions = () => {
   // like the course multi-select popover preserve their state — an empty
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   if (loadError && leads.length === 0) {
@@ -1676,7 +1677,7 @@ const Admissions = () => {
           <CloudDialerNudge />
         </Suspense>
       )}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>
@@ -1802,7 +1803,7 @@ const Admissions = () => {
           to 4 rows of 3 on mobile. */}
       <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1.5">
         {/* Lead stats */}
-        {leadStats.map((stat) => {
+        {leadStats.map((stat, i) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
             (stat.action === "unassigned_new_leads" && newLeadAssignmentFilter === "unassigned") ||
             (stat.action === "assigned_new_leads" && newLeadAssignmentFilter === "assigned") ||
@@ -1811,7 +1812,8 @@ const Admissions = () => {
           return (
             <Card
               key={stat.label}
-              className={`rounded-2xl border-border/40 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              className={`rounded-2xl border-border/40 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              style={{ animationDelay: `${i * 40}ms`, animationFillMode: "both" }}
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
@@ -1879,26 +1881,27 @@ const Admissions = () => {
               }}
             >
               <CardContent className="p-2.5">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3 w-3 text-foreground/70" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground leading-tight line-clamp-2">{stat.label}</span>
                 </div>
-                <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-                <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate mt-1.5 flex items-center gap-0.5">▲ {stat.sub}</p>
               </CardContent>
             </Card>
           );
         })}
         {/* Application stats */}
-        {appStats.map((stat) => (
+        {appStats.map((stat, i) => (
           <Card
             key={stat.label}
-            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
+            className={`border-border/60 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${
               (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "fee_paid" && actionLeadIds && actionBucketLabel === "Fee Paid")
                 ? "ring-2 ring-primary/40 bg-primary/5" : ""
             }`}
+            style={{ animationDelay: `${(leadStats.length + i) * 40}ms`, animationFillMode: "both" }}
             onClick={async () => {
               // Fee Paid uses ID-based filter (count includes leads with paid applications regardless of stage)
               if (stat.action === "fee_paid") {
@@ -1979,14 +1982,14 @@ const Admissions = () => {
             }}
           >
             <CardContent className="p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                  <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                  <stat.icon className="h-3 w-3 text-foreground/70" />
                 </div>
-                <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
               </div>
-              <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-              <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+              <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate mt-1.5">{stat.sub}</p>
             </CardContent>
           </Card>
         ))}
@@ -2142,7 +2145,7 @@ const Admissions = () => {
 
       {/* Search & filters — hidden on Action Center view */}
       {view !== "action_center" && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
               <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
@@ -2526,11 +2529,11 @@ const Admissions = () => {
         <div className="space-y-3">
           {bulkActionBar}
           <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
-            {STAGES.map((stage) => {
+            {STAGES.map((stage, stageIdx) => {
               const stageLeads = filtered.filter((l) => l.stage === stage);
               const StageIcon = stageIcons[stage] || FileText;
               return (
-                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
+                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0 animate-rs-slide-up" style={{ animationDelay: `${stageIdx * 40}ms`, animationFillMode: "both" }}>
                   <div className="flex items-center gap-2 mb-3 px-1">
                     <StageIcon className="h-4 w-4 text-muted-foreground" />
                     <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
@@ -2539,8 +2542,8 @@ const Admissions = () => {
                     </span>
                   </div>
                   <div className="space-y-2.5">
-                    {stageLeads.map((lead) => (
-                      <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
+                    {stageLeads.map((lead, leadIdx) => (
+                      <Card key={lead.id} className="border-border/60 elevation-low hover:elevation-mid hover:-translate-y-1 transition-all duration-240 ease-standard cursor-pointer group animate-rs-slide-up relative" style={{ animationDelay: `${leadIdx * 40}ms`, animationFillMode: "both" }}>
                         {(isSuperAdmin || canTransfer) && (
                           <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
                             <Checkbox
@@ -2592,7 +2595,7 @@ const Admissions = () => {
                       </Card>
                     ))}
                     {stageLeads.length === 0 && (
-                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground">No leads</div>
+                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground animate-rs-slide-up">No leads</div>
                     )}
                   </div>
                 </div>
@@ -2623,11 +2626,11 @@ const Admissions = () => {
           )}
         </div>
         {bulkActionBar && <div className="mb-3">{bulkActionBar}</div>}
-        <Card className="border-border/60 shadow-none overflow-hidden">
+        <Card className="border-border/60 shadow-none overflow-hidden rounded-xl">
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/50">
+                <tr className="border-b border-border bg-surface-subtle">
                   {(isSuperAdmin || canTransfer) && (
                     <th className="px-3 py-3 w-10">
                       <Checkbox
@@ -2652,7 +2655,7 @@ const Admissions = () => {
                 {paginatedLeads.map((lead) => {
                   const summary = aiSummaries[lead.id];
                   return (
-                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors align-top">
+                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors duration-160 ease-standard align-top">
                     {(isSuperAdmin || canTransfer) && (
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <Checkbox

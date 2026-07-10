@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 // ConsultantFeesPanel — the consultant portal "Fees" tab. Lists the
 // consultant's linked students whose course+session is enabled in
 // consultant_fee_management (via the consultant_fee_students RPC — no direct
@@ -115,7 +116,7 @@ export function ConsultantFeesPanel() {
             </button>
           </div>
           {loading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : students.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               No students in an enabled course/session yet. Ask the admissions office to enable fee management for your courses.

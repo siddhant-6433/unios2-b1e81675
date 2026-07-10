@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useParams, Link } from "react-router-dom";
@@ -618,7 +619,7 @@ const StudentProfile = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   if (!student) {
     return (
@@ -1009,15 +1010,15 @@ const StudentProfile = () => {
 
       {/* Stats Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-card card-shadow p-5">
+        <div className="rounded-xl bg-card card-shadow p-5 transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1">
           <div className="flex items-center justify-between mb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success/10">
               <TrendingUp className="h-4 w-4 text-success" />
             </div>
             <span className="text-[10px] font-medium text-success bg-success/10 px-2 py-0.5 rounded-full">+{attendancePct}%</span>
           </div>
-          <p className="text-2xl font-bold text-foreground">{attendancePct}%</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Attendance rate</p>
+          <p className="text-xs text-muted-foreground">Attendance rate</p>
+          <p className="text-2xl font-bold text-foreground mt-1.5">{attendancePct}%</p>
           {/* Mini sparkline placeholder */}
           <div className="flex items-end gap-0.5 mt-3 h-6">
             {[40, 60, 45, 70, 85, 65, 90, 75, 80, 95].map((h, i) => (
@@ -1026,15 +1027,15 @@ const StudentProfile = () => {
           </div>
         </div>
 
-        <div className="rounded-xl bg-card card-shadow p-5">
+        <div className="rounded-xl bg-card card-shadow p-5 transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1">
           <div className="flex items-center justify-between mb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-chart-5/10">
               <BarChart3 className="h-4 w-4 text-chart-5" />
             </div>
             <span className="text-[10px] font-medium text-chart-5 bg-chart-5/10 px-2 py-0.5 rounded-full">{exams.length} exams</span>
           </div>
-          <p className="text-2xl font-bold text-foreground">{avgScore}%</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Average exam score</p>
+          <p className="text-xs text-muted-foreground">Average exam score</p>
+          <p className="text-2xl font-bold text-foreground mt-1.5">{avgScore}%</p>
           {/* Mini bar chart */}
           <div className="flex items-end gap-1 mt-3 h-6">
             {exams.slice(0, 8).map((e, i) => (

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -678,7 +679,7 @@ const PendingFollowups = () => {
       <Card className="border-border/60 shadow-none overflow-x-auto">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : (
             <table className="w-full text-sm">
               <thead>

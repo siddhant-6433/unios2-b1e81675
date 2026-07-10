@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,7 +66,7 @@ export function PaymentReconciliation() {
   );
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
@@ -74,22 +75,22 @@ export function PaymentReconciliation() {
     <div className="space-y-4">
       {/* Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-foreground">{fmt(totals.appFee)}</p>
-            <p className="text-xs text-muted-foreground">Application Fees Collected</p>
+            <p className="text-xs font-medium text-muted-foreground">Application Fees Collected</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{fmt(totals.appFee)}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-primary">{fmt(totals.tokenFee)}</p>
-            <p className="text-xs text-muted-foreground">Token Fees Collected</p>
+            <p className="text-xs font-medium text-muted-foreground">Token Fees Collected</p>
+            <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{fmt(totals.tokenFee)}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-success">{fmt(totals.total)}</p>
-            <p className="text-xs text-muted-foreground">Total Collected</p>
+            <p className="text-xs font-medium text-muted-foreground">Total Collected</p>
+            <p className="text-2xl font-bold text-success mt-2 tabular-nums">{fmt(totals.total)}</p>
           </CardContent>
         </Card>
       </div>

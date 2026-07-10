@@ -227,7 +227,18 @@ const App = () => (
           {/* All routes are React.lazy() — wrap in Suspense so concurrent
               renders can pause for the chunk instead of throwing
               "suspended while responding to synchronous input". */}
-          <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-sm text-muted-foreground">Loading…</div>}>
+          <Suspense fallback={
+            <div className="flex min-h-screen items-center justify-center bg-background">
+              <div className="flex flex-col items-center gap-4 animate-rs-slide-up">
+                <div className="flex gap-1.5">
+                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
+                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
+                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
+                </div>
+                <span className="text-sm text-muted-foreground">Loading…</span>
+              </div>
+            </div>
+          }>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
