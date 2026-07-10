@@ -1572,6 +1572,7 @@ const LeadDetail = () => {
             followups={followups}
             visits={visits}
             callLogs={callLogs}
+            leadPhone={lead.phone}
             newNote={newNote}
             setNewNote={setNewNote}
             onAddNote={addNote}
