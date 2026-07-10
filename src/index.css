@@ -337,58 +337,58 @@
     opacity: 0;
   }
 
-  /* ── Fluted glass — CSS approximation of Razorpay's canvas effect ──
-     The real Razorpay fluted glass is a WebGL <canvas>. This CSS version
-     layers multiple angled gradients that drift at different speeds to
-     approximate the flowing light-through-ridged-glass look. */
+  /* ── Fluted glass — CSS approximation of Razorpay's RzpGlass WebGL shader ──
+     The real effect uses 45 angled glass slits at 0.13rad (~7.5°) with
+     pixel displacement + colorama color-cycling + bloom. CSS can't displace
+     pixels, but we approximate with:
+     1. repeating-linear-gradient at 97.5° (90+7.5) for the slit pattern
+     2. A color-shifting overlay that cycles hue over time
+     3. A soft radial glow for the bloom center */
   .flutes {
     position: relative;
     overflow: hidden;
-    background-color: hsl(var(--muted));
+    background: linear-gradient(135deg,
+      hsl(214 40% 94%) 0%,
+      hsl(210 50% 96%) 50%,
+      hsl(214 40% 94%) 100%
+    );
   }
-  .flutes::before,
-  .flutes::after {
+  .flutes::before {
     content: '';
     position: absolute;
-    inset: -50%;
+    inset: 0;
+    /* 45 slit bands at ~7.5° matching the shader's numSegments + slitAngle */
+    background:
+      repeating-linear-gradient(
+        97.5deg,
+        hsl(var(--primary) / 0.0) 0px,
+        hsl(var(--primary) / 0.06) 4px,
+        hsl(var(--primary) / 0.0) 8px,
+        hsl(var(--info) / 0.04) 12px,
+        hsl(var(--primary) / 0.0) 16px
+      );
+    animation: flutes-shift 4s linear infinite;
     pointer-events: none;
     z-index: 0;
   }
-  .flutes::before {
-    background: linear-gradient(
-      115deg,
-      transparent 20%,
-      hsl(var(--primary) / 0.07) 25%,
-      transparent 30%,
-      hsl(var(--info) / 0.05) 40%,
-      transparent 45%,
-      hsl(var(--primary) / 0.06) 55%,
-      transparent 60%,
-      hsl(var(--info) / 0.04) 70%,
-      transparent 75%,
-      hsl(var(--primary) / 0.05) 85%,
-      transparent 90%
-    );
-    background-size: 200% 200%;
-    animation: flutes-sweep 8s ease-in-out infinite;
-  }
   .flutes::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* Color-cycling overlay — shifts between blue and teal like colorama */
     background: linear-gradient(
-      155deg,
-      transparent 15%,
-      hsl(var(--info) / 0.04) 22%,
-      transparent 28%,
-      hsl(var(--primary) / 0.05) 38%,
-      transparent 44%,
-      hsl(var(--info) / 0.06) 52%,
-      transparent 58%,
-      hsl(var(--primary) / 0.03) 68%,
-      transparent 74%,
-      hsl(var(--info) / 0.05) 82%,
-      transparent 88%
+      135deg,
+      hsl(var(--primary) / 0.04) 0%,
+      hsl(var(--info) / 0.08) 25%,
+      hsl(180 60% 70% / 0.05) 50%,
+      hsl(var(--primary) / 0.06) 75%,
+      hsl(var(--info) / 0.04) 100%
     );
-    background-size: 200% 200%;
-    animation: flutes-sweep 12s ease-in-out infinite reverse;
+    background-size: 300% 300%;
+    animation: flutes-color-cycle 6s ease-in-out infinite;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 0;
   }
   .flutes > * { position: relative; z-index: 1; }
 
@@ -458,11 +458,16 @@
 
 /* ── Blade keyframes (ported from razorpay/blade source) ── */
 
-/* Fluted glass: two layers sweep at different speeds */
-@keyframes flutes-sweep {
-  0%   { background-position: 0% 0%; }
-  50%  { background-position: 100% 100%; }
-  100% { background-position: 0% 0%; }
+/* Fluted glass: slit pattern shifts laterally (like physical glass rotation) */
+@keyframes flutes-shift {
+  from { transform: translateX(0); }
+  to { transform: translateX(16px); }
+}
+/* Fluted glass: color overlay cycles through hues (like colorama) */
+@keyframes flutes-color-cycle {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 /* Skeleton: fade in on first render */
