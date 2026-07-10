@@ -876,7 +876,7 @@ const Login = () => {
               opacity: 0.35,
               pointerEvents: 'none',
             }}
-            backgroundColor={[0.0, 0.21, 0.77]}
+            backgroundColor={[-1, -1, -1]}
           />
         </Suspense>
       </div>
