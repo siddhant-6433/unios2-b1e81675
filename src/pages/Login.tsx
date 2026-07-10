@@ -862,15 +862,16 @@ const Login = () => {
           </div>
         </div>
 
-        {/* RzpGlass — covers entire right panel */}
+        {/* RzpGlass — 3x scaled, covers entire right panel */}
         <Suspense fallback={null}>
           <RazorSense
             preset="default"
-            width="100%"
-            height="100%"
+            width="300%"
+            height="300%"
             style={{
               position: 'absolute',
-              inset: 0,
+              top: '-100%',
+              left: '-100%',
               zIndex: 0,
               opacity: 0.35,
               pointerEvents: 'none',
