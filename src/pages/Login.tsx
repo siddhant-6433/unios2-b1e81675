@@ -868,6 +868,8 @@ const Login = () => {
             preset="default"
             width="400%"
             height="400%"
+            gradientMapSrc="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
+            gradientMap2Src="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
             style={{
               position: 'absolute',
               top: '-150%',
@@ -876,7 +878,6 @@ const Login = () => {
               opacity: 0.35,
               pointerEvents: 'none',
             }}
-            backgroundColor={[-1, -1, -1]}
           />
         </Suspense>
       </div>
