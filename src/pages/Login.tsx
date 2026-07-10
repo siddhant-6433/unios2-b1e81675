@@ -433,7 +433,8 @@ const Login = () => {
   return (
     <div className="min-h-screen flex bg-background animate-fade-in">
       {/* Left panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
+      <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative overflow-hidden flutes"
+        style={{ '--tw-flutes-opacity': '0.12' } as React.CSSProperties}>
         {/* NIMT logo — top left */}
         <div className="absolute top-6 left-6">
           <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />

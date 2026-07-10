@@ -22,6 +22,8 @@ const buttonVariants = cva(
         // Outline: soft-edged secondary pill against the cream canvas
         //   (e.g. month chips, "Filter" pills). Tints to muted on hover.
         "pill-outline": "border border-border bg-card text-foreground hover:bg-muted rounded-full",
+        // Glass: frosted RazorSense button — semi-transparent with backdrop blur
+        glass: "glass-btn text-foreground rounded-xl font-medium",
       },
       size: {
         default: "h-10 px-4 py-2",

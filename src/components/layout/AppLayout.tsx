@@ -91,7 +91,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex w-full">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-5">
+            <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border/60 bg-card/80 backdrop-blur-xl px-3 py-2 sm:px-5">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
                 <div className="flex min-w-0 items-center gap-1.5 text-sm">
