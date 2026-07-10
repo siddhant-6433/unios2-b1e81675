@@ -72,7 +72,7 @@ export function CallQualityRating({
             <Star
               className={`h-4 w-4 ${
                 n <= display
-                  ? "fill-amber-400 text-amber-400"
+                  ? "fill-amber-400 text-warning"
                   : "text-muted-foreground/40"
               }`}
             />
@@ -120,9 +120,9 @@ export function CallQualityMetricsChip({ metrics }: { metrics: Record<string, an
     <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
       <span>{turns} turns · {latency != null ? `${(latency / 1000).toFixed(1)}s lat` : "—"}</span>
       <span className="flex gap-1.5">
-        {reps > 0 && <span className="text-amber-600">↻{reps}</span>}
-        {swaps > 0 && <span className="text-red-600">≠{swaps}</span>}
-        {!dispOk && <span className="text-red-600">no disp</span>}
+        {reps > 0 && <span className="text-warning-foreground">↻{reps}</span>}
+        {swaps > 0 && <span className="text-destructive">≠{swaps}</span>}
+        {!dispOk && <span className="text-destructive">no disp</span>}
         {ttfa != null && <span>{(ttfa / 1000).toFixed(1)}s start</span>}
       </span>
     </div>

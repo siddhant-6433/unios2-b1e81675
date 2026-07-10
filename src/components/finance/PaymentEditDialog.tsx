@@ -213,11 +213,11 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
           </div>
 
           <div>
-            <label className="text-xs font-medium text-rose-700">
-              Reason for change <span className="text-rose-500">*</span>
+            <label className="text-xs font-medium text-destructive">
+              Reason for change <span className="text-destructive">*</span>
             </label>
             <textarea
-              className={inputCls + " border-rose-300"}
+              className={inputCls + " border-destructive/25"}
               rows={2}
               value={reason}
               onChange={e => setReason(e.target.value)}
@@ -251,7 +251,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
               <Button
                 variant="outline"
                 size="sm"
-                className="mr-auto text-rose-700 border-rose-200 hover:bg-rose-50"
+                className="mr-auto text-destructive border-destructive/20 hover:bg-destructive/5"
                 onClick={() => setConfirmDelete(true)}
                 disabled={busy}
               >
@@ -266,7 +266,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
             </>
           ) : (
             <>
-              <p className="text-xs text-rose-700 mr-auto">
+              <p className="text-xs text-destructive mr-auto">
                 Confirm permanent deletion. The audit row will remain.
               </p>
               <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)} disabled={busy}>
@@ -274,7 +274,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
               </Button>
               <Button
                 size="sm"
-                className="bg-rose-600 hover:bg-rose-700 text-white"
+                className="bg-destructive hover:bg-destructive text-white"
                 onClick={handleDelete}
                 disabled={busy}
               >

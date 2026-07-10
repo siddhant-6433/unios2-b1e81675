@@ -42,32 +42,32 @@ function ContextBadge({ lead, variant }: { lead: ActionLead; variant: BucketVari
       const days = lead.days_overdue || 0;
       const label = days === 0 ? "< 1d overdue" : `${days}d overdue`;
       return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-900/30 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:text-red-300">
+        <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 dark:bg-destructive/80/30 px-2 py-0.5 text-[11px] font-medium text-destructive dark:text-destructive/60">
           {lead.followup_type === "call" ? "Call" : lead.followup_type || "Follow-up"} · {label}
         </span>
       );
     }
     case "new_lead":
       return (
-        <span className="inline-flex items-center rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-[11px] font-medium text-orange-700 dark:text-orange-300">
+        <span className="inline-flex items-center rounded-full bg-warning/10 dark:bg-warning/80/30 px-2 py-0.5 text-[11px] font-medium text-warning-foreground dark:text-warning/60">
           Assigned {lead.assigned_ago}
         </span>
       );
     case "today_followup":
       return (
-        <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+        <span className="inline-flex items-center rounded-full bg-info/10 dark:bg-info/80/30 px-2 py-0.5 text-[11px] font-medium text-info-foreground dark:text-info/60">
           {formatTime(lead.scheduled_at)} · {lead.followup_type === "call" ? "Call" : lead.followup_type || "Follow-up"}
         </span>
       );
     case "today_visit":
       return (
-        <span className="inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:text-violet-300">
+        <span className="inline-flex items-center rounded-full bg-primary/10 dark:bg-primary/80/30 px-2 py-0.5 text-[11px] font-medium text-primary dark:text-primary/50">
           {formatTime(lead.visit_date)} · {lead.visit_campus || "Campus visit"}
         </span>
       );
     case "post_visit":
       return (
-        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+        <span className="inline-flex items-center rounded-full bg-warning/10 dark:bg-warning/80/30 px-2 py-0.5 text-[11px] font-medium text-warning-foreground dark:text-warning/70">
           Visited {lead.days_since_visit}d ago, no follow-up
         </span>
       );
@@ -140,11 +140,11 @@ export function ActionLeadRow({ lead, variant, onCall, onCompleteVisit }: Action
         <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={handleCall} title="Log call">
           <Phone className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-green-600" onClick={handleWhatsApp} title="WhatsApp">
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-success" onClick={handleWhatsApp} title="WhatsApp">
           <MessageSquare className="h-3 w-3" />
         </Button>
         {variant === "today_visit" && onCompleteVisit && (
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-violet-600" onClick={handleCompleteVisit} title="Complete visit">
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={handleCompleteVisit} title="Complete visit">
             <CheckCircle className="h-3 w-3" />
           </Button>
         )}

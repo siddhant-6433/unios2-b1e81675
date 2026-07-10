@@ -170,7 +170,7 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
     return (
       <Card className="border-border/60">
         <CardContent className="p-4 flex items-center justify-center">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
         </CardContent>
       </Card>
     );
@@ -219,7 +219,7 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
             key={s.key}
             title={locked ? "Locked after payment" : done ? "Completed" : "Not started"}
             className={`flex-1 min-w-[44px] flex flex-col items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-              done ? "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400"
+              done ? "bg-success/10 text-success dark:bg-success/90/40 dark:text-success"
               : locked ? "text-muted-foreground/40"
               : "text-muted-foreground"
             }`}
@@ -430,7 +430,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
               >
                 <KeyRound className="h-3.5 w-3.5" />
                 Edit Access {editRequests.filter(r => r.status === "pending").length > 0 && (
-                  <Badge className="ml-1 h-4 px-1 text-[9px] bg-orange-500 text-white border-0">
+                  <Badge className="ml-1 h-4 px-1 text-[9px] bg-warning text-white border-0">
                     {editRequests.filter(r => r.status === "pending").length}
                   </Badge>
                 )}
@@ -506,7 +506,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
                   >
                     {done ? <CheckCircle className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
                     <span>{t.label}</span>
-                    {dirty && <span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="Unsaved changes" />}
+                    {dirty && <span className="w-1.5 h-1.5 rounded-full bg-warning" title="Unsaved changes" />}
                   </button>
                 );
               })}
@@ -624,13 +624,13 @@ function AuditLogView({ entries }: { entries: AuditEntry[] }) {
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">OLD</p>
-              <div className="rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40 p-2 font-mono text-[11px] text-red-900 dark:text-red-200 break-words max-h-24 overflow-y-auto">
+              <div className="rounded bg-destructive/5 dark:bg-destructive/90/20 border border-destructive/20 dark:border-destructive/50/40 p-2 font-mono text-[11px] text-destructive dark:text-destructive/40 break-words max-h-24 overflow-y-auto">
                 {fmt(e.old_value)}
               </div>
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">NEW</p>
-              <div className="rounded bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800/40 p-2 font-mono text-[11px] text-green-900 dark:text-green-200 break-words max-h-24 overflow-y-auto">
+              <div className="rounded bg-success/5 dark:bg-success/90/20 border border-success/20 dark:border-success/60/40 p-2 font-mono text-[11px] text-success-foreground dark:text-success/40 break-words max-h-24 overflow-y-auto">
                 {fmt(e.new_value)}
               </div>
             </div>
@@ -744,19 +744,19 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
 
       {/* Current unlock status */}
       {unlockActive && (
-        <div className="rounded-lg border border-green-300 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 p-4">
+        <div className="rounded-lg border border-success/25 dark:border-success/60/40 bg-success/5 dark:bg-success/90/20 p-4">
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/40">
-              <Unlock className="h-4 w-4 text-green-700 dark:text-green-400" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10 dark:bg-success/80/40">
+              <Unlock className="h-4 w-4 text-success dark:text-success" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold text-green-900 dark:text-green-200">Edit access active</p>
-              <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">
+              <p className="text-sm font-semibold text-success-foreground dark:text-success/40">Edit access active</p>
+              <p className="text-xs text-success dark:text-success mt-0.5">
                 Applicant can edit pre-payment tabs on the apply portal until{" "}
                 <span className="font-medium">{unlockExpiry?.toLocaleString("en-IN")}</span>
               </p>
               {app.edit_unlocked_sections && app.edit_unlocked_sections.length > 0 && (
-                <p className="text-[10px] text-green-600 dark:text-green-500 mt-1">
+                <p className="text-[10px] text-success dark:text-success mt-1">
                   Sections: {app.edit_unlocked_sections.join(", ")}
                 </p>
               )}
@@ -775,7 +775,7 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pending Requests</h4>
           {pending.map(r => (
-            <div key={r.id} className="rounded-lg border border-orange-300 dark:border-orange-800/40 bg-orange-50 dark:bg-orange-950/20 p-4 space-y-3">
+            <div key={r.id} className="rounded-lg border border-warning/25 dark:border-warning/50/40 bg-warning/5 dark:bg-warning/90/20 p-4 space-y-3">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">{r.requested_by_name || "Staff"}</p>
@@ -783,7 +783,7 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
                     {r.requested_by_role} · {new Date(r.created_at).toLocaleString("en-IN")} · {r.duration_hours}h duration
                   </p>
                 </div>
-                <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 border-0 text-[10px]">
+                <Badge className="bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/60 border-0 text-[10px]">
                   Pending
                 </Badge>
               </div>
@@ -797,7 +797,7 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
                 </div>
               )}
               {isAdmin ? (
-                <div className="space-y-2 pt-2 border-t border-orange-200 dark:border-orange-800/40">
+                <div className="space-y-2 pt-2 border-t border-warning/20 dark:border-warning/50/40">
                   <textarea
                     placeholder="Review notes (optional)"
                     value={reviewNotes[r.id] || ""}
@@ -913,10 +913,10 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-foreground">{r.requested_by_name}</span>
                   <Badge className={`text-[9px] border-0 ${
-                    r.status === "approved" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    : r.status === "rejected" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                    r.status === "approved" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
+                    : r.status === "rejected" ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
                     : r.status === "expired" ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
-                    : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                    : "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
                   }`}>
                     {r.status}
                   </Badge>

@@ -547,7 +547,7 @@ export default function PaymentPortal() {
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col animate-fade-in">
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
             <img src={student ? brand.logo : uniosLogo} alt={student ? brand.logoAlt : "UniOs"} className="h-8 max-w-[150px] object-contain" />
@@ -573,7 +573,7 @@ export default function PaymentPortal() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -593,7 +593,7 @@ export default function PaymentPortal() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -643,7 +643,7 @@ export default function PaymentPortal() {
           {step === "fees" && student && !loading && (
             <div className="space-y-4">
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -667,7 +667,7 @@ export default function PaymentPortal() {
 
               {fees.length === 0 ? (
                 <div className="rounded-xl bg-white border border-gray-200 p-8 text-center">
-                  <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
+                  <CheckCircle className="h-10 w-10 text-success mx-auto mb-3" />
                   <h3 className="text-lg font-semibold text-gray-900">All fees paid!</h3>
                   <p className="text-sm text-gray-500 mt-1">No outstanding fees at this time.</p>
                 </div>
@@ -680,7 +680,7 @@ export default function PaymentPortal() {
                           <p className="text-sm font-medium text-gray-900">{fee.fee_head}</p>
                           <p className="text-xs text-gray-400">
                             Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                            {fee.status === "overdue" && <span className="ml-2 text-red-500 font-medium">Overdue</span>}
+                            {fee.status === "overdue" && <span className="ml-2 text-destructive font-medium">Overdue</span>}
                           </p>
                         </div>
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
@@ -692,9 +692,9 @@ export default function PaymentPortal() {
                     </div>
                     {waiverAmount > 0 && (
                       <>
-                        <div className="flex items-center justify-between p-4 bg-green-50">
-                          <p className="text-sm font-semibold text-green-700">Pay All Waiver (5%)</p>
-                          <p className="text-sm font-bold text-green-700">-₹{waiverAmount.toLocaleString("en-IN")}</p>
+                        <div className="flex items-center justify-between p-4 bg-success/5">
+                          <p className="text-sm font-semibold text-success">Pay All Waiver (5%)</p>
+                          <p className="text-sm font-bold text-success">-₹{waiverAmount.toLocaleString("en-IN")}</p>
                         </div>
                         <div className="flex items-center justify-between p-4 bg-gray-50">
                           <p className="text-sm font-bold text-gray-900">Payable Now</p>
@@ -750,8 +750,8 @@ export default function PaymentPortal() {
           {step === "receipt" && student && (
             <div className="space-y-6 text-center">
               <div>
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 mx-auto mb-4">
-                  <CheckCircle className="h-8 w-8 text-green-600" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10 mx-auto mb-4">
+                  <CheckCircle className="h-8 w-8 text-success" />
                 </div>
                 <h2 className="text-xl font-bold text-gray-900">Payment Successful!</h2>
                 {paidTxnId && <p className="text-xs text-gray-400 mt-1 font-mono">{paidTxnId}</p>}
@@ -764,7 +764,7 @@ export default function PaymentPortal() {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Amount Paid</span>
-                  <span className="text-lg font-bold text-green-600">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
+                  <span className="text-lg font-bold text-success">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Date</span>

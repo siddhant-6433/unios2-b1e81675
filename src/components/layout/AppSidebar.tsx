@@ -418,16 +418,16 @@ export function AppSidebar() {
                           const isCahetSprint = item.url === "/cahet-sprint";
                           const isUpdeledSprint = item.url === "/updeled-sprint";
                           const itemActiveClass = isCahetSprint
-                            ? "!bg-rose-100 dark:!bg-rose-900/30 !text-rose-700 dark:!text-rose-300 font-semibold"
+                            ? "!bg-destructive/10 dark:!bg-destructive/80/30 !text-destructive dark:!text-destructive/50 font-semibold"
                             : isUpdeledSprint
-                            ? "!bg-indigo-100 dark:!bg-indigo-900/30 !text-indigo-700 dark:!text-indigo-300 font-semibold"
+                            ? "!bg-primary/10 dark:!bg-primary/80/30 !text-primary dark:!text-primary/50 font-semibold"
                             : isCloudDialer
                             ? "!bg-cyan-100 dark:!bg-cyan-900/30 !text-cyan-700 dark:!text-cyan-300 font-semibold"
                             : activeClass;
                           const itemBaseClass = isCahetSprint
-                            ? `${subLinkClass} text-rose-700 dark:text-rose-400 font-semibold`
+                            ? `${subLinkClass} text-destructive dark:text-destructive/70 font-semibold`
                             : isUpdeledSprint
-                            ? `${subLinkClass} text-indigo-700 dark:text-indigo-400 font-semibold`
+                            ? `${subLinkClass} text-primary dark:text-primary/60 font-semibold`
                             : isCloudDialer
                             ? `${subLinkClass} text-cyan-700 dark:text-cyan-400`
                             : subLinkClass;
@@ -439,8 +439,8 @@ export function AppSidebar() {
                                 <span className="flex-1">{item.title}</span>
                                 {item.badge ? (
                                   <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white px-1 ${
-                                    item.url === "/whatsapp-inbox" ? "bg-green-500"
-                                    : item.url === "/missed-calls" ? "bg-red-500"
+                                    item.url === "/whatsapp-inbox" ? "bg-success/50"
+                                    : item.url === "/missed-calls" ? "bg-destructive/50"
                                     : "bg-primary"
                                   }`}>
                                     {item.badge > 99 ? "99+" : item.badge}

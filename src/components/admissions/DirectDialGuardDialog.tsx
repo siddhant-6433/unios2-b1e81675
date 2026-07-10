@@ -64,7 +64,7 @@ export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, on
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            <AlertTriangle className="h-5 w-5 text-warning" />
             Priority leads pending
           </DialogTitle>
           <DialogDescription>
@@ -74,23 +74,23 @@ export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, on
 
         <div className="space-y-2 py-2">
           {counts.paid_pending > 0 && (
-            <div className="flex items-center justify-between rounded-md border bg-purple-50 dark:bg-purple-900/20 p-3">
+            <div className="flex items-center justify-between rounded-md border bg-primary/5 dark:bg-primary/80/20 p-3">
               <div>
                 <div className="text-sm font-medium">Fresh Meta / Google Ads</div>
                 <div className="text-xs text-muted-foreground">Unattempted, &lt; 24 hours old</div>
               </div>
-              <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">
+              <div className="text-2xl font-bold text-primary dark:text-primary/50">
                 {counts.paid_pending}
               </div>
             </div>
           )}
           {counts.overdue_pending > 0 && (
-            <div className="flex items-center justify-between rounded-md border bg-red-50 dark:bg-red-900/20 p-3">
+            <div className="flex items-center justify-between rounded-md border bg-destructive/5 dark:bg-destructive/80/20 p-3">
               <div>
                 <div className="text-sm font-medium">Overdue followups</div>
                 <div className="text-xs text-muted-foreground">Past their scheduled time by &gt; 2 hours</div>
               </div>
-              <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+              <div className="text-2xl font-bold text-destructive dark:text-destructive/60">
                 {counts.overdue_pending}
               </div>
             </div>

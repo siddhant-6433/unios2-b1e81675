@@ -84,17 +84,17 @@ export function AiCallQueueStatus() {
     return (
       <Card className="border-border/60 shadow-none">
         <CardContent className="p-6 flex items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
         </CardContent>
       </Card>
     );
   }
 
   const heroBg = status.in_business_hours
-    ? "bg-emerald-50 border-emerald-200"
+    ? "bg-success/5 border-success/20"
     : "bg-muted/40 border-border";
   const heroIcon = status.in_business_hours
-    ? <Activity className="h-4 w-4 text-emerald-600 animate-pulse" />
+    ? <Activity className="h-4 w-4 text-success animate-pulse" />
     : <PauseCircle className="h-4 w-4 text-muted-foreground" />;
   const heroText = status.in_business_hours
     ? "Cron is firing — 2 calls / min, FIFO by scheduled time"
@@ -105,7 +105,7 @@ export function AiCallQueueStatus() {
       {/* Hero status strip */}
       <div className={`rounded-xl border ${heroBg} px-4 py-3 flex items-center gap-3 flex-wrap`}>
         {heroIcon}
-        <span className={`text-sm font-medium ${status.in_business_hours ? "text-emerald-900" : "text-foreground"}`}>{heroText}</span>
+        <span className={`text-sm font-medium ${status.in_business_hours ? "text-success-foreground" : "text-foreground"}`}>{heroText}</span>
         <span className="text-xs text-muted-foreground ml-auto">
           IST: {new Date(status.ist_now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
         </span>
@@ -117,25 +117,25 @@ export function AiCallQueueStatus() {
           label="In Queue"
           value={status.pending}
           sub={status.pending_due > 0 ? `${status.pending_due.toLocaleString("en-IN")} due now` : "all scheduled later"}
-          Icon={ListChecks} iconBg="bg-blue-100" iconColor="text-blue-600"
+          Icon={ListChecks} iconBg="bg-info/10" iconColor="text-info-foreground"
         />
         <StatCard
           label="Processing"
           value={status.processing}
           sub={status.processing > 0 ? "in flight" : "idle"}
-          Icon={Play} iconBg="bg-amber-100" iconColor="text-amber-600"
+          Icon={Play} iconBg="bg-warning/10" iconColor="text-warning-foreground"
         />
         <StatCard
           label="Fired in Last 60 min"
           value={status.completed_1h}
           sub={`${status.completed_today.toLocaleString("en-IN")} today`}
-          Icon={Clock} iconBg="bg-violet-100" iconColor="text-violet-600"
+          Icon={Clock} iconBg="bg-primary/10" iconColor="text-primary"
         />
         <StatCard
           label="Failed Today"
           value={status.failed_today}
           sub={status.skipped_today > 0 ? `${status.skipped_today.toLocaleString("en-IN")} skipped` : "—"}
-          Icon={AlertTriangle} iconBg="bg-rose-100" iconColor="text-rose-600"
+          Icon={AlertTriangle} iconBg="bg-destructive/10" iconColor="text-destructive"
         />
         <StatCard
           label="Last Completed"
@@ -144,8 +144,8 @@ export function AiCallQueueStatus() {
             ? `Drain ETA: ${fmtDrain(status.pending_due, true)}`
             : "Cron paused — resumes 9 AM IST"}
           Icon={CheckCircle2}
-          iconBg={status.in_business_hours ? "bg-emerald-100" : "bg-muted"}
-          iconColor={status.in_business_hours ? "text-emerald-600" : "text-muted-foreground"}
+          iconBg={status.in_business_hours ? "bg-success/10" : "bg-muted"}
+          iconColor={status.in_business_hours ? "text-success" : "text-muted-foreground"}
           muted={!status.in_business_hours}
         />
       </div>

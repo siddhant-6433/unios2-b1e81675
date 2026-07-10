@@ -16,41 +16,41 @@ export function CahetRegistrationDetails({ registration, className, compact }: P
 
   if (compact) {
     return (
-      <div className={`rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs ${className || ""}`}>
+      <div className={`rounded-lg border border-success/20 bg-success/5/70 px-3 py-2 text-xs ${className || ""}`}>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="border-0 bg-emerald-600 text-white text-[10px]">
+          <Badge className="border-0 bg-success text-white text-[10px]">
             <CheckCircle2 className="mr-1 h-3 w-3" />
             CAHET registered
           </Badge>
-          <span className="font-mono font-semibold text-emerald-950">{registration.registration_no}</span>
-          {registeredAt && <span className="text-emerald-900/70">{registeredAt}</span>}
+          <span className="font-mono font-semibold text-success-foreground">{registration.registration_no}</span>
+          {registeredAt && <span className="text-success-foreground/70">{registeredAt}</span>}
           {documentUrl && (
-            <a href={documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-emerald-800 hover:underline">
+            <a href={documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-success-foreground hover:underline">
               Proof <ExternalLink className="h-3 w-3" />
             </a>
           )}
         </div>
-        {registration.notes && <p className="mt-1 text-[11px] text-emerald-900/80">{registration.notes}</p>}
+        {registration.notes && <p className="mt-1 text-[11px] text-success-foreground/80">{registration.notes}</p>}
       </div>
     );
   }
 
   return (
-    <div className={`rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 ${className || ""}`}>
+    <div className={`rounded-xl border border-success/20 bg-success/5/70 p-3 ${className || ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-emerald-950 flex items-center gap-1.5">
-            <Flame className="h-3.5 w-3.5 text-emerald-700" />
+          <p className="text-xs font-semibold text-success-foreground flex items-center gap-1.5">
+            <Flame className="h-3.5 w-3.5 text-success" />
             CAHET registration
           </p>
           <p className="mt-1 text-sm font-mono font-semibold text-foreground truncate">
             {registration.registration_no}
           </p>
           {registeredAt && <p className="mt-0.5 text-[11px] text-muted-foreground">Registered: {registeredAt}</p>}
-          {registration.notes && <p className="mt-1.5 text-[11px] text-emerald-900/80">{registration.notes}</p>}
+          {registration.notes && <p className="mt-1.5 text-[11px] text-success-foreground/80">{registration.notes}</p>}
         </div>
         {documentUrl ? (
-          <Button asChild variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-100">
+          <Button asChild variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs border-success/30 text-success-foreground hover:bg-success/10">
             <a href={documentUrl} target="_blank" rel="noreferrer">
               <FileText className="h-3.5 w-3.5" />
               Proof

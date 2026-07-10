@@ -9,8 +9,8 @@ import { Loader2, CheckCircle, XCircle, Clock, HandCoins } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
-  pending_principal: "bg-amber-100 text-amber-700",
-  pending_super_admin: "bg-blue-100 text-blue-700",
+  pending_principal: "bg-warning/10 text-warning-foreground",
+  pending_super_admin: "bg-info/10 text-info-foreground",
   approved: "bg-success/10 text-success",
   rejected: "bg-destructive/10 text-destructive",
 };
@@ -158,7 +158,7 @@ export function ConcessionApprovalPanel() {
   );
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -169,7 +169,7 @@ export function ConcessionApprovalPanel() {
           <h3 className="text-base font-semibold text-foreground">Concession Requests</h3>
         </div>
         {pending.length > 0 && (
-          <Badge className="bg-amber-100 text-amber-700 border-amber-200">{pending.length} pending</Badge>
+          <Badge className="bg-warning/10 text-warning-foreground border-warning/20">{pending.length} pending</Badge>
         )}
       </div>
 

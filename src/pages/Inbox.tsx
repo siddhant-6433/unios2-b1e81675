@@ -200,7 +200,7 @@ export default function Inbox() {
       icon: Tag,
       count: counts.offer_waivers,
       roles: ["super_admin"],
-      color: "text-amber-600",
+      color: "text-warning-foreground",
     },
     {
       id: "offer_approvals",
@@ -208,7 +208,7 @@ export default function Inbox() {
       icon: FileText,
       count: counts.offer_approvals,
       roles: APPROVER_ROLES,
-      color: "text-blue-600",
+      color: "text-info-foreground",
     },
     {
       id: "contact_changes",
@@ -224,7 +224,7 @@ export default function Inbox() {
       icon: FileText,
       count: counts.applications,
       roles: ADMISSIONS_ROLES,
-      color: "text-violet-600",
+      color: "text-primary",
     },
     {
       id: "followups",
@@ -232,7 +232,7 @@ export default function Inbox() {
       icon: AlertTriangle,
       count: counts.followups,
       roles: ADMISSIONS_ROLES,
-      color: "text-orange-600",
+      color: "text-warning-foreground",
     },
     {
       id: "whatsapp",
@@ -240,7 +240,7 @@ export default function Inbox() {
       icon: MessageSquare,
       count: counts.whatsapp,
       roles: ADMISSIONS_ROLES,
-      color: "text-green-600",
+      color: "text-success",
     },
     {
       id: "video_approvals",
@@ -248,7 +248,7 @@ export default function Inbox() {
       icon: Video,
       count: counts.video_approvals,
       roles: ["super_admin"],
-      color: "text-rose-600",
+      color: "text-destructive",
     },
     {
       id: "voice_messages",
@@ -256,7 +256,7 @@ export default function Inbox() {
       icon: Mic,
       count: counts.voice_messages,
       roles: APPROVER_ROLES,
-      color: "text-purple-600",
+      color: "text-primary",
     },
   ];
 
@@ -879,7 +879,7 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{w.lead_name}</p>
               <p className="text-xs text-muted-foreground truncate">{w.course_name || "—"}</p>
             </div>
-            <span className="text-sm font-semibold text-amber-700 shrink-0">{fmtINR(w.amount)}</span>
+            <span className="text-sm font-semibold text-warning-foreground shrink-0">{fmtINR(w.amount)}</span>
           </div>
           <div className="flex items-center gap-2 mt-1">
             <Badge className="bg-muted text-muted-foreground border-0 text-[10px] capitalize">
@@ -900,7 +900,7 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{o.lead_name}</p>
               <p className="text-xs text-muted-foreground truncate">{o.course_name || "—"}</p>
             </div>
-            <span className="text-[10px] text-amber-600 font-medium shrink-0">Pending</span>
+            <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
         </button>
@@ -916,7 +916,7 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
               <p className="text-xs text-muted-foreground truncate">{c.field_name.replace(/_/g, " ")}</p>
             </div>
-            <span className="text-[10px] text-amber-600 font-medium shrink-0">Pending</span>
+            <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.created_at)}</p>
         </button>
@@ -976,7 +976,7 @@ export default function Inbox() {
                 <p className="text-xs text-muted-foreground truncate">{w.last_message}</p>
               )}
             </div>
-            <Badge className="bg-green-100 text-green-700 border-0 text-[10px] shrink-0">
+            <Badge className="bg-success/10 text-success border-0 text-[10px] shrink-0">
               {formatBadgeCount(w.unread_count)}
             </Badge>
           </div>
@@ -1007,10 +1007,10 @@ export default function Inbox() {
       const m = item as VoiceMessageItem;
       const isUnread = m.status === "unread";
       return (
-        <button key={m.id} className={cn(baseClass, isUnread && "bg-purple-50/30 dark:bg-purple-950/10")} onClick={() => setSelectedItem(m)}>
+        <button key={m.id} className={cn(baseClass, isUnread && "bg-primary/5/30 dark:bg-primary/90/10")} onClick={() => setSelectedItem(m)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex items-center gap-1.5">
-              {isUnread && <span className="h-2 w-2 rounded-full bg-purple-500 shrink-0" />}
+              {isUnread && <span className="h-2 w-2 rounded-full bg-primary/50 shrink-0" />}
               <p className="text-sm font-medium text-foreground truncate">{m.sender_name}</p>
             </div>
             <Mic className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
@@ -1513,8 +1513,8 @@ export default function Inbox() {
               {displayCount > 0 && (
                 <span className={cn(
                   "flex h-6 min-w-6 items-center justify-center rounded-full text-[10px] font-bold text-white px-1.5",
-                  cat.id === "whatsapp" ? "bg-green-500"
-                  : cat.id === "followups" ? "bg-orange-500"
+                  cat.id === "whatsapp" ? "bg-success/50"
+                  : cat.id === "followups" ? "bg-warning"
                   : "bg-primary"
                 )}>
                   {formatBadgeCount(displayCount)}
@@ -1537,13 +1537,13 @@ export default function Inbox() {
                 {items.length} item{items.length !== 1 ? "s" : ""}
               </p>
             </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
           {loading && items.length === 0 ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">

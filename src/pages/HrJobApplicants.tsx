@@ -222,7 +222,7 @@ const HrJobApplicants = () => {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">

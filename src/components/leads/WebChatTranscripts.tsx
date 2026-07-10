@@ -53,18 +53,18 @@ export function WebChatTranscripts({ leadId }: WebChatTranscriptsProps) {
         const timeLabel = new Date(conv.started_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
         return (
-          <Card key={conv.id} className={`border-2 ${idx === 0 ? "border-blue-300 dark:border-blue-600 bg-blue-50/50 dark:bg-blue-950/20" : "border-border bg-card"} overflow-hidden`}>
+          <Card key={conv.id} className={`border-2 ${idx === 0 ? "border-info/30 dark:border-info/40 bg-info/5/50 dark:bg-info/90/20" : "border-border bg-card"} overflow-hidden`}>
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
-                <div className={`flex h-9 w-9 items-center justify-center rounded-xl shrink-0 ${idx === 0 ? "bg-blue-100 dark:bg-blue-900/40" : "bg-muted"}`}>
-                  <MessageSquare className={`h-4 w-4 ${idx === 0 ? "text-blue-600" : "text-muted-foreground"}`} />
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl shrink-0 ${idx === 0 ? "bg-info/10 dark:bg-info/80/40" : "bg-muted"}`}>
+                  <MessageSquare className={`h-4 w-4 ${idx === 0 ? "text-info-foreground" : "text-muted-foreground"}`} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-bold text-foreground">
                       Website Chat {conversations.length > 1 ? `#${conversations.length - idx}` : ""}
                     </h3>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 dark:bg-blue-800/50 dark:text-blue-300">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-info/15 text-info-foreground dark:bg-info/70/50 dark:text-info/60">
                       {dateLabel} {timeLabel}
                     </span>
                     <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
@@ -97,7 +97,7 @@ export function WebChatTranscripts({ leadId }: WebChatTranscriptsProps) {
                       {msgs.map((msg, i) => (
                         <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                           {msg.role === "assistant" && (
-                            <Bot className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                            <Bot className="h-4 w-4 text-info shrink-0 mt-0.5" />
                           )}
                           <div className={`rounded-lg px-3 py-2 max-w-[80%] ${
                             msg.role === "user"

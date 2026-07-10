@@ -88,7 +88,7 @@ export function PostVisitQueue({ refreshKey, onChanged }: Props) {
   };
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (

@@ -415,7 +415,7 @@ const Consultants = () => {
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -505,7 +505,7 @@ const Consultants = () => {
                   {c.organization && <p className="text-xs text-primary font-medium mt-0.5">{c.organization}</p>}
                 </div>
                 <div className="flex items-center gap-1">
-                  {c.user_id && <Badge className="text-[9px] border-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Linked</Badge>}
+                  {c.user_id && <Badge className="text-[9px] border-0 bg-success/10 text-success dark:bg-success/80/30 dark:text-success">Linked</Badge>}
                   <Badge className={`text-[10px] border-0 ${stageColors[c.stage] || "bg-muted"}`}>{stageLabels[c.stage] || c.stage}</Badge>
                 </div>
               </div>

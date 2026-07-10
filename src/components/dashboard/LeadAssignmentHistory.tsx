@@ -637,7 +637,7 @@ export function LeadAssignmentHistory({
       <CardContent className="p-0">
         {loading ? (
           <div className="flex h-36 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
           </div>
         ) : error ? (
           <div className="px-4 py-10 text-center text-sm text-destructive">{error}</div>
@@ -683,7 +683,7 @@ export function LeadAssignmentHistory({
                     </td>
                     <td className="min-w-[180px] px-4 py-3 text-xs text-muted-foreground">
                       <div className="flex items-center gap-1.5">
-                        {row.assignment_source === "ai_priority" && <Bot className="h-3.5 w-3.5 text-amber-600" />}
+                        {row.assignment_source === "ai_priority" && <Bot className="h-3.5 w-3.5 text-warning-foreground" />}
                         <span>{sourceLabel(row)}</span>
                       </div>
                     </td>
@@ -702,7 +702,7 @@ export function LeadAssignmentHistory({
                         <>
                           <div className="flex flex-wrap items-center gap-2">
                             {row.latest_call_disposition && (
-                              <Badge className="border-0 bg-blue-100 text-[11px] text-blue-700">
+                              <Badge className="border-0 bg-info/10 text-[11px] text-info-foreground">
                                 {labelize(row.latest_call_disposition)}
                               </Badge>
                             )}

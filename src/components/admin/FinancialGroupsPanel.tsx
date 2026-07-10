@@ -61,10 +61,10 @@ const inputCls =
   "rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
 const amberBadge =
-  "inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+  "inline-flex items-center rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning-foreground dark:bg-warning/80/30 dark:text-warning";
 
 const blueBadge =
-  "inline-flex items-center rounded-md bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+  "inline-flex items-center rounded-md bg-info/10 px-2 py-0.5 text-[11px] font-semibold text-info-foreground dark:bg-info/80/30 dark:text-info/80";
 
 const grayBadge =
   "inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground";
@@ -224,7 +224,7 @@ export default function FinancialGroupsPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -351,7 +351,7 @@ export default function FinancialGroupsPanel() {
                       setManagingMembersFor(isManaging ? null : group.id);
                       if (!isManaging) setExpandedGroups((prev) => new Set([...prev, group.id]));
                     }}
-                    className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                    className="rounded-lg bg-info/5 dark:bg-info/80/20 border border-info/20 dark:border-info/50 px-2.5 py-1 text-xs font-medium text-info-foreground dark:text-info/80 hover:bg-info/10 dark:hover:bg-info/80/40 transition-colors"
                   >
                     Manage Members
                   </button>
@@ -582,8 +582,8 @@ export default function FinancialGroupsPanel() {
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-xl bg-card border border-input p-3 flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
-            <Layers className="h-4 w-4 text-blue-700 dark:text-blue-400" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 dark:bg-info/80/30">
+            <Layers className="h-4 w-4 text-info-foreground dark:text-info/80" />
           </div>
           <div>
             <p className="text-[11px] text-muted-foreground">Groups</p>
@@ -591,8 +591,8 @@ export default function FinancialGroupsPanel() {
           </div>
         </div>
         <div className="rounded-xl bg-card border border-input p-3 flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
-            <Building2 className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-warning/10 dark:bg-warning/80/30">
+            <Building2 className="h-4 w-4 text-warning-foreground dark:text-warning" />
           </div>
           <div>
             <p className="text-[11px] text-muted-foreground">Institutions</p>

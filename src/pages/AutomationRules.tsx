@@ -260,7 +260,7 @@ const AutomationRules = () => {
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -308,7 +308,7 @@ const AutomationRules = () => {
                   {/* Trigger */}
                   <div className="mt-3 space-y-1.5">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <Badge variant="outline" className="text-[9px] bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                      <Badge variant="outline" className="text-[9px] bg-info/5 dark:bg-info/90/20 border-info/20 dark:border-info/50">
                         WHEN: {TRIGGER_LABELS[rule.trigger_type]}
                       </Badge>
                       {config.to_stage && <span className="text-[10px] text-muted-foreground">→ {STAGES[config.to_stage] || config.to_stage}</span>}
@@ -320,7 +320,7 @@ const AutomationRules = () => {
                     {/* Conditions */}
                     {Object.keys(conditions).length > 0 && (
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <Badge variant="outline" className="text-[9px] bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">IF</Badge>
+                        <Badge variant="outline" className="text-[9px] bg-warning/5 dark:bg-warning/90/20 border-warning/20 dark:border-warning/60">IF</Badge>
                         {conditions.source && <span className="text-[10px] text-muted-foreground">source={conditions.source}</span>}
                         {conditions.temperature && <span className="text-[10px] text-muted-foreground">temp={conditions.temperature}</span>}
                         {conditions.has_email !== undefined && <span className="text-[10px] text-muted-foreground">{conditions.has_email ? "has email" : "no email"}</span>}
@@ -332,7 +332,7 @@ const AutomationRules = () => {
                       const AIcon = ACTION_ICONS[a.type] || Zap;
                       return (
                         <div key={i} className="flex items-center gap-1.5">
-                          <Badge variant="outline" className="text-[9px] bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800">
+                          <Badge variant="outline" className="text-[9px] bg-success/5 dark:bg-success/90/20 border-success/20 dark:border-success/60">
                             THEN
                           </Badge>
                           <AIcon className="h-3 w-3 text-muted-foreground" />
@@ -354,7 +354,7 @@ const AutomationRules = () => {
                       <Badge variant="outline" className="text-[9px]">Priority: {rule.priority}</Badge>
                       <span className="text-[10px] text-muted-foreground">{new Date(rule.created_at).toLocaleDateString("en-IN")}</span>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-600" onClick={() => deleteRule(rule.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => deleteRule(rule.id)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -392,7 +392,7 @@ const AutomationRules = () => {
                         {(ex.actions_executed || []).map((a: any) => ACTION_LABELS[a.type] || a.type).join(", ")}
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <Badge className={`text-[9px] border-0 ${ex.status === "success" ? "bg-emerald-100 text-emerald-700" : ex.status === "partial" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                        <Badge className={`text-[9px] border-0 ${ex.status === "success" ? "bg-success/10 text-success" : ex.status === "partial" ? "bg-warning/10 text-warning-foreground" : "bg-destructive/10 text-destructive"}`}>
                           {ex.status}
                         </Badge>
                       </td>
@@ -431,8 +431,8 @@ const AutomationRules = () => {
             </div>
 
             {/* ── TRIGGER ── */}
-            <div className="rounded-lg border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/10 p-3 space-y-3">
-              <p className="text-[11px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">When (Trigger)</p>
+            <div className="rounded-lg border border-info/20 dark:border-info/50/40 bg-info/5/50 dark:bg-info/90/10 p-3 space-y-3">
+              <p className="text-[11px] font-semibold text-info-foreground dark:text-info/80 uppercase tracking-wider">When (Trigger)</p>
               <select value={formTrigger} onChange={e => setFormTrigger(e.target.value)} className={inputCls}>
                 {Object.entries(TRIGGER_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
@@ -486,8 +486,8 @@ const AutomationRules = () => {
             </div>
 
             {/* ── CONDITIONS ── */}
-            <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-950/10 p-3 space-y-3">
-              <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">If (Conditions) — optional</p>
+            <div className="rounded-lg border border-warning/20 dark:border-warning/60/40 bg-warning/5/50 dark:bg-warning/90/10 p-3 space-y-3">
+              <p className="text-[11px] font-semibold text-warning-foreground dark:text-warning uppercase tracking-wider">If (Conditions) — optional</p>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[10px] text-muted-foreground mb-1">Source</label>
@@ -517,9 +517,9 @@ const AutomationRules = () => {
             </div>
 
             {/* ── ACTIONS ── */}
-            <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/10 p-3 space-y-3">
+            <div className="rounded-lg border border-success/20 dark:border-success/60/40 bg-success/5/50 dark:bg-success/90/10 p-3 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Then (Actions)</p>
+                <p className="text-[11px] font-semibold text-success dark:text-success uppercase tracking-wider">Then (Actions)</p>
                 <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => setFormActions(prev => [...prev, emptyAction()])}>
                   <Plus className="h-3 w-3 mr-1" /> Add Action
                 </Button>
@@ -528,7 +528,7 @@ const AutomationRules = () => {
               {formActions.map((action, idx) => (
                 <div key={idx} className="rounded-lg border border-border bg-card p-3 space-y-2 relative">
                   {formActions.length > 1 && (
-                    <button className="absolute top-2 right-2 text-muted-foreground hover:text-red-500" onClick={() => removeAction(idx)}>
+                    <button className="absolute top-2 right-2 text-muted-foreground hover:text-destructive" onClick={() => removeAction(idx)}>
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}

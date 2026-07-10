@@ -140,7 +140,7 @@ export function PermissionMatrixPanel() {
     }
   };
 
-  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-4">
@@ -220,7 +220,7 @@ export function PermissionMatrixPanel() {
                             onClick={() => togglePermission(r, p)}
                             disabled={saving === key}
                             className={`h-4 w-4 rounded-sm border inline-flex items-center justify-center transition-colors ${
-                              granted ? "bg-emerald-500 border-emerald-500 text-white" : "border-border/60 hover:border-emerald-400"
+                              granted ? "bg-success/50 border-success/35 text-white" : "border-border/60 hover:border-success/30"
                             }`}
                           >
                             {saving === key ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : granted ? <Check className="h-2.5 w-2.5" /> : null}

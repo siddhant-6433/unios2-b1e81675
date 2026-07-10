@@ -97,10 +97,10 @@ function StageNode({ stage, href, feeReceipt }: {
   feeReceipt?: { url: string | null; onGenerate?: () => void } | undefined;
 }) {
   const palette = {
-    done:    { bg: "bg-emerald-100 dark:bg-emerald-900/30", ring: "ring-emerald-500", text: "text-emerald-800 dark:text-emerald-200", icon: "text-emerald-600", labelCls: "text-foreground" },
-    current: { bg: "bg-blue-100 dark:bg-blue-900/30", ring: "ring-blue-500 ring-offset-1 animate-pulse", text: "text-blue-800 dark:text-blue-200", icon: "text-blue-600", labelCls: "text-foreground font-semibold" },
+    done:    { bg: "bg-success/10 dark:bg-success/80/30", ring: "ring-emerald-500", text: "text-success-foreground dark:text-success/40", icon: "text-success", labelCls: "text-foreground" },
+    current: { bg: "bg-info/10 dark:bg-info/80/30", ring: "ring-blue-500 ring-offset-1 animate-pulse", text: "text-info-foreground dark:text-info/40", icon: "text-info-foreground", labelCls: "text-foreground font-semibold" },
     future:  { bg: "bg-muted",       ring: "ring-border",  text: "text-muted-foreground", icon: "text-muted-foreground", labelCls: "text-muted-foreground" },
-    blocked: { bg: "bg-rose-100 dark:bg-rose-900/30",  ring: "ring-rose-500",  text: "text-rose-800 dark:text-rose-200",  icon: "text-rose-600",  labelCls: "text-foreground font-semibold" },
+    blocked: { bg: "bg-destructive/10 dark:bg-destructive/80/30",  ring: "ring-rose-500",  text: "text-destructive dark:text-destructive/40",  icon: "text-destructive",  labelCls: "text-foreground font-semibold" },
   }[stage.state];
 
   const Icon = stage.state === "done" ? CheckCircle2
@@ -117,7 +117,7 @@ function StageNode({ stage, href, feeReceipt }: {
       {href && (
         <a
           href={href}
-          className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+          className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-success px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-success/90 transition-colors"
         >
           View Student
         </a>
@@ -149,7 +149,7 @@ function Connector({ from, to }: { from: StageState; to: StageState }) {
   const filled = from === "done" && (to === "done" || to === "current" || to === "blocked");
   return (
     <div className="flex items-center justify-center flex-1 min-w-[12px] -mt-3">
-      <div className={`h-0.5 w-full ${filled ? "bg-emerald-400" : "bg-border"}`} />
+      <div className={`h-0.5 w-full ${filled ? "bg-success/50" : "bg-border"}`} />
     </div>
   );
 }
@@ -173,9 +173,9 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       Icon: AlertCircle,
       title: "Lead has been deleted",
       body: "This application's lead record no longer exists, so admission steps (approve, issue offer, payments, AN) can't proceed. Either restore the lead or delete this orphan application.",
-      tone: "border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20",
-      iconCls: "text-rose-600",
-      titleCls: "text-rose-900 dark:text-rose-200",
+      tone: "border-destructive/20 bg-destructive/5 dark:border-destructive/60/40 dark:bg-destructive/90/20",
+      iconCls: "text-destructive",
+      titleCls: "text-destructive dark:text-destructive/40",
       cta: p.onIssueOffer ? { label: "Create Lead & Issue Offer", onClick: p.onIssueOffer, cls: "bg-teal-600 hover:bg-teal-700" } : undefined,
     };
   }
@@ -185,9 +185,9 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       Icon: CheckCircle2,
       title: "Admission complete",
       body: "All lifecycle steps are done. Student has been admitted and the portal-claim link was sent via WhatsApp.",
-      tone: "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20",
-      iconCls: "text-emerald-600",
-      titleCls: "text-emerald-900 dark:text-emerald-200",
+      tone: "border-success/20 bg-success/5 dark:border-success/60/40 dark:bg-success/90/20",
+      iconCls: "text-success",
+      titleCls: "text-success-foreground dark:text-success/40",
     };
   }
 
@@ -199,9 +199,9 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       Icon: AlertCircle,
       title: `${p.docs.rejected} document${p.docs.rejected > 1 ? "s" : ""} need re-upload`,
       body: "AN issuance is blocked while any document is rejected. The applicant has been notified via WhatsApp; once they re-upload, mark the doc verified.",
-      tone: "border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20",
-      iconCls: "text-rose-600",
-      titleCls: "text-rose-900 dark:text-rose-200",
+      tone: "border-destructive/20 bg-destructive/5 dark:border-destructive/60/40 dark:bg-destructive/90/20",
+      iconCls: "text-destructive",
+      titleCls: "text-destructive dark:text-destructive/40",
     };
   }
 
@@ -210,44 +210,44 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       Icon: AlertCircle,
       title: "Application rejected",
       body: a.rejection_reason || "The applicant was notified via WhatsApp. No further admission steps will proceed.",
-      tone: "border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20",
-      iconCls: "text-rose-600",
-      titleCls: "text-rose-900 dark:text-rose-200",
+      tone: "border-destructive/20 bg-destructive/5 dark:border-destructive/60/40 dark:bg-destructive/90/20",
+      iconCls: "text-destructive",
+      titleCls: "text-destructive dark:text-destructive/40",
     };
   }
 
   // Per-stage guidance
-  const ctaCls = "bg-blue-600 hover:bg-blue-700";
+  const ctaCls = "bg-info hover:bg-info/60";
   switch (currentKey) {
     case "submitted":
       return {
         Icon: FileCheck2,
         title: "Awaiting application submission",
         body: "Applicant has not submitted the form yet. They'll receive a WhatsApp confirmation once they do.",
-        tone: "border-amber-200 bg-amber-50/60", iconCls: "text-amber-600", titleCls: "text-amber-900 dark:text-amber-200",
+        tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     case "fee":
       return {
         Icon: CreditCard,
         title: "Awaiting application fee",
         body: "Applicant needs to pay the application fee. They've received a payment link in their apply portal.",
-        tone: "border-amber-200 bg-amber-50/60", iconCls: "text-amber-600", titleCls: "text-amber-900 dark:text-amber-200",
+        tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     case "docs":
       return {
         Icon: ShieldCheck,
         title: `Review ${p.docs.pending} document${p.docs.pending > 1 ? "s" : ""}`,
         body: "Mark each uploaded document Verified or Rejected below. Rejected docs will block AN until resolved.",
-        tone: "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20",
-        iconCls: "text-blue-600", titleCls: "text-blue-900 dark:text-blue-200",
+        tone: "border-info/20 bg-info/5 dark:border-info/60/40 dark:bg-info/90/20",
+        iconCls: "text-info-foreground", titleCls: "text-info-foreground dark:text-info/40",
       };
     case "approved":
       return {
         Icon: CheckCircle2,
         title: "Approve the application",
         body: "All checks are clear. Approving advances the lead stage and unlocks the offer-letter step.",
-        tone: "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20",
-        iconCls: "text-blue-600", titleCls: "text-blue-900 dark:text-blue-200",
+        tone: "border-info/20 bg-info/5 dark:border-info/60/40 dark:bg-info/90/20",
+        iconCls: "text-info-foreground", titleCls: "text-info-foreground dark:text-info/40",
         cta: p.onApprove ? { label: "Approve", onClick: p.onApprove, cls: ctaCls } : undefined,
       };
     case "offer":
@@ -255,8 +255,8 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
         Icon: Gift,
         title: "Issue the offer letter",
         body: "Generate the offer letter; the applicant gets a WhatsApp with the offer PDF and a magic link to pay the token fee.",
-        tone: "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20",
-        iconCls: "text-blue-600", titleCls: "text-blue-900 dark:text-blue-200",
+        tone: "border-info/20 bg-info/5 dark:border-info/60/40 dark:bg-info/90/20",
+        iconCls: "text-info-foreground", titleCls: "text-info-foreground dark:text-info/40",
         cta: p.onIssueOffer ? { label: "Issue Offer Letter", onClick: p.onIssueOffer, cls: "bg-teal-600 hover:bg-teal-700" } : undefined,
       };
     case "token":
@@ -264,14 +264,14 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
         Icon: Coins,
         title: "Awaiting token-fee payment",
         body: "Offer was sent. Once the applicant pays the token fee, a Pre-Admission Number is auto-issued.",
-        tone: "border-amber-200 bg-amber-50/60", iconCls: "text-amber-600", titleCls: "text-amber-900 dark:text-amber-200",
+        tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     case "admitted":
       return {
         Icon: GraduationCap,
         title: "Awaiting balance to 25%",
         body: "Pre-admitted. Once total fees paid reach 25% of year-1, the Admission Number is auto-issued and the student is enrolled.",
-        tone: "border-amber-200 bg-amber-50/60", iconCls: "text-amber-600", titleCls: "text-amber-900 dark:text-amber-200",
+        tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     default:
       return {

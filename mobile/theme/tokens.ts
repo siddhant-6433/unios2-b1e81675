@@ -1,4 +1,4 @@
-// Design tokens — "Warm Editorial Utility" (see mobile/DESIGN.md).
+// Design tokens — RazorSense (cool blue-gray, see mobile/DESIGN.md).
 // Single source of truth; screens and components never hardcode these values.
 import { Platform, type TextStyle } from 'react-native';
 
@@ -30,60 +30,60 @@ export interface ThemeColors {
 }
 
 const lightTints: Record<ChipTint, TintPair> = {
-  yellow: { bg: '#FBF3D7', fg: '#8A6100' },
-  blue: { bg: '#E4ECFB', fg: '#1D4FD7' },
-  purple: { bg: '#EFE8FC', fg: '#6D28D9' },
-  red: { bg: '#FBE3E1', fg: '#C0392B' },
-  green: { bg: '#DFF3E5', fg: '#187741' },
-  orange: { bg: '#FBEBDB', fg: '#B45309' },
-  neutral: { bg: '#F1EFEC', fg: '#57534E' },
+  yellow: { bg: '#FEF4D5', fg: '#7A5600' },
+  blue: { bg: '#E1EEFF', fg: '#0035C5' },
+  purple: { bg: '#EDE5FC', fg: '#5B21B6' },
+  red: { bg: '#FDE5E3', fg: '#B91C1C' },
+  green: { bg: '#DDFBE6', fg: '#166534' },
+  orange: { bg: '#FDE8D4', fg: '#9A3412' },
+  neutral: { bg: '#EEF0F4', fg: '#4B5563' },
 };
 
 const darkTints: Record<ChipTint, TintPair> = {
-  yellow: { bg: '#3A3012', fg: '#EAC85B' },
-  blue: { bg: '#1B2440', fg: '#8FA8F5' },
-  purple: { bg: '#2A2140', fg: '#B79AF0' },
-  red: { bg: '#3C1E1B', fg: '#F09A8F' },
-  green: { bg: '#16301F', fg: '#7CCB98' },
-  orange: { bg: '#382512', fg: '#EBAA66' },
-  neutral: { bg: '#26262B', fg: '#B3B0AC' },
+  yellow: { bg: '#372D0F', fg: '#E8C44E' },
+  blue: { bg: '#0F1B3D', fg: '#8EAAFC' },
+  purple: { bg: '#251C3D', fg: '#B491F0' },
+  red: { bg: '#391A18', fg: '#EF9590' },
+  green: { bg: '#0F2B1C', fg: '#6FCA93' },
+  orange: { bg: '#331F0E', fg: '#E8A45E' },
+  neutral: { bg: '#1E2028', fg: '#A8ADB8' },
 };
 
 export const lightColors: ThemeColors = {
-  canvas: '#F7F5F2',
+  canvas: '#F5F7FA',
   card: '#FFFFFF',
-  cardSubtle: '#FBFAF8',
-  inverse: '#17161A',
-  inverseInk: '#F4F3F1',
-  line: '#EFEDE9',
-  ink: '#1A1917',
-  inkSecondary: '#6E6A64',
-  inkMuted: '#A6A19A',
+  cardSubtle: '#F8F9FC',
+  inverse: '#161B22',
+  inverseInk: '#F3F5F9',
+  line: '#E2E6ED',
+  ink: '#161B22',
+  inkSecondary: '#636D7E',
+  inkMuted: '#9BA3B2',
   accent: '#0035C5',
-  accentSoft: '#E8EDFB',
-  success: '#187741',
-  danger: '#C0392B',
-  pillBg: '#1A1917',
+  accentSoft: '#E1EEFF',
+  success: '#166534',
+  danger: '#B91C1C',
+  pillBg: '#161B22',
   pillFg: '#FFFFFF',
   tint: lightTints,
 };
 
 export const darkColors: ThemeColors = {
-  canvas: '#0D0D0F',
-  card: '#1A1A1E',
-  cardSubtle: '#141416',
-  inverse: '#F7F5F2',
-  inverseInk: '#1A1917',
-  line: '#26262B',
-  ink: '#F4F3F1',
-  inkSecondary: '#A7A4A0',
-  inkMuted: '#6B6965',
+  canvas: '#0C0E14',
+  card: '#161B24',
+  cardSubtle: '#111620',
+  inverse: '#F3F5F9',
+  inverseInk: '#161B22',
+  line: '#1E2430',
+  ink: '#F3F5F9',
+  inkSecondary: '#A3AAB8',
+  inkMuted: '#636D80',
   accent: '#7B96FF',
-  accentSoft: '#1B2440',
-  success: '#7CCB98',
-  danger: '#F09A8F',
-  pillBg: '#F4F3F1',
-  pillFg: '#17161A',
+  accentSoft: '#0F1B3D',
+  success: '#6FCA93',
+  danger: '#EF9590',
+  pillBg: '#F3F5F9',
+  pillFg: '#0C0E14',
   tint: darkTints,
 };
 
@@ -146,10 +146,17 @@ export const type = {
 } as const;
 
 export const motion = {
-  pressScale: 0.97,
-  fast: 120,
-  normal: 220,
-  slow: 320,
+  pressScale: 0.98,
+  fast: 160,
+  normal: 280,
+  slow: 480,
+  // ponytail: Blade easing curves for Animated.timing
+  easing: {
+    entrance: [0, 0, 0.2, 1] as const,
+    exit: [0.17, 0, 1, 1] as const,
+    standard: [0.3, 0, 0.2, 1] as const,
+    emphasized: [0.5, 0, 0, 1] as const,
+  },
 } as const;
 
 export interface Theme {

@@ -144,7 +144,7 @@ export default function ConsultantFeeManagementPanel() {
           </button>
         </div>
         {loading ? (
-          <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
         ) : rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">No consultant fee management configured yet.</p>
         ) : (
@@ -167,12 +167,12 @@ export default function ConsultantFeeManagementPanel() {
                   <td className="px-4 py-2.5 text-muted-foreground">{r.session_name}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      r.enabled ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                      r.enabled ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
                     }`}>{r.enabled ? "Enabled" : "Disabled"}</span>
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => toggle(r)}>
-                      {r.enabled ? <ToggleRight className="h-4 w-4 text-emerald-600" /> : <ToggleLeft className="h-4 w-4" />}
+                      {r.enabled ? <ToggleRight className="h-4 w-4 text-success" /> : <ToggleLeft className="h-4 w-4" />}
                       {r.enabled ? "Disable" : "Enable"}
                     </Button>
                   </td>

@@ -431,7 +431,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="min-h-screen flex bg-background animate-fade-in">
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
         {/* NIMT logo — top left */}
@@ -473,7 +473,7 @@ const Login = () => {
                 onClick={() => { resetState(); setMethod(method === "dev_password" ? "whatsapp_sign_in" : "dev_password"); }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
-                <ShieldCheck className="h-3.5 w-3.5 text-orange-500" />
+                <ShieldCheck className="h-3.5 w-3.5 text-warning" />
                 {method === "dev_password" ? "Standard sign in" : "Dev sign in"}
               </button>
             </div>
@@ -482,7 +482,7 @@ const Login = () => {
           {/* Dev Password Login (localhost only) */}
           {method === "dev_password" && import.meta.env.DEV && (
             <form onSubmit={handleDevPasswordLogin} className="space-y-4">
-              <div className="rounded-xl bg-orange-500/10 border border-orange-500/20 px-4 py-2 text-xs text-orange-700 dark:text-orange-400 font-medium">
+              <div className="rounded-xl bg-warning/10 border border-warning/35/20 px-4 py-2 text-xs text-warning-foreground dark:text-warning font-medium">
                 Dev mode — not visible in production
               </div>
               <input
@@ -504,7 +504,7 @@ const Login = () => {
               <button
                 type="submit"
                 disabled={submitting || !devEmail || !devPassword}
-                className="w-full rounded-xl bg-orange-500 py-3 text-sm font-medium text-white hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full rounded-xl bg-warning py-3 text-sm font-medium text-white hover:bg-warning transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In (Dev)"}
               </button>
@@ -515,7 +515,7 @@ const Login = () => {
           {method === "whatsapp_sign_in" && (
             <div className="space-y-4">
               {waSignInState === "no_account" ? (
-                <div className="rounded-xl bg-amber-500/5 border border-amber-500/30 p-5">
+                <div className="rounded-xl bg-warning/50/5 border border-warning/35/30 p-5">
                   <p className="text-sm font-medium text-foreground">No UniOs account on this WhatsApp number</p>
                   <p className="text-xs text-muted-foreground mt-1.5">
                     Sign-in is for existing students, parents, and staff. New applicants should start an application instead.
@@ -538,8 +538,8 @@ const Login = () => {
                   </div>
                 </div>
               ) : waSignInState === "waiting" ? (
-                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-5 text-center">
-                  <Loader2 className="h-7 w-7 text-emerald-600 mx-auto mb-3 animate-spin" />
+                <div className="rounded-xl bg-success/50/5 border border-success/35/20 p-5 text-center">
+                  <Loader2 className="h-7 w-7 text-success mx-auto mb-3 animate-spin" />
                   <p className="text-sm font-medium text-foreground">Waiting for WhatsApp</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Send the prefilled message from WhatsApp to finish signing in.
@@ -555,7 +555,7 @@ const Login = () => {
                   type="button"
                   onClick={handleWhatsAppSignIn}
                   disabled={submitting}
-                  className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full rounded-xl bg-success py-3 text-sm font-medium text-white hover:bg-success/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
                   Continue with WhatsApp
@@ -565,7 +565,7 @@ const Login = () => {
               <button
                 type="button"
                 onClick={() => { resetState(); setMethod("whatsapp_otp"); }}
-                className="w-full rounded-xl border border-emerald-600/25 bg-emerald-50 py-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                className="w-full rounded-xl border border-success/40/25 bg-success/5 py-2.5 text-xs font-medium text-success hover:bg-success/10 transition-colors"
               >
                 Use WhatsApp OTP instead
               </button>

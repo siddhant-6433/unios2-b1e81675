@@ -203,7 +203,7 @@ const FeeCollections = () => {
         {/* Table */}
         {loading ? (
           <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
           <Card className="border-border/60 shadow-none overflow-hidden">
@@ -235,7 +235,7 @@ const FeeCollections = () => {
                         <div className="text-xs text-muted-foreground font-mono">{p.students?.admission_no || "—"}</div>
                         {p.student_id && consultantManagedIds.has(p.student_id) && (
                           <Badge
-                            className="mt-1 border-0 bg-amber-100 text-amber-700 text-[10px]"
+                            className="mt-1 border-0 bg-warning/10 text-warning-foreground text-[10px]"
                             title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
                           >
                             Consultant-managed fee

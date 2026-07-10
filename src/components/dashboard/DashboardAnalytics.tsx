@@ -221,11 +221,11 @@ export default function DashboardAnalytics({
                 </span>
                 <span>
                   <span className="text-muted-foreground">Paid: </span>
-                  <span className="font-semibold text-green-600">{fmtAmt(feeTotal.paid)}</span>
+                  <span className="font-semibold text-success">{fmtAmt(feeTotal.paid)}</span>
                 </span>
                 <span>
                   <span className="text-muted-foreground">Due: </span>
-                  <span className="font-semibold text-amber-600">{fmtAmt(feeTotal.due)}</span>
+                  <span className="font-semibold text-warning-foreground">{fmtAmt(feeTotal.due)}</span>
                 </span>
               </div>
             )}

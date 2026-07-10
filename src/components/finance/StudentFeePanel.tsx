@@ -172,7 +172,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const totalBalance = fees.reduce((s, f) => s + Number(f.balance || 0), 0);
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -191,7 +191,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </Badge>
         )}
         {student.fee_structure_version && (
-          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-amber-100 text-amber-700 border-amber-200" : isStethoBatch ? "bg-violet-100 text-violet-700 border-violet-200" : "bg-blue-100 text-blue-700 border-blue-200"}>
+          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-warning/10 text-warning-foreground border-warning/20" : isStethoBatch ? "bg-primary/10 text-primary border-primary/20" : "bg-info/10 text-info-foreground border-info/20"}>
             {student.fee_structure_version === "existing_parent" ? "Existing Parent" : isStethoBatch ? "Stetho Batch" : "New Admission"}
           </Badge>
         )}
@@ -199,9 +199,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
 
       {/* Cashier note — consultant-managed fee */}
       {consultantManaged && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-900/20 px-4 py-3 flex items-start gap-2.5">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-sm text-amber-900 dark:text-amber-200">
+        <div className="rounded-xl border border-warning/20 bg-warning/5 dark:border-warning/60/50 dark:bg-warning/80/20 px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle className="h-4 w-4 text-warning-foreground shrink-0 mt-0.5" />
+          <p className="text-sm text-warning-foreground dark:text-warning/40">
             Fee for this candidate is managed via consultant login / consultant-sent payment links
             <span className="font-medium"> ({consultantManaged})</span>. The fee structure is hidden from the student&rsquo;s login.
           </p>

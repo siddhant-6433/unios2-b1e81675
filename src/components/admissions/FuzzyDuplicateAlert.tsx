@@ -25,18 +25,18 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const REASON_CONFIG: Record<string, { label: string; icon: typeof Phone; color: string }> = {
-  exact_phone:    { label: "Same phone",      icon: Phone,       color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  guardian_phone: { label: "Guardian phone",   icon: ShieldAlert, color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
-  exact_email:    { label: "Same email",       icon: Mail,        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  similar_email:  { label: "Similar email",    icon: Mail,        color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
-  similar_name:   { label: "Similar name",     icon: User,        color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  exact_phone:    { label: "Same phone",      icon: Phone,       color: "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80" },
+  guardian_phone: { label: "Guardian phone",   icon: ShieldAlert, color: "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning" },
+  exact_email:    { label: "Same email",       icon: Mail,        color: "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80" },
+  similar_email:  { label: "Similar email",    icon: Mail,        color: "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning" },
+  similar_name:   { label: "Similar name",     icon: User,        color: "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80" },
   weak_name:      { label: "Name overlap",     icon: User,        color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
 };
 
 function confidenceLabel(score: number): { text: string; color: string } {
-  if (score >= 0.70) return { text: "Very likely duplicate", color: "text-red-600 dark:text-red-400" };
-  if (score >= 0.50) return { text: "Likely duplicate", color: "text-orange-600 dark:text-orange-400" };
-  if (score >= 0.30) return { text: "Possible duplicate", color: "text-amber-600 dark:text-amber-400" };
+  if (score >= 0.70) return { text: "Very likely duplicate", color: "text-destructive dark:text-destructive/80" };
+  if (score >= 0.50) return { text: "Likely duplicate", color: "text-warning-foreground dark:text-warning" };
+  if (score >= 0.30) return { text: "Possible duplicate", color: "text-warning-foreground dark:text-warning" };
   return { text: "Low confidence", color: "text-muted-foreground" };
 }
 
@@ -88,15 +88,15 @@ export function FuzzyDuplicateAlert({ leadId, leadName, leadPhone, leadEmail }: 
 
   const topScore = matches[0]?.match_score ?? 0;
   const confidence = confidenceLabel(topScore);
-  const borderColor = topScore >= 0.50 ? "border-red-300 dark:border-red-800/40" : "border-amber-200 dark:border-amber-800/40";
-  const bgColor = topScore >= 0.50 ? "bg-red-50/50 dark:bg-red-950/10" : "bg-amber-50/50 dark:bg-amber-950/10";
+  const borderColor = topScore >= 0.50 ? "border-destructive/30 dark:border-destructive/50/40" : "border-warning/20 dark:border-warning/60/40";
+  const bgColor = topScore >= 0.50 ? "bg-destructive/5/50 dark:bg-destructive/90/10" : "bg-warning/5/50 dark:bg-warning/90/10";
 
   return (
     <Card className={`${borderColor} ${bgColor}`}>
       <CardContent className="p-4 space-y-2">
         <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-amber-600" />
-          <h3 className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">
+          <Users className="h-4 w-4 text-warning-foreground" />
+          <h3 className="text-xs font-semibold text-warning-foreground dark:text-warning/70 uppercase tracking-wide">
             Possible Duplicates ({matches.length})
           </h3>
           <span className={`text-[10px] font-medium ml-auto ${confidence.color}`}>{confidence.text}</span>
@@ -136,8 +136,8 @@ export function FuzzyDuplicateAlert({ leadId, leadName, leadPhone, leadEmail }: 
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <Badge className={`border-0 text-[9px] font-semibold ${
-                  m.match_score >= 0.50 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                  : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  m.match_score >= 0.50 ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
+                  : "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
                 }`}>
                   {Math.round(m.match_score * 100)}%
                 </Badge>

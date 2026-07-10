@@ -1176,7 +1176,7 @@ const Library = () => {
   };
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -1539,7 +1539,7 @@ const Library = () => {
                         </div>
                       </div>
                       {(signals.accession || signals.isbn) && (
-                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <div className="mt-3 rounded-xl border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning-foreground">
                           {signals.accession && <p>Accession already exists: {signals.accession}</p>}
                           {signals.isbn && <p>ISBN matches existing title: {signals.isbn}</p>}
                         </div>

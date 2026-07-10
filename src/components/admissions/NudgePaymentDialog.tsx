@@ -143,7 +143,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <MessageCircle className="h-4 w-4 text-emerald-600" />
+            <MessageCircle className="h-4 w-4 text-success" />
             Nudge {candidate.full_name} to confirm admission
           </DialogTitle>
           <DialogDescription className="text-xs">
@@ -156,7 +156,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
           <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-muted-foreground">To confirm admission (AN)</span>
-              <span className="text-sm font-semibold tabular-nums text-emerald-700">₹{fmtINR(anDue)}</span>
+              <span className="text-sm font-semibold tabular-nums text-success">₹{fmtINR(anDue)}</span>
             </div>
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-muted-foreground">Full Sem 1 balance</span>
@@ -206,7 +206,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
           <Button
             onClick={handleSend}
             disabled={sending || !candidate.phone || loadingDate}
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+            className="gap-1.5 bg-success hover:bg-success/90"
           >
             {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
             Send via WhatsApp

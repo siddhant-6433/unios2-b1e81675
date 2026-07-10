@@ -33,10 +33,10 @@ interface Campus { id: string; name: string; }
 type Tab = "scheduled" | "completed" | "no_show" | "unmarked" | "walkins" | "post_visit";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  scheduled:  { label: "Scheduled",  color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
+  scheduled:  { label: "Scheduled",  color: "text-info-foreground",   bg: "bg-info/5 border-info/20" },
   confirmed:  { label: "Confirmed",  color: "text-teal-700",   bg: "bg-teal-50 border-teal-200" },
-  completed:  { label: "Completed",  color: "text-emerald-700",bg: "bg-emerald-50 border-emerald-200" },
-  no_show:    { label: "No Show",    color: "text-rose-700",   bg: "bg-rose-50 border-rose-200" },
+  completed:  { label: "Completed",  color: "text-success",bg: "bg-success/5 border-success/20" },
+  no_show:    { label: "No Show",    color: "text-destructive",   bg: "bg-destructive/5 border-destructive/20" },
 };
 
 function fmtDate(iso: string) {
@@ -170,11 +170,11 @@ export default function VisitMonitor() {
   });
 
   const TABS: { key: Tab; label: string; icon: typeof Calendar; countKey: keyof typeof counts; accent: string }[] = [
-    { key: "scheduled",  label: "Scheduled",      icon: Calendar,     countKey: "scheduled",  accent: "text-blue-600" },
-    { key: "completed",  label: "Completed",      icon: CheckCircle2, countKey: "completed",  accent: "text-emerald-600" },
-    { key: "no_show",    label: "No Show",        icon: XCircle,      countKey: "no_show",    accent: "text-rose-600" },
-    { key: "unmarked",   label: "Unmarked",       icon: AlertCircle,  countKey: "unmarked",   accent: "text-amber-600" },
-    { key: "walkins",    label: "Walk-ins",       icon: Footprints,   countKey: "walkins",    accent: "text-purple-600" },
+    { key: "scheduled",  label: "Scheduled",      icon: Calendar,     countKey: "scheduled",  accent: "text-info-foreground" },
+    { key: "completed",  label: "Completed",      icon: CheckCircle2, countKey: "completed",  accent: "text-success" },
+    { key: "no_show",    label: "No Show",        icon: XCircle,      countKey: "no_show",    accent: "text-destructive" },
+    { key: "unmarked",   label: "Unmarked",       icon: AlertCircle,  countKey: "unmarked",   accent: "text-warning-foreground" },
+    { key: "walkins",    label: "Walk-ins",       icon: Footprints,   countKey: "walkins",    accent: "text-primary" },
     { key: "post_visit", label: "Post-Visit",     icon: Clock,        countKey: "post_visit", accent: "text-slate-600" },
   ];
 
@@ -298,7 +298,7 @@ export default function VisitMonitor() {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : tabRows.length === 0 ? (
         <div className="rounded-xl border border-border bg-card flex flex-col items-center gap-2 py-16 text-muted-foreground">
@@ -412,7 +412,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
             {sc.label}
           </span>
           {v.visit_type === "walk_in" && (
-            <span className="inline-flex w-fit items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
+            <span className="inline-flex w-fit items-center gap-1 rounded-md border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-semibold text-primary">
               <Footprints className="h-2.5 w-2.5" /> Walk-in
             </span>
           )}
@@ -424,7 +424,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
         <td className="px-4 py-3 max-w-[200px]">
           {v.feedback
             ? <p className="text-xs text-muted-foreground line-clamp-2">{v.feedback}</p>
-            : <span className="text-[11px] text-rose-500 font-medium">No feedback</span>
+            : <span className="text-[11px] text-destructive font-medium">No feedback</span>
           }
         </td>
       )}
@@ -432,7 +432,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
       {/* Overdue (unmarked tab only) */}
       {tab === "unmarked" && (
         <td className="px-4 py-3">
-          <span className={`text-sm font-semibold ${overdueDays > 2 ? "text-rose-600" : "text-amber-600"}`}>
+          <span className={`text-sm font-semibold ${overdueDays > 2 ? "text-destructive" : "text-warning-foreground"}`}>
             {overdueDays}d ago
           </span>
         </td>

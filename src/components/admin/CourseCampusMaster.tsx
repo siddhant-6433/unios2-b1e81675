@@ -209,7 +209,7 @@ export default function CourseCampusMaster() {
 
   if (loading) return (
     <div className="flex items-center justify-center py-16">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <Loader2 className="h-6 w-6 animate-spin text-primary" />
     </div>
   );
 
@@ -290,12 +290,12 @@ export default function CourseCampusMaster() {
                                   rel="noreferrer"
                                   onClick={e => e.stopPropagation()}
                                   title={`Course video: ${course.video_url}`}
-                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 shrink-0"
+                                  className="text-success hover:text-success p-0.5 shrink-0"
                                 >
                                   <Video className="h-3.5 w-3.5" />
                                 </a>
                               )}
-                              <span className={`h-2 w-2 rounded-full shrink-0 ${course.is_active !== false ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} title={course.is_active !== false ? 'Active' : 'Inactive'} />
+                              <span className={`h-2 w-2 rounded-full shrink-0 ${course.is_active !== false ? 'bg-success/50' : 'bg-muted-foreground/40'}`} title={course.is_active !== false ? 'Active' : 'Inactive'} />
                               <button
                                 onClick={e => { e.stopPropagation(); openRuleDialog(course); }}
                                 className={`p-0.5 transition-opacity ${hasRule ? 'text-primary' : 'text-muted-foreground opacity-0 group-hover:opacity-100'}`}
@@ -394,7 +394,7 @@ export default function CourseCampusMaster() {
             ) : (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-foreground text-sm leading-snug">{inst.name}</span>
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">{inst.code}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning">{inst.code}</span>
                 {campus && (campus.city || campus.state) && (
                   <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
                     <MapPin className="h-3 w-3" />
@@ -478,7 +478,7 @@ export default function CourseCampusMaster() {
                   onClick={(e) => { e.stopPropagation(); setGeofenceCampus(campus); }}
                   className={`relative z-10 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-lg cursor-pointer border transition-colors ${
                     campus.latitude
-                      ? "bg-pastel-green border-green-200 text-green-800 hover:bg-green-100"
+                      ? "bg-pastel-green border-success/20 text-success-foreground hover:bg-success/10"
                       : "bg-pastel-yellow border-yellow-200 text-yellow-800 hover:bg-yellow-100"
                   }`}
                 >
@@ -513,7 +513,7 @@ export default function CourseCampusMaster() {
                 onClick={(e) => { e.stopPropagation(); setGeofenceCampus(campus); }}
                 className={`relative z-10 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-lg cursor-pointer border transition-colors ${
                   campus.latitude
-                    ? "bg-pastel-green border-green-200 text-green-800 hover:bg-green-100"
+                    ? "bg-pastel-green border-success/20 text-success-foreground hover:bg-success/10"
                     : "bg-pastel-yellow border-yellow-200 text-yellow-800 hover:bg-yellow-100"
                 }`}
               >
@@ -594,7 +594,7 @@ export default function CourseCampusMaster() {
               <Card key={loc.id} className="border-border/60">
                 <CardContent className="p-4 flex items-center gap-3">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${loc.is_active ? "bg-pastel-green" : "bg-muted"}`}>
-                    <MapPin className={`h-4 w-4 ${loc.is_active ? "text-green-700" : "text-muted-foreground"}`} />
+                    <MapPin className={`h-4 w-4 ${loc.is_active ? "text-success" : "text-muted-foreground"}`} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

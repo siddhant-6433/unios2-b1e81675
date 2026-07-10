@@ -97,7 +97,7 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="cahet-reg-no">
-              CAHET registration no. <span className="text-rose-600">*</span>
+              CAHET registration no. <span className="text-destructive">*</span>
             </Label>
             <Input
               id="cahet-reg-no"
@@ -138,7 +138,7 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={saving} className="bg-rose-600 hover:bg-rose-700">
+          <Button onClick={submit} disabled={saving} className="bg-destructive hover:bg-destructive">
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
             ) : (

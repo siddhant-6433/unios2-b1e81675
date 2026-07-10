@@ -129,7 +129,7 @@ export function SendPaymentLinkDialog({
             <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <span className="flex-1 truncate text-xs text-foreground">{createdUrl}</span>
               <button onClick={copyUrl} className="text-muted-foreground hover:text-foreground" title="Copy">
-                {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
               </button>
             </div>
           </div>

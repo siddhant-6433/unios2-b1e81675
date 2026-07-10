@@ -317,17 +317,17 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const statusBadge = (status: string) => {
-  if (["paid", "present", "admitted", "active", "approved"].includes(status)) return "bg-emerald-100 text-emerald-700";
-  if (["pending", "due", "waitlisted"].includes(status)) return "bg-amber-100 text-amber-700";
-  if (["cancelled", "overdue", "absent", "rejected"].includes(status)) return "bg-red-100 text-red-700";
+  if (["paid", "present", "admitted", "active", "approved"].includes(status)) return "bg-success/10 text-success";
+  if (["pending", "due", "waitlisted"].includes(status)) return "bg-warning/10 text-warning-foreground";
+  if (["cancelled", "overdue", "absent", "rejected"].includes(status)) return "bg-destructive/10 text-destructive";
   return "bg-muted text-muted-foreground";
 };
 
 const attributionBadge = (type: string | null | undefined) => {
-  if (type === "attributed_to_you") return "bg-emerald-100 text-emerald-700";
-  if (type === "nimt_counsellor") return "bg-blue-100 text-blue-700";
+  if (type === "attributed_to_you") return "bg-success/10 text-success";
+  if (type === "nimt_counsellor") return "bg-info/10 text-info-foreground";
   if (type === "not_attributed_to_you") return "bg-slate-100 text-slate-700";
-  return "bg-amber-100 text-amber-700";
+  return "bg-warning/10 text-warning-foreground";
 };
 
 const ATTRIBUTION_LABELS: Record<PaidApplicationRpcRow["attribution_type"], string> = {
@@ -1049,7 +1049,7 @@ export default function AcademicPartnerPortal() {
     }
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   if (!partner) return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">No academic partner profile is linked to this account.</div>;
 
   const partnerInitials = getPartnerInitials(partner.company_name || partner.name);
@@ -1098,11 +1098,11 @@ export default function AcademicPartnerPortal() {
       </div>
 
       {onboardingSkipped && !showOnboarding && (
-        <Card className="border-amber-200 bg-amber-50/70 shadow-none">
+        <Card className="border-warning/20 bg-warning/5/70 shadow-none">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
-              <p className="text-sm font-semibold text-amber-900">Academic partner onboarding was skipped</p>
-              <p className="mt-1 text-xs text-amber-800">Resume it anytime to add company, tax, signatory, and internal document details.</p>
+              <p className="text-sm font-semibold text-warning-foreground">Academic partner onboarding was skipped</p>
+              <p className="mt-1 text-xs text-warning-foreground">Resume it anytime to add company, tax, signatory, and internal document details.</p>
             </div>
             <Button variant="outline" className="gap-2 bg-background" onClick={() => setShowOnboarding(true)}>
               <RotateCcw className="h-4 w-4" /> Resume Onboarding
@@ -1507,7 +1507,7 @@ export default function AcademicPartnerPortal() {
                     <tr key={studentId} className="border-b last:border-0">
                       <td className="px-4 py-3"><div className="font-medium">{fee?.student_name || "-"}</div><div className="text-xs text-muted-foreground">{fee?.student_admission_no || "-"}</div></td>
                       <td className="px-4 py-3 text-right">{fmt(summary.total)}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmt(summary.paid)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-success">{fmt(summary.paid)}</td>
                       <td className="px-4 py-3 text-right">{fmt(summary.balance)}</td>
                       <td className="px-4 py-3 text-center">
                         <Button size="sm" variant="outline" onClick={() => setFeeDetailsStudentId(studentId)}>
@@ -1541,9 +1541,9 @@ export default function AcademicPartnerPortal() {
                     <tr key={student.id} className="border-b last:border-0">
                       <td className="px-4 py-3"><div className="font-medium">{student.name}</div><div className="text-xs text-muted-foreground">{student.admission_no || student.phone || "-"}</div></td>
                       <td className="px-4 py-3">{student.batch_name}</td>
-                      <td className="px-4 py-3 text-center text-emerald-700 font-medium">{att.present}</td>
-                      <td className="px-4 py-3 text-center text-red-700 font-medium">{att.absent}</td>
-                      <td className="px-4 py-3 text-center text-amber-700 font-medium">{att.late}</td>
+                      <td className="px-4 py-3 text-center text-success font-medium">{att.present}</td>
+                      <td className="px-4 py-3 text-center text-destructive font-medium">{att.absent}</td>
+                      <td className="px-4 py-3 text-center text-warning-foreground font-medium">{att.late}</td>
                       <td className="px-4 py-3 text-center">{attendancePercent(att.present, att.total)}</td>
                     </tr>
                   );
@@ -1579,8 +1579,8 @@ export default function AcademicPartnerPortal() {
         <TabsContent value="payouts" className="mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-primary">{fmt(stats?.total_payout)}</p><p className="text-[11px] text-muted-foreground">Total Payout</p></CardContent></Card>
-            <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-amber-600">{fmt(stats?.pending_payout)}</p><p className="text-[11px] text-muted-foreground">Pending</p></CardContent></Card>
-            <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-emerald-600">{fmt(stats?.paid_payout)}</p><p className="text-[11px] text-muted-foreground">Paid</p></CardContent></Card>
+            <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-warning">{fmt(stats?.pending_payout)}</p><p className="text-[11px] text-muted-foreground">Pending</p></CardContent></Card>
+            <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-success">{fmt(stats?.paid_payout)}</p><p className="text-[11px] text-muted-foreground">Paid</p></CardContent></Card>
           </div>
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <table className="w-full text-sm">
@@ -1791,7 +1791,7 @@ export default function AcademicPartnerPortal() {
             </div>
             <div className="rounded-lg border border-border p-3">
               <p className="text-[11px] uppercase text-muted-foreground">Collected</p>
-              <p className="mt-1 text-lg font-semibold text-emerald-700">{fmt(feeDetailsSummary?.paid)}</p>
+              <p className="mt-1 text-lg font-semibold text-success">{fmt(feeDetailsSummary?.paid)}</p>
             </div>
             <div className="rounded-lg border border-border p-3">
               <p className="text-[11px] uppercase text-muted-foreground">Balance</p>

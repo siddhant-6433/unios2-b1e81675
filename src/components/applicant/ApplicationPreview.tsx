@@ -44,7 +44,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             {Object.entries(cs).map(([key, done]) => (
               <div key={key} className="flex items-center gap-1.5">
-                {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
+                {done ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <AlertCircle className="h-3.5 w-3.5 text-warning" />}
                 <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
               </div>
             ))}

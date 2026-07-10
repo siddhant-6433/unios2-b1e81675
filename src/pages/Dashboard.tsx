@@ -145,7 +145,7 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
 
   if (loading) return (
     <div className="flex h-64 items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <Loader2 className="h-6 w-6 animate-spin text-primary" />
     </div>
   );
 
@@ -348,15 +348,15 @@ const ParentDashboard = () => {
 
   if (loading) return (
     <div className="flex h-64 items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <Loader2 className="h-6 w-6 animate-spin text-primary" />
     </div>
   );
 
   const statusColor: Record<string, string> = {
-    active: "bg-green-100 text-green-700",
-    pre_admitted: "bg-blue-100 text-blue-700",
+    active: "bg-success/10 text-success",
+    pre_admitted: "bg-info/10 text-info-foreground",
     inactive: "bg-gray-100 text-gray-600",
-    alumni: "bg-purple-100 text-purple-700",
+    alumni: "bg-primary/10 text-primary",
   };
 
   return (

@@ -56,21 +56,21 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 const stageColor = (s: string) => {
-  if (s === "admitted" || s === "pre_admitted" || s === "token_paid") return "bg-emerald-100 text-emerald-700";
-  if (s === "visit_scheduled" || s === "interview") return "bg-purple-100 text-purple-700";
-  if (s === "counsellor_call" || s === "ai_called") return "bg-blue-100 text-blue-700";
-  if (s === "priority_interested") return "bg-amber-100 text-amber-700";
+  if (s === "admitted" || s === "pre_admitted" || s === "token_paid") return "bg-success/10 text-success";
+  if (s === "visit_scheduled" || s === "interview") return "bg-primary/10 text-primary";
+  if (s === "counsellor_call" || s === "ai_called") return "bg-info/10 text-info-foreground";
+  if (s === "priority_interested") return "bg-warning/10 text-warning-foreground";
   return "bg-slate-100 text-slate-700";
 };
 const flameTint = (score: number) => {
-  if (score >= 80) return "text-red-500";
-  if (score >= 50) return "text-orange-500";
-  return "text-amber-400";
+  if (score >= 80) return "text-destructive";
+  if (score >= 50) return "text-warning";
+  return "text-warning";
 };
 const engagementBar = (score: number) => {
-  if (score >= 80) return "bg-red-500";
-  if (score >= 50) return "bg-orange-400";
-  return "bg-amber-400";
+  if (score >= 80) return "bg-destructive/50";
+  if (score >= 50) return "bg-warning/50";
+  return "bg-warning/40";
 };
 const timeAgo = (s: string) => {
   const m = Math.floor((Date.now() - new Date(s).getTime()) / 60000);
@@ -143,13 +143,13 @@ export function HotLeadsSidebar({ profileId, isSuperAdmin, isTeamLeader }: Props
         onClick={openPanel}
         aria-label={`${newCount > 0 ? `${newCount} new hot leads` : "View hot leads"}`}
         className={`fixed right-4 bottom-20 z-40 group inline-flex items-center gap-2 rounded-full border bg-card px-3 py-2 shadow-lg shadow-orange-500/10 hover:shadow-orange-500/20 transition-all hover:scale-105 ${
-          newCount > 0 ? "border-orange-300 bg-orange-50 animate-pulse" : "border-border/60"
+          newCount > 0 ? "border-warning/25 bg-warning/5 animate-pulse" : "border-border/60"
         }`}
       >
-        <Flame className={`h-4 w-4 ${newCount > 0 ? "text-orange-600" : "text-orange-500"}`} />
+        <Flame className={`h-4 w-4 ${newCount > 0 ? "text-warning-foreground" : "text-warning"}`} />
         <span className="text-xs font-semibold text-foreground">{leads.length}</span>
         {newCount > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-orange-600 text-white text-[10px] font-bold px-1.5 py-0.5">
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning text-white text-[10px] font-bold px-1.5 py-0.5">
             <BellRing className="h-2.5 w-2.5" /> {newCount}
           </span>
         )}
@@ -173,8 +173,8 @@ export function HotLeadsSidebar({ profileId, isSuperAdmin, isTeamLeader }: Props
       >
         <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100">
-              <Flame className="h-4 w-4 text-orange-600" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-warning/10">
+              <Flame className="h-4 w-4 text-warning-foreground" />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-foreground">Hot Leads</h2>
@@ -202,7 +202,7 @@ export function HotLeadsSidebar({ profileId, isSuperAdmin, isTeamLeader }: Props
                     key={lead.id}
                     onClick={() => { setIsOpen(false); navigate(`/admissions/${lead.id}`); }}
                     className={`group flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors hover:bg-muted/50 ${
-                      isNew ? "border-orange-300 bg-orange-50/40" : "border-border/40"
+                      isNew ? "border-warning/25 bg-warning/5/40" : "border-border/40"
                     }`}
                   >
                     <Flame className={`h-4 w-4 shrink-0 ${flameTint(lead.engagement_score)}`} />
@@ -210,7 +210,7 @@ export function HotLeadsSidebar({ profileId, isSuperAdmin, isTeamLeader }: Props
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-semibold text-foreground group-hover:underline">{lead.name}</span>
                         {isNew && (
-                          <span className="inline-flex items-center rounded-full bg-orange-600 text-white text-[8px] font-bold px-1.5 py-0.5 uppercase tracking-wider">new</span>
+                          <span className="inline-flex items-center rounded-full bg-warning text-white text-[8px] font-bold px-1.5 py-0.5 uppercase tracking-wider">new</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">

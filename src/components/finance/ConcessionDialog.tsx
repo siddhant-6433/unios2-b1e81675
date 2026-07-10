@@ -252,7 +252,7 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
                 As super admin, these concessions will be applied immediately.
               </div>
             ) : (
-              <div className="p-2.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-medium">
+              <div className="p-2.5 rounded-xl bg-warning/5 text-warning-foreground text-xs font-medium">
                 This request will be sent to the principal for approval, then to the super admin.
               </div>
             )

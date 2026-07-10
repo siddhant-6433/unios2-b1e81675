@@ -221,7 +221,7 @@ export function WhatsAppPanel() {
           <TooltipTrigger asChild>
             <button
               onClick={() => navigate("/whatsapp-inbox")}
-              className="hidden md:flex items-center gap-1.5 rounded-xl border border-green-400/60 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors cursor-pointer select-none"
+              className="hidden md:flex items-center gap-1.5 rounded-xl border border-success/30/60 bg-success/5 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/10 transition-colors cursor-pointer select-none"
             >
               <WhatsAppIcon className="h-3.5 w-3.5 shrink-0" />
               <span>{unrepliedCount} unreplied</span>
@@ -230,7 +230,7 @@ export function WhatsAppPanel() {
           <TooltipContent side="bottom" className="text-xs max-w-[220px]">
             <p className="font-semibold mb-1">🟢 {unrepliedCount} WhatsApp {unrepliedCount === 1 ? "message" : "messages"} waiting</p>
             <p className="leading-snug text-muted-foreground">Leads are waiting for a reply. Respond quickly — fast replies significantly improve conversion rates.</p>
-            <p className="mt-1.5 font-medium text-green-700">Click to open WhatsApp Inbox →</p>
+            <p className="mt-1.5 font-medium text-success">Click to open WhatsApp Inbox →</p>
           </TooltipContent>
         </Tooltip>
       )}
@@ -238,10 +238,10 @@ export function WhatsAppPanel() {
       {/* WhatsApp notifications popover */}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-green-600 hover:text-green-700 hover:bg-green-50 relative">
+          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-success hover:text-success hover:bg-success/5 relative">
             <WhatsAppIcon className="h-[18px] w-[18px]" />
             {unrepliedCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-white px-1 ring-2 ring-card">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-success/50 text-[9px] font-bold text-white px-1 ring-2 ring-card">
                 {unrepliedCount > 99 ? "99+" : unrepliedCount}
               </span>
             )}
@@ -250,10 +250,10 @@ export function WhatsAppPanel() {
         <PopoverContent align="end" className="w-[380px] p-0" sideOffset={8}>
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div className="flex items-center gap-2">
-              <WhatsAppIcon className="h-4 w-4 text-green-600" />
+              <WhatsAppIcon className="h-4 w-4 text-success" />
               <h3 className="text-sm font-semibold text-foreground">WhatsApp</h3>
               {unrepliedCount > 0 && (
-                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
                   {unrepliedCount} unreplied
                 </span>
               )}
@@ -267,7 +267,7 @@ export function WhatsAppPanel() {
               )}
               <button
                 onClick={() => { setOpen(false); navigate("/whatsapp-inbox"); }}
-                className="text-xs text-green-600 hover:underline font-medium"
+                className="text-xs text-success hover:underline font-medium"
               >
                 Open Inbox →
               </button>
@@ -275,9 +275,9 @@ export function WhatsAppPanel() {
           </div>
 
           {unrepliedCount > 0 && (
-            <div className="border-b border-green-100 bg-green-50 px-4 py-2.5 flex items-center gap-2">
-              <WhatsAppIcon className="h-3.5 w-3.5 text-green-600 shrink-0" />
-              <p className="text-xs text-green-800">
+            <div className="border-b border-success/10 bg-success/5 px-4 py-2.5 flex items-center gap-2">
+              <WhatsAppIcon className="h-3.5 w-3.5 text-success shrink-0" />
+              <p className="text-xs text-success-foreground">
                 <strong>{unrepliedCount}</strong> conversation{unrepliedCount !== 1 ? "s" : ""} waiting for reply — respond quickly to improve conversions.
               </p>
             </div>
@@ -286,7 +286,7 @@ export function WhatsAppPanel() {
           <div className="max-h-[360px] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
@@ -296,10 +296,10 @@ export function WhatsAppPanel() {
               notifications.map(notif => (
                 <div
                   key={notif.id}
-                  className={`group relative flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${!notif.is_read ? "bg-green-500/[0.03]" : ""}`}
+                  className={`group relative flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${!notif.is_read ? "bg-success/50/[0.03]" : ""}`}
                   onClick={() => handleClick(notif)}
                 >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-50 text-green-600">
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-success/5 text-success">
                     <WhatsAppIcon className="h-4 w-4" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -307,7 +307,7 @@ export function WhatsAppPanel() {
                       <p className={`text-sm leading-tight ${!notif.is_read ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>
                         {notif.title}
                       </p>
-                      {!notif.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-green-500" />}
+                      {!notif.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-success/50" />}
                     </div>
                     {notif.body && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{notif.body}</p>}
                     <p className="mt-1 text-[10px] text-muted-foreground/70">{timeAgo(notif.created_at)}</p>
@@ -316,7 +316,7 @@ export function WhatsAppPanel() {
                     {!notif.is_read && (
                       <button
                         onClick={(e) => markNotificationRead(e, notif)}
-                        className="rounded-md p-1 text-muted-foreground hover:bg-green-100 hover:text-green-700"
+                        className="rounded-md p-1 text-muted-foreground hover:bg-success/10 hover:text-success"
                         title="Mark read"
                       >
                         <CheckCheck className="h-3.5 w-3.5" />

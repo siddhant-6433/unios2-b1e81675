@@ -366,7 +366,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               </span>
             )}
             {draftStatus === "saved" && (
-              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-emerald-600">
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-success">
                 <Save className="h-3 w-3" /> Draft saved
               </span>
             )}
@@ -615,7 +615,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <label className="block text-[11px] font-medium text-muted-foreground mb-2">
                 Fee Structure
                 {form.school_admission_no.trim() && isSchool && (
-                  <Badge className="ml-2 text-[10px] bg-amber-100 text-amber-700 border-amber-200">Auto: Existing Parent</Badge>
+                  <Badge className="ml-2 text-[10px] bg-warning/10 text-warning-foreground border-warning/20">Auto: Existing Parent</Badge>
                 )}
               </label>
               {isSchool ? (
@@ -626,7 +626,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                     <p className="text-[10px] text-muted-foreground mt-0.5">Standard rates for new families</p>
                   </button>
                   <button onClick={() => set("fee_version", "existing_parent")}
-                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-warning/35 bg-warning/5" : "border-border"}`}>
                     <p className="text-xs font-semibold text-foreground">Existing Parent</p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">CPI-revised rates for continuing families</p>
                   </button>

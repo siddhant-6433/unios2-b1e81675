@@ -28,17 +28,17 @@ interface Props extends LifecycleInput {
 // dim outline = future. Makes "this stage hasn't happened yet" obvious at a
 // glance, so users don't read a past-tense label and assume completion.
 const dotPalette: Record<string, string> = {
-  done:    "bg-emerald-500 ring-emerald-200",
-  current: "bg-white border-2 border-blue-500 ring-2 ring-blue-200 animate-pulse",
+  done:    "bg-success/50 ring-emerald-200",
+  current: "bg-white border-2 border-info/35 ring-2 ring-blue-200 animate-pulse",
   future:  "bg-muted ring-border",
-  blocked: "bg-rose-500 ring-rose-200 ring-2",
+  blocked: "bg-destructive/50 ring-rose-200 ring-2",
 };
 
 const labelPalette: Record<string, string> = {
-  done:    "text-emerald-700 dark:text-emerald-400",
-  current: "text-blue-700 dark:text-blue-300 font-semibold",
+  done:    "text-success dark:text-success",
+  current: "text-info-foreground dark:text-info/60 font-semibold",
   future:  "text-muted-foreground/60",
-  blocked: "text-rose-700 dark:text-rose-300 font-semibold",
+  blocked: "text-destructive dark:text-destructive/50 font-semibold",
 };
 
 export function MiniLifecycleStepper(props: Props) {
@@ -52,7 +52,7 @@ export function MiniLifecycleStepper(props: Props) {
         {stages.map((s, i) => {
           const isLast = i === stages.length - 1;
           const lineCls = stages[i].state === "done" && (i + 1 < stages.length && stages[i + 1].state !== "future")
-            ? "bg-emerald-400"
+            ? "bg-success/50"
             : "bg-border";
           return (
             <div key={s.key} className="flex items-center" title={`${s.label}${s.hint ? ` — ${s.hint}` : ""}`}>
@@ -76,11 +76,11 @@ export function MiniLifecycleStepper(props: Props) {
       {stages.map((s, i) => {
         const isLast = i === stages.length - 1;
         const lineCls = stages[i].state === "done" && (i + 1 < stages.length && stages[i + 1].state !== "future")
-          ? "bg-emerald-400"
+          ? "bg-success/50"
           : "bg-border";
         const showAmount = s.amountDue != null && s.amountDue > 0 && s.state !== "done";
         const amountTone = s.state === "current"
-          ? "text-blue-700 dark:text-blue-300 font-semibold"
+          ? "text-info-foreground dark:text-info/60 font-semibold"
           : "text-muted-foreground/70";
         const tooltip = `${s.label}${s.hint ? ` — ${s.hint}` : ""}${showAmount ? ` · ₹${s.amountDue!.toLocaleString("en-IN")} due` : ""}`;
         return (

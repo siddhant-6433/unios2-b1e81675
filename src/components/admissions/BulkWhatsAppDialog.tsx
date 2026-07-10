@@ -123,7 +123,7 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-green-600" />
+            <MessageSquare className="h-5 w-5 text-success" />
             Bulk WhatsApp
           </DialogTitle>
         </DialogHeader>
@@ -140,7 +140,7 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
                 </div>
                 {result.failed > 0 && (
                   <div>
-                    <p className="text-2xl font-bold text-red-600">{result.failed}</p>
+                    <p className="text-2xl font-bold text-destructive">{result.failed}</p>
                     <p className="text-xs text-muted-foreground">Failed</p>
                   </div>
                 )}
@@ -156,7 +156,7 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
               <Users className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm text-foreground font-medium">{validLeads.length} recipient{validLeads.length !== 1 ? "s" : ""}</span>
               {validLeads.length !== leads.length && (
-                <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
+                <Badge variant="outline" className="text-[10px] text-warning-foreground border-warning/30">
                   <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
                   {leads.length - validLeads.length} without phone
                 </Badge>
@@ -184,9 +184,9 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
             </div>
 
             {validLeads.length > 50 && (
-              <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex items-start gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40 px-3 py-2">
+                <AlertTriangle className="h-4 w-4 text-warning-foreground mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-warning-foreground dark:text-warning">
                   Sending to {validLeads.length} leads may take a few minutes. Do not close this dialog.
                 </p>
               </div>

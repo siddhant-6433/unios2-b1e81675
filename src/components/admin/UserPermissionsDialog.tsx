@@ -147,7 +147,7 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : (
             Object.entries(grouped).map(([module, perms]) => (
@@ -166,17 +166,17 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-foreground">{p.action}</span>
                             {status === "granted" && (
-                              <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                              <span className="rounded-full bg-success/10 dark:bg-success/80/30 px-1.5 py-0.5 text-[10px] font-semibold text-success dark:text-success">
                                 GRANTED
                               </span>
                             )}
                             {status === "revoked" && (
-                              <span className="rounded-full bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400">
+                              <span className="rounded-full bg-destructive/10 dark:bg-destructive/80/30 px-1.5 py-0.5 text-[10px] font-semibold text-destructive dark:text-destructive/80">
                                 REVOKED
                               </span>
                             )}
                             {status === "role" && (
-                              <span className="rounded-full bg-blue-100 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-400">
+                              <span className="rounded-full bg-info/10 dark:bg-info/80/30 px-1.5 py-0.5 text-[10px] font-semibold text-info-foreground dark:text-info/80">
                                 FROM ROLE
                               </span>
                             )}
@@ -190,8 +190,8 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
                           disabled={!!saving}
                           className={`ml-3 flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
                             effective
-                              ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-700 dark:hover:text-red-400"
-                              : "bg-muted text-muted-foreground hover:bg-emerald-100 dark:hover:bg-emerald-900/30 hover:text-emerald-700 dark:hover:text-emerald-400"
+                              ? "bg-success/10 dark:bg-success/80/30 text-success dark:text-success hover:bg-destructive/10 dark:hover:bg-destructive/80/30 hover:text-destructive dark:hover:text-destructive/80"
+                              : "bg-muted text-muted-foreground hover:bg-success/10 dark:hover:bg-success/80/30 hover:text-success dark:hover:text-success"
                           }`}
                         >
                           {isSaving ? (

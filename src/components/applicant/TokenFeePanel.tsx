@@ -884,7 +884,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   if (error) {
     return (
-      <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap font-mono">
+      <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive whitespace-pre-wrap font-mono">
         {error}
       </div>
     );
@@ -895,7 +895,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   if (!offer) return null;
   if (!feeStatus || feeStatus.first_year_fee <= 0) {
     return (
-      <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+      <div className="mt-3 rounded-xl bg-warning/5 border border-warning/20 p-3 text-xs text-warning-foreground">
         Offer letter is ready, but the fee structure for your course/session isn't published yet. Please contact admissions.
       </div>
     );
@@ -960,10 +960,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 mb-1">
               <Sparkles className="h-3.5 w-3.5 text-yellow-300" />
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-blue-200">Offer Issued</p>
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-info/40">Offer Issued</p>
             </div>
             <h3 className="text-xl font-bold leading-tight">Congratulations! 🎉</h3>
-            <p className="text-sm text-blue-100 mt-1 leading-snug">
+            <p className="text-sm text-info/30 mt-1 leading-snug">
               Your seat is reserved. Complete the steps below to secure your admission.
             </p>
           </div>
@@ -981,8 +981,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         {/* Deadline strip */}
         {deadlineDate && (
           <div className={`mt-3 flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 ${
-            isExpired ? "bg-red-600/40 border border-red-400/40"
-            : isUrgent ? "bg-orange-500/30 border border-orange-400/40"
+            isExpired ? "bg-destructive/40 border border-destructive/25/40"
+            : isUrgent ? "bg-warning/30 border border-warning/30/40"
             : "bg-white/10"
           }`}>
             <Clock className="h-4 w-4 shrink-0 text-white/80" />
@@ -991,7 +991,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 Token fee due by {deadlineDate.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
               </p>
               <p className={`text-[11px] font-medium mt-0.5 ${
-                isExpired ? "text-red-200" : isUrgent ? "text-orange-200" : "text-blue-200"
+                isExpired ? "text-destructive/40" : isUrgent ? "text-warning/40" : "text-info/40"
               }`}>
                 {isExpired
                   ? "Deadline passed — contact admissions immediately"
@@ -1000,7 +1000,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </p>
             </div>
             {isUrgent && !isExpired && (
-              <span className="shrink-0 text-[10px] font-bold text-orange-200 bg-orange-500/30 rounded-full px-2 py-0.5 animate-pulse">URGENT</span>
+              <span className="shrink-0 text-[10px] font-bold text-warning/40 bg-warning/30 rounded-full px-2 py-0.5 animate-pulse">URGENT</span>
             )}
           </div>
         )}
@@ -1008,16 +1008,16 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
       {/* ── Education loan letter ───────────────────────── */}
       {loanLetterUnlocked && (
-        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
+        <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4 shadow-sm">
           <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0">
               <FileText className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-indigo-950">
+              <p className="text-sm font-bold text-primary">
                 Education Loan Letter
               </p>
-              <p className="text-xs mt-0.5 leading-snug text-indigo-700">
+              <p className="text-xs mt-0.5 leading-snug text-primary">
                 You have paid at least ₹{loanLetterUnlockAmount.toLocaleString("en-IN")} token fee. Download the loan support letter for bank processing.
               </p>
             </div>
@@ -1025,7 +1025,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               <button
                 disabled={generatingLoanLetter}
                 onClick={generateLoanLetter}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2.5 text-xs font-bold text-white hover:bg-primary/60 transition-colors disabled:opacity-50"
               >
                 {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
                 {useLocalLoanLetterPreview ? "Preview latest local" : offer.loan_letter_url ? "View Latest" : "Generate"}
@@ -1048,23 +1048,23 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             const active = !done;
             return (
               <div className={`rounded-xl p-3 border transition-all ${
-                done ? "border-green-200 bg-green-50"
-                : "border-blue-200 bg-blue-50 ring-1 ring-blue-300/40"
+                done ? "border-success/20 bg-success/5"
+                : "border-info/20 bg-info/5 ring-1 ring-blue-300/40"
               }`}>
                 <div className="flex items-start gap-3">
                   <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 font-bold text-sm shadow-sm ${
-                    done ? "bg-green-500 text-white" : "bg-blue-600 text-white"
+                    done ? "bg-success/50 text-white" : "bg-info text-white"
                   }`}>
                     {done ? <Check className="h-4 w-4" /> : "1"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <p className={`text-sm font-bold ${done ? "text-green-800" : "text-blue-900"}`}>
+                      <p className={`text-sm font-bold ${done ? "text-success-foreground" : "text-info-foreground"}`}>
                         Pay Token Fee
                       </p>
                       {done
-                        ? <span className="text-[10px] font-semibold text-green-700 bg-green-100 border border-green-200 px-2 py-0.5 rounded-full">Completed ✓</span>
-                        : <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">Action Required</span>}
+                        ? <span className="text-[10px] font-semibold text-success bg-success/10 border border-success/20 px-2 py-0.5 rounded-full">Completed ✓</span>
+                        : <span className="text-[10px] font-semibold text-info-foreground bg-info/10 border border-info/20 px-2 py-0.5 rounded-full">Action Required</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 leading-snug">
                       Pay the token fee shown on your offer to secure your seat and receive your Pre-Admission Number.
@@ -1072,7 +1072,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </p>
                     <div className="mt-2.5 h-2 rounded-full bg-gray-200 overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-700 ${done ? "bg-green-500" : "bg-blue-500"}`}
+                        className={`h-full rounded-full transition-all duration-700 ${done ? "bg-success/50" : "bg-info/50"}`}
                         style={{ width: `${Math.min(100, (paidTowardCourse / Math.max(1, feeStatus.token_required)) * 100)}%` }}
                       />
                     </div>
@@ -1081,7 +1081,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       <span>Target: ₹{feeStatus.token_required.toLocaleString("en-IN")}</span>
                     </div>
                     {isPreAdmitted && lead.pre_admission_no && (
-                      <p className="mt-1.5 text-xs text-emerald-700 font-semibold">✓ Pre-Admission No: {lead.pre_admission_no}</p>
+                      <p className="mt-1.5 text-xs text-success font-semibold">✓ Pre-Admission No: {lead.pre_admission_no}</p>
                     )}
                   </div>
                 </div>
@@ -1090,15 +1090,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           })()}
 
           {/* Step 2 — Pre-Admission Number */}
-          <div className={`rounded-xl p-3 border ${isPreAdmitted ? "border-green-200 bg-green-50" : "border-gray-100 bg-gray-50"}`}>
+          <div className={`rounded-xl p-3 border ${isPreAdmitted ? "border-success/20 bg-success/5" : "border-gray-100 bg-gray-50"}`}>
             <div className="flex items-start gap-3">
               <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 font-bold text-sm ${
-                isPreAdmitted ? "bg-green-500 text-white shadow-sm" : "bg-gray-200 text-gray-500"
+                isPreAdmitted ? "bg-success/50 text-white shadow-sm" : "bg-gray-200 text-gray-500"
               }`}>
                 {isPreAdmitted ? <Check className="h-4 w-4" /> : "2"}
               </div>
               <div>
-                <p className={`text-sm font-semibold ${isPreAdmitted ? "text-green-800" : "text-gray-500"}`}>
+                <p className={`text-sm font-semibold ${isPreAdmitted ? "text-success-foreground" : "text-gray-500"}`}>
                   Receive Pre-Admission Number
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
@@ -1117,25 +1117,25 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             const confirmExpired = dLeft !== null && dLeft < 0;
             return (
               <div className={`rounded-xl p-3 border ${
-                done ? "border-green-200 bg-green-50"
-                : active ? "border-emerald-200 bg-emerald-50 ring-1 ring-emerald-300/40"
+                done ? "border-success/20 bg-success/5"
+                : active ? "border-success/20 bg-success/5 ring-1 ring-emerald-300/40"
                 : "border-gray-100 bg-gray-50"
               }`}>
                 <div className="flex items-start gap-3">
                   <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 font-bold text-sm ${
-                    done ? "bg-green-500 text-white shadow-sm"
-                    : active ? "bg-emerald-600 text-white shadow-sm"
+                    done ? "bg-success/50 text-white shadow-sm"
+                    : active ? "bg-success text-white shadow-sm"
                     : "bg-gray-200 text-gray-500"
                   }`}>
                     {done ? <Check className="h-4 w-4" /> : "3"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <p className={`text-sm font-semibold ${done ? "text-green-800" : active ? "text-emerald-900" : "text-gray-500"}`}>
+                      <p className={`text-sm font-semibold ${done ? "text-success-foreground" : active ? "text-success-foreground" : "text-gray-500"}`}>
                         Confirm Admission
                       </p>
-                      {done && <span className="text-[10px] font-semibold text-green-700 bg-green-100 border border-green-200 px-2 py-0.5 rounded-full">Completed ✓</span>}
-                      {!done && confirmUrgent && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
+                      {done && <span className="text-[10px] font-semibold text-success bg-success/10 border border-success/20 px-2 py-0.5 rounded-full">Completed ✓</span>}
+                      {!done && confirmUrgent && <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 border border-warning/20 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
                       Pay the admission threshold (₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}) → Admission Number issued
@@ -1143,9 +1143,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     {/* Deadline strip — always visible */}
                     {!done && (
                       <div className={`mt-2 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold w-fit ${
-                        confirmExpired    ? "bg-red-100 text-red-700"
-                        : confirmUrgent  ? "bg-orange-100 text-orange-700"
-                        : confirmDueDate ? "bg-emerald-100 text-emerald-700"
+                        confirmExpired    ? "bg-destructive/10 text-destructive"
+                        : confirmUrgent  ? "bg-warning/10 text-warning-foreground"
+                        : confirmDueDate ? "bg-success/10 text-success"
                         :                  "bg-gray-100 text-gray-500"
                       }`}>
                         <Clock className="h-3 w-3 shrink-0" />
@@ -1162,7 +1162,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       <>
                         <div className="mt-2.5 h-2 rounded-full bg-gray-200 overflow-hidden">
                           <div
-                            className={`h-full rounded-full transition-all duration-700 ${done ? "bg-green-500" : "bg-emerald-500"}`}
+                            className={`h-full rounded-full transition-all duration-700 ${done ? "bg-success/50" : "bg-success/50"}`}
                             style={{ width: `${Math.min(100, (coursePaid / Math.max(1, feeStatus.twenty_five_pct)) * 100)}%` }}
                           />
                         </div>
@@ -1173,7 +1173,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       </>
                     )}
                     {isAdmitted && lead.admission_no && (
-                      <p className="mt-1.5 text-xs text-emerald-700 font-semibold">✓ Admission No: {lead.admission_no}</p>
+                      <p className="mt-1.5 text-xs text-success font-semibold">✓ Admission No: {lead.admission_no}</p>
                     )}
                   </div>
                 </div>
@@ -1190,33 +1190,33 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             const semExpired = !semDone && semDaysLeft < 0;
             return (
               <div className={`rounded-xl p-3 border ${
-                semDone ? "border-green-200 bg-green-50"
-                : semActive ? "border-blue-200 bg-blue-50 ring-1 ring-blue-200/40"
+                semDone ? "border-success/20 bg-success/5"
+                : semActive ? "border-info/20 bg-info/5 ring-1 ring-blue-200/40"
                 : "border-gray-100 bg-gray-50"
               }`}>
                 <div className="flex items-start gap-3">
                   <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 font-bold text-sm ${
-                    semDone ? "bg-green-500 text-white shadow-sm"
-                    : semActive ? "bg-blue-600 text-white shadow-sm"
+                    semDone ? "bg-success/50 text-white shadow-sm"
+                    : semActive ? "bg-info text-white shadow-sm"
                     : "bg-gray-200 text-gray-500"
                   }`}>
                     {semDone ? <Check className="h-4 w-4" /> : "4"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <p className={`text-sm font-semibold ${semDone ? "text-green-800" : semActive ? "text-blue-900" : "text-gray-500"}`}>
+                      <p className={`text-sm font-semibold ${semDone ? "text-success-foreground" : semActive ? "text-info-foreground" : "text-gray-500"}`}>
                         Pay First Semester Fee
                       </p>
-                      {semUrgent && !semExpired && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
+                      {semUrgent && !semExpired && <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 border border-warning/20 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
                       Pay the remaining first-year fee by {fmtDate(semesterFeeDeadline)} to begin classes.
                     </p>
                     {!semDone && (
                       <div className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        semExpired ? "bg-red-100 text-red-700"
-                        : semUrgent ? "bg-orange-100 text-orange-700"
-                        : "bg-blue-100 text-blue-700"
+                        semExpired ? "bg-destructive/10 text-destructive"
+                        : semUrgent ? "bg-warning/10 text-warning-foreground"
+                        : "bg-info/10 text-info-foreground"
                       }`}>
                         <Clock className="h-3 w-3" />
                         {semExpired
@@ -1232,15 +1232,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           })()}
 
           {/* Step 5 — Classes Begin */}
-          <div className={`rounded-xl p-3 border ${isAdmitted ? "border-green-200 bg-gradient-to-r from-green-50 to-emerald-50" : "border-gray-100 bg-gray-50"}`}>
+          <div className={`rounded-xl p-3 border ${isAdmitted ? "border-success/20 bg-gradient-to-r from-green-50 to-emerald-50" : "border-gray-100 bg-gray-50"}`}>
             <div className="flex items-start gap-3">
               <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 text-sm ${
-                isAdmitted ? "bg-green-500 text-white shadow-sm" : "bg-gray-200 text-gray-500"
+                isAdmitted ? "bg-success/50 text-white shadow-sm" : "bg-gray-200 text-gray-500"
               }`}>
                 {isAdmitted ? <GraduationCap className="h-4 w-4" /> : "5"}
               </div>
               <div>
-                <p className={`text-sm font-semibold ${isAdmitted ? "text-green-800" : "text-gray-500"}`}>
+                <p className={`text-sm font-semibold ${isAdmitted ? "text-success-foreground" : "text-gray-500"}`}>
                   {isAdmitted ? "You're admitted! Welcome to NIMT 🎓" : "Start Your Classes"}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
@@ -1291,15 +1291,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   {/* Scholarship */}
                   {sch > 0 && (
                     <div className="flex justify-between items-center pl-3">
-                      <span className="text-xs text-emerald-600">Scholarship</span>
-                      <span className="text-xs font-medium text-emerald-600">− {fmt(sch)}</span>
+                      <span className="text-xs text-success">Scholarship</span>
+                      <span className="text-xs font-medium text-success">− {fmt(sch)}</span>
                     </div>
                   )}
                   {/* Approved waivers (non-scholarship) */}
                   {waivers > 0 && (
                     <div className="flex justify-between items-center pl-3">
-                      <span className="text-xs text-emerald-600">Approved Waiver</span>
-                      <span className="text-xs font-medium text-emerald-600">− {fmt(waivers)}</span>
+                      <span className="text-xs text-success">Approved Waiver</span>
+                      <span className="text-xs font-medium text-success">− {fmt(waivers)}</span>
                     </div>
                   )}
                   {/* Net for this year */}
@@ -1310,12 +1310,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </div>
                   )}
                   {term === "year_1" && seatBlockCredit > 0 && (
-                    <div className="mt-1.5 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2 space-y-1">
+                    <div className="mt-1.5 rounded-lg border border-success/10 bg-success/5/70 px-3 py-2 space-y-1">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs text-emerald-700">Application fee counted toward PAN amount</span>
-                        <span className="text-xs font-semibold text-emerald-700">− {fmt(seatBlockCredit)}</span>
+                        <span className="text-xs text-success">Application fee counted toward PAN amount</span>
+                        <span className="text-xs font-semibold text-success">− {fmt(seatBlockCredit)}</span>
                       </div>
-                      <div className="flex justify-between items-center pt-1 border-t border-emerald-100">
+                      <div className="flex justify-between items-center pt-1 border-t border-success/10">
                         <span className="text-xs font-semibold text-gray-700">Seat block balance payable</span>
                         <span className="text-xs font-bold text-gray-900">{fmt(seatBlockNet)}</span>
                       </div>
@@ -1333,8 +1333,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   </div>
                   {hasAnyDeduction && (
                     <div className="flex justify-between items-center mt-1">
-                      <span className="text-sm text-emerald-600">Total Deductions</span>
-                      <span className="text-sm font-medium text-emerald-600">− {fmt(grandDeductions)}</span>
+                      <span className="text-sm text-success">Total Deductions</span>
+                      <span className="text-sm font-medium text-success">− {fmt(grandDeductions)}</span>
                     </div>
                   )}
                   <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-200">
@@ -1353,10 +1353,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     <span className="text-sm font-semibold text-gray-900">{fmt(unappliedApplicationPaid)}</span>
                   </div>
                   <div className="flex justify-between items-center pl-3">
-                    <span className="text-xs text-green-600 flex items-center gap-1">
+                    <span className="text-xs text-success flex items-center gap-1">
                       <Check className="h-3 w-3" /> Paid
                     </span>
-                    <span className="text-xs font-medium text-green-600">− {fmt(unappliedApplicationPaid)}</span>
+                    <span className="text-xs font-medium text-success">− {fmt(unappliedApplicationPaid)}</span>
                   </div>
                   <div className="flex justify-between items-center pl-3 pt-0.5 border-t border-dashed border-gray-200">
                     <span className="text-xs font-semibold text-gray-500">Balance</span>
@@ -1381,20 +1381,20 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           // Token paid — show countdown to admission-confirmation deadline
           return (
             <div className={`rounded-2xl px-4 py-3.5 flex gap-3 items-start ${
-              isOverdue      ? "bg-red-50 border border-red-200"
-              : isUrgentConfirm ? "bg-orange-50 border border-orange-200"
-              : "bg-amber-50 border border-amber-200"
+              isOverdue      ? "bg-destructive/5 border border-destructive/20"
+              : isUrgentConfirm ? "bg-warning/5 border border-warning/20"
+              : "bg-warning/5 border border-warning/20"
             }`}>
-              <Clock className={`h-4 w-4 shrink-0 mt-0.5 ${isOverdue ? "text-red-500" : isUrgentConfirm ? "text-orange-500" : "text-amber-500"}`} />
+              <Clock className={`h-4 w-4 shrink-0 mt-0.5 ${isOverdue ? "text-destructive" : isUrgentConfirm ? "text-warning" : "text-warning"}`} />
               <div className="min-w-0">
-                <p className={`text-sm font-bold ${isOverdue ? "text-red-800" : isUrgentConfirm ? "text-orange-800" : "text-amber-900"}`}>
+                <p className={`text-sm font-bold ${isOverdue ? "text-destructive" : isUrgentConfirm ? "text-warning-foreground" : "text-warning-foreground"}`}>
                   {isOverdue
                     ? "Admission confirmation payment overdue — contact admissions immediately"
                     : dLeft === 0
                     ? "Admission confirmation payment due today"
                     : `Confirm admission by ${fmtDate(confirmDueDate)}`}
                 </p>
-                <p className={`text-xs mt-0.5 leading-snug ${isOverdue ? "text-red-700" : isUrgentConfirm ? "text-orange-700" : "text-amber-700"}`}>
+                <p className={`text-xs mt-0.5 leading-snug ${isOverdue ? "text-destructive" : isUrgentConfirm ? "text-warning-foreground" : "text-warning-foreground"}`}>
                   {isOverdue
                     ? "Your token fee holds the seat but admission is not confirmed until the admission threshold is paid."
                     : `Your token fee holds your seat for 5 days. Pay ₹${towardsAdmission.toLocaleString("en-IN")} by ${fmtDate(confirmDueDate)} to receive your Admission Number.${dLeft !== null && dLeft > 0 ? ` ${dLeft} day${dLeft !== 1 ? "s" : ""} remaining.` : ""}`}
@@ -1406,11 +1406,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
         // Token not yet paid — pre-explain the 5-day rule
         return (
-          <div className="rounded-2xl bg-blue-50 border border-blue-200 px-4 py-3.5 flex gap-3 items-start">
-            <Clock className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
+          <div className="rounded-2xl bg-info/5 border border-info/20 px-4 py-3.5 flex gap-3 items-start">
+            <Clock className="h-4 w-4 shrink-0 mt-0.5 text-info" />
             <div className="min-w-0">
-              <p className="text-sm font-bold text-blue-900">Token fee holds your seat · admission threshold confirms it</p>
-              <p className="text-xs text-blue-700 mt-0.5 leading-snug">
+              <p className="text-sm font-bold text-info-foreground">Token fee holds your seat · admission threshold confirms it</p>
+              <p className="text-xs text-info-foreground mt-0.5 leading-snug">
                 Paying the token fee reserves your seat for <span className="font-semibold">5 days</span>.
                 You must pay the admission threshold within those 5 days to receive your Admission Number and confirm enrollment.
                 Admission is <span className="font-semibold">not confirmed</span> until the threshold is paid.
@@ -1421,14 +1421,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       })()}
 
       {onBehalfContext?.token && !feeStatus.twenty_five_complete && (
-        <div className={`rounded-2xl border p-4 space-y-3 ${offerConsentVerified ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+        <div className={`rounded-2xl border p-4 space-y-3 ${offerConsentVerified ? "border-success/20 bg-success/5" : "border-warning/20 bg-warning/5"}`}>
           <div className="flex items-start gap-3">
-            <Check className={`h-4 w-4 mt-0.5 shrink-0 ${offerConsentVerified ? "text-emerald-600" : "text-amber-600"}`} />
+            <Check className={`h-4 w-4 mt-0.5 shrink-0 ${offerConsentVerified ? "text-success" : "text-warning-foreground"}`} />
             <div className="min-w-0 flex-1">
-              <p className={`text-sm font-bold ${offerConsentVerified ? "text-emerald-900" : "text-amber-900"}`}>
+              <p className={`text-sm font-bold ${offerConsentVerified ? "text-success-foreground" : "text-warning-foreground"}`}>
                 Student OTP consent required
               </p>
-              <p className={`text-xs mt-0.5 leading-relaxed ${offerConsentVerified ? "text-emerald-700" : "text-amber-800"}`}>
+              <p className={`text-xs mt-0.5 leading-relaxed ${offerConsentVerified ? "text-success" : "text-warning-foreground"}`}>
                 Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {applicantPhone || "the candidate phone"}.
               </p>
             </div>
@@ -1440,7 +1440,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 type="button"
                 disabled={offerOtpLoading}
                 onClick={sendOfferOtp}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-warning px-3.5 py-2.5 text-xs font-bold text-white hover:bg-warning/60 disabled:opacity-50"
               >
                 {offerOtpLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                 {offerOtpSent ? "Resend OTP" : "Send OTP"}
@@ -1450,7 +1450,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 onChange={(e) => setOfferOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="Enter OTP"
                 inputMode="numeric"
-                className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-500"
+                className="min-w-0 flex-1 rounded-xl border border-warning/20 bg-white px-3 py-2.5 text-sm outline-none focus:border-warning/35"
               />
               <button
                 type="button"
@@ -1475,8 +1475,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 onClick={() => setSelectedGateway(gateway.gateway)}
                 className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
                   selectedGateway === gateway.gateway
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-200 text-gray-600 hover:border-blue-300 hover:bg-blue-50"
+                    ? "border-info/35 bg-info/5 text-info-foreground"
+                    : "border-gray-200 text-gray-600 hover:border-info/30 hover:bg-info/5"
                 }`}
               >
                 {gateway.display_name}
@@ -1501,17 +1501,17 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         return (
           <div className="space-y-3">
             {/* ── Primary: confirm admission ── */}
-            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-50 p-4 shadow-sm space-y-3">
+            <div className="rounded-2xl border border-success/20 bg-gradient-to-br from-emerald-50 to-green-50 p-4 shadow-sm space-y-3">
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recommended</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-success">Recommended</span>
                 </div>
-                <p className="text-base font-bold text-emerald-900">Confirm Your Admission</p>
-                <p className="text-xs text-emerald-700 mt-0.5 leading-relaxed">
+                <p className="text-base font-bold text-success-foreground">Confirm Your Admission</p>
+                <p className="text-xs text-success mt-0.5 leading-relaxed">
                   Pay the admission threshold and receive your Admission Number — your seat is fully secured.
                 </p>
               </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-emerald-100 px-3.5 py-2.5">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
                 <div>
                   <p className="text-[10px] text-gray-400 font-medium">Amount due</p>
                   <p className="text-lg font-bold text-gray-900">₹{towardsAdmission.toLocaleString("en-IN")}</p>
@@ -1529,7 +1529,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   paymentType: "token_fee",
                   productinfo: "Admission Confirmation Fee",
                 })}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white hover:bg-emerald-700 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
               >
                 {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                 Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
@@ -1564,7 +1564,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       <button
                         disabled={paying || !applicantPhone}
                         onClick={() => startPayment(tokenOutstanding)}
-                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50"
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
                       >
                         {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
                         Pay Now
@@ -1577,7 +1577,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
                         setCustomAmt("");
                       }}
-                      className="text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
+                      className="text-xs text-info-foreground hover:text-info-foreground font-medium underline underline-offset-2"
                     >
                       {instalmentPreset !== tokenOutstanding
                         ? "Hide instalment options"
@@ -1594,8 +1594,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                               onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
                               className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
                                 instalmentPreset === amt
-                                  ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                                  : "border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50"
+                                  ? "bg-info border-info/40 text-white shadow-sm"
+                                  : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
                               }`}
                             >
                               ₹{amt.toLocaleString("en-IN")}
@@ -1605,8 +1605,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                             onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
                             className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
                               instalmentPreset === null
-                                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                                : "border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50"
+                                ? "bg-info border-info/40 text-white shadow-sm"
+                                : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
                             }`}
                           >
                             Custom
@@ -1622,7 +1622,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                               value={customAmt}
                               onChange={e => setCustomAmt(e.target.value)}
                               placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-blue-300"
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-info/30"
                             />
                           </div>
                         )}
@@ -1634,7 +1634,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         <button
                           disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
                           onClick={() => selectedAmt && startPayment(selectedAmt)}
-                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
                         >
                           {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                           {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
@@ -1643,7 +1643,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     )}
 
                     {!applicantPhone && (
-                      <p className="text-xs text-red-600 text-center bg-red-50 rounded-lg py-2 px-3">
+                      <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
                         Phone number missing — please contact admissions
                       </p>
                     )}
@@ -1716,10 +1716,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             {hasFullCourse && (fullCourseWindowOpen || fcCovered) && (
               <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
-                "border-emerald-300 bg-emerald-50"
+                "border-success/30 bg-success/5"
               }`}>
                 {!fcCovered && (
-                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-success px-3 py-1 text-[10px] font-bold text-white shadow-md">
                     <Sparkles className="h-3 w-3" /> {fcDisc > 0 ? "BEST VALUE" : "FULL COURSE"}
                   </div>
                 )}
@@ -1728,23 +1728,23 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   <div className="min-w-0 flex-1">
                     {fcCovered ? (
                       <>
-                        <p className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+                        <p className="text-sm font-bold text-success-foreground flex items-center gap-1.5">
                           <Check className="h-4 w-4" /> Full course paid
                         </p>
-                        <p className="text-xs text-emerald-700 mt-0.5">Your fee is fully settled. Welcome aboard.</p>
+                        <p className="text-xs text-success mt-0.5">Your fee is fully settled. Welcome aboard.</p>
                       </>
                     ) : (
                       <>
-                        <p className="text-lg font-bold text-emerald-900 leading-tight">
+                        <p className="text-lg font-bold text-success-foreground leading-tight">
                           Pay full course now
                         </p>
-                        <p className="text-xs text-emerald-700 mt-1">
+                        <p className="text-xs text-success mt-1">
                           {fcDisc > 0
                             ? `One-time waiver: save ${fmtRupee(fcDisc)} on the post-waiver course fee.`
                             : "Settle the full post-waiver course fee in one payment."}
                         </p>
                         {fcDisc > 0 && (
-                          <p className="text-[11px] text-emerald-700 mt-0.5">
+                          <p className="text-[11px] text-success mt-0.5">
                             {lumpSumPct}% off year 1
                             {inMultiYearWindow
                               ? ` + extra ${multiYearPct}% off all other years.`
@@ -1752,10 +1752,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           </p>
                         )}
                         {inMultiYearWindow && multiYearPct > 0 && (
-                          <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/80 border border-emerald-200 px-2.5 py-1">
-                            <CalendarDays className="h-3 w-3 text-emerald-700" />
-                            <span className="text-[10px] font-semibold text-emerald-700">Additional scholarship available until</span>
-                            <span className="text-[11px] font-bold text-emerald-900">
+                          <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/80 border border-success/20 px-2.5 py-1">
+                            <CalendarDays className="h-3 w-3 text-success" />
+                            <span className="text-[10px] font-semibold text-success">Additional scholarship available until</span>
+                            <span className="text-[11px] font-bold text-success-foreground">
                               {fmtDateLong(scholarshipDeadline)}
                             </span>
                           </div>
@@ -1794,7 +1794,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           concessionBreakdown: Object.keys(breakdown).length ? breakdown : undefined,
                         });
                       }}
-                      className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3.5 text-sm font-bold text-white hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
+                      className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-success px-5 py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
                     >
                       {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                       Pay {fmtRupee(fcDue)}
@@ -1806,29 +1806,29 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     the marketing copy clean, expanded on click. */}
                 {!fcCovered && (
                   <details className="relative mt-3 group">
-                    <summary className="cursor-pointer text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                    <summary className="cursor-pointer text-[11px] font-semibold text-success hover:text-success-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
                       <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
                       View breakdown
                     </summary>
-                    <div className="mt-2 space-y-1 text-[12px] font-mono bg-white/60 rounded-lg p-3 border border-emerald-200/60">
+                    <div className="mt-2 space-y-1 text-[12px] font-mono bg-white/60 rounded-lg p-3 border border-success/20/60">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Course fee after waiver</span>
                         <span className="text-gray-900">{fmtRupee(totalFee)}</span>
                       </div>
                       {paid > 0 && (
-                        <div className="flex justify-between text-blue-700">
+                        <div className="flex justify-between text-info-foreground">
                           <span>Already paid</span>
                           <span>− {fmtRupee(Math.min(paid, totalFee))}</span>
                         </div>
                       )}
                       {y1Disc > 0 && (
-                        <div className="flex justify-between text-emerald-700">
+                        <div className="flex justify-between text-success">
                           <span>{lumpSumPct}% one-time off year 1</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}
                       {multiDisc > 0 && (
-                        <div className="flex justify-between text-emerald-700">
+                        <div className="flex justify-between text-success">
                           <span>
                             {inMultiYearWindow
                               ? `${lumpSumPct + multiYearPct}% off years 2-N`
@@ -1837,9 +1837,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           <span>− {fmtRupee(multiDisc)}</span>
                         </div>
                       )}
-                      <div className="border-t border-emerald-300/60 pt-1.5 mt-1.5 flex justify-between font-bold">
+                      <div className="border-t border-success/30/60 pt-1.5 mt-1.5 flex justify-between font-bold">
                         <span className="text-gray-700">Pay now</span>
-                        <span className="text-emerald-900">{fmtRupee(fcDue)}</span>
+                        <span className="text-success-foreground">{fmtRupee(fcDue)}</span>
                       </div>
                     </div>
                   </details>
@@ -1850,7 +1850,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             {/* ── Year 1 only — secondary alternative ─────────────────── */}
             {(y1Fee > 0) && (
               <div className={`rounded-xl border p-3 ${
-                y1Covered ? "border-gray-200 bg-gray-50" : "border-amber-200 bg-amber-50/60"
+                y1Covered ? "border-gray-200 bg-gray-50" : "border-warning/20 bg-warning/5/60"
               }`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -1859,7 +1859,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </p>
                     {y1Covered ? (
                       <p className="text-xs text-gray-600 inline-flex items-center gap-1">
-                        <Check className="h-3 w-3 text-emerald-600" />
+                        <Check className="h-3 w-3 text-success" />
                         Year 1 covered.
                         {surplusPaidVsY1 > 0 && (
                           <span className="text-gray-500 italic">
@@ -1869,10 +1869,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       </p>
                     ) : (
                       <>
-                        <p className="text-sm font-semibold text-amber-900">
+                        <p className="text-sm font-semibold text-warning-foreground">
                           Pay year 1 now
                         </p>
-                        <p className="text-[11px] text-amber-700 mt-0.5">
+                        <p className="text-[11px] text-warning-foreground mt-0.5">
                           {y1Disc > 0
                             ? `One-time waiver: save ${fmtRupee(y1Disc)} · pay ${fmtRupee(y1Due)}`
                             : `Pay remaining first-year fee: ${fmtRupee(y1Due)}`}
@@ -1882,7 +1882,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   </div>
 
                   {y1Covered ? (
-                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2.5 py-1 text-[10px] font-bold">
+                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2.5 py-1 text-[10px] font-bold">
                       <Check className="h-3 w-3" /> Covered
                     </span>
                   ) : (
@@ -1895,7 +1895,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
                         concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
                       })}
-                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-amber-700 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-warning px-3.5 py-2 text-xs font-bold text-white hover:bg-warning/60 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
                     >
                       {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
                       Pay {fmtRupee(y1Due)}
@@ -1906,30 +1906,30 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 {/* Compact breakdown — only show when there's something to pay */}
                 {!y1Covered && (
                   <details className="mt-2 group">
-                    <summary className="cursor-pointer text-[10px] font-semibold text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-warning-foreground hover:text-warning-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
                       <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
                       View breakdown
                     </summary>
-                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-amber-200/50">
+                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Year 1 fee after waiver</span>
                         <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
                       </div>
                       {paid > 0 && (
-                        <div className="flex justify-between text-blue-700">
+                        <div className="flex justify-between text-info-foreground">
                           <span>Already paid</span>
                           <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
                         </div>
                       )}
                       {y1Disc > 0 && (
-                        <div className="flex justify-between text-emerald-700">
+                        <div className="flex justify-between text-success">
                           <span>{lumpSumPct}% one-time off</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}
-                      <div className="border-t border-amber-200/60 pt-1 mt-1 flex justify-between font-bold">
+                      <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
                         <span className="text-gray-700">Pay now</span>
-                        <span className="text-amber-900">{fmtRupee(y1Due)}</span>
+                        <span className="text-warning-foreground">{fmtRupee(y1Due)}</span>
                       </div>
                     </div>
                   </details>
@@ -1942,7 +1942,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
       {/* Error */}
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
           {error}
         </div>
       )}
@@ -1950,7 +1950,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       {/* Contact strip */}
       <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 flex items-center justify-between gap-3">
         <p className="text-xs text-gray-500">Need help? Call our admissions team</p>
-        <a href="tel:+919555192192" className="text-xs font-semibold text-blue-600 hover:text-blue-700 shrink-0">
+        <a href="tel:+919555192192" className="text-xs font-semibold text-info-foreground hover:text-info-foreground shrink-0">
           +91 9555 192192
         </a>
       </div>
@@ -1997,7 +1997,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           )}
                           <span className="text-[11px] text-gray-400">{fmtDt(p.payment_date || p.created_at)}</span>
                           {p.concession_amount > 0 && (
-                            <span className="text-[11px] text-emerald-600">· {fmtAmt(p.concession_amount)} waiver applied</span>
+                            <span className="text-[11px] text-success">· {fmtAmt(p.concession_amount)} waiver applied</span>
                           )}
                         </div>
                       </div>
@@ -2006,7 +2006,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         {p.receipt_url ? (
                           <a
                             href={p.receipt_url} target="_blank" rel="noopener"
-                            className="text-[11px] text-blue-600 hover:underline"
+                            className="text-[11px] text-info-foreground hover:underline"
                           >
                             Receipt ↗
                           </a>
@@ -2048,7 +2048,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                               {TYPE_LABELS[p.type] || p.type}
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              isPending ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                              isPending ? "bg-warning/10 text-warning-foreground" : "bg-destructive/10 text-destructive"
                             }`}>
                               {isPending ? "Pending" : p.status}
                             </span>
@@ -2060,7 +2060,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                             )}
                           </div>
                         </div>
-                        <p className={`text-sm font-medium ${isPending ? "text-amber-700" : "text-gray-500"}`}>
+                        <p className={`text-sm font-medium ${isPending ? "text-warning-foreground" : "text-gray-500"}`}>
                           {fmtAmt(p.amount)}
                         </p>
                       </div>

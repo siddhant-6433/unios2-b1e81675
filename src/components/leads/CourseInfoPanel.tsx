@@ -134,7 +134,7 @@ export function CourseInfoPanel({ courseId }: Props) {
     })();
   }, [courseId]);
 
-  if (loading) return <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
   if (!course) return <p className="text-xs text-muted-foreground text-center py-4">Course not found</p>;
 
   // Prefer course-level affiliations from DB; fall back to hardcoded institution defaults
@@ -203,12 +203,12 @@ export function CourseInfoPanel({ courseId }: Props) {
           </h4>
           <div className="flex flex-wrap gap-1.5">
             {instInfo.affiliations.map((a, i) => (
-              <Badge key={i} className="text-[10px] border-0 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              <Badge key={i} className="text-[10px] border-0 bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80">
                 {a}
               </Badge>
             ))}
             {instInfo.approvals.map((a, i) => (
-              <Badge key={i} className="text-[10px] border-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+              <Badge key={i} className="text-[10px] border-0 bg-success/10 text-success dark:bg-success/80/30 dark:text-success">
                 <CheckCircle className="h-2.5 w-2.5 mr-0.5" /> {a}
               </Badge>
             ))}
@@ -229,13 +229,13 @@ export function CourseInfoPanel({ courseId }: Props) {
                 <>
                   <span className="text-foreground font-medium">{eligibility.entrance_exam_name}</span>
                   {eligibility.entrance_exam_required
-                    ? <Badge className="text-[8px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">Mandatory</Badge>
-                    : <Badge className="text-[8px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">Optional</Badge>}
+                    ? <Badge className="text-[8px] bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80 border-0">Mandatory</Badge>
+                    : <Badge className="text-[8px] bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning border-0">Optional</Badge>}
                 </>
               ) : (
                 <span className="text-foreground font-medium">
                   Not required
-                  <Badge className="text-[8px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0 ml-1.5">Direct Admission</Badge>
+                  <Badge className="text-[8px] bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80 border-0 ml-1.5">Direct Admission</Badge>
                 </span>
               )}
             </div>
