@@ -222,20 +222,33 @@ Deno.serve(async (req) => {
                 buttonUrls = [campusQuery, "nimt"];
               }
 
-              await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${serviceRoleKey}`,
-                },
-                body: JSON.stringify({
-                  template_key: action.template_key,
-                  phone: recipientPhone,
-                  params,
+              // Delay support: queue instead of sending immediately.
+              if (action.delay_hours && action.delay_hours > 0) {
+                const sendAt = new Date(Date.now() + action.delay_hours * 60 * 60 * 1000).toISOString();
+                await admin.from("whatsapp_scheduled_sends").insert({
                   lead_id: lead.id,
-                  ...(buttonUrls ? { button_urls: buttonUrls } : {}),
-                }),
-              });
+                  phone: recipientPhone,
+                  template_key: action.template_key,
+                  params: params.length > 0 ? params : [],
+                  button_urls: buttonUrls || null,
+                  send_at: sendAt,
+                });
+              } else {
+                await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${serviceRoleKey}`,
+                  },
+                  body: JSON.stringify({
+                    template_key: action.template_key,
+                    phone: recipientPhone,
+                    params,
+                    lead_id: lead.id,
+                    ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+                  }),
+                });
+              }
 
               // Auto follow-up with course video for the course-info templates
               if ((action.template_key === "course_info_video" || isCourseInfoVideoV2) && !sendToCounsellor && lead.phone) {

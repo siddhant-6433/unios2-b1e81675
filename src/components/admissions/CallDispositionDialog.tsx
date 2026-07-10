@@ -916,7 +916,7 @@ export function CallDispositionDialog({
                     <span className="text-[11px] text-foreground flex items-center gap-1">
                       <GraduationCap className="h-3 w-3 text-success" />
                       Also send course details
-                      <span className="text-[10px] text-muted-foreground">(course_info_v4 - auto-filled from DB)</span>
+                      <span className="text-[10px] text-muted-foreground">(free-form text, no template cost)</span>
                     </span>
                   </label>
                 )}
