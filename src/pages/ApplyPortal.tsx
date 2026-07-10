@@ -1208,17 +1208,17 @@ function ApplicationDashboardView({
 
           // Gradient + content derived from state.
           let gradient     = "bg-gradient-to-br from-blue-600 to-indigo-700";
-          let eyebrowColor = "text-info/40";
+          let eyebrowColor = "text-white/60";
           let subtitle: React.ReactNode = `Your admission journey at ${portal.name}`;
-          let subtitleColor = "text-info/30";
+          let subtitleColor = "text-white/60";
           let cardIcon: React.ReactNode = <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           let cta: React.ReactNode = null;
 
           if (admittedApp) {
             gradient      = "bg-gradient-to-br from-green-600 to-emerald-700";
-            eyebrowColor  = "text-success/40";
+            eyebrowColor  = "text-white/60";
             subtitle      = <span className="font-mono font-semibold">Admission No: {an}</span>;
-            subtitleColor = "text-success/30";
+            subtitleColor = "text-white/70";
             cta = (
               <a href="https://uni.nimt.ac.in" target="_blank" rel="noopener"
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
@@ -1227,9 +1227,9 @@ function ApplicationDashboardView({
             );
           } else if (preAdmitted) {
             subtitle      = <span className="font-mono font-semibold">Pre-Admission No: {pan}</span>;
-            subtitleColor = "text-info/30";
+            subtitleColor = "text-white/60";
             cta = (
-              <button onClick={() => onContinue(preAdmitted)}
+              <button onClick={() => setOpenAppId(openAppId === preAdmitted.id ? null : preAdmitted.id)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 Pay token fee to complete admission →
               </button>
@@ -1237,8 +1237,8 @@ function ApplicationDashboardView({
           } else if (docActionApp) {
             const rejectedCount = docStates[docActionApp.application_id]?.rejected || 0;
             gradient      = "bg-gradient-to-br from-rose-600 to-red-700";
-            eyebrowColor  = "text-destructive/20";
-            subtitleColor = "text-destructive/10";
+            eyebrowColor  = "text-white/60";
+            subtitleColor = "text-white/60";
             subtitle      = `${rejectedCount} document${rejectedCount === 1 ? "" : "s"} need re-upload`;
             cardIcon      = <AlertCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
             cta = (
@@ -1252,21 +1252,21 @@ function ApplicationDashboardView({
               ?.map((c: any) => displayValue(c.course_name)).filter(Boolean).join(", ") || "your course";
             subtitle = <>🎉 Offer approved for <span className="font-semibold">{courseLabel}</span></>;
             cta = (
-              <button onClick={() => onContinue(offerApp)}
+              <button onClick={() => setOpenAppId(openAppId === offerApp.id ? null : offerApp.id)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 Pay token fee to secure your seat →
               </button>
             );
           } else if (reviewApp) {
             gradient      = "bg-gradient-to-br from-emerald-600 to-teal-700";
-            eyebrowColor  = "text-success/40";
+            eyebrowColor  = "text-white/60";
             subtitle      = "Application submitted · We'll be in touch soon";
-            subtitleColor = "text-success/30";
+            subtitleColor = "text-white/70";
             cardIcon      = <CheckCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           } else if (feeApp) {
             gradient      = "bg-gradient-to-br from-amber-500 to-orange-600";
-            eyebrowColor  = "text-warning/40";
-            subtitleColor = "text-warning/30";
+            eyebrowColor  = "text-white/60";
+            subtitleColor = "text-white/60";
             subtitle      = `Pay ₹${Number(feeApp.fee_amount).toLocaleString("en-IN")} application fee to submit`;
             cardIcon      = <Wallet className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
             cta = (
@@ -2651,7 +2651,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-6">
-            <div key={currentStep} className="animate-rs-slide-up">
+            <div key={step} className="animate-rs-slide-up">
               {renderStep()}
             </div>
           </CardContent>

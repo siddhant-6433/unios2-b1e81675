@@ -103,13 +103,13 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
     : null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">
         {isSchool ? 'Child Details' : 'Personal Details'}
       </h2>
 
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         <TextField
           label="Full Name"
           required
@@ -209,7 +209,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       </div>
 
       {/* APAAR / PEN */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5 mt-1">
         <TextField
           label="APAAR ID (optional)"
           value={data.apaar_id || ""}
@@ -228,8 +228,8 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       </div>
 
       {/* Address */}
-      <h3 className="text-sm font-semibold text-foreground mt-2">Address <span className="text-destructive">*</span></h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <h3 className="text-sm font-semibold text-foreground mt-6 pt-4 border-t border-border/40">Address <span className="text-destructive">*</span></h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         <TextField
           label="Address Line"
           required

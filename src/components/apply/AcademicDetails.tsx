@@ -333,7 +333,7 @@ function AcademicBlock({
         )}
       </header>
       <div className="p-4 space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         {isGradBlock ? (
           <>
             {showDegreeSelector ? (
@@ -790,7 +790,7 @@ function SchoolAcademicBlock({
       <p className="text-sm text-muted-foreground">
         Previous school details {isOptional ? '(Optional for KG applicants)' : ''}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         <TextField
           label="Previous Class / Grade"
           required={!isOptional}
@@ -1105,7 +1105,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">Subject-wise Marks (Class 12)</h3>
               <p className="text-xs text-muted-foreground">Some of your selected courses require minimum marks in specific subjects.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
                 {Array.from(requiredSubjectMarks.entries()).map(([subject, minPct]) => {
                   const subjectMarks = (academic.class_12?.subject_marks || {}) as Record<string, string>;
                   const val = subjectMarks[subject] || '';

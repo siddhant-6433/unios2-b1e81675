@@ -38,7 +38,7 @@ export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving,
           placeholder="Any notable achievements..."
           textareaClassName={textareaCls}
         />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
           <TextField label="Competitions" value={ext.competitions || ''} onValueChange={(value) => update('competitions', value)} inputClassName={inputCls} />
           <TextField label="Leadership Roles" value={ext.leadership || ''} onValueChange={(value) => update('leadership', value)} inputClassName={inputCls} />
           <TextField label="Sports" value={ext.sports || ''} onValueChange={(value) => update('sports', value)} inputClassName={inputCls} />
