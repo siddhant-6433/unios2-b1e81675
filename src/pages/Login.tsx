@@ -439,10 +439,10 @@ const Login = () => {
       {/* Left panel — clean brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
         <div className="absolute top-6 left-6">
-          <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
+          <img src={nimtLogo} alt="NIMT" width="64" height="32" className="h-8 w-auto brightness-0 invert opacity-80" />
         </div>
         <div className="max-w-md text-center">
-          <img src={uniosLogo} alt="UniOs" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
+          <img src={uniosLogo} alt="UniOs" width="128" height="128" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
           <h1 className="text-3xl font-bold text-primary-foreground mb-3">NIMT UniOs</h1>
           <p className="text-primary-foreground/70 text-base leading-relaxed">
             Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
@@ -454,13 +454,13 @@ const Login = () => {
       <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
         {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
         <div className="lg:hidden absolute top-5 right-5">
-          <img src={nimtLogo} alt="NIMT" className="h-7 w-auto opacity-60" />
+          <img src={nimtLogo} alt="NIMT" width="56" height="28" className="h-7 w-auto opacity-60" />
         </div>
 
         <div className="w-full max-w-sm space-y-6 relative z-10">
           {/* Mobile logo */}
           <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
-            <img src={uniosLogo} alt="UniOs" className="h-16 w-16 object-contain" />
+            <img src={uniosLogo} alt="UniOs" width="64" height="64" className="h-16 w-16 object-contain" />
             <span className="text-lg font-bold text-foreground">NIMT UniOs</span>
           </div>
 
@@ -856,7 +856,7 @@ const Login = () => {
           </p>
 
           <div className="text-center pt-2">
-            <a href="/publisher-login" className="text-[11px] text-muted-foreground/70 hover:text-primary transition-colors">
+            <a href="/publisher-login" className="text-[11px] text-muted-foreground hover:text-primary transition-colors">
               Publisher Portal →
             </a>
           </div>

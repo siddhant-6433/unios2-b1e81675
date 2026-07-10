@@ -18,6 +18,27 @@
     <meta name="twitter:title" content="NIMT UniOs">
     <meta name="twitter:description" content="Student Lifecycle Management">
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <link rel="preconnect" href="https://www.google-analytics.com" />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@500;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@500;600;700;800&display=swap" /></noscript>
+  </head>
+
+  <body>
+    <!-- Meta Pixel noscript fallback. Lives in <body> (browsers disallow
+         <img> inside <noscript> in <head>). The SPA needs JS anyway, so a
+         no-JS visitor never reaches the form — this fallback is purely for
+         crawlers/preview cards. Brand isn't known at HTML load, so we fall
+         back to the parent NIMT college pixel. -->
+    <noscript><img height="1" width="1" style="display:none"
+      src="https://www.facebook.com/tr?id=2580313152286928&ev=PageView&noscript=1"
+      alt=""
+    /></noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+
     <!-- Google Tag Manager — public marketing-site containers.
          The same build can be served from multiple hostnames; choose the GTM
          container by hostname. UniOs uses the parent NIMT container so CRM and
@@ -130,19 +151,5 @@
         window.fbq('track', 'PageView');
       })();
     </script>
-  </head>
-
-  <body>
-    <!-- Meta Pixel noscript fallback. Lives in <body> (browsers disallow
-         <img> inside <noscript> in <head>). The SPA needs JS anyway, so a
-         no-JS visitor never reaches the form — this fallback is purely for
-         crawlers/preview cards. Brand isn't known at HTML load, so we fall
-         back to the parent NIMT college pixel. -->
-    <noscript><img height="1" width="1" style="display:none"
-      src="https://www.facebook.com/tr?id=2580313152286928&ev=PageView&noscript=1"
-      alt=""
-    /></noscript>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
