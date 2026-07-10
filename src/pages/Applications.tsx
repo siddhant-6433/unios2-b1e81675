@@ -1520,13 +1520,13 @@ export default function Applications() {
                     style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis, animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
                     title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
-                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
+                    <div className="flex items-center justify-between mb-1.5 min-w-0">
+                      <p className="text-[10px] font-medium text-muted-foreground truncate">{meta.label}</p>
+                      <div className={`w-5 h-5 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-2.5 w-2.5 ${meta.iconColor}`} />
                       </div>
-                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     </div>
-                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
                       <div className={`h-full ${meta.bar} transition-all duration-480 ease-standard`} style={{ width: `${reachPct}%` }} />
                     </div>

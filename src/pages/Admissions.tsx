@@ -1881,14 +1881,14 @@ const Admissions = () => {
               }}
             >
               <CardContent className="p-2.5">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3 w-3 text-foreground/70" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground leading-tight line-clamp-2">{stat.label}</span>
                 </div>
-                <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-                <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate mt-1.5 flex items-center gap-0.5">▲ {stat.sub}</p>
               </CardContent>
             </Card>
           );
@@ -1982,14 +1982,14 @@ const Admissions = () => {
             }}
           >
             <CardContent className="p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                  <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                  <stat.icon className="h-3 w-3 text-foreground/70" />
                 </div>
-                <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
               </div>
-              <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-              <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+              <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate mt-1.5">{stat.sub}</p>
             </CardContent>
           </Card>
         ))}
