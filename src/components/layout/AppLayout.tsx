@@ -119,17 +119,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <main className="flex-1 overflow-auto p-6">
               <Suspense fallback={
                 <div className="animate-rs-slide-up space-y-6">
+                  <div className="blade-indeterminate h-0.5 w-full rounded-full bg-primary/20" />
                   <div className="space-y-2">
-                    <div className="h-7 w-48 rounded-lg flutes" />
-                    <div className="h-4 w-80 rounded-md flutes" />
+                    <div className="h-7 w-48 rounded-lg blade-skeleton" />
+                    <div className="h-4 w-80 rounded-md blade-skeleton" />
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="h-28 rounded-lg flutes" />
-                    <div className="h-28 rounded-lg flutes" />
-                    <div className="h-28 rounded-lg flutes" />
-                    <div className="h-28 rounded-lg flutes" />
+                    <div className="h-28 rounded-xl flutes" />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '80ms' }} />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '160ms' }} />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '240ms' }} />
                   </div>
-                  <div className="h-64 rounded-lg flutes" />
+                  <div className="h-64 rounded-xl flutes" />
                 </div>
               }>
                 {children}

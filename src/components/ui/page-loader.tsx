@@ -11,11 +11,79 @@ function BladeSpinner({ size = 20, className }: { size?: number; className?: str
   );
 }
 
-export function PageLoader({ className }: { className?: string }) {
+function SkeletonBar({ className, delay = 0 }: { className?: string; delay?: number }) {
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-3 py-20", className)}>
-      <BladeSpinner size={24} />
-      <span className="text-xs text-muted-foreground">Loading…</span>
+    <div
+      className={cn("rounded-lg blade-skeleton", className)}
+      style={delay ? { animationDelay: `${delay}ms` } : undefined}
+    />
+  );
+}
+
+export function PageLoader({ className, variant = "default" }: {
+  className?: string;
+  variant?: "default" | "table" | "cards" | "detail";
+}) {
+  if (variant === "table") {
+    return (
+      <div className={cn("space-y-0 animate-rs-slide-up", className)}>
+        <div className="h-10 rounded-t-lg blade-skeleton" />
+        {[0, 1, 2, 3, 4].map(i => (
+          <div key={i} className="flex gap-4 border-b border-border/20 px-4 py-3" style={{ animationDelay: `${i * 60}ms` }}>
+            <SkeletonBar className="h-4 w-24" delay={i * 60} />
+            <SkeletonBar className="h-4 w-32 flex-1" delay={i * 60 + 30} />
+            <SkeletonBar className="h-4 w-20" delay={i * 60 + 60} />
+            <SkeletonBar className="h-4 w-16" delay={i * 60 + 90} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === "cards") {
+    return (
+      <div className={cn("space-y-4 animate-rs-slide-up", className)}>
+        <SkeletonBar className="h-6 w-48" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[0, 1, 2, 3].map(i => (
+            <SkeletonBar key={i} className="h-28 rounded-xl" delay={i * 80} />
+          ))}
+        </div>
+        <SkeletonBar className="h-48 rounded-xl" delay={400} />
+      </div>
+    );
+  }
+
+  if (variant === "detail") {
+    return (
+      <div className={cn("flex gap-6 animate-rs-slide-up", className)}>
+        <div className="w-1/3 space-y-3">
+          <SkeletonBar className="h-32 rounded-xl" />
+          <SkeletonBar className="h-20 rounded-xl" delay={100} />
+          <SkeletonBar className="h-20 rounded-xl" delay={200} />
+        </div>
+        <div className="flex-1 space-y-3">
+          <SkeletonBar className="h-8 w-64" />
+          <SkeletonBar className="h-4 w-96" delay={80} />
+          <SkeletonBar className="h-64 rounded-xl" delay={160} />
+        </div>
+      </div>
+    );
+  }
+
+  // Default: title + subtitle + content rows + indeterminate bar at top
+  return (
+    <div className={cn("space-y-4 animate-rs-slide-up", className)}>
+      <div className="blade-indeterminate h-0.5 w-full rounded-full bg-primary/20" />
+      <div className="space-y-2">
+        <SkeletonBar className="h-6 w-48" />
+        <SkeletonBar className="h-4 w-72" delay={60} />
+      </div>
+      <div className="space-y-3">
+        {[0, 1, 2].map(i => (
+          <SkeletonBar key={i} className="h-16 w-full rounded-xl" delay={120 + i * 80} />
+        ))}
+      </div>
     </div>
   );
 }
