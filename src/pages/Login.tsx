@@ -862,7 +862,11 @@ const Login = () => {
             <a href="/privacy" className="underline hover:text-foreground transition-colors">Privacy Policy</a>.
           </p>
 
-          <div className="text-center pt-2">
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <a href="/about" className="text-[11px] text-muted-foreground hover:text-primary transition-colors">
+              About UniOs
+            </a>
+            <span className="text-[11px] text-muted-foreground/40">·</span>
             <a href="/publisher-login" className="text-[11px] text-muted-foreground hover:text-primary transition-colors">
               Publisher Portal →
             </a>
