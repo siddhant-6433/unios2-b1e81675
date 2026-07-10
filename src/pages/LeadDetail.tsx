@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
-  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
+  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
   ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon,
 } from "lucide-react";
@@ -83,6 +83,13 @@ const stageIndex = (stage: string) => {
 };
 
 const FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 12);
+const PAYMENT_LINK_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 16);
+
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
 
 type FollowupQueueState = {
   ids: string[];
@@ -1206,19 +1213,7 @@ const LeadDetail = () => {
 
       {/* Quick action icon bar */}
       {(() => {
-        // Payment is restricted to super_admin only
-        const canRecordPayment = role === "super_admin";
-        // Offer requires application to be submitted (or later stage). Pre-offer stages can't issue.
-        const appSubmittedOrLater = stageIndex(lead.stage) >= stageIndex("application_submitted");
-        const canIssueOffer = appSubmittedOrLater && (
-          role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin"
-        );
         const canCreateProposal = role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin";
-        const offerDisabledReason = !appSubmittedOrLater
-          ? "Offer can only be issued after application is submitted"
-          : !canIssueOffer
-          ? "You do not have permission to issue offers"
-          : undefined;
         const showFeeProposalNewBadge = new Date() < FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL;
 
         const actions = [
@@ -1234,22 +1229,14 @@ const LeadDetail = () => {
             icon: Sparkles, label: "Add to Dialer", color: "text-fuchsia-600 bg-fuchsia-100 dark:bg-fuchsia-900/30",
             action: pinToDialer, disabled: pinningToDialer,
           },
-          { icon: MessageSquare, label: "WhatsApp", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWhatsApp(true) },
+          { icon: WhatsAppIcon, label: "WhatsApp", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Schedule Visit", color: "text-primary bg-primary/10 dark:bg-primary/80/30", action: () => setShowScheduleVisit(true) },
           { icon: Footprints, label: "Log Walk-In", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
-          ...(role !== "counsellor" ? [{
+          ...(isSuperAdmin ? [{
             icon: Bot, label: "AI Call", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: triggerAiCall, disabled: aiCalling,
           }] : []),
-          { icon: UserCheck, label: "Interview", color: "text-primary bg-primary/10 dark:bg-primary/80/30", action: () => setShowInterview(true) },
-          {
-            icon: FileText, label: "Offer",
-            color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30",
-            action: () => setShowOfferLetter(true),
-            disabled: !canIssueOffer,
-            tooltip: offerDisabledReason,
-          },
           {
             icon: School, label: "Fee Proposal",
             color: "text-lime-700 bg-lime-100 dark:bg-lime-900/30",
@@ -1258,18 +1245,14 @@ const LeadDetail = () => {
             tooltip: canCreateProposal ? undefined : "You do not have permission to create fee proposals",
             badge: showFeeProposalNewBadge ? "New" : undefined,
           },
-          // Payment only visible for super_admin
-          ...(canRecordPayment ? [{
-            icon: IndianRupee, label: "Payment",
-            color: "text-success bg-success/10 dark:bg-success/80/30",
-            action: () => setShowRecordPayment(true),
-          }] : []),
           // Payment link — any staff with leads access (the QuickActions bar is
           // already gated by the leads:view page permission).
           {
             icon: LinkIcon, label: "Payment Link",
             color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30",
             action: () => setShowSendPaymentLink(true),
+            badge: new Date() < PAYMENT_LINK_NEW_BADGE_VISIBLE_UNTIL ? "New" : undefined,
+            tooltip: "Send a payment link via WhatsApp/Email. Pick purpose (token/fee due/custom), set amount & expiry, then send or copy the link.",
           },
           { icon: ThumbsDown, label: "Not Interested", color: "text-destructive bg-destructive/10 dark:bg-destructive/80/30", action: () => setShowNotInterested(true) },
         ];
