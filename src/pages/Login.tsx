@@ -862,21 +862,21 @@ const Login = () => {
           </div>
         </div>
 
-        {/* RzpGlass — 3x scaled, covers entire right panel */}
+        {/* RzpGlass — 12x scaled, UniOS primary blue tint */}
         <Suspense fallback={null}>
           <RazorSense
             preset="default"
-            width="300%"
-            height="300%"
+            width="1200%"
+            height="1200%"
             style={{
               position: 'absolute',
-              top: '-100%',
-              left: '-100%',
+              top: '-550%',
+              left: '-550%',
               zIndex: 0,
               opacity: 0.35,
               pointerEvents: 'none',
             }}
-            backgroundColor={[0.92, 0.94, 0.97]}
+            backgroundColor={[0.0, 0.21, 0.77]}
           />
         </Suspense>
       </div>
