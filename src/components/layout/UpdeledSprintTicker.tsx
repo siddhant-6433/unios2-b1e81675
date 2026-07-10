@@ -107,8 +107,8 @@ export function UpdeledSprintTicker() {
     <div
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-xs border-b sm:px-4 ${
         urgent
-          ? "bg-indigo-600 text-white border-indigo-700"
-          : "bg-indigo-50 text-indigo-900 border-indigo-200"
+          ? "bg-primary text-white border-primary/50"
+          : "bg-primary/5 text-primary border-primary/20"
       }`}
     >
       <GraduationCap className={`h-3.5 w-3.5 flex-shrink-0 ${urgent ? "animate-pulse" : ""}`} />
@@ -122,12 +122,12 @@ export function UpdeledSprintTicker() {
           <span>
             You: <strong className="tabular-nums">{stats.own_count}/{TARGET_PER_COUNSELLOR}</strong>
             {stats.own_today > 0 && (
-              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-indigo-600"}>(+{stats.own_today} today)</span>
+              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-primary"}>(+{stats.own_today} today)</span>
             )}
           </span>
-          <div className={`hidden h-1.5 w-24 rounded overflow-hidden sm:block ${urgent ? "bg-indigo-800/40" : "bg-indigo-200"}`}>
+          <div className={`hidden h-1.5 w-24 rounded overflow-hidden sm:block ${urgent ? "bg-primary/70/40" : "bg-primary/15"}`}>
             <div
-              className={urgent ? "h-full bg-white" : "h-full bg-indigo-600"}
+              className={urgent ? "h-full bg-white" : "h-full bg-primary"}
               style={{ width: `${ownProgress}%` }}
             />
           </div>
@@ -142,7 +142,7 @@ export function UpdeledSprintTicker() {
           <span>
             Team <strong className="tabular-nums">{stats.team_count}</strong>
             {stats.team_today > 0 && (
-              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-indigo-600"}>(+{stats.team_today} today)</span>
+              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-primary"}>(+{stats.team_today} today)</span>
             )}
           </span>
           <span className="opacity-80">·</span>
@@ -153,7 +153,7 @@ export function UpdeledSprintTicker() {
       )}
       <Link
         to="/updeled-sprint"
-        className={`ml-auto inline-flex items-center gap-1 whitespace-nowrap font-medium hover:underline ${urgent ? "" : "text-indigo-700"}`}
+        className={`ml-auto inline-flex items-center gap-1 whitespace-nowrap font-medium hover:underline ${urgent ? "" : "text-primary"}`}
       >
         Open Sprint <ArrowRight className="h-3 w-3" />
       </Link>
@@ -161,7 +161,7 @@ export function UpdeledSprintTicker() {
         type="button"
         aria-label="Dismiss"
         onClick={dismiss}
-        className={`opacity-60 hover:opacity-100 transition-opacity ${urgent ? "text-white" : "text-indigo-900"}`}
+        className={`opacity-60 hover:opacity-100 transition-opacity ${urgent ? "text-white" : "text-primary"}`}
       >
         <X className="h-3.5 w-3.5" />
       </button>

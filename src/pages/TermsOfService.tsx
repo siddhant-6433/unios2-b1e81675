@@ -110,19 +110,19 @@ export default function TermsOfService() {
                 <tbody className="divide-y divide-border text-muted-foreground">
                   <tr>
                     <td className="px-3 py-2">Before the offer letter is issued</td>
-                    <td className="px-3 py-2 text-emerald-600 font-medium">Full refund</td>
+                    <td className="px-3 py-2 text-success font-medium">Full refund</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">Within 15 days of paying the token fee</td>
-                    <td className="px-3 py-2 text-emerald-600 font-medium">Full refund (less ₹1,000 processing charge)</td>
+                    <td className="px-3 py-2 text-success font-medium">Full refund (less ₹1,000 processing charge)</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">15–30 days after paying the token fee</td>
-                    <td className="px-3 py-2 text-amber-600 font-medium">50% refund</td>
+                    <td className="px-3 py-2 text-warning-foreground font-medium">50% refund</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">More than 30 days after paying the token fee</td>
-                    <td className="px-3 py-2 text-rose-600 font-medium">No refund</td>
+                    <td className="px-3 py-2 text-destructive font-medium">No refund</td>
                   </tr>
                 </tbody>
               </table>
@@ -144,19 +144,19 @@ export default function TermsOfService() {
                 <tbody className="divide-y divide-border text-muted-foreground">
                   <tr>
                     <td className="px-3 py-2">15 or more days before the formally notified last date of admission</td>
-                    <td className="px-3 py-2 text-emerald-600 font-medium">Full refund (less ₹1,000 processing charge)</td>
+                    <td className="px-3 py-2 text-success font-medium">Full refund (less ₹1,000 processing charge)</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">Less than 15 days before the last date of admission</td>
-                    <td className="px-3 py-2 text-amber-600 font-medium">90% refund</td>
+                    <td className="px-3 py-2 text-warning-foreground font-medium">90% refund</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">After admission but within 30 days of commencement of classes</td>
-                    <td className="px-3 py-2 text-amber-600 font-medium">80% refund</td>
+                    <td className="px-3 py-2 text-warning-foreground font-medium">80% refund</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">More than 30 days after commencement of classes</td>
-                    <td className="px-3 py-2 text-rose-600 font-medium">No refund</td>
+                    <td className="px-3 py-2 text-destructive font-medium">No refund</td>
                   </tr>
                 </tbody>
               </table>

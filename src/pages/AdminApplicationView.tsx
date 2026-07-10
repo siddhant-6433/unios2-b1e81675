@@ -831,16 +831,16 @@ export default function AdminApplicationView() {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
   if (loadError) {
     return (
       <div className="p-8 max-w-xl mx-auto">
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
-          <p className="text-sm font-semibold text-rose-900">Couldn't load this application</p>
-          <p className="text-xs text-rose-800 mt-1">{loadError}</p>
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+          <p className="text-sm font-semibold text-destructive">Couldn't load this application</p>
+          <p className="text-xs text-destructive mt-1">{loadError}</p>
         </div>
         <div className="mt-3 flex gap-2">
           <Button variant="outline" size="sm" onClick={() => refresh()}>Retry</Button>
@@ -946,8 +946,8 @@ export default function AdminApplicationView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge className="text-[10px] border-0 bg-violet-100 text-violet-700">{app.status}</Badge>
-          <Badge className="text-[10px] border-0 bg-emerald-100 text-emerald-700">{app.payment_status || "pending"}</Badge>
+          <Badge className="text-[10px] border-0 bg-primary/10 text-primary">{app.status}</Badge>
+          <Badge className="text-[10px] border-0 bg-success/10 text-success">{app.payment_status || "pending"}</Badge>
           {(lead?.id || app.lead_id) && (
             <Button
               variant="outline"
@@ -1023,7 +1023,7 @@ export default function AdminApplicationView() {
               <p className="text-sm font-semibold text-foreground truncate">{currentCourseName}</p>
               {currentCampusName && <p className="text-xs text-muted-foreground truncate">{currentCampusName}</p>}
               {hasOffer && (
-                <p className="mt-1 text-[11px] text-amber-700">
+                <p className="mt-1 text-[11px] text-warning-foreground">
                   Existing offer letters remain unchanged. Regenerate or edit the offer letter if it should use the new program.
                 </p>
               )}
@@ -1092,7 +1092,7 @@ export default function AdminApplicationView() {
               const isConfirmed = pmt.status === "confirmed";
               return (
                 <div key={pmt.id} className="flex items-center gap-3 px-3 py-2.5 text-xs bg-background hover:bg-muted/30 transition-colors">
-                  <div className={`shrink-0 rounded-full p-1.5 ${isConfirmed ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}>
+                  <div className={`shrink-0 rounded-full p-1.5 ${isConfirmed ? "bg-success/10 text-success" : "bg-warning/10 text-warning-foreground"}`}>
                     {isConfirmed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1107,7 +1107,7 @@ export default function AdminApplicationView() {
                         </span>
                       )}
                       {pmt.gateway === "offline" && (
-                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                        <span className="rounded bg-warning/5 px-1.5 py-0.5 text-[10px] text-warning-foreground">
                           Offline
                         </span>
                       )}
@@ -1182,16 +1182,16 @@ export default function AdminApplicationView() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground font-medium">Document review:</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success/5 text-success px-2 py-0.5">
                 <CheckCircle2 className="h-3 w-3" />{counts.verified} verified
               </span>
               {counts.rejected > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 text-rose-700 px-2 py-0.5">
+                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/5 text-destructive px-2 py-0.5">
                   <XCircle className="h-3 w-3" />{counts.rejected} rejected
                 </span>
               )}
               {counts.pending > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-2 py-0.5">
+                <span className="inline-flex items-center gap-1 rounded-full bg-warning/5 text-warning-foreground px-2 py-0.5">
                   <Clock className="h-3 w-3" />{counts.pending} pending
                 </span>
               )}
@@ -1202,7 +1202,7 @@ export default function AdminApplicationView() {
                 <Button
                   variant="pill-outline"
                   size="pill"
-                  className="text-rose-700 border-rose-200 hover:bg-rose-50"
+                  className="text-destructive border-destructive/20 hover:bg-destructive/5"
                   onClick={() => decideApplication("rejected")}
                   disabled={decisionBusy}
                 >
@@ -1236,7 +1236,7 @@ export default function AdminApplicationView() {
                   onClick={issueOfferOrRepairLead}
                   disabled={repairingLead || (!canIssueOffer && !hasOffer)}
                   title={hasOffer ? undefined : reason}
-                  className={hasOffer ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
+                  className={hasOffer ? "bg-info hover:bg-info/60 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
                 >
                   {repairingLead ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
                   {hasOffer ? "View Offer Letter" : lead?.id ? "Issue Offer Letter" : "Create Lead & Issue Offer"}
@@ -1267,7 +1267,7 @@ export default function AdminApplicationView() {
           )}
 
           {counts.rejected > 0 && (
-            <p className="text-[11px] text-rose-700 inline-flex items-center gap-1">
+            <p className="text-[11px] text-destructive inline-flex items-center gap-1">
               <AlertCircle className="h-3 w-3" />
               Admission Number issuance is blocked while any document is rejected.
             </p>
@@ -1478,10 +1478,10 @@ class SectionErrorBoundary extends Component<{ label: string; children: ReactNod
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
-          <p className="font-semibold text-amber-900">Couldn't render {this.props.label}.</p>
-          <p className="text-amber-800 mt-0.5">{this.state.error.message}</p>
-          <p className="text-amber-700/80 mt-1">The rest of the page is fine. Reload to retry, or check the console for details.</p>
+        <div className="rounded-lg border border-warning/20 bg-warning/5 p-3 text-xs">
+          <p className="font-semibold text-warning-foreground">Couldn't render {this.props.label}.</p>
+          <p className="text-warning-foreground mt-0.5">{this.state.error.message}</p>
+          <p className="text-warning-foreground/80 mt-1">The rest of the page is fine. Reload to retry, or check the console for details.</p>
         </div>
       );
     }

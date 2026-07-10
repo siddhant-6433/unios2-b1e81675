@@ -87,6 +87,11 @@ export default function PaymentPortal() {
   const [error, setError]       = useState<string | null>(null);
   const [student, setStudent]   = useState<StudentInfo | null>(null);
   const [fees, setFees]         = useState<StudentFee[]>([]);
+  // Consultant-managed fee hiding: the student-role fee_ledger SELECT returns
+  // zero rows for flagged students. In that mode we show a single due total
+  // (via the student_fee_due_summary RPC) and let the gateway compute the
+  // authoritative amount server-side (payment_scope='due', no fee_ids).
+  const [hiddenDueMode, setHiddenDueMode] = useState(false);
   const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
   const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
   const [receiptSnapshot, setReceiptSnapshot] = useState<StudentFeeReceiptSnapshot | null>(null);
@@ -148,9 +153,19 @@ export default function PaymentPortal() {
       Array.isArray(paymentHandoff.fees)
     ) {
       setStudent(paymentHandoff.student);
-      setFees(paymentHandoff.fees);
-      setStep("fees");
-      setLoading(false);
+      if (paymentHandoff.fees.length > 0) {
+        setFees(paymentHandoff.fees);
+        setStep("fees");
+        setLoading(false);
+      } else {
+        // Hidden-fee students hand off an empty list — resolve the due total
+        // through the hidden-mode fallback in fetchFees.
+        void (async () => {
+          await fetchFees(paymentHandoff.student!.id);
+          setStep("fees");
+          setLoading(false);
+        })();
+      }
       return;
     }
 
@@ -331,11 +346,46 @@ export default function PaymentPortal() {
       return fee.due_date <= todayKey;
     });
 
+    // Hidden-fee fallback: no visible ledger rows can also mean the fee
+    // structure is consultant-managed and hidden from this student. The RPC
+    // returns just the due total (no structure); errors (e.g. unauthenticated
+    // OTP flow) leave the empty state untouched.
+    if (mapped.length === 0 && !feeParam) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentId });
+      const dueTotal = Number((summary as any)?.due_total || 0);
+      if (dueTotal > 0) {
+        setHiddenDueMode(true);
+        setFees([{
+          id: "hidden-due",
+          fee_head: "Fee due",
+          amount: dueTotal,
+          balance: dueTotal,
+          status: "due",
+          due_date: todayKey,
+        }]);
+        return;
+      }
+    }
+
+    setHiddenDueMode(false);
     setFees(mapped);
   };
 
   const checkFeesPaid = async (): Promise<boolean> => {
     if (!student) return false;
+
+    // Hidden-fee mode: the student can't read fee_ledger rows, so settle-state
+    // comes from the due-summary RPC instead.
+    if (hiddenDueMode) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: student.id });
+      const stillDue = Number((summary as any)?.due_total || 0);
+      if (stillDue > 0) return false;
+      setReceiptSnapshot((current) => current ?? buildReceiptSnapshot(paidTxnId, activeGateway));
+      setStep("receipt");
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      return true;
+    }
+
     const { data } = await supabase
       .from("fee_ledger")
       .select("id")
@@ -353,6 +403,9 @@ export default function PaymentPortal() {
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
+  // Only real ledger UUIDs go to the gateways; the hidden-mode synthetic row is
+  // excluded so the server falls back to computing the 'due' selection itself.
+  const realFeeIds = fees.map((fee) => fee.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   const waiverAmount = paymentScope === "all" ? Math.round(totalDue * 0.05) : 0;
   const payableAmount = Math.max(totalDue - waiverAmount, 0);
   const paymentTitle = paymentScope === "all"
@@ -392,7 +445,7 @@ export default function PaymentPortal() {
           description: paymentTitle,
           studentId: student.id,
           paymentScope,
-          feeIds: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          feeIds: paymentScope === "all" ? [] : realFeeIds,
           waiverAmount,
           customerName: student.name,
           customerPhone: student.parent_phone || phone || "9999999999",
@@ -418,7 +471,7 @@ export default function PaymentPortal() {
           txnid,
           amount: totalDue,
           payment_scope: paymentScope,
-          fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          fee_ids: paymentScope === "all" ? [] : realFeeIds,
           waiver_amount: waiverAmount,
           productinfo: "Fee Payment",
           firstname: nameParts[0],
@@ -460,7 +513,7 @@ export default function PaymentPortal() {
                 txnid: gatewayTxnId,
                 application_id: "",
                 student_id: student.id,
-                fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+                fee_ids: paymentScope === "all" ? [] : realFeeIds,
                 payment_scope: paymentScope,
                 waiver_amount: waiverAmount,
               },
@@ -494,7 +547,7 @@ export default function PaymentPortal() {
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col animate-fade-in">
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
             <img src={student ? brand.logo : uniosLogo} alt={student ? brand.logoAlt : "UniOs"} className="h-8 max-w-[150px] object-contain" />
@@ -520,7 +573,7 @@ export default function PaymentPortal() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -540,7 +593,7 @@ export default function PaymentPortal() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -590,7 +643,7 @@ export default function PaymentPortal() {
           {step === "fees" && student && !loading && (
             <div className="space-y-4">
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -614,7 +667,7 @@ export default function PaymentPortal() {
 
               {fees.length === 0 ? (
                 <div className="rounded-xl bg-white border border-gray-200 p-8 text-center">
-                  <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
+                  <CheckCircle className="h-10 w-10 text-success mx-auto mb-3" />
                   <h3 className="text-lg font-semibold text-gray-900">All fees paid!</h3>
                   <p className="text-sm text-gray-500 mt-1">No outstanding fees at this time.</p>
                 </div>
@@ -627,7 +680,7 @@ export default function PaymentPortal() {
                           <p className="text-sm font-medium text-gray-900">{fee.fee_head}</p>
                           <p className="text-xs text-gray-400">
                             Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                            {fee.status === "overdue" && <span className="ml-2 text-red-500 font-medium">Overdue</span>}
+                            {fee.status === "overdue" && <span className="ml-2 text-destructive font-medium">Overdue</span>}
                           </p>
                         </div>
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
@@ -639,9 +692,9 @@ export default function PaymentPortal() {
                     </div>
                     {waiverAmount > 0 && (
                       <>
-                        <div className="flex items-center justify-between p-4 bg-green-50">
-                          <p className="text-sm font-semibold text-green-700">Pay All Waiver (5%)</p>
-                          <p className="text-sm font-bold text-green-700">-₹{waiverAmount.toLocaleString("en-IN")}</p>
+                        <div className="flex items-center justify-between p-4 bg-success/5">
+                          <p className="text-sm font-semibold text-success">Pay All Waiver (5%)</p>
+                          <p className="text-sm font-bold text-success">-₹{waiverAmount.toLocaleString("en-IN")}</p>
                         </div>
                         <div className="flex items-center justify-between p-4 bg-gray-50">
                           <p className="text-sm font-bold text-gray-900">Payable Now</p>
@@ -697,8 +750,8 @@ export default function PaymentPortal() {
           {step === "receipt" && student && (
             <div className="space-y-6 text-center">
               <div>
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 mx-auto mb-4">
-                  <CheckCircle className="h-8 w-8 text-green-600" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10 mx-auto mb-4">
+                  <CheckCircle className="h-8 w-8 text-success" />
                 </div>
                 <h2 className="text-xl font-bold text-gray-900">Payment Successful!</h2>
                 {paidTxnId && <p className="text-xs text-gray-400 mt-1 font-mono">{paidTxnId}</p>}
@@ -711,7 +764,7 @@ export default function PaymentPortal() {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Amount Paid</span>
-                  <span className="text-lg font-bold text-green-600">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
+                  <span className="text-lg font-bold text-success">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Date</span>

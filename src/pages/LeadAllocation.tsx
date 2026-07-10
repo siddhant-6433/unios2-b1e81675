@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -259,7 +260,7 @@ const LeadAllocation = () => {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <PageLoader />
       ) : rules.length === 0 ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center">
           <Settings className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />

@@ -128,11 +128,11 @@ const SOURCE_BADGE: Record<LeadList["source"], { label: string; cls: string }> =
 };
 
 const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
-  pending: "bg-blue-100 text-blue-700",
-  sending: "bg-emerald-100 text-emerald-700",
-  paused: "bg-amber-100 text-amber-700",
+  pending: "bg-info/10 text-info-foreground",
+  sending: "bg-success/10 text-success",
+  paused: "bg-warning/10 text-warning-foreground",
   completed: "bg-muted text-muted-foreground",
-  failed: "bg-rose-100 text-rose-700",
+  failed: "bg-destructive/10 text-destructive",
   terminated: "bg-zinc-200 text-zinc-700",
 };
 
@@ -223,9 +223,9 @@ const formatPct = (value: number | null | undefined) =>
 
 const senderHealthClass = (failedPct: number | null | undefined) => {
   if (typeof failedPct !== "number") return "bg-muted text-muted-foreground";
-  if (failedPct >= 10) return "bg-rose-100 text-rose-700";
-  if (failedPct >= 5) return "bg-amber-100 text-amber-700";
-  return "bg-emerald-100 text-emerald-700";
+  if (failedPct >= 10) return "bg-destructive/10 text-destructive";
+  if (failedPct >= 5) return "bg-warning/10 text-warning-foreground";
+  return "bg-success/10 text-success";
 };
 
 const resolveBusinessNumber = (
@@ -293,7 +293,7 @@ const WhatsAppBusinessIdentity = ({
     <div className={`flex w-full items-center gap-3 ${compact ? "py-1" : "rounded-md p-2"}`}>
       <Avatar className={compact ? "h-9 w-9 border bg-white" : "h-10 w-10 border bg-white"}>
         <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
-        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
+        <AvatarFallback className="bg-success/5 text-[10px] font-semibold text-success">NIMT</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -323,7 +323,7 @@ const WhatsAppBusinessIdentity = ({
           </div>
         )}
       </div>
-      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+      {selected && <Check className="h-4 w-4 shrink-0 text-success" />}
     </div>
   );
 };
@@ -1131,7 +1131,7 @@ export default function LeadLists() {
 
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : lists.length === 0 ? (
         <Card>
@@ -1237,9 +1237,9 @@ export default function LeadLists() {
             <DialogTitle>Send WhatsApp to "{waList?.name}"</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 overflow-y-auto px-6 py-4">
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-              <p className="text-xs text-amber-800">
+            <div className="flex items-start gap-2 rounded-lg border border-warning/20 bg-warning/5 px-3 py-2">
+              <AlertTriangle className="h-4 w-4 text-warning-foreground mt-0.5 shrink-0" />
+              <p className="text-xs text-warning-foreground">
                 Only Meta-approved templates can be sent in bulk. DNC leads and members without a phone are skipped automatically.
               </p>
             </div>
@@ -1335,7 +1335,7 @@ export default function LeadLists() {
                 </div>
               )}
               {waSenderError && (
-                <p className="mt-1 text-[11px] text-amber-700">
+                <p className="mt-1 text-[11px] text-warning-foreground">
                   Could not refresh sender health: {waSenderError}
                 </p>
               )}
@@ -1372,7 +1372,7 @@ export default function LeadLists() {
                   return (
                     <div key={p.name}>
                       <label className="text-xs font-medium text-muted-foreground capitalize">
-                        {label} {!hasDefaultMedia && <span className="text-rose-600">*</span>}
+                        {label} {!hasDefaultMedia && <span className="text-destructive">*</span>}
                       </label>
                       {canMap && (
                         <select
@@ -1572,7 +1572,7 @@ export default function LeadLists() {
           </DialogHeader>
           {previewLoading ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : (
             <div className="rounded-xl border border-border overflow-hidden">
@@ -1639,7 +1639,7 @@ export default function LeadLists() {
                 })
               )}
             </div>
-            {assignmentSummary && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{assignmentSummary}</p>}
+            {assignmentSummary && <p className="rounded-md bg-success/5 px-3 py-2 text-sm text-success">{assignmentSummary}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignOpen(false)}>Close</Button>
@@ -1658,7 +1658,7 @@ export default function LeadLists() {
           </DialogHeader>
           {reportLoading ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : assignmentReport.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">No list assignment activity found.</div>
@@ -1697,7 +1697,7 @@ export default function LeadLists() {
                       <td className="px-3 py-2">
                         {row.latest_call_disposition ? (
                           <>
-                            <Badge className="border-0 bg-blue-100 text-blue-700">{row.latest_call_disposition.replace(/_/g, " ")}</Badge>
+                            <Badge className="border-0 bg-info/10 text-info-foreground">{row.latest_call_disposition.replace(/_/g, " ")}</Badge>
                             <p className="mt-1 text-[11px] text-muted-foreground">
                               {row.latest_call_at ? new Date(row.latest_call_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-"}
                             </p>

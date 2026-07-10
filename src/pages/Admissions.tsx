@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
@@ -219,11 +220,11 @@ interface ExistingList {
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
   const color = pct === 100
-    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
     : pct >= 50
-    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+    ? "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
     : pct > 0
-    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
     : "bg-muted text-muted-foreground";
   const label = paymentStatus === "paid" && pct < 100 ? `${pct}% · 💳 Paid` : `${pct}%`;
   return (
@@ -235,7 +236,7 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 }
 
 function DeferredBlock({ className = "h-24" }: { className?: string }) {
-  return <div className={`rounded-2xl border border-border/40 bg-muted/20 animate-pulse ${className}`} />;
+  return <div className={`rounded-2xl border border-border/40 bg-muted/20 flutes ${className}`} />;
 }
 
 const Admissions = () => {
@@ -1595,7 +1596,7 @@ const Admissions = () => {
   // like the course multi-select popover preserve their state — an empty
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   if (loadError && leads.length === 0) {
@@ -1676,7 +1677,7 @@ const Admissions = () => {
           <CloudDialerNudge />
         </Suspense>
       )}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>
@@ -1705,29 +1706,29 @@ const Admissions = () => {
       {role === "counsellor" && (todayFollowups > 0 || overdueFollowups > 0) && view !== "action_center" && (
         <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
           overdueFollowups > 0
-            ? "border-red-400/50 bg-red-50 dark:bg-red-950/30"
-            : "border-amber-400/50 bg-amber-50 dark:bg-amber-950/30"
+            ? "border-destructive/25/50 bg-destructive/5 dark:bg-destructive/90/30"
+            : "border-warning/30/50 bg-warning/5 dark:bg-warning/90/30"
         }`}>
           <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
-            overdueFollowups > 0 ? "bg-red-500/20" : "bg-amber-500/20"
+            overdueFollowups > 0 ? "bg-destructive/50/20" : "bg-warning/50/20"
           }`}>
-            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`} />
+            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-destructive dark:text-destructive/80" : "text-warning-foreground dark:text-warning"}`} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground">
               {overdueFollowups > 0 && todayFollowups > 0 ? (
                 <>
-                  <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue</span>
+                  <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue</span>
                   <span className="mx-1.5 text-muted-foreground">/</span>
-                  <span className="text-amber-700 dark:text-amber-300">{todayFollowups} due today</span>
+                  <span className="text-warning-foreground dark:text-warning/70">{todayFollowups} due today</span>
                 </>
               ) : overdueFollowups > 0 ? (
-                <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
+                <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
               ) : (
-                <span className="text-amber-800 dark:text-amber-200">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
+                <span className="text-warning-foreground dark:text-warning/40">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
               )}
             </p>
-            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-red-600/80 dark:text-red-400/80" : "text-amber-700/80 dark:text-amber-300/80"}`}>
+            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-destructive/80 dark:text-destructive/80/80" : "text-warning-foreground/80 dark:text-warning/70/80"}`}>
               Don't let these leads wait - call them before end of day
             </p>
           </div>
@@ -1735,7 +1736,7 @@ const Admissions = () => {
             {todayFollowups > 0 && (
               <Button
                 size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white shadow-none gap-1.5"
+                className="bg-warning hover:bg-warning/60 text-white shadow-none gap-1.5"
                 onClick={() => navigate("/pending-followups?tab=today")}
               >
                 <Phone className="h-3.5 w-3.5" />
@@ -1745,7 +1746,7 @@ const Admissions = () => {
             {overdueFollowups > 0 && (
               <Button
                 size="sm"
-                className="bg-red-600 hover:bg-red-700 text-white shadow-none gap-1.5"
+                className="bg-destructive hover:bg-destructive/60 text-white shadow-none gap-1.5"
                 onClick={() => navigate("/pending-followups?tab=overdue")}
               >
                 <Clock className="h-3.5 w-3.5" />
@@ -1802,7 +1803,7 @@ const Admissions = () => {
           to 4 rows of 3 on mobile. */}
       <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1.5">
         {/* Lead stats */}
-        {leadStats.map((stat) => {
+        {leadStats.map((stat, i) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
             (stat.action === "unassigned_new_leads" && newLeadAssignmentFilter === "unassigned") ||
             (stat.action === "assigned_new_leads" && newLeadAssignmentFilter === "assigned") ||
@@ -1811,7 +1812,8 @@ const Admissions = () => {
           return (
             <Card
               key={stat.label}
-              className={`rounded-2xl border-border/40 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              className={`rounded-2xl border-border/40 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              style={{ animationDelay: `${i * 40}ms`, animationFillMode: "both" }}
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
@@ -1879,26 +1881,27 @@ const Admissions = () => {
               }}
             >
               <CardContent className="p-2.5">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3 w-3 text-foreground/70" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground leading-tight line-clamp-2">{stat.label}</span>
                 </div>
-                <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-                <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate mt-1.5 flex items-center gap-0.5">▲ {stat.sub}</p>
               </CardContent>
             </Card>
           );
         })}
         {/* Application stats */}
-        {appStats.map((stat) => (
+        {appStats.map((stat, i) => (
           <Card
             key={stat.label}
-            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
+            className={`border-border/60 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${
               (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "fee_paid" && actionLeadIds && actionBucketLabel === "Fee Paid")
                 ? "ring-2 ring-primary/40 bg-primary/5" : ""
             }`}
+            style={{ animationDelay: `${(leadStats.length + i) * 40}ms`, animationFillMode: "both" }}
             onClick={async () => {
               // Fee Paid uses ID-based filter (count includes leads with paid applications regardless of stage)
               if (stat.action === "fee_paid") {
@@ -1979,14 +1982,14 @@ const Admissions = () => {
             }}
           >
             <CardContent className="p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                  <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                  <stat.icon className="h-3 w-3 text-foreground/70" />
                 </div>
-                <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
               </div>
-              <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-              <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+              <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate mt-1.5">{stat.sub}</p>
             </CardContent>
           </Card>
         ))}
@@ -2005,15 +2008,15 @@ const Admissions = () => {
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
       {myDefaults && myDefaults.total_defaults > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/10 dark:border-red-900/30 px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
-            <Clock className="h-4 w-4 text-red-600" />
+        <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 dark:bg-destructive/90/10 dark:border-destructive/60/30 px-4 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 dark:bg-destructive/80/30">
+            <Clock className="h-4 w-4 text-destructive" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+            <p className="text-sm font-semibold text-destructive dark:text-destructive/60">
               You have {myDefaults.total_defaults} pending action{myDefaults.total_defaults > 1 ? "s" : ""}
             </p>
-            <p className="text-xs text-red-600 dark:text-red-400">
+            <p className="text-xs text-destructive dark:text-destructive/80">
               {[
                 myDefaults.new_leads_overdue > 0 && `${myDefaults.new_leads_overdue} new leads to contact`,
                 myDefaults.overdue_followups > 0 && `${myDefaults.overdue_followups} overdue follow-ups`,
@@ -2024,7 +2027,7 @@ const Admissions = () => {
           <Button
             size="sm"
             variant="outline"
-            className="border-red-300 text-red-700 hover:bg-red-100 shrink-0"
+            className="border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
             onClick={() => setView("action_center")}
           >
             View Details
@@ -2033,14 +2036,14 @@ const Admissions = () => {
       )}
 
       {inactiveIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-amber-600" />
-          <span className="font-medium text-amber-800 dark:text-amber-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/70">
             Showing {inactiveIds.size} inactive lead{inactiveIds.size !== 1 ? "s" : ""} past threshold
           </span>
           <button
             onClick={() => setInactiveIds(null)}
-            className="ml-2 rounded-md bg-amber-200 dark:bg-amber-800 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/25 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -2048,14 +2051,14 @@ const Admissions = () => {
       )}
 
       {followupLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-orange-600" />
-          <span className="font-medium text-orange-800 dark:text-orange-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/50/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/60">
             Showing {followupLeadIds.size} lead{followupLeadIds.size !== 1 ? "s" : ""} with pending follow-ups
           </span>
           <button
             onClick={() => setFollowupLeadIds(null)}
-            className="ml-2 rounded-md bg-orange-200 dark:bg-orange-800 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200 hover:bg-orange-300 dark:hover:bg-orange-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/30 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -2063,14 +2066,14 @@ const Admissions = () => {
       )}
 
       {visitLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800/40 px-3 py-2 text-sm">
-          <MapPin className="h-3.5 w-3.5 text-violet-600" />
-          <span className="font-medium text-violet-800 dark:text-violet-300">
+        <div className="flex items-center gap-2 rounded-lg bg-primary/5 dark:bg-primary/90/20 border border-primary/20 dark:border-primary/50/40 px-3 py-2 text-sm">
+          <MapPin className="h-3.5 w-3.5 text-primary" />
+          <span className="font-medium text-primary dark:text-primary/50">
             Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with campus visits
           </span>
           <button
             onClick={() => setVisitLeadIds(null)}
-            className="ml-2 rounded-md bg-violet-200 dark:bg-violet-800 px-2 py-0.5 text-xs font-medium text-violet-800 dark:text-violet-200 hover:bg-violet-300 dark:hover:bg-violet-700"
+            className="ml-2 rounded-md bg-primary/15 dark:bg-primary/70 px-2 py-0.5 text-xs font-medium text-primary dark:text-primary/40 hover:bg-primary/25 dark:hover:bg-primary/60"
           >
             Clear filter
           </button>
@@ -2078,14 +2081,14 @@ const Admissions = () => {
       )}
 
       {notCalledIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm">
-          <Phone className="h-3.5 w-3.5 text-red-600" />
-          <span className="font-medium text-red-800 dark:text-red-300">
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/5 dark:bg-destructive/90/20 border border-destructive/20 dark:border-destructive/50/40 px-3 py-2 text-sm">
+          <Phone className="h-3.5 w-3.5 text-destructive" />
+          <span className="font-medium text-destructive dark:text-destructive/60">
             Showing {notCalledIds.size} not-called lead{notCalledIds.size !== 1 ? "s" : ""} — select and transfer to reassign
           </span>
           <button
             onClick={() => { setNotCalledIds(null); setCounsellorFilter("all"); }}
-            className="ml-2 rounded-md bg-red-200 dark:bg-red-800 px-2 py-0.5 text-xs font-medium text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-700"
+            className="ml-2 rounded-md bg-destructive/15 dark:bg-destructive/70 px-2 py-0.5 text-xs font-medium text-destructive dark:text-destructive/40 hover:bg-destructive/25 dark:hover:bg-destructive/60"
           >
             Clear filter
           </button>
@@ -2142,7 +2145,7 @@ const Admissions = () => {
 
       {/* Search & filters — hidden on Action Center view */}
       {view !== "action_center" && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
               <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
@@ -2526,11 +2529,11 @@ const Admissions = () => {
         <div className="space-y-3">
           {bulkActionBar}
           <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
-            {STAGES.map((stage) => {
+            {STAGES.map((stage, stageIdx) => {
               const stageLeads = filtered.filter((l) => l.stage === stage);
               const StageIcon = stageIcons[stage] || FileText;
               return (
-                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
+                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0 animate-rs-slide-up" style={{ animationDelay: `${stageIdx * 40}ms`, animationFillMode: "both" }}>
                   <div className="flex items-center gap-2 mb-3 px-1">
                     <StageIcon className="h-4 w-4 text-muted-foreground" />
                     <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
@@ -2539,8 +2542,8 @@ const Admissions = () => {
                     </span>
                   </div>
                   <div className="space-y-2.5">
-                    {stageLeads.map((lead) => (
-                      <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
+                    {stageLeads.map((lead, leadIdx) => (
+                      <Card key={lead.id} className="border-border/60 elevation-low hover:elevation-mid hover:-translate-y-1 transition-all duration-240 ease-standard cursor-pointer group animate-rs-slide-up relative" style={{ animationDelay: `${leadIdx * 40}ms`, animationFillMode: "both" }}>
                         {(isSuperAdmin || canTransfer) && (
                           <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
                             <Checkbox
@@ -2592,7 +2595,7 @@ const Admissions = () => {
                       </Card>
                     ))}
                     {stageLeads.length === 0 && (
-                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground">No leads</div>
+                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground animate-rs-slide-up">No leads</div>
                     )}
                   </div>
                 </div>
@@ -2623,11 +2626,11 @@ const Admissions = () => {
           )}
         </div>
         {bulkActionBar && <div className="mb-3">{bulkActionBar}</div>}
-        <Card className="border-border/60 shadow-none overflow-hidden">
+        <Card className="border-border/60 shadow-none overflow-hidden rounded-xl">
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/50">
+                <tr className="border-b border-border bg-surface-subtle">
                   {(isSuperAdmin || canTransfer) && (
                     <th className="px-3 py-3 w-10">
                       <Checkbox
@@ -2652,7 +2655,7 @@ const Admissions = () => {
                 {paginatedLeads.map((lead) => {
                   const summary = aiSummaries[lead.id];
                   return (
-                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors align-top">
+                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors duration-160 ease-standard align-top">
                     {(isSuperAdmin || canTransfer) && (
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
@@ -2679,13 +2682,13 @@ const Admissions = () => {
                           />
                         </span>
                         {lead.ai_called && (
-                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30 shrink-0" title="AI Called">
-                            <Bot className="h-2.5 w-2.5 text-violet-600" />
+                          <span className="flex h-4 w-4 items-center justify-center rounded bg-primary/10 dark:bg-primary/80/30 shrink-0" title="AI Called">
+                            <Bot className="h-2.5 w-2.5 text-primary" />
                           </span>
                         )}
                         {postVisitPendingIds.has(lead.id) && (
-                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1 shrink-0" title="Post-visit followup pending">
-                            <MapPin className="h-2.5 w-2.5 text-amber-600" />
+                          <span className="flex h-4 items-center gap-0.5 rounded bg-warning/10 dark:bg-warning/80/30 px-1 shrink-0" title="Post-visit followup pending">
+                            <MapPin className="h-2.5 w-2.5 text-warning-foreground" />
                           </span>
                         )}
                       </div>

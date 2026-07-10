@@ -17,6 +17,7 @@ import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
+  ArrowRightLeft, UserPlus,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -35,6 +36,7 @@ import {
   type RenderedWhatsAppTemplate,
   type WhatsAppTemplateDefinition,
 } from "@/lib/whatsappTemplateRender";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
@@ -168,42 +170,42 @@ const DeliveryReceipt = ({ status }: { status: string | null | undefined }) => {
   const normalized = (status || "sent").toLowerCase();
   if (normalized === "failed") {
     return (
-      <span title="Failed by Meta" aria-label="Failed by Meta" className="inline-flex items-center text-red-600">
+      <span title="Failed by Meta" aria-label="Failed by Meta" className="inline-flex items-center text-destructive animate-rs-shake">
         <AlertOctagon className="h-3 w-3" />
       </span>
     );
   }
   if (normalized === "read") {
     return (
-      <span title="Read" aria-label="Read" className="inline-flex items-center text-[#34b7f1]">
+      <span title="Read" aria-label="Read" className="inline-flex items-center text-info transition-colors duration-240 ease-entrance">
         <CheckCheck className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (normalized === "delivered") {
     return (
-      <span title="Delivered" aria-label="Delivered" className="inline-flex items-center text-slate-500">
+      <span title="Delivered" aria-label="Delivered" className="inline-flex items-center text-muted-foreground transition-colors duration-240 ease-entrance">
         <CheckCheck className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (normalized === "sent") {
     return (
-      <span title="Sent by Meta" aria-label="Sent by Meta" className="inline-flex items-center text-slate-500">
+      <span title="Sent by Meta" aria-label="Sent by Meta" className="inline-flex items-center text-muted-foreground transition-colors duration-240 ease-entrance">
         <Check className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (normalized === "accepted" || normalized === "submitted") {
     return (
-      <span title="Accepted by Meta" aria-label="Accepted by Meta" className="inline-flex items-center text-emerald-600">
+      <span title="Accepted by Meta" aria-label="Accepted by Meta" className="inline-flex items-center text-success transition-colors duration-240 ease-entrance">
         <CircleCheck className="h-3.5 w-3.5" />
       </span>
     );
   }
   return (
-    <span title="Sending" aria-label="Sending" className="inline-flex items-center text-slate-400">
-      <Clock className="h-3 w-3" />
+    <span title="Sending" aria-label="Sending" className="inline-flex items-center text-muted-foreground/50">
+      <Clock className="h-3 w-3 animate-pulse" />
     </span>
   );
 };
@@ -507,7 +509,7 @@ const WhatsAppInboxIdentity = ({
     <div className={`flex w-full items-center gap-3 ${compact ? "py-0.5" : "rounded-md p-2"}`}>
       <Avatar className={compact ? "h-8 w-8 border bg-white" : "h-10 w-10 border bg-white"}>
         <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
-        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
+        <AvatarFallback className="bg-success/5 text-[10px] font-semibold text-success">NIMT</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -526,7 +528,7 @@ const WhatsAppInboxIdentity = ({
           {!compact && typeof option.count === "number" && <span>{option.count.toLocaleString("en-IN")} chats</span>}
         </div>
       </div>
-      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+      {selected && <Check className="h-4 w-4 shrink-0 text-success" />}
     </div>
   );
 };
@@ -826,6 +828,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [bfSecondaryNumber, setBfSecondaryNumber] = useState("");
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState<any>(null);
+
+  // Assign / reassign dialog
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferLeadIds, setTransferLeadIds] = useState<string[]>([]);
+  const [transferLeadNames, setTransferLeadNames] = useState<string[]>([]);
 
   // Per-conversation AI/human guard. 'human' means the bot stays silent and a
   // counsellor handles the chat (inbox or WhatsApp Business app). Read by the
@@ -2422,7 +2429,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     );
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return (
+    <div className="flex h-64 flex-col items-center justify-center gap-3">
+      <div className="flex gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
+      </div>
+      <span className="text-xs text-muted-foreground">Loading conversations...</span>
+    </div>
+  );
 
   return (
     <div className="animate-fade-in overflow-hidden">
@@ -2505,10 +2521,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
                 { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnrepliedConvs, color: "bg-primary/10 text-primary border-primary/30" },
-                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-blue-50 text-blue-700 border-blue-200" },
-                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-violet-50 text-violet-700 border-violet-200" },
-                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-purple-50 text-purple-700 border-purple-200" },
-                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-amber-50 text-amber-700 border-amber-200" },
+                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-info/5 text-info-foreground border-info/20" },
+                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-warning/5 text-warning-foreground border-warning/20" },
               ]).map((t) => (
                 <button
                   key={t.key}
@@ -2518,7 +2534,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   }`}
                 >
                   {t.label} {t.count}{t.unreplied > 0 && (
-                    <span className="ml-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-green-500 px-0.5 text-[8px] font-bold text-white">{t.unreplied}</span>
+                    <span className="ml-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-success/50 px-0.5 text-[8px] font-bold text-white">{t.unreplied}</span>
                   )}
                 </button>
               ))}
@@ -2544,7 +2560,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
-              <div className="px-3 py-2 border-b border-border bg-muted/20">
+              <div className="px-3 py-2 border-b border-border bg-muted/20 flex items-center gap-2">
                 <SelectField
                   value={counsellorFilter}
                   onValueChange={(value) => { setCounsellorFilter(value); setUnrepliedOnly(false); }}
@@ -2557,6 +2573,22 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   triggerClassName="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:ring-1 focus:ring-ring/20"
                   ariaLabel="Filter WhatsApp conversations by counsellor"
                 />
+                <button
+                  onClick={() => {
+                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    if (ids.length === 0) {
+                      toast({ title: "No leads", description: "No leads in the current view to assign.", variant: "destructive" });
+                      return;
+                    }
+                    setTransferLeadIds(ids);
+                    setTransferLeadNames([]);
+                    setTransferOpen(true);
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-primary/25 bg-primary/5 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                  title="Bulk assign/reassign all leads in current filtered view"
+                >
+                  <UserPlus className="h-3 w-3" /> Bulk Assign
+                </button>
               </div>
             )}
 
@@ -2575,10 +2607,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
             {/* Admin: unreplied breakdown panel */}
             {isAdminRole(role) && unrepliedByCC.length > 0 && (
-              <div className="border-b border-border bg-amber-50/60 dark:bg-amber-950/20">
+              <div className="border-b border-border bg-warning/5/60 dark:bg-warning/90/20">
                 <button
                   onClick={() => setUnrepliedPanelOpen(v => !v)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition-colors"
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-warning-foreground dark:text-warning uppercase tracking-wide hover:bg-warning/10/40 dark:hover:bg-warning/80/20 transition-colors"
                 >
                   <span>Unreplied by Counsellor</span>
                   <ChevronDown className={`h-3 w-3 transition-transform ${unrepliedPanelOpen ? "rotate-180" : ""}`} />
@@ -2592,8 +2624,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         className={`rounded-full px-2 py-0.5 text-[10px] font-medium border transition-colors ${
                           (item.id === "__unassigned__" && counsellorFilter === "unassigned") ||
                           (item.id !== "__unassigned__" && counsellorFilter === item.id)
-                            ? "bg-amber-500 border-amber-500 text-white"
-                            : "bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800/40"
+                            ? "bg-warning/50 border-warning/35 text-white"
+                            : "bg-warning/10 dark:bg-warning/80/30 border-warning/30 dark:border-warning/50 text-warning-foreground dark:text-warning/70 hover:bg-warning/15 dark:hover:bg-warning/70/40"
                         }`}
                       >
                         {item.name}: {item.count}
@@ -2606,9 +2638,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
             {/* Unreplied-only active indicator */}
             {unrepliedOnly && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-amber-500/10 border-b border-amber-300/40">
-                <span className="text-[10px] font-medium text-amber-700">Showing unreplied only</span>
-                <button onClick={() => setUnrepliedOnly(false)} className="text-[10px] text-amber-700 hover:underline">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-warning/50/10 border-b border-warning/30/40">
+                <span className="text-[10px] font-medium text-warning-foreground">Showing unreplied only</span>
+                <button onClick={() => setUnrepliedOnly(false)} className="text-[10px] text-warning-foreground hover:underline">
                   Show all
                 </button>
               </div>
@@ -2641,7 +2673,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           >
                           <div className="flex items-start justify-between gap-2">
                             <Avatar className="mt-0.5 h-10 w-10 shrink-0 bg-slate-100">
-                              <AvatarFallback className="bg-emerald-100 text-xs font-semibold text-emerald-700">
+                              <AvatarFallback className="bg-success/10 text-xs font-semibold text-success">
                                 {getDisplayName(c).slice(0, 2).toUpperCase()}
                               </AvatarFallback>
                             </Avatar>
@@ -2651,28 +2683,28 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                   {getDisplayName(c)}
                                 </span>
                                 {isStaffConv(c) && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-violet-300 text-violet-600 dark:text-violet-400">Staff</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-primary/25 text-primary dark:text-primary/60">Staff</Badge>
                                 )}
                                 {c.lead_id && (!c.lead_person_role || c.lead_person_role === "lead" || c.lead_person_role === "applicant") && !isStaffConv(c) && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-blue-300 text-blue-600">Admission</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-info/30 text-info-foreground">Admission</Badge>
                                 )}
                                 {c.lead_person_role === "job_applicant" && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-purple-300 text-purple-600">Job</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-primary/25 text-primary">Job</Badge>
                                 )}
                                 {c.lead_person_role === "vendor" && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-amber-300 text-amber-600">Vendor</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-warning/30 text-warning-foreground">Vendor</Badge>
                                 )}
                                 {c.lead_person_role === "other" && (
                                   <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-gray-300 text-gray-500">Other</Badge>
                                 )}
                                 {isReplyWindowConversation(c) && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-emerald-300 bg-emerald-50 text-emerald-700">24h</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-success/30 bg-success/5 text-success">24h</Badge>
                                 )}
                               </div>
                               <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                                 {formatPhone(c.phone)}
-                                {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
-                                {c.lead_source && <span className="px-1 rounded bg-emerald-50 text-emerald-700 text-[8px] font-medium capitalize">{sourceLabel(c.lead_source)}</span>}
+                                {c.course_name && <span className="px-1 rounded bg-info/5 text-info-foreground text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                                {c.lead_source && <span className="px-1 rounded bg-success/5 text-success text-[8px] font-medium capitalize">{sourceLabel(c.lead_source)}</span>}
                                 {c.counsellor_name && !isStaffConv(c) && (
                                   <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
                                 )}
@@ -2682,7 +2714,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                               </p>
                             </div>
                             <div className="flex shrink-0 flex-col items-end gap-1">
-                              <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-emerald-600 font-semibold" : "text-muted-foreground"}`}>
+                              <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-success font-semibold" : "text-muted-foreground"}`}>
                                 {formatTime(c.last_message_at)}
                               </span>
                               {c.unread_count > 0 && (
@@ -2739,7 +2771,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
                   <Avatar className="h-10 w-10 bg-slate-200">
-                    <AvatarFallback className="bg-emerald-100 text-sm font-semibold text-emerald-700">
+                    <AvatarFallback className="bg-success/10 text-sm font-semibold text-success">
                       {(selectedConv?.lead_name || selectedPhone || "WA").slice(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -2756,14 +2788,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       {selectedPhone ? formatPhone(selectedPhone) : ""}
                       {selectedConv?.course_name && (
                         <span
-                          className="inline-block max-w-[32rem] px-1.5 py-0 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold cursor-pointer hover:bg-blue-200 transition-colors truncate"
+                          className="inline-block max-w-[32rem] px-1.5 py-0 rounded bg-info/10 text-info-foreground text-[9px] font-semibold cursor-pointer hover:bg-info/15 transition-colors truncate"
                           title={`${selectedConv.course_name} — click to copy`}
                           onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
                         >Course: {selectedConv.course_name}</span>
                       )}
                       {selectedConv?.lead_source && (
                         <span
-                          className="px-1.5 py-0 rounded bg-emerald-50 text-emerald-700 text-[9px] font-semibold capitalize"
+                          className="px-1.5 py-0 rounded bg-success/5 text-success text-[9px] font-semibold capitalize"
                           title={`Lead source: ${sourceLabel(selectedConv.lead_source)}`}
                         >Source: {sourceLabel(selectedConv.lead_source)}</span>
                       )}
@@ -2775,10 +2807,24 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         type="button"
                         title={`${selectedConv.counsellor_name} — click to copy`}
                         onClick={() => { navigator.clipboard.writeText(selectedConv.counsellor_name!); toast({ title: "Copied", description: selectedConv.counsellor_name }); }}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 dark:bg-primary/80/30 border border-primary/20 dark:border-primary/50 px-2.5 py-1.5 text-xs font-medium text-primary dark:text-primary/50 whitespace-nowrap hover:bg-primary/15 dark:hover:bg-primary/80/50 transition-colors"
                       >
                         <User className="h-3 w-3" />
                         {selectedConv.counsellor_name}
+                      </button>
+                    )}
+                    {isAdminRole(role) && selectedConv?.lead_id && (
+                      <button
+                        onClick={() => {
+                          setTransferLeadIds([selectedConv.lead_id!]);
+                          setTransferLeadNames([selectedConv.lead_name || selectedPhone || ""]);
+                          setTransferOpen(true);
+                        }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary/25 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                        title={selectedConv.counsellor_name ? "Reassign to a different counsellor" : "Assign a counsellor"}
+                      >
+                        <ArrowRightLeft className="h-3 w-3" />
+                        {selectedConv.counsellor_name ? "Reassign" : "Assign"}
                       </button>
                     )}
                     {conversationBusinessKey(selectedConv) && aiMode && (
@@ -2789,8 +2835,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
                           : "AI auto-reply is on. Click to pause and handle this chat manually."}
                         className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
-                          ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                          : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
+                          ? "border-warning/30 bg-warning/5 text-warning-foreground hover:bg-warning/10 dark:border-warning/50 dark:bg-warning/80/30 dark:text-warning/70"
+                          : "border-success/30 bg-success/5 text-success hover:bg-success/10 dark:border-success/50 dark:bg-success/80/30 dark:text-success/60"}`}
                       >
                         {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
                       </button>
@@ -2806,7 +2852,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       disabled={copilotLoading}
                       className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${
                         showCopilotPanel
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                          ? "border-primary/25 bg-primary/5 text-primary hover:bg-primary/10"
                           : "border-input bg-background text-muted-foreground hover:bg-muted/50"
                       }`}
                     >
@@ -2824,7 +2870,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
                       <Button
                         variant="ghost" size="sm"
-                        className="shrink-0 gap-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="shrink-0 gap-1 text-xs text-destructive hover:text-destructive hover:bg-destructive/5"
                         onClick={async () => {
                           if (!selectedConv?.lead_id) return;
                           // Mark DNC first; then send the farewell with bypass_dnc
@@ -2866,7 +2912,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       </Button>
                     )}
                     {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
-                      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-red-700 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-2 py-1 rounded-md">
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-destructive bg-destructive/5 dark:bg-destructive/90/40 border border-destructive/20 dark:border-destructive/50 px-2 py-1 rounded-md">
                         <Ban className="h-3 w-3" /> DNC
                       </span>
                     )}
@@ -2874,28 +2920,28 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 </div>
                 {/* Quick lead actions — only for lead conversations */}
                 {selectedConv?.lead_id && selectedConv?.lead_person_role !== "job_applicant" && selectedConv?.lead_person_role !== "vendor" && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5 border-b border-border bg-amber-50/40 dark:bg-amber-950/10 sm:flex-wrap">
+                  <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5 border-b border-border bg-warning/5/40 dark:bg-warning/90/10 sm:flex-wrap">
                     <span className="text-[9px] text-muted-foreground mr-0.5 shrink-0">Quick:</span>
                     {selectedConv?.lead_stage !== "not_interested" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-[10px] font-medium hover:bg-red-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-destructive/20 bg-destructive/5 text-destructive text-[10px] font-medium hover:bg-destructive/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "not_interested")}
                       ><ThumbsDown className="h-3 w-3" /> Not Interested</button>
                     )}
                     {selectedConv?.lead_stage !== "ineligible" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-orange-200 bg-orange-50 text-orange-700 text-[10px] font-medium hover:bg-orange-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-warning/20 bg-warning/5 text-warning-foreground text-[10px] font-medium hover:bg-warning/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "ineligible")}
                       ><AlertOctagon className="h-3 w-3" /> Ineligible</button>
                     )}
                     {selectedConv?.lead_stage !== "new_lead" && selectedConv?.lead_stage !== "application_in_progress" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-green-200 bg-green-50 text-green-700 text-[10px] font-medium hover:bg-green-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-success/20 bg-success/5 text-success text-[10px] font-medium hover:bg-success/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "new_lead")}
                       ><ThumbsUp className="h-3 w-3" /> Interested</button>
                     )}
                     <button
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-[10px] font-medium hover:bg-blue-100 transition-colors"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-info/20 bg-info/5 text-info-foreground text-[10px] font-medium hover:bg-info/10 transition-colors"
                       onClick={() => { setFollowupDate(""); setFollowupNote(""); setFollowupOpen(true); }}
                     ><CalendarPlus className="h-3 w-3" /> Create Followup</button>
                   </div>
@@ -2905,9 +2951,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 <div className="flex items-center gap-1 overflow-x-auto px-3 py-1 border-b border-border bg-muted/20">
                   <span className="text-[9px] text-muted-foreground mr-1 shrink-0">Mark as:</span>
                   {([
-                    { value: "lead", label: "Admission", color: "border-blue-300 bg-blue-50 text-blue-700", activeColor: "ring-2 ring-blue-400 bg-blue-100" },
-                    { value: "job_applicant", label: "Job Applicant", color: "border-purple-300 bg-purple-50 text-purple-700", activeColor: "ring-2 ring-purple-400 bg-purple-100" },
-                    { value: "vendor", label: "Vendor", color: "border-amber-300 bg-amber-50 text-amber-700", activeColor: "ring-2 ring-amber-400 bg-amber-100" },
+                    { value: "lead", label: "Admission", color: "border-info/30 bg-info/5 text-info-foreground", activeColor: "ring-2 ring-blue-400 bg-info/10" },
+                    { value: "job_applicant", label: "Job Applicant", color: "border-primary/25 bg-primary/5 text-primary", activeColor: "ring-2 ring-purple-400 bg-primary/10" },
+                    { value: "vendor", label: "Vendor", color: "border-warning/30 bg-warning/5 text-warning-foreground", activeColor: "ring-2 ring-amber-400 bg-warning/10" },
                     { value: "other", label: "Other", color: "border-gray-300 bg-gray-50 text-gray-600", activeColor: "ring-2 ring-gray-400 bg-gray-100" },
                   ] as const).map(cat => {
                     const currentRole = selectedConv?.lead_person_role || "lead";
@@ -2968,14 +3014,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 </div>
 
                 {showCopilotPanel && (
-                  <div className="border-b border-border bg-indigo-50/50 dark:bg-indigo-950/20">
-                    <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-indigo-100 dark:border-indigo-900/50">
+                  <div className="border-b border-border bg-primary/5/50 dark:bg-primary/90/20">
+                    <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-primary/10 dark:border-primary/60/50">
                       <div className="flex min-w-0 items-center gap-2">
-                        <Bot className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" />
+                        <Bot className="h-4 w-4 shrink-0 text-primary dark:text-primary/50" />
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">Copilot</p>
+                          <p className="text-xs font-semibold text-primary dark:text-primary/40">Copilot</p>
                           {copilotResult?.model_unavailable && (
-                            <p className="text-[10px] text-amber-700 dark:text-amber-300">Model fallback response</p>
+                            <p className="text-[10px] text-warning-foreground dark:text-warning/70">Model fallback response</p>
                           )}
                         </div>
                       </div>
@@ -2988,7 +3034,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           disabled={copilotLoading}
                           onClick={() => void runCopilotAssist()}
                         >
-                          {copilotLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {copilotLoading && <div className="flex gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:100ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:200ms]" /></div>}
                           Refresh
                         </Button>
                         <Button
@@ -3005,45 +3051,49 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
                     <div className="px-4 py-3">
                       {copilotLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Reading thread...
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground animate-rs-slide-up">
+                          <div className="flex gap-1">
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
+                          </div>
+                          Thinking...
                         </div>
                       ) : copilotError ? (
-                        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive animate-rs-shake">
                           {copilotError}
                         </div>
                       ) : copilotResult ? (
                         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)]">
                           <div className="space-y-2">
                             <div>
-                              <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Summary</p>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-primary dark:text-primary/50">Summary</p>
                               <p className="mt-0.5 text-xs leading-relaxed text-foreground">{copilotResult.summary}</p>
                             </div>
                             <div className="grid gap-2 sm:grid-cols-2">
-                              <div className="rounded-md border border-indigo-100 bg-background/80 px-3 py-2">
+                              <div className="rounded-md border border-primary/10 bg-background/80 px-3 py-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Intent</p>
                                 <p className="mt-0.5 text-xs font-medium text-foreground">{copilotResult.intent}</p>
                               </div>
-                              <div className="rounded-md border border-indigo-100 bg-background/80 px-3 py-2">
+                              <div className="rounded-md border border-primary/10 bg-background/80 px-3 py-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Next Action</p>
                                 <p className="mt-0.5 text-xs font-medium text-foreground">{copilotResult.next_action_label}</p>
                                 <p className="mt-0.5 text-[10px] text-muted-foreground">{copilotResult.next_action_reason}</p>
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                              <span className="rounded-full border border-indigo-200 bg-background/80 px-2 py-0.5">
+                              <span className="rounded-full border border-primary/20 bg-background/80 px-2 py-0.5">
                                 Confidence {Math.round(copilotResult.confidence * 100)}%
                               </span>
                               {copilotResult.should_pause_ai && (
-                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                                <span className="rounded-full border border-warning/20 bg-warning/5 px-2 py-0.5 text-warning-foreground">
                                   Human review
                                 </span>
                               )}
                             </div>
                           </div>
 
-                          <div className="rounded-md border border-indigo-100 bg-background/90 p-3">
+                          <div className="rounded-md border border-primary/10 bg-background/90 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Draft Reply</p>
                             <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-foreground">
                               {copilotResult.draft_reply}
@@ -3126,18 +3176,18 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           </span>
                         </div>
                       )}
-                    <div className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[82%] rounded-lg px-3 py-2 text-slate-900 shadow-sm sm:max-w-[68%] ${
+                    <div className={`flex animate-rs-slide-up ${isOutbound ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[82%] rounded-lg px-3 py-2 text-slate-900 sm:max-w-[68%] transition-all duration-240 ease-entrance ${
                         isOutbound
                           ? failedMessage
-                            ? "bg-red-50 ring-1 ring-red-200"
-                            : "bg-[#d9fdd3] rounded-tr-sm"
-                          : "bg-white rounded-tl-sm"
+                            ? "bg-destructive/5 ring-1 ring-destructive/30 animate-rs-shake"
+                            : "bg-[#d9fdd3] rounded-tr-sm elevation-low"
+                          : "bg-white rounded-tl-sm elevation-low"
                       }`}>
                         {renderedTemplate && (
-                          <div className="mb-2 rounded-md border border-emerald-200/80 bg-white/70 p-2">
+                          <div className="mb-2 rounded-md border border-success/20/80 bg-white/70 p-2">
                             <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700">
+                              <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success">
                                 Template
                               </span>
                               <span className="text-[10px] font-medium text-slate-700">{renderedTemplate.label}</span>
@@ -3146,7 +3196,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             {renderedTemplate.buttons.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
                                 {renderedTemplate.buttons.map(button => (
-                                  <span key={button} className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                                  <span key={button} className="rounded border border-success/20 bg-success/5 px-2 py-0.5 text-[10px] font-medium text-success">
                                     {button}
                                   </span>
                                 ))}
@@ -3187,7 +3237,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{getMessageText(m).replace(/\\n/g, "\n")}</p>
                         )}
                         {failedMessage && (
-                          <div className="mt-2 rounded-md border border-red-200 bg-red-100/70 p-2 text-[11px] text-red-800">
+                          <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive animate-rs-error-pulse">
                             <div className="flex items-start gap-2">
                               <AlertOctagon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                               <div className="min-w-0 flex-1">
@@ -3246,7 +3296,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   <DialogContent className="max-h-[86vh] max-w-5xl overflow-hidden p-0">
                     <DialogHeader className="border-b px-4 py-3">
                       <DialogTitle className="flex items-center gap-2 text-sm">
-                        <LayoutTemplate className="h-4 w-4 text-emerald-600" />
+                        <LayoutTemplate className="h-4 w-4 text-success" />
                         Send WhatsApp Template
                       </DialogTitle>
                     </DialogHeader>
@@ -3279,13 +3329,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                     }}
                                     className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                                       selectedTemplate === t.key
-                                        ? "border-emerald-300 bg-emerald-50"
+                                        ? "border-success/30 bg-success/5"
                                         : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-100"
                                     }`}
                                   >
                                     <div className="flex items-center justify-between gap-2">
                                       <p className="truncate text-xs font-semibold text-slate-900">{t.label}</p>
-                                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-emerald-700">
+                                      <span className="rounded bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success">
                                         {t.status || "approved"}
                                       </span>
                                     </div>
@@ -3312,8 +3362,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             {selectedTemplateRender && (
                               <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                                 <span className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-700">{selectedTemplateRender.language.toUpperCase()}</span>
-                                <span className="rounded bg-emerald-100 px-2 py-1 font-medium capitalize text-emerald-700">{selectedTemplateRender.category}</span>
-                                <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
+                                <span className="rounded bg-success/10 px-2 py-1 font-medium capitalize text-success">{selectedTemplateRender.category}</span>
+                                <span className="rounded bg-info/10 px-2 py-1 font-medium text-info-foreground">
                                   {(() => {
                                     const lastInbound = [...messages].reverse().find(m => m.direction === "inbound");
                                     return lastInbound && Date.now() - new Date(lastInbound.created_at).getTime() < 24 * 60 * 60 * 1000
@@ -3337,9 +3387,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           >
                             {selectedTemplateRender ? (
                               <div className="ml-auto max-w-[86%] rounded-lg rounded-tr-sm bg-[#d9fdd3] px-3 py-2 text-slate-900 shadow-sm sm:max-w-[72%]">
-                                <div className="mb-2 rounded-md border border-emerald-200 bg-white/70 p-2">
+                                <div className="mb-2 rounded-md border border-success/20 bg-white/70 p-2">
                                   <div className="flex flex-wrap items-center gap-1.5">
-                                    <span className="rounded-sm bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700">
+                                    <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success">
                                       Template preview
                                     </span>
                                     <span className="text-[10px] font-medium text-slate-700">{selectedTemplateRender.label}</span>
@@ -3349,7 +3399,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                 {selectedTemplateRender.buttons.length > 0 && (
                                   <div className="mt-3 space-y-1">
                                     {selectedTemplateRender.buttons.map(button => (
-                                      <div key={button} className="rounded-md border border-emerald-200 bg-white/70 px-3 py-1.5 text-center text-xs font-semibold text-emerald-700">
+                                      <div key={button} className="rounded-md border border-success/20 bg-white/70 px-3 py-1.5 text-center text-xs font-semibold text-success">
                                         {button}
                                       </div>
                                     ))}
@@ -3380,13 +3430,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                   <label key={param.key} className="block">
                                     <span className="mb-1 flex items-center justify-between text-[10px] font-medium text-slate-600">
                                       {param.label}
-                                      {param.required && !param.resolved && <span className="text-red-600">Required</span>}
+                                      {param.required && !param.resolved && <span className="text-destructive">Required</span>}
                                     </span>
                                     <input
                                       value={templateParamOverrides[param.key] ?? param.value}
                                       onChange={e => setTemplateParamOverrides(prev => ({ ...prev, [param.key]: e.target.value }))}
                                       className={`h-8 w-full rounded-md border px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20 ${
-                                        param.required && !param.resolved ? "border-red-300 bg-red-50" : "border-input"
+                                        param.required && !param.resolved ? "border-destructive/30 bg-destructive/5" : "border-input"
                                       }`}
                                     />
                                   </label>
@@ -3411,7 +3461,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             Cancel
                           </Button>
                           <Button
-                            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                            className="gap-1.5 bg-success hover:bg-success/90"
                             disabled={!selectedTemplateRender || selectedTemplateRender.unresolved.length > 0 || sendingTemplate}
                             onClick={handleSendTemplate}
                           >
@@ -3458,9 +3508,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   if (isDnc) {
                     return (
                       <div className="px-4 py-3 border-t border-border">
-                        <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-3 py-2.5">
-                          <Ban className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
-                          <div className="text-xs text-red-800 dark:text-red-300">
+                        <div className="flex items-start gap-2 rounded-lg bg-destructive/5 dark:bg-destructive/90/40 border border-destructive/20 dark:border-destructive/50 px-3 py-2.5">
+                          <Ban className="h-4 w-4 text-destructive dark:text-destructive/80 mt-0.5 shrink-0" />
+                          <div className="text-xs text-destructive dark:text-destructive/60">
                             <strong>This lead is on the Do Not Contact list.</strong>
                             <p className="mt-0.5">No further messages can be sent — neither free-form replies nor templates. To resume contact, change the lead's stage from DNC.</p>
                           </div>
@@ -3512,7 +3562,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           disabled={!withinWindow}
                           className="h-11 flex-1 rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                         />
-                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="h-10 w-10 rounded-full bg-emerald-600 hover:bg-emerald-700">
+                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
                           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                       </form>
@@ -3632,7 +3682,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             </div>
 
             {bfResult && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              <div className="rounded-lg border border-success/20 bg-success/5 p-3 text-xs text-success-foreground">
                 <div className="font-semibold mb-1">Done</div>
                 <div>Primary: {bfResult.primary_threads ?? 0} threads · {bfResult.primary_messages ?? 0} messages</div>
                 <div>Secondary: {bfResult.secondary_threads ?? 0} threads · {bfResult.secondary_messages ?? 0} messages</div>
@@ -3647,6 +3697,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TransferLeadDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        leadIds={transferLeadIds}
+        leadNames={transferLeadNames}
+        onSuccess={() => {
+          void fetchConversationPage(true, null);
+        }}
+      />
     </div>
   );
 };

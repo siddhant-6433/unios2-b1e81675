@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useParams, Link } from "react-router-dom";
@@ -7,12 +8,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface StudentDocument {
@@ -254,30 +257,73 @@ const CONTACT_FIELDS = [
 ] as const;
 
 const EDIT_FIELDS = [
+  // Identity
   { key: "name", label: "Full Name" },
   { key: "first_name", label: "First Name" },
   { key: "middle_name", label: "Middle Name" },
   { key: "last_name", label: "Last Name" },
   { key: "dob", label: "Date of Birth", type: "date" },
   { key: "gender", label: "Gender" },
+  { key: "blood_group", label: "Blood Group" },
+  { key: "nationality", label: "Nationality" },
+  { key: "birth_place", label: "Birth Place" },
+  { key: "religion", label: "Religion" },
+  { key: "caste", label: "Caste" },
+  { key: "sub_caste", label: "Sub Caste" },
+  { key: "caste_category", label: "Caste Category" },
+  { key: "mother_tongue", label: "Mother Tongue" },
+  { key: "language_spoken", label: "Language Spoken" },
+  { key: "second_language", label: "Second Language" },
+  { key: "third_language", label: "Third Language" },
+  // Contact
   { key: "phone", label: "Student Phone" },
   { key: "whatsapp_no", label: "Student WhatsApp" },
   { key: "student_email", label: "Student Email", type: "email" },
   { key: "email", label: "Parent Email", type: "email" },
-  { key: "father_name", label: "Father Name" },
-  { key: "father_phone", label: "Father Phone" },
-  { key: "father_email", label: "Father Email", type: "email" },
-  { key: "mother_name", label: "Mother Name" },
-  { key: "mother_phone", label: "Mother Phone" },
-  { key: "mother_email", label: "Mother Email", type: "email" },
-  { key: "guardian_name", label: "Guardian Name" },
-  { key: "guardian_phone", label: "Guardian Phone" },
+  { key: "school_email", label: "School Email", type: "email" },
+  // Address
   { key: "address", label: "Address", type: "textarea" },
   { key: "city", label: "City" },
   { key: "state", label: "State" },
+  { key: "country", label: "Country" },
   { key: "pincode", label: "Pincode" },
-  { key: "section", label: "Section" },
+  // Identity documents
+  { key: "student_aadhar", label: "Student Aadhar" },
+  { key: "biometric_id", label: "Biometric ID" },
+  // Medical & lifestyle
+  { key: "medical_ailments", label: "Medical Ailments / Conditions", type: "textarea" },
+  { key: "food_habits", label: "Food Habits" },
+  { key: "house", label: "House" },
+  { key: "sports", label: "Sports" },
+  { key: "student_type", label: "Student Type" },
+  { key: "hostel_type", label: "Hostel Type" },
+  { key: "sr_number", label: "SR Number" },
+  { key: "school_admission_no", label: "School Admission No" },
   { key: "class_roll_no", label: "Class Roll No" },
+  // Father
+  { key: "father_name", label: "Father Name" },
+  { key: "father_phone", label: "Father Phone" },
+  { key: "father_whatsapp", label: "Father WhatsApp" },
+  { key: "father_email", label: "Father Email", type: "email" },
+  { key: "father_occupation", label: "Father Occupation" },
+  { key: "father_designation", label: "Father Designation" },
+  { key: "father_organization", label: "Father Organization" },
+  { key: "father_qualification", label: "Father Qualification" },
+  { key: "father_income", label: "Father Income" },
+  { key: "father_aadhar", label: "Father Aadhar" },
+  // Mother
+  { key: "mother_name", label: "Mother Name" },
+  { key: "mother_phone", label: "Mother Phone" },
+  { key: "mother_whatsapp", label: "Mother WhatsApp" },
+  { key: "mother_email", label: "Mother Email", type: "email" },
+  { key: "mother_occupation", label: "Mother Occupation" },
+  { key: "mother_organization", label: "Mother Organization" },
+  { key: "mother_aadhar", label: "Mother Aadhar" },
+  // Guardian
+  { key: "guardian_name", label: "Guardian Name" },
+  { key: "guardian_phone", label: "Guardian Phone" },
+  // Academic
+  { key: "section", label: "Section" },
   { key: "admission_date", label: "Admission Date", type: "date" },
   { key: "joining_academic_year", label: "Joining Academic Year / Session" },
   { key: "semester", label: "Current Semester / Year" },
@@ -337,8 +383,47 @@ const StudentProfile = () => {
   const [editForm, setEditForm] = useState<EditFormState>(() => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, ""])) as EditFormState);
   const [editReason, setEditReason] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [removalAction, setRemovalAction] = useState<null | "archive" | "delete">(null);
+  const [removalReason, setRemovalReason] = useState("");
+  const [removalBusy, setRemovalBusy] = useState(false);
+
+  const canArchive = role === "office_assistant" || role === "principal" || role === "super_admin";
+  const canDelete = role === "super_admin";
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
+
+  const submitRemoval = async () => {
+    if (!student || !removalAction) return;
+    if (!removalReason.trim()) {
+      toast({ variant: "destructive", title: "Reason required", description: `Please give a reason for ${removalAction === "archive" ? "archiving" : "deleting"} this student.` });
+      return;
+    }
+    setRemovalBusy(true);
+    const rpc = removalAction === "archive" ? "archive_student" : "delete_student";
+    const { error } = await supabase.rpc(rpc as never, { _student_id: student.id, _reason: removalReason.trim() } as never);
+    setRemovalBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Action failed", description: error.message });
+      return;
+    }
+    toast({ title: removalAction === "archive" ? "Student archived" : "Student deleted" });
+    setRemovalAction(null);
+    setRemovalReason("");
+    fetchStudent();
+  };
+
+  const unarchiveStudent = async () => {
+    if (!student) return;
+    setRemovalBusy(true);
+    const { error } = await supabase.rpc("unarchive_student" as never, { _student_id: student.id } as never);
+    setRemovalBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Could not unarchive", description: error.message });
+      return;
+    }
+    toast({ title: "Student restored" });
+    fetchStudent();
+  };
 
   const logStudentAudit = async (rows: Array<{
     event_type: string;
@@ -534,7 +619,7 @@ const StudentProfile = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   if (!student) {
     return (
@@ -877,6 +962,11 @@ const StudentProfile = () => {
               <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.status === "active" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                 {student.status.replace("_", " ")}
               </span>
+              {(student as { archived_at?: string | null }).archived_at && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                  <Archive className="h-3 w-3" /> Archived
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {headerAcademicItems.map((item, index) => (
@@ -899,20 +989,36 @@ const StudentProfile = () => {
               <Edit3 className="h-3.5 w-3.5" /> Correct Information
             </Button>
           )}
+          {canArchive && (
+            (student as { archived_at?: string | null }).archived_at ? (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={unarchiveStudent} disabled={removalBusy}>
+                <ArchiveRestore className="h-3.5 w-3.5" /> Unarchive
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={() => { setRemovalReason(""); setRemovalAction("archive"); }}>
+                <Archive className="h-3.5 w-3.5" /> Archive
+              </Button>
+            )
+          )}
+          {canDelete && (
+            <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Stats Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-card card-shadow p-5">
+        <div className="rounded-xl bg-card card-shadow p-5 transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1">
           <div className="flex items-center justify-between mb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success/10">
               <TrendingUp className="h-4 w-4 text-success" />
             </div>
             <span className="text-[10px] font-medium text-success bg-success/10 px-2 py-0.5 rounded-full">+{attendancePct}%</span>
           </div>
-          <p className="text-2xl font-bold text-foreground">{attendancePct}%</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Attendance rate</p>
+          <p className="text-xs text-muted-foreground">Attendance rate</p>
+          <p className="text-2xl font-bold text-foreground mt-1.5">{attendancePct}%</p>
           {/* Mini sparkline placeholder */}
           <div className="flex items-end gap-0.5 mt-3 h-6">
             {[40, 60, 45, 70, 85, 65, 90, 75, 80, 95].map((h, i) => (
@@ -921,15 +1027,15 @@ const StudentProfile = () => {
           </div>
         </div>
 
-        <div className="rounded-xl bg-card card-shadow p-5">
+        <div className="rounded-xl bg-card card-shadow p-5 transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1">
           <div className="flex items-center justify-between mb-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-chart-5/10">
               <BarChart3 className="h-4 w-4 text-chart-5" />
             </div>
             <span className="text-[10px] font-medium text-chart-5 bg-chart-5/10 px-2 py-0.5 rounded-full">{exams.length} exams</span>
           </div>
-          <p className="text-2xl font-bold text-foreground">{avgScore}%</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Average exam score</p>
+          <p className="text-xs text-muted-foreground">Average exam score</p>
+          <p className="text-2xl font-bold text-foreground mt-1.5">{avgScore}%</p>
           {/* Mini bar chart */}
           <div className="flex items-end gap-1 mt-3 h-6">
             {exams.slice(0, 8).map((e, i) => (
@@ -1223,6 +1329,7 @@ const StudentProfile = () => {
 
         <TabsContent value="documents">
           <div className="mt-4 space-y-4">
+            <TransferCertificateSection studentId={student.id} leadId={student.lead_id} archived={!!(student as { archived_at?: string | null }).archived_at} />
             {canUploadDocuments && (
               <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1336,10 +1443,10 @@ const StudentProfile = () => {
                 <div className="divide-y divide-border">
                   {leadDocs.map((doc) => {
                     const statusIcon = doc.status === "verified"
-                      ? <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                      ? <ShieldCheck className="h-4 w-4 text-success" />
                       : doc.status === "rejected"
-                      ? <AlertCircle className="h-4 w-4 text-rose-500" />
-                      : <Clock3 className="h-4 w-4 text-amber-500" />;
+                      ? <AlertCircle className="h-4 w-4 text-destructive" />
+                      : <Clock3 className="h-4 w-4 text-warning" />;
                     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name ?? "");
                     return (
                       <div key={doc.id} className="flex items-center gap-3 py-2.5">
@@ -1349,7 +1456,7 @@ const StudentProfile = () => {
                         }
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-foreground truncate">{doc.document_name}</p>
-                          {doc.rejection_reason && <p className="text-[11px] text-rose-500 truncate">{doc.rejection_reason}</p>}
+                          {doc.rejection_reason && <p className="text-[11px] text-destructive truncate">{doc.rejection_reason}</p>}
                         </div>
                         <div title={doc.status} className="shrink-0">{statusIcon}</div>
                         {doc.file_url && (
@@ -1469,6 +1576,31 @@ const StudentProfile = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={removalAction !== null} onOpenChange={(o) => { if (!o) { setRemovalAction(null); setRemovalReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{removalAction === "delete" ? "Delete Student" : "Archive Student"}</DialogTitle>
+            <DialogDescription>
+              {removalAction === "delete"
+                ? "This removes the student from active lists. Fee, attendance and audit history are preserved. A reason is required."
+                : "Archiving marks the student as left/inactive. It is reversible and is required before a transfer certificate can be issued. A reason is required."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="removal-reason">Reason</Label>
+            <Textarea id="removal-reason" value={removalReason} onChange={(e) => setRemovalReason(e.target.value)} rows={3}
+              placeholder={removalAction === "delete" ? "Reason for deletion" : "Reason for archiving"} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRemovalAction(null); setRemovalReason(""); }} disabled={removalBusy}>Cancel</Button>
+            <Button variant={removalAction === "delete" ? "destructive" : "default"} onClick={submitRemoval} disabled={removalBusy || !removalReason.trim()}>
+              {removalBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removalAction === "delete" ? "Delete" : "Archive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-4xl">

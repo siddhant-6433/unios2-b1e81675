@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -104,7 +105,7 @@ export default function FaceApprovalPanel() {
   const rejected = registrations.filter(r => r.status === "rejected");
 
   if (loading) {
-    return <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   const statusBadge = (status: string) => {

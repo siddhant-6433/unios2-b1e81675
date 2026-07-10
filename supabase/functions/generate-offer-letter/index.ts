@@ -575,6 +575,7 @@ interface BuildOpts {
   branding: any;
   totalCourseFee: number;
   tokenAmount: number;
+  tokenAlreadyPaid?: number;
   applicationFeePaid: number;
   sessionName: string | null;
   // Resolved separately from applications table — leads.application_id is
@@ -834,12 +835,21 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   // ── Token + acceptance deadline ────────────────────────────────────────
   drawSection(ctx, "ADMISSION CONFIRMATION");
-  drawKVGrid(ctx, [
-    { label: "Token Fee Payable",   value: fmtINR(opts.tokenAmount || 0) },
+  const tokenPrePaid = Number(opts.tokenAlreadyPaid || 0);
+  const netTokenPayable = Math.max(0, Number(opts.tokenAmount || 0) - tokenPrePaid);
+  const confirmationRows = [
+    { label: "Token Fee Payable", value: fmtINR(opts.tokenAmount || 0) },
+    ...(tokenPrePaid > 0
+      ? [
+          { label: "Less: Token Fee Already Paid", value: "- " + fmtINR(tokenPrePaid) },
+          { label: "Net Token Fee Due", value: fmtINR(netTokenPayable) },
+        ]
+      : []),
     { label: "Acceptance Deadline", value: fmtDeadline(opts.offer.acceptance_deadline) },
     { label: "Pay Online",          value: "uni.nimt.ac.in" },
     { label: "Reference No.",       value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-" },
-  ]);
+  ];
+  drawKVGrid(ctx, confirmationRows);
 
   ctx.y -= 4;
 
@@ -1032,6 +1042,19 @@ Deno.serve(async (req) => {
     const applicationFeePaid = ((applicationFeeRows || []) as { amount: number | string | null }[])
       .reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
+    // Sum of confirmed token payments (offer-driven token_fee + any
+    // pre-application token collected before this offer existed). Shown on the
+    // offer as "Less: token fee already paid" so a pre-paid candidate sees the
+    // credit against their admission fee (owner requirement).
+    const { data: tokenPaidRows } = await admin
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .in("type", ["token_fee", "pre_admission_token"])
+      .eq("status", "confirmed");
+    const tokenAlreadyPaid = ((tokenPaidRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
     // Resolve session name for the top-right pill + programme details grid.
     let sessionName: string | null = null;
     if (offer.session_id) {
@@ -1186,6 +1209,7 @@ Deno.serve(async (req) => {
       branding,
       totalCourseFee,
       tokenAmount,
+      tokenAlreadyPaid,
       applicationFeePaid,
       sessionName,
       applicationId,

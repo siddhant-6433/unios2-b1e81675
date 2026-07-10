@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -54,15 +55,15 @@ interface PersonalDoc {
 }
 
 const TYPE_META: Record<DocType, { label: string; icon: LucideIcon; iconBg: string; iconColor: string; tab: string }> = {
-  health_insurance:  { label: "Health Insurance",  icon: Heart,       iconBg: "bg-rose-100",    iconColor: "text-rose-500",   tab: "health" },
-  life_insurance:    { label: "Life Insurance",    icon: ShieldCheck, iconBg: "bg-blue-100",    iconColor: "text-blue-500",   tab: "health" },
-  vehicle_insurance: { label: "Car Insurance",     icon: Car,         iconBg: "bg-amber-100",   iconColor: "text-amber-600",  tab: "vehicle" },
-  vehicle_pollution: { label: "Vehicle PUC",       icon: Wind,        iconBg: "bg-emerald-100", iconColor: "text-emerald-600",tab: "vehicle" },
-  vehicle_rc:        { label: "Vehicle RC",        icon: Car,         iconBg: "bg-orange-100",  iconColor: "text-orange-500", tab: "vehicle" },
-  driving_license:   { label: "Driving License",   icon: CreditCard,  iconBg: "bg-purple-100",  iconColor: "text-purple-500", tab: "other" },
-  passport:          { label: "Passport",          icon: BookOpen,    iconBg: "bg-indigo-100",  iconColor: "text-indigo-500", tab: "other" },
-  aadhaar:           { label: "Aadhaar",           icon: BadgeCheck,  iconBg: "bg-green-100",   iconColor: "text-green-600",  tab: "other" },
-  pan:               { label: "PAN Card",          icon: BadgeCheck,  iconBg: "bg-orange-100",  iconColor: "text-orange-500", tab: "other" },
+  health_insurance:  { label: "Health Insurance",  icon: Heart,       iconBg: "bg-destructive/10",    iconColor: "text-destructive",   tab: "health" },
+  life_insurance:    { label: "Life Insurance",    icon: ShieldCheck, iconBg: "bg-info/10",    iconColor: "text-info",   tab: "health" },
+  vehicle_insurance: { label: "Car Insurance",     icon: Car,         iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",  tab: "vehicle" },
+  vehicle_pollution: { label: "Vehicle PUC",       icon: Wind,        iconBg: "bg-success/10", iconColor: "text-success",tab: "vehicle" },
+  vehicle_rc:        { label: "Vehicle RC",        icon: Car,         iconBg: "bg-warning/10",  iconColor: "text-warning", tab: "vehicle" },
+  driving_license:   { label: "Driving License",   icon: CreditCard,  iconBg: "bg-primary/10",  iconColor: "text-primary", tab: "other" },
+  passport:          { label: "Passport",          icon: BookOpen,    iconBg: "bg-primary/10",  iconColor: "text-primary", tab: "other" },
+  aadhaar:           { label: "Aadhaar",           icon: BadgeCheck,  iconBg: "bg-success/10",   iconColor: "text-success",  tab: "other" },
+  pan:               { label: "PAN Card",          icon: BadgeCheck,  iconBg: "bg-warning/10",  iconColor: "text-warning", tab: "other" },
   other:             { label: "Other",             icon: FileText,    iconBg: "bg-slate-100",   iconColor: "text-slate-500",  tab: "other" },
 };
 
@@ -82,10 +83,10 @@ function daysUntil(iso: string | null): number | null {
 function statusFor(iso: string | null) {
   const d = daysUntil(iso);
   if (d === null) return { label: "No expiry", color: "text-muted-foreground", badge: "outline" as const };
-  if (d < 0)     return { label: `Expired ${-d}d ago`, color: "text-red-500", badge: "destructive" as const };
-  if (d <= 7)    return { label: `Expires in ${d}d`, color: "text-red-500", badge: "destructive" as const };
-  if (d <= 30)   return { label: `Expires in ${d}d`, color: "text-amber-600", badge: "secondary" as const };
-  return { label: `Valid ${d}d`, color: "text-emerald-600", badge: "default" as const };
+  if (d < 0)     return { label: `Expired ${-d}d ago`, color: "text-destructive", badge: "destructive" as const };
+  if (d <= 7)    return { label: `Expires in ${d}d`, color: "text-destructive", badge: "destructive" as const };
+  if (d <= 30)   return { label: `Expires in ${d}d`, color: "text-warning-foreground", badge: "secondary" as const };
+  return { label: `Valid ${d}d`, color: "text-success", badge: "default" as const };
 }
 
 const MyDocs = () => {
@@ -127,7 +128,7 @@ const MyDocs = () => {
   );
 
   if (loading || !roleLoaded) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="animate-spin" /></div>;
+    return <PageLoader className="min-h-screen" />;
   }
 
   if (!allowed) {
@@ -155,9 +156,9 @@ const MyDocs = () => {
 
       {/* Expiring soon banner */}
       {expiringSoon.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
-          <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-          <div className="text-sm text-amber-900">
+        <div className="rounded-xl border border-warning/20 bg-warning/5 px-4 py-3 flex items-start gap-3">
+          <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+          <div className="text-sm text-warning-foreground">
             <span className="font-medium">{expiringSoon.length} document{expiringSoon.length > 1 ? "s" : ""} expiring soon — </span>
             {expiringSoon.map(d => d.label).join(", ")}
           </div>
@@ -166,16 +167,16 @@ const MyDocs = () => {
 
       {/* WhatsApp hint */}
       {waPhone && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 flex items-start gap-3">
-          <Smartphone className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
-          <div className="text-sm text-emerald-900">
+        <div className="rounded-xl border border-success/20 bg-success/5/60 px-4 py-3 flex items-start gap-3">
+          <Smartphone className="h-4 w-4 text-success mt-0.5 shrink-0" />
+          <div className="text-sm text-success-foreground">
             <span className="font-medium">Forward documents on WhatsApp</span>
-            <span className="text-emerald-800/80"> — send a photo or PDF from </span>
+            <span className="text-success-foreground/80"> — send a photo or PDF from </span>
             <b>{waPhone}</b>
-            <span className="text-emerald-800/80"> to </span>
+            <span className="text-success-foreground/80"> to </span>
             <b>+91 96676 41872</b>
-            <span className="text-emerald-800/80"> with caption </span>
-            <code className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 text-xs">#mydoc</code>
+            <span className="text-success-foreground/80"> with caption </span>
+            <code className="px-1.5 py-0.5 rounded bg-success/10 text-success-foreground text-xs">#mydoc</code>
           </div>
         </div>
       )}
@@ -201,7 +202,7 @@ const MyDocs = () => {
 
       {/* Document list */}
       {loadingDocs ? (
-        <div className="flex items-center justify-center h-40"><Loader2 className="animate-spin" /></div>
+        <PageLoader />
       ) : filtered.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-muted-foreground text-sm">
@@ -275,7 +276,7 @@ const DocRow = ({ doc, onChanged }: { doc: PersonalDoc; onChanged: () => void })
           <div className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground mb-0.5">
             {meta.label}
             {doc.source === "whatsapp" && (
-              <span className="ml-2 normal-case tracking-normal text-[10px] text-emerald-600">· WhatsApp</span>
+              <span className="ml-2 normal-case tracking-normal text-[10px] text-success">· WhatsApp</span>
             )}
           </div>
           <div className="font-semibold text-sm leading-snug truncate">{doc.label}</div>
@@ -308,7 +309,7 @@ const DocRow = ({ doc, onChanged }: { doc: PersonalDoc; onChanged: () => void })
                 <Pencil className="h-4 w-4 mr-2" /> Edit details
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-red-600 focus:text-red-600">
+              <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-destructive focus:text-destructive">
                 <Trash2 className="h-4 w-4 mr-2" /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -143,7 +144,7 @@ export function CourseCommissions({ consultantId }: Props) {
 
   const pendingReqMap = new Map(requests.map(r => [r.course_id, r]));
 
-  if (loading) return <div className="flex h-10 items-center justify-center"><Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-3">
@@ -183,7 +184,7 @@ export function CourseCommissions({ consultantId }: Props) {
                         {c.course_code && <span className="text-[10px] text-muted-foreground">({c.course_code})</span>}
                       </div>
                       {pendingReq && (
-                        <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-warning-foreground dark:text-warning">
                           <Clock className="h-2.5 w-2.5" />
                           Pending: ₹{pendingReq.requested_amount}
                         </div>
@@ -223,7 +224,7 @@ export function CourseCommissions({ consultantId }: Props) {
                       {isEditing ? (
                         <div className="flex items-center gap-1 justify-end">
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleSave(c)} disabled={saving}>
-                            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 text-emerald-600" />}
+                            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 text-success" />}
                           </Button>
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={cancelEdit}>
                             <X className="h-3 w-3 text-muted-foreground" />

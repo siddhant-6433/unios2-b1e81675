@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,15 +27,15 @@ interface FreshLead {
 const PAGE_SIZE = 50;
 
 const SOURCE_COLORS: Record<string, string> = {
-  website: "bg-blue-100 text-blue-700",
-  meta_ads: "bg-purple-100 text-purple-700",
-  google_ads: "bg-green-100 text-green-700",
-  justdial: "bg-amber-100 text-amber-700",
-  collegedunia: "bg-indigo-100 text-indigo-700",
+  website: "bg-info/10 text-info-foreground",
+  meta_ads: "bg-primary/10 text-primary",
+  google_ads: "bg-success/10 text-success",
+  justdial: "bg-warning/10 text-warning-foreground",
+  collegedunia: "bg-primary/10 text-primary",
   collegehai: "bg-cyan-100 text-cyan-700",
   shiksha: "bg-pink-100 text-pink-700",
-  walk_in: "bg-emerald-100 text-emerald-700",
-  referral: "bg-orange-100 text-orange-700",
+  walk_in: "bg-success/10 text-success",
+  referral: "bg-warning/10 text-warning-foreground",
 };
 
 const FreshLeads = () => {
@@ -199,7 +200,7 @@ const FreshLeads = () => {
       <Card className="border-border/60 shadow-none overflow-x-auto">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            <PageLoader />
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -233,7 +234,7 @@ const FreshLeads = () => {
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`text-xs font-medium ${
-                        l.hours_since >= 24 ? "text-red-600" : l.hours_since >= 4 ? "text-amber-600" : "text-emerald-600"
+                        l.hours_since >= 24 ? "text-destructive" : l.hours_since >= 4 ? "text-warning-foreground" : "text-success"
                       }`}>
                         {fmtAge(l.hours_since)}
                       </span>

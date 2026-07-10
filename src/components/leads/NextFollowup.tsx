@@ -48,8 +48,8 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
             )}
           </div>
           {pending ? (
-            <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/10 rounded-xl p-3">
-              <Clock className="h-4 w-4 text-amber-500 shrink-0" />
+            <div className="flex items-center gap-3 bg-warning/5 dark:bg-warning/80/10 rounded-xl p-3">
+              <Clock className="h-4 w-4 text-warning shrink-0" />
               <div>
                 <p className="text-sm font-medium text-foreground">
                   {new Date(pending.scheduled_at).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}

@@ -140,25 +140,25 @@ const DISPOSITIONS: {
   onlyWhenNotConnected?: boolean;
   requiresConnected?: boolean;
 }[] = [
-  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true,
+  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-success/10 text-success border-success/30 hover:bg-success/5 dark:bg-success/80/30 dark:text-success", suggestsFollowup: true,
     help: "Lead engaged on the call and is interested in the programme. Triggers personalised follow-up WhatsApp + course info.",
     requiresConnected: true },
-  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/5 dark:bg-destructive/80/30 dark:text-destructive/80", suggestsFollowup: false,
     help: "Lead spoke with you and explicitly declined. Sends a polite closure WhatsApp with your contact for future revival.",
     requiresConnected: true },
-  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false,
+  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-primary/10 text-primary border-primary/25 hover:bg-primary/5 dark:bg-primary/80/30 dark:text-primary/60", suggestsFollowup: false,
     help: "Lead doesn't meet course eligibility (marks, subjects, age). Optionally deferred to a future session.",
     requiresConnected: true },
-  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true,
+  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-warning/10 text-warning-foreground border-warning/30 hover:bg-warning/5 dark:bg-warning/80/30 dark:text-warning", suggestsFollowup: true,
     help: "Phone rang but lead didn't pick up. Sends an apology + course-info WhatsApp.",
     onlyWhenNotConnected: true },
-  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true,
+  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-info/10 text-info-foreground border-info/30 hover:bg-info/5 dark:bg-info/80/30 dark:text-info/80", suggestsFollowup: true,
     help: "Lead spoke but asked to be called back at a specific time. Schedules the follow-up + sends a WhatsApp confirming the time.",
     requiresConnected: true },
-  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true,
+  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-primary/10 text-primary border-primary/25 hover:bg-primary/5 dark:bg-primary/80/30 dark:text-primary/60", suggestsFollowup: true,
     help: "Call landed on voicemail / answering machine. Sends an apology WhatsApp with a tap-to-call link.",
     onlyWhenNotConnected: true },
-  { value: "busy", label: "Busy", icon: Phone, color: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400", suggestsFollowup: true,
+  { value: "busy", label: "Busy", icon: Phone, color: "bg-warning/10 text-warning-foreground border-warning/25 hover:bg-warning/5 dark:bg-warning/80/30 dark:text-warning", suggestsFollowup: true,
     help: "Lead's line was busy. Will retry; an apology WhatsApp also goes out.",
     onlyWhenNotConnected: true },
   { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false,
@@ -166,7 +166,7 @@ const DISPOSITIONS: {
   { value: "course_not_listed", label: "Course Not Listed", icon: FileQuestion, color: "bg-teal-100 text-teal-700 border-teal-300 hover:bg-teal-50 dark:bg-teal-900/30 dark:text-teal-400", suggestsFollowup: false,
     help: "Lead wants a course NIMT doesn't currently offer. No follow-up — just capture the course they asked for so we can track unmet demand.",
     requiresConnected: true },
-  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/5 dark:bg-destructive/80/30 dark:text-destructive/80", suggestsFollowup: false,
     help: "Lead requested to be removed from all outreach. Adds them to the DNC list — NO future calls or WhatsApp messages. Use only when the lead explicitly asks to be removed." },
 ];
 
@@ -490,7 +490,7 @@ export function CallDispositionDialog({
                     </span>
                   )}
                   {leadStage && (
-                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-info/10 text-info-foreground dark:bg-info/90 dark:text-info/60">
                       {leadStage.replace(/_/g, " ")}
                     </span>
                   )}
@@ -511,7 +511,7 @@ export function CallDispositionDialog({
                     {SOURCE_LABELS[leadSource] || leadSource.replace(/_/g, " ")}
                   </span>
                   {leadSource === "justdial" && jdKeyword && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/40">
                       <FileText className="h-2.5 w-2.5" />
                       {jdKeyword}
                     </span>
@@ -522,16 +522,16 @@ export function CallDispositionDialog({
 
             {/* AI call summary if available — primary "why am I calling this lead" context */}
             {aiCallSummary && (
-              <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/20 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300 mb-1">AI call summary</p>
+              <div className="rounded-xl border border-primary/20 dark:border-primary/50/40 bg-primary/5/50 dark:bg-primary/90/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-primary dark:text-primary/50 mb-1">AI call summary</p>
                 <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-5">{aiCallSummary}</p>
               </div>
             )}
 
             {/* Latest counsellor note */}
             {latestNote && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">Latest note</p>
+              <div className="rounded-xl border border-warning/20 dark:border-warning/60/40 bg-warning/5/40 dark:bg-warning/90/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-warning-foreground dark:text-warning/70 mb-1">Latest note</p>
                 <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-3">{latestNote}</p>
               </div>
             )}
@@ -553,7 +553,7 @@ export function CallDispositionDialog({
             <div className="flex gap-2">
               <Button
                 size="sm"
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
+                className="flex-1 bg-success hover:bg-success/90 text-xs"
                 onClick={() => onManualConnect?.()}
                 disabled={callStarting || cancelling || !onManualConnect}
               >
@@ -597,16 +597,16 @@ export function CallDispositionDialog({
   if (callStatus === "counsellor_no_answer") {
     return renderShell(
       <>
-        <PhoneMissed className="h-4 w-4 text-amber-600" />
+        <PhoneMissed className="h-4 w-4 text-warning-foreground" />
         You didn't pick up
       </>,
       <div className="space-y-3 pt-1">
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-3">
-              <p className="text-sm text-amber-900 dark:text-amber-200">
+            <div className="rounded-xl border border-warning/20 dark:border-warning/60/40 bg-warning/5 dark:bg-warning/90/30 px-3 py-3">
+              <p className="text-sm text-warning-foreground dark:text-warning/40">
                 Your phone rang but the call wasn't answered, so
                 <span className="font-semibold"> {leadName}</span> was never dialed.
               </p>
-              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5">
+              <p className="text-[11px] text-warning-foreground dark:text-warning mt-1.5">
                 This attempt won't count in your call metrics. Hit Redial to try again.
               </p>
             </div>
@@ -667,26 +667,26 @@ export function CallDispositionDialog({
             <div className={`rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
               callEnded
                 ? "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
-                : "border-emerald-300 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-950/30"
+                : "border-success/30 dark:border-success/60/40 bg-success/5 dark:bg-success/90/30"
             }`}>
               <span className="relative flex h-2.5 w-2.5">
                 {!callEnded && (
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-success/50 opacity-75 animate-ping" />
                 )}
-                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${callEnded ? "bg-slate-400" : "bg-emerald-500"}`} />
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${callEnded ? "bg-slate-400" : "bg-success/50"}`} />
               </span>
               <div className="flex-1">
-                <p className={`text-xs font-semibold ${callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"}`}>
+                <p className={`text-xs font-semibold ${callEnded ? "text-slate-700 dark:text-slate-200" : "text-success-foreground dark:text-success/40"}`}>
                   {callEnded ? "Call ended" : "Call connected"}
                 </p>
-                <p className={`text-[10px] ${callEnded ? "text-slate-600 dark:text-slate-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                <p className={`text-[10px] ${callEnded ? "text-slate-600 dark:text-slate-400" : "text-success dark:text-success/60"}`}>
                   {callEnded
                     ? `Talked with ${leadName} for ${fmtElapsed(elapsedSec)}. Mark the outcome below.`
                     : `Live with ${leadName}. Mark the outcome below — the dialog stays open through the call.`}
                 </p>
               </div>
               <div className={`font-mono text-sm font-semibold tabular-nums ${
-                callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"
+                callEnded ? "text-slate-700 dark:text-slate-200" : "text-success-foreground dark:text-success/40"
               }`}>
                 {fmtElapsed(elapsedSec)}
               </div>
@@ -695,9 +695,9 @@ export function CallDispositionDialog({
 
           {/* Auto-disposed banner */}
           {isAutoDisposed && (
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-amber-700 dark:text-amber-400 mt-0.5 shrink-0" />
-              <div className="text-xs text-amber-900 dark:text-amber-200">
+            <div className="rounded-xl border border-warning/20 dark:border-warning/60/40 bg-warning/5 dark:bg-warning/90/30 px-3 py-2 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-warning-foreground dark:text-warning mt-0.5 shrink-0" />
+              <div className="text-xs text-warning-foreground dark:text-warning/40">
                 {autoBannerText[callStatus!] || "Call did not connect."}
                 <div className="text-[10px] mt-0.5 opacity-80">Edit the follow-up time below and save.</div>
               </div>
@@ -715,7 +715,7 @@ export function CallDispositionDialog({
             {!callStatus && (
               <Button
                 size="sm"
-                className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                className="shrink-0 gap-1.5 bg-info hover:bg-info/60 text-white"
                 onClick={async () => {
                   if (leadPhone) window.open(`tel:${leadPhone}`);
                   if (onCallNow) await onCallNow();
@@ -814,10 +814,10 @@ export function CallDispositionDialog({
 
           {/* Future eligibility — only for "Ineligible" */}
           {disposition === "ineligible" && (
-            <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/20 p-3 space-y-2">
+            <div className="rounded-xl border border-primary/20 dark:border-primary/50/40 bg-primary/5/50 dark:bg-primary/90/20 p-3 space-y-2">
               <div className="flex items-center gap-2">
-                <AlertCircle className="h-3.5 w-3.5 text-purple-700 dark:text-purple-400" />
-                <span className="text-xs font-semibold text-purple-900 dark:text-purple-200">Eligible for future session?</span>
+                <AlertCircle className="h-3.5 w-3.5 text-primary dark:text-primary/60" />
+                <span className="text-xs font-semibold text-primary dark:text-primary/40">Eligible for future session?</span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {(["2027-28", "2028-29"] as const).map((session) => (
@@ -827,8 +827,8 @@ export function CallDispositionDialog({
                     onClick={() => setFutureSession(futureSession === session ? null : session)}
                     className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors ${
                       futureSession === session
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "bg-background border-border text-foreground hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                        ? "bg-primary text-white border-primary/40"
+                        : "bg-background border-border text-foreground hover:bg-primary/5 dark:hover:bg-primary/90/40"
                     }`}
                   >
                     {session}
@@ -847,7 +847,7 @@ export function CallDispositionDialog({
                 </button>
               </div>
               {futureSession && (
-                <p className="text-[10px] text-purple-700 dark:text-purple-300">
+                <p className="text-[10px] text-primary dark:text-primary/50">
                   Lead will be marked ineligible for current session but re-contacted for {futureSession} admissions.
                 </p>
               )}
@@ -881,10 +881,10 @@ export function CallDispositionDialog({
                 ? "Polite closure note signed off by you with your contact for future revival."
                 : "Personal follow-up note with the confirmed callback date.";
             return (
-              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 space-y-2">
+              <div className="rounded-xl border border-success/20 dark:border-success/60/40 bg-success/5/60 dark:bg-success/90/20 p-3 space-y-2">
                 <div className="flex items-center gap-2">
-                  <MessageSquare className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                  <MessageSquare className="h-3.5 w-3.5 text-success dark:text-success" />
+                  <span className="text-xs font-semibold text-success-foreground dark:text-success/40">
                     WhatsApp follow-up
                   </span>
                 </div>
@@ -914,9 +914,9 @@ export function CallDispositionDialog({
                       className="mt-0.5 accent-emerald-600"
                     />
                     <span className="text-[11px] text-foreground flex items-center gap-1">
-                      <GraduationCap className="h-3 w-3 text-emerald-700" />
+                      <GraduationCap className="h-3 w-3 text-success" />
                       Also send course details
-                      <span className="text-[10px] text-muted-foreground">(course_info_v4 - auto-filled from DB)</span>
+                      <span className="text-[10px] text-muted-foreground">(free-form text, no template cost)</span>
                     </span>
                   </label>
                 )}
@@ -925,8 +925,8 @@ export function CallDispositionDialog({
           })()}
 
           {asksCnetAppeared && disposition && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-              <label className="block text-xs font-semibold text-blue-900 dark:text-blue-200 mb-2">
+            <div className="rounded-xl border border-info/20 bg-info/5/60 p-3 dark:border-info/60/50 dark:bg-info/90/20">
+              <label className="block text-xs font-semibold text-info-foreground dark:text-info/40 mb-2">
                 CNET appeared? <span className="text-destructive">*</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -937,8 +937,8 @@ export function CallDispositionDialog({
                     onClick={() => setCnetAppeared(value)}
                     className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                       cnetAppeared === value
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                        ? "border-info/40 bg-info text-white"
+                        : "border-info/20 bg-background text-foreground hover:bg-info/5 dark:border-info/60"
                     }`}
                   >
                     {value === "yes" ? "Yes" : "No"}
@@ -949,8 +949,8 @@ export function CallDispositionDialog({
           )}
 
           {asksCahetRegistered && disposition && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
-              <label className="block text-xs font-semibold text-rose-900 dark:text-rose-200 mb-2">
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5/60 p-3 dark:border-destructive/60/50 dark:bg-destructive/90/20">
+              <label className="block text-xs font-semibold text-destructive dark:text-destructive/40 mb-2">
                 Registered for CAHET? <span className="text-destructive">*</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -961,8 +961,8 @@ export function CallDispositionDialog({
                     onClick={() => setCahetRegistered(value)}
                     className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                       cahetRegistered === value
-                        ? "border-rose-600 bg-rose-600 text-white"
-                        : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                        ? "border-destructive/40 bg-destructive text-white"
+                        : "border-destructive/20 bg-background text-foreground hover:bg-destructive/5 dark:border-destructive/60"
                     }`}
                   >
                     {value === "yes" ? "Yes" : "No"}
@@ -998,23 +998,23 @@ export function CallDispositionDialog({
             if (!requiresAction || !disposition) return null;
 
             return (
-              <div className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-3 space-y-3">
+              <div className="rounded-xl border border-info/20 dark:border-info/50/40 bg-info/5/50 dark:bg-info/90/20 p-3 space-y-3">
                 <div className="flex items-center gap-2">
-                  <Clock className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400" />
-                  <span className="text-xs font-semibold text-blue-900 dark:text-blue-200">Schedule Next Action *</span>
+                  <Clock className="h-3.5 w-3.5 text-info-foreground dark:text-info/80" />
+                  <span className="text-xs font-semibold text-info-foreground dark:text-info/40">Schedule Next Action *</span>
                 </div>
 
                 {/* Action type toggle */}
                 <div className="flex gap-1.5">
                   <button type="button" onClick={() => setShowVisitForm(false)}
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium border transition-colors ${
-                      !showVisitForm ? "bg-blue-600 text-white border-blue-600" : "bg-background text-foreground border-border hover:bg-muted"
+                      !showVisitForm ? "bg-info text-white border-info/40" : "bg-background text-foreground border-border hover:bg-muted"
                     }`}>
                     <Phone className="h-3.5 w-3.5" /> Follow-up Call
                   </button>
                   <button type="button" onClick={() => setShowVisitForm(true)}
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium border transition-colors ${
-                      showVisitForm ? "bg-emerald-600 text-white border-emerald-600" : "bg-background text-foreground border-border hover:bg-muted"
+                      showVisitForm ? "bg-success text-white border-success/40" : "bg-background text-foreground border-border hover:bg-muted"
                     }`}>
                     <MapPin className="h-3.5 w-3.5" /> Campus Visit
                   </button>
@@ -1085,7 +1085,7 @@ export function CallDispositionDialog({
                   <Button
                     onClick={() => handleSubmit({ scheduleVisit: true })}
                     disabled={!disposition || !visitCampusId || qualifierRequiredUnanswered || saving}
-                    className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    className="w-full gap-2 bg-success hover:bg-success/90"
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
                     Save & Schedule Visit

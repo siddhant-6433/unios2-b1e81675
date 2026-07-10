@@ -379,20 +379,20 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
           {/* Nudge to add more courses */}
           {selections.length === 1 && !isSchoolPortal && (
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40">
-              <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40">
+              <Info className="h-4 w-4 text-warning-foreground shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Add more courses to improve your chances!</p>
-                <p className="text-xs text-amber-700/70 dark:text-amber-400/70 mt-0.5">
+                <p className="text-sm font-medium text-warning-foreground dark:text-warning/70">Add more courses to improve your chances!</p>
+                <p className="text-xs text-warning-foreground/70 dark:text-warning/70 mt-0.5">
                   Add multiple course preferences in a single application. If your first preference is full, you'll automatically be considered for your next choice.
                 </p>
               </div>
             </div>
           )}
           {selections.length >= 2 && !isSchoolPortal && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              <p className="text-xs text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-success/5 dark:bg-success/90/20 border border-success/20 dark:border-success/60/40">
+              <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+              <p className="text-xs text-success dark:text-success">
                 {selections.length} preferences selected — your chances of admission are higher with multiple choices.
               </p>
             </div>

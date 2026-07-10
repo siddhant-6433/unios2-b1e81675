@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,20 +15,20 @@ import {
 } from "lucide-react";
 
 const DISPOSITION_COLORS: Record<string, string> = {
-  interested: "bg-emerald-100 text-emerald-700",
-  not_interested: "bg-red-100 text-red-700",
-  not_answered: "bg-amber-100 text-amber-700",
-  no_answer: "bg-amber-100 text-amber-700",
-  "no-answer": "bg-amber-100 text-amber-700",
-  voicemail: "bg-indigo-100 text-indigo-700",
-  call_back: "bg-blue-100 text-blue-700",
-  callback: "bg-blue-100 text-blue-700",
-  busy: "bg-orange-100 text-orange-700",
-  timeout: "bg-amber-100 text-amber-600",
-  failed: "bg-red-100 text-red-600",
-  completed: "bg-green-100 text-green-700",
+  interested: "bg-success/10 text-success",
+  not_interested: "bg-destructive/10 text-destructive",
+  not_answered: "bg-warning/10 text-warning-foreground",
+  no_answer: "bg-warning/10 text-warning-foreground",
+  "no-answer": "bg-warning/10 text-warning-foreground",
+  voicemail: "bg-primary/10 text-primary",
+  call_back: "bg-info/10 text-info-foreground",
+  callback: "bg-info/10 text-info-foreground",
+  busy: "bg-warning/10 text-warning-foreground",
+  timeout: "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
+  completed: "bg-success/10 text-success",
   wrong_number: "bg-pink-100 text-pink-700",
-  do_not_contact: "bg-red-200 text-red-800",
+  do_not_contact: "bg-destructive/15 text-destructive",
   ineligible: "bg-gray-100 text-gray-600",
 };
 
@@ -532,7 +533,7 @@ const CallLog = () => {
 
       {/* Table */}
       {loading ? (
-        <div className="flex h-40 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <PageLoader />
       ) : (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">

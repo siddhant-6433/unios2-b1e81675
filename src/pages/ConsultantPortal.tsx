@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,6 +24,7 @@ import { ConsultantTour } from "@/components/consultant/ConsultantTour";
 import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecorder";
 import { BookOpen } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
+import { ConsultantFeesPanel } from "@/components/finance/ConsultantFeesPanel";
 
 interface DashboardStats {
   consultant_id: string;
@@ -199,8 +201,8 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  new_lead: "bg-gray-100 text-gray-700", admitted: "bg-emerald-100 text-emerald-700",
-  rejected: "bg-red-100 text-red-700", waitlisted: "bg-amber-100 text-amber-700",
+  new_lead: "bg-gray-100 text-gray-700", admitted: "bg-success/10 text-success",
+  rejected: "bg-destructive/10 text-destructive", waitlisted: "bg-warning/10 text-warning-foreground",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -214,10 +216,10 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 const PAYOUT_STATUS: Record<string, { label: string; cls: string }> = {
-  pending: { label: "Pending", cls: "bg-amber-100 text-amber-700" },
-  approved: { label: "Approved", cls: "bg-blue-100 text-blue-700" },
-  paid: { label: "Paid", cls: "bg-emerald-100 text-emerald-700" },
-  cancelled: { label: "Cancelled", cls: "bg-red-100 text-red-700" },
+  pending: { label: "Pending", cls: "bg-warning/10 text-warning-foreground" },
+  approved: { label: "Approved", cls: "bg-info/10 text-info-foreground" },
+  paid: { label: "Paid", cls: "bg-success/10 text-success" },
+  cancelled: { label: "Cancelled", cls: "bg-destructive/10 text-destructive" },
 };
 
 const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
@@ -532,7 +534,7 @@ const ConsultantPortal = () => {
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
   if (!consultantId) return <div className="flex h-64 items-center justify-center"><p className="text-sm text-muted-foreground">No consultant profile linked to your account.</p></div>;
 
   const onboardingComplete = consultant?.onboarding_status === "completed";
@@ -560,11 +562,11 @@ const ConsultantPortal = () => {
       </div>
 
       {onboardingSkipped && !showOnboarding && (
-        <Card className="border-amber-200 bg-amber-50/70 shadow-none">
+        <Card className="border-warning/20 bg-warning/5/70 shadow-none">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
-              <p className="text-sm font-semibold text-amber-900">Consultant onboarding was skipped</p>
-              <p className="mt-1 text-xs text-amber-800">Resume it anytime to add company, tax, signatory, agreement, and supporting documents.</p>
+              <p className="text-sm font-semibold text-warning-foreground">Consultant onboarding was skipped</p>
+              <p className="mt-1 text-xs text-warning-foreground">Resume it anytime to add company, tax, signatory, agreement, and supporting documents.</p>
             </div>
             <Button variant="outline" className="gap-2 bg-background" onClick={() => setShowOnboarding(true)}>
               <RotateCcw className="h-4 w-4" /> Resume Onboarding
@@ -744,7 +746,7 @@ const ConsultantPortal = () => {
 
       <Tabs defaultValue="leads" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
-          {["Leads", "Payments", "Commissions", "Requests"].map(t => (
+          {["Leads", "Payments", "Fees", "Commissions", "Requests"].map(t => (
             <TabsTrigger key={t} value={t.toLowerCase()} data-tour={`${t.toLowerCase()}-tab`}
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
               {t}
@@ -806,6 +808,11 @@ const ConsultantPortal = () => {
           </Card>
         </TabsContent>
 
+        {/* FEES TAB — consultant-managed fee visibility + pay/send-link */}
+        <TabsContent value="fees" className="mt-4">
+          <ConsultantFeesPanel />
+        </TabsContent>
+
         {/* PAYMENTS TAB */}
         <TabsContent value="payments" className="mt-4">
           <Card className="border-border/60 shadow-none overflow-hidden">
@@ -856,13 +863,13 @@ const ConsultantPortal = () => {
             </Card>
             <Card className="border-border/60 shadow-none">
               <CardContent className="p-4 text-center">
-                <p className="text-xl font-bold text-emerald-600">{fmt(Number(stats?.commission_paid || 0))}</p>
+                <p className="text-xl font-bold text-success">{fmt(Number(stats?.commission_paid || 0))}</p>
                 <p className="text-[11px] text-muted-foreground">Paid Out</p>
               </CardContent>
             </Card>
             <Card className="border-border/60 shadow-none">
               <CardContent className="p-4 text-center">
-                <p className="text-xl font-bold text-amber-600">{fmt(Number(stats?.commission_pending || 0))}</p>
+                <p className="text-xl font-bold text-warning-foreground">{fmt(Number(stats?.commission_pending || 0))}</p>
                 <p className="text-[11px] text-muted-foreground">Pending</p>
               </CardContent>
             </Card>
@@ -890,7 +897,7 @@ const ConsultantPortal = () => {
                         <td className="px-4 py-3 text-muted-foreground">{p.course_name || "—"}</td>
                         <td className="px-4 py-3 text-right text-muted-foreground">{fmt(p.student_fee_paid)}</td>
                         <td className="px-4 py-3 text-center">
-                          <Badge className={`text-[10px] border-0 ${Number(p.fee_paid_pct) >= 25 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                          <Badge className={`text-[10px] border-0 ${Number(p.fee_paid_pct) >= 25 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                             {p.fee_paid_pct}%
                           </Badge>
                         </td>

@@ -41,7 +41,7 @@ const STEPS = [
     title: "Your Leads Pipeline",
     subtitle: "Track every lead through the admission journey",
     icon: ArrowRight,
-    color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30",
+    color: "bg-info/10 text-info-foreground dark:bg-info/80/30",
     content: (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground leading-relaxed">
@@ -49,13 +49,13 @@ const STEPS = [
         </p>
         <div className="space-y-1.5">
           {[
-            { stage: "New Lead", desc: "Just assigned — make first contact", color: "bg-blue-500" },
-            { stage: "In Follow Up", desc: "Called — discuss course & campus", color: "bg-orange-500" },
+            { stage: "New Lead", desc: "Just assigned — make first contact", color: "bg-info/50" },
+            { stage: "In Follow Up", desc: "Called — discuss course & campus", color: "bg-warning" },
             { stage: "Visit Scheduled", desc: "Campus visit booked", color: "bg-yellow-500" },
-            { stage: "Interview", desc: "Conduct interview & score", color: "bg-indigo-500" },
+            { stage: "Interview", desc: "Conduct interview & score", color: "bg-primary/50" },
             { stage: "Offer Sent", desc: "Send admission offer letter", color: "bg-teal-500" },
-            { stage: "Token Paid", desc: "Payment received — almost there!", color: "bg-emerald-500" },
-            { stage: "Admitted", desc: "Converted to student", color: "bg-green-600" },
+            { stage: "Token Paid", desc: "Payment received — almost there!", color: "bg-success/50" },
+            { stage: "Admitted", desc: "Converted to student", color: "bg-success" },
           ].map(({ stage, desc, color }) => (
             <div key={stage} className="flex items-center gap-3">
               <div className={`h-2.5 w-2.5 rounded-full ${color} shrink-0`} />
@@ -73,7 +73,7 @@ const STEPS = [
     title: "Quick Actions",
     subtitle: "One-click actions on any lead page",
     icon: Zap,
-    color: "bg-amber-100 text-amber-600 dark:bg-amber-900/30",
+    color: "bg-warning/10 text-warning-foreground dark:bg-warning/80/30",
     content: (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground leading-relaxed">
@@ -81,14 +81,14 @@ const STEPS = [
         </p>
         <div className="grid grid-cols-3 gap-2">
           {[
-            { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100" },
-            { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100" },
-            { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100" },
-            { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100" },
+            { icon: Phone, label: "Call", color: "text-info-foreground bg-info/10" },
+            { icon: MessageSquare, label: "WhatsApp", color: "text-success bg-success/10" },
+            { icon: Clock, label: "Follow Up", color: "text-warning-foreground bg-warning/10" },
+            { icon: MapPin, label: "Visit", color: "text-primary bg-primary/10" },
             { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100" },
-            { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100" },
+            { icon: Bot, label: "AI Call", color: "text-warning-foreground bg-warning/10" },
             { icon: FileText, label: "Offer", color: "text-teal-600 bg-teal-100" },
-            { icon: IndianRupee, label: "Payment", color: "text-emerald-600 bg-emerald-100" },
+            { icon: IndianRupee, label: "Payment", color: "text-success bg-success/10" },
             { icon: CheckCircle, label: "Convert", color: "text-primary bg-primary/10" },
           ].map(({ icon: I, label, color }) => (
             <div key={label} className="flex flex-col items-center gap-1 py-2">
@@ -106,7 +106,7 @@ const STEPS = [
     title: "Lead Buckets",
     subtitle: "Self-assign leads from the unassigned pool",
     icon: Inbox,
-    color: "bg-violet-100 text-violet-600 dark:bg-violet-900/30",
+    color: "bg-primary/10 text-primary dark:bg-primary/80/30",
     content: (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground leading-relaxed">
@@ -121,7 +121,7 @@ const STEPS = [
             <li>The lead appears in your Leads list immediately</li>
           </ol>
         </div>
-        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+        <p className="text-[11px] text-warning-foreground dark:text-warning font-medium">
           Tip: Leads have an SLA timer — make first contact quickly or the lead returns to the bucket!
         </p>
       </div>
@@ -131,18 +131,18 @@ const STEPS = [
     title: "WhatsApp & Communication",
     subtitle: "Stay connected with leads via WhatsApp, calls, and email",
     icon: MessageSquare,
-    color: "bg-green-100 text-green-600 dark:bg-green-900/30",
+    color: "bg-success/10 text-success dark:bg-success/80/30",
     content: (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground leading-relaxed">
           Use the <strong>WhatsApp Inbox</strong> to see all conversations. Send pre-approved templates or free-text replies.
         </p>
         <div className="space-y-2">
-          <div className="rounded-xl bg-green-50 dark:bg-green-950/20 p-3">
-            <p className="text-[10px] font-semibold text-green-800 dark:text-green-400 uppercase mb-1">Available Templates</p>
+          <div className="rounded-xl bg-success/5 dark:bg-success/90/20 p-3">
+            <p className="text-[10px] font-semibold text-success-foreground dark:text-success uppercase mb-1">Available Templates</p>
             <div className="grid grid-cols-2 gap-1">
               {["Lead Welcome", "Visit Confirmation", "Visit Reminder", "Fee Reminder", "Course Details", "Application Received"].map(t => (
-                <p key={t} className="text-[10px] text-green-700 dark:text-green-300">• {t}</p>
+                <p key={t} className="text-[10px] text-success dark:text-success/60">• {t}</p>
               ))}
             </div>
           </div>
@@ -157,7 +157,7 @@ const STEPS = [
     title: "You're All Set!",
     subtitle: "Start converting leads into students",
     icon: CheckCircle,
-    color: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30",
+    color: "bg-success/10 text-success dark:bg-success/80/30",
     content: (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground leading-relaxed">

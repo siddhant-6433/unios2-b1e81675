@@ -46,24 +46,24 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  lead_assigned: "text-blue-500 bg-blue-50 dark:bg-blue-950/30",
-  sla_warning: "text-amber-500 bg-amber-50 dark:bg-amber-950/30",
-  lead_reclaimed: "text-red-500 bg-red-50 dark:bg-red-950/30",
-  followup_due: "text-orange-500 bg-orange-50 dark:bg-orange-950/30",
-  followup_overdue: "text-red-500 bg-red-50 dark:bg-red-950/30",
-  visit_confirmation_due: "text-purple-500 bg-purple-50 dark:bg-purple-950/30",
-  visit_followup_due: "text-purple-500 bg-purple-50 dark:bg-purple-950/30",
-  lead_transferred: "text-blue-500 bg-blue-50 dark:bg-blue-950/30",
-  deletion_request: "text-red-500 bg-red-50 dark:bg-red-950/30",
-  whatsapp_message: "text-green-500 bg-green-50 dark:bg-green-950/30",
-  whatsapp_sla_warning: "text-amber-600 bg-amber-50 dark:bg-amber-950/30",
-  whatsapp_sla_breach: "text-red-600 bg-red-50 dark:bg-red-950/30",
-  approval_pending: "text-amber-600 bg-amber-50 dark:bg-amber-950/30",
-  approval_decided: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30",
-  template_status_update: "text-green-600 bg-green-50 dark:bg-green-950/30",
-  tat_defaults_report: "text-red-600 bg-red-50 dark:bg-red-950/30",
-  post_visit_nudge: "text-violet-600 bg-violet-50 dark:bg-violet-950/30",
-  score_penalty: "text-red-600 bg-red-50 dark:bg-red-950/30",
+  lead_assigned: "text-info bg-info/5 dark:bg-info/90/30",
+  sla_warning: "text-warning bg-warning/5 dark:bg-warning/90/30",
+  lead_reclaimed: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
+  followup_due: "text-warning bg-warning/5 dark:bg-warning/90/30",
+  followup_overdue: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
+  visit_confirmation_due: "text-primary bg-primary/5 dark:bg-primary/90/30",
+  visit_followup_due: "text-primary bg-primary/5 dark:bg-primary/90/30",
+  lead_transferred: "text-info bg-info/5 dark:bg-info/90/30",
+  deletion_request: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
+  whatsapp_message: "text-success bg-success/5 dark:bg-success/90/30",
+  whatsapp_sla_warning: "text-warning-foreground bg-warning/5 dark:bg-warning/90/30",
+  whatsapp_sla_breach: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
+  approval_pending: "text-warning-foreground bg-warning/5 dark:bg-warning/90/30",
+  approval_decided: "text-success bg-success/5 dark:bg-success/90/30",
+  template_status_update: "text-success bg-success/5 dark:bg-success/90/30",
+  tat_defaults_report: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
+  post_visit_nudge: "text-primary bg-primary/5 dark:bg-primary/90/30",
+  score_penalty: "text-destructive bg-destructive/5 dark:bg-destructive/90/30",
   feedback_received: "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30",
   general: "text-gray-500 bg-gray-50 dark:bg-gray-900/30",
 };
@@ -290,7 +290,7 @@ export function NotificationPanel() {
           <div className="max-h-[400px] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
@@ -303,7 +303,7 @@ export function NotificationPanel() {
                 return (
                   <div
                     key={notif.id}
-                    className={`group relative w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${
+                    className={`group relative w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors duration-160 ease-standard border-b border-border/30 cursor-pointer animate-rs-slide-up ${
                       !notif.is_read ? "bg-primary/[0.03]" : ""
                     }`}
                     onClick={() => handleClick(notif)}

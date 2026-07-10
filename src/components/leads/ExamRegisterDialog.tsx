@@ -184,7 +184,7 @@ export function ExamRegisterDialog({ target, onClose, onSaved }: Props) {
               >
                 {saving === "registered_no_number"
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                  : <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-amber-600" />}
+                  : <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-warning-foreground" />}
                 Registered, no number
               </Button>
               <Button
@@ -196,7 +196,7 @@ export function ExamRegisterDialog({ target, onClose, onSaved }: Props) {
               >
                 {saving === "not_registered"
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                  : <XCircle className="h-3.5 w-3.5 mr-1 text-rose-600" />}
+                  : <XCircle className="h-3.5 w-3.5 mr-1 text-destructive" />}
                 Not registered
               </Button>
               <Button
@@ -218,7 +218,7 @@ export function ExamRegisterDialog({ target, onClose, onSaved }: Props) {
           <Button variant="outline" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={saveRegistered} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={saveRegistered} disabled={busy} className="bg-success hover:bg-success/90">
             {saving === "registered"
               ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
               : <CheckCircle2 className="h-4 w-4 mr-1.5" />}

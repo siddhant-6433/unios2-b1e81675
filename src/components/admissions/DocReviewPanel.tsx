@@ -139,17 +139,17 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
           </p>
         </div>
         <div className="flex items-center gap-1.5 text-[11px]">
-          <CountChip Icon={CheckCircle2} cls="bg-emerald-50 text-emerald-700">{counts.verified} verified</CountChip>
-          {counts.rejected > 0 && <CountChip Icon={XCircle} cls="bg-rose-50 text-rose-700">{counts.rejected} rejected</CountChip>}
-          {counts.pending > 0 && <CountChip Icon={Clock} cls="bg-amber-50 text-amber-700">{counts.pending} pending</CountChip>}
+          <CountChip Icon={CheckCircle2} cls="bg-success/5 text-success">{counts.verified} verified</CountChip>
+          {counts.rejected > 0 && <CountChip Icon={XCircle} cls="bg-destructive/5 text-destructive">{counts.rejected} rejected</CountChip>}
+          {counts.pending > 0 && <CountChip Icon={Clock} cls="bg-warning/5 text-warning-foreground">{counts.pending} pending</CountChip>}
         </div>
       </div>
 
       {/* Applied-for course context — helps the reviewer match docs to
           eligibility without leaving the page. */}
       {courseInfo && (
-        <div className="px-4 py-2.5 border-b border-border bg-blue-50/40 dark:bg-blue-950/20 flex items-start gap-2.5">
-          <GraduationCap className="h-4 w-4 text-blue-700 dark:text-blue-300 mt-0.5 shrink-0" />
+        <div className="px-4 py-2.5 border-b border-border bg-info/5/40 dark:bg-info/90/20 flex items-start gap-2.5">
+          <GraduationCap className="h-4 w-4 text-info-foreground dark:text-info/60 mt-0.5 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-foreground">
               Applied for: {courseInfo.name}
@@ -177,7 +177,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
         </div>
       )}
       {cahetRegistration && (
-        <div className="px-4 py-2.5 border-b border-border bg-emerald-50/50 dark:bg-emerald-950/20">
+        <div className="px-4 py-2.5 border-b border-border bg-success/5/50 dark:bg-success/90/20">
           <CahetRegistrationDetails registration={cahetRegistration} compact />
         </div>
       )}
@@ -194,7 +194,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               <li key={d.path}>
                 <button
                   onClick={() => setActiveIdx(i)}
-                  className={`w-full text-left px-3 py-2.5 border-b border-border/40 flex items-start gap-2 transition-colors ${isActive ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/40"}`}
+                  className={`w-full text-left px-3 py-2.5 border-b border-border/40 flex items-start gap-2 transition-colors ${isActive ? "bg-info/5 dark:bg-info/90/20" : "hover:bg-muted/40"}`}
                 >
                   <DocStatusDot status={s} />
                   <span className="min-w-0 flex-1">
@@ -236,12 +236,12 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
             the operator isn't prompted to re-verify an already-decided doc. */}
         <div className="p-4 space-y-3 bg-card">
           {activeStatus === "verified" ? (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 flex items-center gap-2 dark:bg-emerald-950/20 dark:border-emerald-900/40">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <div className="rounded-lg bg-success/5 border border-success/20 px-3 py-2.5 flex items-center gap-2 dark:bg-success/90/20 dark:border-success/60/40">
+              <CheckCircle2 className="h-4 w-4 text-success" />
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Verified</p>
+                <p className="text-xs font-semibold text-success-foreground dark:text-success/40">Verified</p>
                 {activeReview?.reviewed_at && (
-                  <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/70">
+                  <p className="text-[10px] text-success/80 dark:text-success/60/70">
                     {activeReview.reviewed_by_name ? `Verified by ${activeReview.reviewed_by_name}` : "Verified"}
                     {" · "}
                     {new Date(activeReview.reviewed_at).toLocaleString()}
@@ -250,16 +250,16 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               </div>
             </div>
           ) : activeStatus === "rejected" ? (
-            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2.5 dark:bg-rose-950/20 dark:border-rose-900/40">
+            <div className="rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2.5 dark:bg-destructive/90/20 dark:border-destructive/60/40">
               <div className="flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-rose-600" />
-                <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Rejected</p>
+                <XCircle className="h-4 w-4 text-destructive" />
+                <p className="text-xs font-semibold text-destructive dark:text-destructive/40">Rejected</p>
               </div>
-              <p className="text-[11px] text-rose-700/90 dark:text-rose-300/80 mt-1 leading-snug">
+              <p className="text-[11px] text-destructive/90 dark:text-destructive/50/80 mt-1 leading-snug">
                 Waiting for the applicant to re-upload this document from the apply portal. Review actions will appear on the replacement file.
               </p>
               {activeReview?.reviewed_at && (
-                <p className="text-[10px] text-rose-700/70 dark:text-rose-300/70 mt-1.5">
+                <p className="text-[10px] text-destructive/70 dark:text-destructive/50/70 mt-1.5">
                   {activeReview.reviewed_by_name ? `Rejected by ${activeReview.reviewed_by_name}` : "Rejected"}
                   {" · "}
                   {new Date(activeReview.reviewed_at).toLocaleString()}
@@ -294,7 +294,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               <div className="space-y-1.5">
                 <Button
                   size="sm"
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="w-full bg-success hover:bg-success/90 text-white"
                   onClick={() => handleDecision("verified")}
                   disabled={busy}
                 >
@@ -303,7 +303,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                 <Button
                   size="sm"
                   variant="outline"
-                  className="w-full text-rose-700 border-rose-200 hover:bg-rose-50"
+                  className="w-full text-destructive border-destructive/20 hover:bg-destructive/5"
                   onClick={() => handleDecision("rejected")}
                   disabled={busy}
                 >
@@ -388,9 +388,9 @@ function DocPreview({ doc }: { doc: PreviewDoc }) {
 
 function DocStatusDot({ status }: { status: DocStatus }) {
   const cls = {
-    verified: "bg-emerald-500",
-    rejected: "bg-rose-500",
-    pending:  "bg-amber-400",
+    verified: "bg-success/50",
+    rejected: "bg-destructive/50",
+    pending:  "bg-warning/40",
   }[status];
   return <span className={`inline-block w-2 h-2 rounded-full shrink-0 mt-1.5 ${cls}`} aria-label={status} />;
 }

@@ -47,9 +47,9 @@ type OnBehalfContext = {
 function OnBehalfBanner({ context, candidateName }: { context: OnBehalfContext | null; candidateName: string }) {
   if (!context) return null;
   return (
-    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <div className="mb-4 rounded-xl border border-warning/20 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
       <div className="font-semibold">Academic partner on-behalf mode</div>
-      <div className="mt-0.5 text-xs leading-relaxed text-amber-800">
+      <div className="mt-0.5 text-xs leading-relaxed text-warning-foreground">
         You are completing this application for {candidateName || "the candidate"} as {context.academic_partner_name}.
         Application changes and payments are internally audited under the academic partner account. Offer acceptance requires OTP confirmation from the student phone.
       </div>
@@ -393,7 +393,7 @@ function OtpLogin({
   if (checkingSession) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -929,11 +929,11 @@ type DashboardDocState = {
 const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
 
 function statusBadge(status: string, paymentStatus: string | null) {
-  if (status === "approved") return { label: "Approved", className: "bg-green-100 text-green-700", Icon: CheckCircle };
-  if (status === "submitted" || status === "under_review") return { label: status === "submitted" ? "Submitted" : "Under Review", className: "bg-emerald-100 text-emerald-700", Icon: CheckCircle };
-  if (status === "rejected") return { label: "Rejected", className: "bg-red-100 text-red-700", Icon: Clock };
-  if (paymentStatus === "paid") return { label: "Fee Paid · Continue", className: "bg-blue-100 text-blue-700", Icon: Clock };
-  return { label: "Draft · In Progress", className: "bg-amber-100 text-amber-700", Icon: Clock };
+  if (status === "approved") return { label: "Approved", className: "bg-success/10 text-success", Icon: CheckCircle };
+  if (status === "submitted" || status === "under_review") return { label: status === "submitted" ? "Submitted" : "Under Review", className: "bg-success/10 text-success", Icon: CheckCircle };
+  if (status === "rejected") return { label: "Rejected", className: "bg-destructive/10 text-destructive", Icon: Clock };
+  if (paymentStatus === "paid") return { label: "Fee Paid · Continue", className: "bg-info/10 text-info-foreground", Icon: Clock };
+  return { label: "Draft · In Progress", className: "bg-warning/10 text-warning-foreground", Icon: Clock };
 }
 
 // Lists every confirmed payment receipt for an application's lead — used by
@@ -1006,7 +1006,7 @@ function AllReceiptsDialog({
           )}
 
           {errorMsg && (
-            <div className="px-5 py-4 text-xs text-red-600 bg-red-50 border-b border-red-100">{errorMsg}</div>
+            <div className="px-5 py-4 text-xs text-destructive bg-destructive/5 border-b border-destructive/10">{errorMsg}</div>
           )}
 
           {showEmpty && (
@@ -1041,7 +1041,7 @@ function AllReceiptsDialog({
                     {p.receipt_url ? (
                       <a
                         href={p.receipt_url} target="_blank" rel="noopener"
-                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                        className="text-[11px] text-info-foreground hover:underline font-semibold"
                       >
                         Download ↗
                       </a>
@@ -1051,7 +1051,7 @@ function AllReceiptsDialog({
                       // from the application row so the user isn't blocked.
                       <button
                         onClick={() => setShowFallback(true)}
-                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                        className="text-[11px] text-info-foreground hover:underline font-semibold"
                       >
                         View
                       </button>
@@ -1172,7 +1172,7 @@ function ApplicationDashboardView({
             <ApplicationHeaderLogo />
           ) : (
             <div className="flex items-center gap-2">
-              <GraduationCap className="h-5 w-5 text-blue-600" />
+              <GraduationCap className="h-5 w-5 text-info-foreground" />
               <span className="text-sm font-bold text-gray-900">{portal.name}</span>
             </div>
           )}
@@ -1208,17 +1208,17 @@ function ApplicationDashboardView({
 
           // Gradient + content derived from state.
           let gradient     = "bg-gradient-to-br from-blue-600 to-indigo-700";
-          let eyebrowColor = "text-blue-200";
+          let eyebrowColor = "text-info/40";
           let subtitle: React.ReactNode = `Your admission journey at ${portal.name}`;
-          let subtitleColor = "text-blue-100";
+          let subtitleColor = "text-info/30";
           let cardIcon: React.ReactNode = <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           let cta: React.ReactNode = null;
 
           if (admittedApp) {
             gradient      = "bg-gradient-to-br from-green-600 to-emerald-700";
-            eyebrowColor  = "text-green-200";
+            eyebrowColor  = "text-success/40";
             subtitle      = <span className="font-mono font-semibold">Admission No: {an}</span>;
-            subtitleColor = "text-green-100";
+            subtitleColor = "text-success/30";
             cta = (
               <a href="https://uni.nimt.ac.in" target="_blank" rel="noopener"
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
@@ -1227,7 +1227,7 @@ function ApplicationDashboardView({
             );
           } else if (preAdmitted) {
             subtitle      = <span className="font-mono font-semibold">Pre-Admission No: {pan}</span>;
-            subtitleColor = "text-blue-100";
+            subtitleColor = "text-info/30";
             cta = (
               <button onClick={() => onContinue(preAdmitted)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
@@ -1237,8 +1237,8 @@ function ApplicationDashboardView({
           } else if (docActionApp) {
             const rejectedCount = docStates[docActionApp.application_id]?.rejected || 0;
             gradient      = "bg-gradient-to-br from-rose-600 to-red-700";
-            eyebrowColor  = "text-rose-100";
-            subtitleColor = "text-rose-50";
+            eyebrowColor  = "text-destructive/20";
+            subtitleColor = "text-destructive/10";
             subtitle      = `${rejectedCount} document${rejectedCount === 1 ? "" : "s"} need re-upload`;
             cardIcon      = <AlertCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
             cta = (
@@ -1259,14 +1259,14 @@ function ApplicationDashboardView({
             );
           } else if (reviewApp) {
             gradient      = "bg-gradient-to-br from-emerald-600 to-teal-700";
-            eyebrowColor  = "text-emerald-200";
+            eyebrowColor  = "text-success/40";
             subtitle      = "Application submitted · We'll be in touch soon";
-            subtitleColor = "text-emerald-100";
+            subtitleColor = "text-success/30";
             cardIcon      = <CheckCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           } else if (feeApp) {
             gradient      = "bg-gradient-to-br from-amber-500 to-orange-600";
-            eyebrowColor  = "text-amber-200";
-            subtitleColor = "text-amber-100";
+            eyebrowColor  = "text-warning/40";
+            subtitleColor = "text-warning/30";
             subtitle      = `Pay ₹${Number(feeApp.fee_amount).toLocaleString("en-IN")} application fee to submit`;
             cardIcon      = <Wallet className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
             cta = (
@@ -1324,11 +1324,11 @@ function ApplicationDashboardView({
 
           // Card accent colour by state
           const accentClass = needsDocReupload
-            ? "border-rose-200 bg-white"
+            ? "border-destructive/20 bg-white"
             : hasApprovedOffer
-            ? "border-blue-200 bg-white"
+            ? "border-info/20 bg-white"
             : isUnderReview
-            ? "border-emerald-200 bg-white"
+            ? "border-success/20 bg-white"
             : "border-gray-200 bg-white";
 
           return (
@@ -1391,7 +1391,7 @@ function ApplicationDashboardView({
                     {a.fee_amount != null && a.fee_amount > 0 && (
                       <p className="text-xs text-gray-400 mt-0.5">
                         Application fee ₹{Number(a.fee_amount).toLocaleString("en-IN")}
-                        {isPaid && <span className="ml-1.5 text-green-600 font-medium">· Paid</span>}
+                        {isPaid && <span className="ml-1.5 text-success font-medium">· Paid</span>}
                       </p>
                     )}
                   </div>
@@ -1399,17 +1399,17 @@ function ApplicationDashboardView({
 
                 {/* What happens next hint */}
                 {needsDocReupload && (
-                  <div className="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5 text-xs text-rose-700">
+                  <div className="rounded-xl bg-destructive/5 border border-destructive/10 px-3 py-2.5 text-xs text-destructive">
                     One or more documents were rejected by admissions. Re-upload the corrected file so review can continue.
                   </div>
                 )}
                 {!needsDocReupload && isUnderReview && !hasApprovedOffer && (
-                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-xs text-emerald-700">
+                  <div className="rounded-xl bg-success/5 border border-success/10 px-3 py-2.5 text-xs text-success">
                     Our admissions team is reviewing your application. You'll be notified once an offer is issued.
                   </div>
                 )}
                 {isDraft && (
-                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-800">
+                  <div className="rounded-xl bg-warning/5 border border-warning/10 px-3 py-2.5 text-xs text-warning-foreground">
                     Your application is incomplete. Continue editing to submit it for review.
                   </div>
                 )}
@@ -1419,14 +1419,14 @@ function ApplicationDashboardView({
                   {needsDocReupload ? (
                     <button
                       onClick={() => onContinue(a)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 active:scale-95 transition-all"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-destructive px-4 py-2 text-xs font-bold text-white hover:bg-destructive active:scale-95 transition-all"
                     >
                       <AlertCircle className="h-3.5 w-3.5" /> Re-upload Documents
                     </button>
                   ) : isDraft ? (
                     <button
                       onClick={() => onContinue(a)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 active:scale-95 transition-all"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2 text-xs font-bold text-white hover:bg-info/60 active:scale-95 transition-all"
                     >
                       <Pencil className="h-3.5 w-3.5" /> Continue Editing
                     </button>
@@ -1466,7 +1466,7 @@ function ApplicationDashboardView({
                   {hasLetterPdf && (
                     <a
                       href={offer!.letter_url!} target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 active:scale-95 transition-all"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-info/20 bg-info/5 px-3.5 py-2 text-xs font-semibold text-info-foreground hover:bg-info/10 active:scale-95 transition-all"
                     >
                       <Award className="h-3.5 w-3.5" /> Offer Letter
                     </a>
@@ -1482,7 +1482,7 @@ function ApplicationDashboardView({
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all active:scale-95 ${
                         isOpen
                           ? "border border-gray-200 bg-gray-100 text-gray-700"
-                          : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-200"
+                          : "bg-info text-white hover:bg-info/60 shadow-sm shadow-blue-200"
                       }`}
                     >
                       <Wallet className="h-3.5 w-3.5" />
@@ -1514,7 +1514,7 @@ function ApplicationDashboardView({
         {/* Start new */}
         <button
           onClick={onStartNew}
-          className="w-full rounded-2xl border-2 border-dashed border-gray-200 py-4 text-sm font-semibold text-gray-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2"
+          className="w-full rounded-2xl border-2 border-dashed border-gray-200 py-4 text-sm font-semibold text-gray-400 hover:border-info/30 hover:text-info hover:bg-info/5/30 transition-all flex items-center justify-center gap-2"
         >
           <Plus className="h-4 w-4" /> Start a new application
         </button>
@@ -2254,7 +2254,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   if (restoringSession) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -2310,10 +2310,10 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   // ── Submitted (full preview) ──
   if (submitted && app && !editUnlocked) {
     const submittedBadge = app.status === "approved"
-      ? { label: "Approved", className: "bg-green-100 text-green-700" }
+      ? { label: "Approved", className: "bg-success/10 text-success" }
       : app.status === "under_review"
-      ? { label: "Under Review", className: "bg-blue-100 text-blue-700" }
-      : { label: "Submitted", className: "bg-emerald-100 text-emerald-700" };
+      ? { label: "Under Review", className: "bg-info/10 text-info-foreground" }
+      : { label: "Submitted", className: "bg-success/10 text-success" };
 
     const rejectedDocs = previewDocs.filter(d => d.review_status === "rejected");
 
@@ -2337,7 +2337,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
                 <CheckCircle className="h-3 w-3" />{submittedBadge.label}
               </span>
               {app.payment_status === "paid" && (
-                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-emerald-100 text-emerald-700">
+                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-success/10 text-success">
                   Paid
                 </span>
               )}
@@ -2381,11 +2381,11 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
             if (status === "rejected") {
               return (
-                <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4 flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="rounded-2xl bg-destructive/5 border border-destructive/20 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-semibold text-rose-900">Application not accepted.</p>
-                    <p className="text-xs text-rose-700 mt-0.5">
+                    <p className="text-sm font-semibold text-destructive">Application not accepted.</p>
+                    <p className="text-xs text-destructive mt-0.5">
                       {rejectionReason || "The admissions team has declined this application. Please contact us for next steps."}
                     </p>
                   </div>
@@ -2395,13 +2395,13 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
             if (status === "approved") {
               return (
-                <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="rounded-2xl bg-success/5 border border-success/20 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-success shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-semibold text-emerald-900">
+                    <p className="text-sm font-semibold text-success-foreground">
                       {paid ? "Application approved and fee paid." : "Application approved."}
                     </p>
-                    <p className="text-xs text-emerald-700 mt-0.5">
+                    <p className="text-xs text-success mt-0.5">
                       {paid
                         ? "An offer letter and next-step instructions will follow shortly. Below is a summary of your application."
                         : "Please complete your application fee payment to proceed. Below is a summary of your application."}
@@ -2413,13 +2413,13 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
             // status === 'submitted' (or anything else past draft)
             return (
-              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
-                <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="rounded-2xl bg-success/5 border border-success/20 p-4 flex items-start gap-3">
+                <CheckCircle className="h-5 w-5 text-success shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-emerald-900">
+                  <p className="text-sm font-semibold text-success-foreground">
                     {paid ? "Application submitted and fee paid." : "Your application has been received."}
                   </p>
-                  <p className="text-xs text-emerald-700 mt-0.5">
+                  <p className="text-xs text-success mt-0.5">
                     {paid
                       ? "Our admissions team is reviewing your application. Below is a summary of what you submitted."
                       : "Our admissions team will review and contact you shortly. Below is a summary of what you submitted."}
@@ -2431,19 +2431,19 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
           <ApplicationPreview app={app} docs={previewDocs} />
           {rejectedDocs.length > 0 && (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4">
               <div className="mb-4 flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-rose-900">
+                  <p className="text-sm font-semibold text-destructive">
                     {rejectedDocs.length} document{rejectedDocs.length === 1 ? "" : "s"} need re-upload
                   </p>
-                  <p className="text-xs text-rose-700 mt-0.5">
+                  <p className="text-xs text-destructive mt-0.5">
                     Re-upload the rejected document below. The admissions team will review the replacement.
                   </p>
                 </div>
               </div>
-              <Card className="border-rose-200 shadow-none">
+              <Card className="border-destructive/20 shadow-none">
                 <CardContent className="p-5">
                   <DocumentUpload
                     data={app}
@@ -2620,14 +2620,14 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
         />
 
         {editUnlocked && editUnlockedUntil && (
-          <div className="mb-6 rounded-xl border border-green-300 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 p-4">
+          <div className="mb-6 rounded-xl border border-success/25 dark:border-success/60/40 bg-success/5 dark:bg-success/90/20 p-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/40 shrink-0">
-                <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10 dark:bg-success/80/40 shrink-0">
+                <CheckCircle className="h-4 w-4 text-success dark:text-success" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-green-900 dark:text-green-200">Edit access granted</p>
-                <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">
+                <p className="text-sm font-semibold text-success-foreground dark:text-success/40">Edit access granted</p>
+                <p className="text-xs text-success dark:text-success mt-0.5">
                   A counsellor has unlocked your application for editing.
                   {unlockedSections && unlockedSections.length > 0 && (
                     <> You can edit: <span className="font-medium">{unlockedSections.join(", ")}</span>.</>
@@ -2651,7 +2651,9 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-6">
-            {renderStep()}
+            <div key={currentStep} className="animate-rs-slide-up">
+              {renderStep()}
+            </div>
           </CardContent>
         </Card>
 

@@ -39,10 +39,10 @@ interface AiCallCursor {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  completed: "bg-emerald-100 text-emerald-700",
-  initiated: "bg-blue-100 text-blue-700",
-  in_progress: "bg-amber-100 text-amber-700",
-  failed: "bg-red-100 text-red-700",
+  completed: "bg-success/10 text-success",
+  initiated: "bg-info/10 text-info-foreground",
+  in_progress: "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
   no_answer: "bg-muted text-muted-foreground",
 };
 
@@ -275,8 +275,8 @@ const AiCallLog = () => {
           { key: "completed" as const, label: "Completed", value: stats.completed, icon: CheckCircle, bg: "bg-pastel-green" },
           { key: "inbound" as const, label: "Inbound (Website)", value: stats.inbound, icon: PhoneIncoming, bg: "bg-pastel-purple" },
           { key: "withRecording" as const, label: "With Recording", value: stats.withRecording, icon: Play, bg: "bg-pastel-orange" },
-          { key: "highConv" as const, label: "High Conversion", value: stats.highConv, icon: AlertCircle, bg: "bg-red-100" },
-        ]).map((s) => {
+          { key: "highConv" as const, label: "High Conversion", value: stats.highConv, icon: AlertCircle, bg: "bg-destructive/10" },
+        ]).map((s, i) => {
           const isActive = s.key === "total" ? activeStatFilter === null : activeStatFilter === s.key;
           const handleClick = () => {
             if (s.key === "total") { setActiveStatFilter(null); return; }
@@ -286,16 +286,17 @@ const AiCallLog = () => {
             <Card
               key={s.label}
               onClick={handleClick}
-              className={`border-border/60 shadow-none cursor-pointer transition-all hover:shadow-md ${isActive ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100"}`}
+              className={`border-border/60 shadow-none cursor-pointer transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1 animate-rs-slide-up ${isActive ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100"}`}
+              style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
             >
               <CardContent className="p-4">
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${s.bg} mb-2`}>
                   <s.icon className="h-4 w-4 text-foreground/70" />
                 </div>
-                <p className="text-2xl font-bold text-foreground">{loading ? "—" : s.value.toLocaleString()}</p>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className="text-2xl font-bold text-foreground mt-1.5">{loading ? "—" : s.value.toLocaleString()}</p>
                 {isActive && s.key !== "total" && (
-                  <p className="text-[10px] text-primary font-medium mt-0.5">Filtered — click to clear</p>
+                  <p className="text-[10px] text-primary font-medium mt-1">Filtered — click to clear</p>
                 )}
               </CardContent>
             </Card>
@@ -364,7 +365,7 @@ const AiCallLog = () => {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -387,9 +388,9 @@ const AiCallLog = () => {
               </thead>
               <tbody>
                 {records.map((r) => {
-                  const probColor = (r.conversion_probability || 0) >= 60 ? "bg-emerald-100 text-emerald-700"
-                    : (r.conversion_probability || 0) >= 40 ? "bg-amber-100 text-amber-700"
-                    : r.conversion_probability ? "bg-red-100 text-red-700"
+                  const probColor = (r.conversion_probability || 0) >= 60 ? "bg-success/10 text-success"
+                    : (r.conversion_probability || 0) >= 40 ? "bg-warning/10 text-warning-foreground"
+                    : r.conversion_probability ? "bg-destructive/10 text-destructive"
                     : "bg-muted text-muted-foreground";
 
                   return (
@@ -401,15 +402,15 @@ const AiCallLog = () => {
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {r.call_type === "inbound"
-                          ? <Badge className="text-[9px] border-0 bg-violet-100 text-violet-700 gap-0.5"><PhoneIncoming className="h-2.5 w-2.5" />Inbound</Badge>
+                          ? <Badge className="text-[9px] border-0 bg-primary/10 text-primary gap-0.5"><PhoneIncoming className="h-2.5 w-2.5" />Inbound</Badge>
                           : r.call_type === "manual"
                           ? <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 gap-0.5"><Phone className="h-2.5 w-2.5" />Manual</Badge>
-                          : <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700 gap-0.5"><Bot className="h-2.5 w-2.5" />AI</Badge>
+                          : <Badge className="text-[9px] border-0 bg-warning/10 text-warning-foreground gap-0.5"><Bot className="h-2.5 w-2.5" />AI</Badge>
                         }
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {r.call_type === "inbound"
-                          ? <Badge className="text-[9px] border-0 bg-violet-100 text-violet-700 gap-0.5"><PhoneIncoming className="h-2.5 w-2.5" />Inbound</Badge>
+                          ? <Badge className="text-[9px] border-0 bg-primary/10 text-primary gap-0.5"><PhoneIncoming className="h-2.5 w-2.5" />Inbound</Badge>
                           : <Badge className="text-[9px] border-0 bg-sky-100 text-sky-700 gap-0.5"><PhoneOutgoing className="h-2.5 w-2.5" />Outbound</Badge>
                         }
                       </td>
@@ -441,7 +442,7 @@ const AiCallLog = () => {
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <span className={`text-xs font-medium ${(r.retry_count || 1) > 1 ? "text-amber-600" : "text-muted-foreground"}`}>
+                        <span className={`text-xs font-medium ${(r.retry_count || 1) > 1 ? "text-warning-foreground" : "text-muted-foreground"}`}>
                           {r.retry_count || 1}
                         </span>
                       </td>
@@ -449,8 +450,8 @@ const AiCallLog = () => {
                         {r.followup_status ? (
                           <div>
                             <Badge className={`text-[10px] border-0 ${
-                              r.followup_status === "pending" ? "bg-amber-100 text-amber-700"
-                              : r.followup_status === "completed" ? "bg-emerald-100 text-emerald-700"
+                              r.followup_status === "pending" ? "bg-warning/10 text-warning-foreground"
+                              : r.followup_status === "completed" ? "bg-success/10 text-success"
                               : "bg-muted text-muted-foreground"
                             }`}>
                               {r.followup_status}

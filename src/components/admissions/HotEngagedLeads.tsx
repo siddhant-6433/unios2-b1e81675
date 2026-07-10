@@ -39,10 +39,10 @@ function timeAgo(dateStr: string): string {
 }
 
 function engagementColor(score: number): string {
-  if (score >= 80) return "bg-red-500";
-  if (score >= 50) return "bg-orange-400";
-  if (score >= 30) return "bg-amber-400";
-  return "bg-amber-300";
+  if (score >= 80) return "bg-destructive/50";
+  if (score >= 50) return "bg-warning/50";
+  if (score >= 30) return "bg-warning/40";
+  return "bg-warning/25";
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -58,9 +58,9 @@ function stageLabel(stage: string): string {
 }
 
 function stageColor(stage: string): string {
-  if (stage === "admitted" || stage === "pre_admitted" || stage === "token_paid") return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
-  if (stage === "visit_scheduled" || stage === "interview") return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400";
-  if (stage === "counsellor_call" || stage === "ai_called") return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+  if (stage === "admitted" || stage === "pre_admitted" || stage === "token_paid") return "bg-success/10 text-success dark:bg-success/80/30 dark:text-success";
+  if (stage === "visit_scheduled" || stage === "interview") return "bg-primary/10 text-primary dark:bg-primary/80/30 dark:text-primary/60";
+  if (stage === "counsellor_call" || stage === "ai_called") return "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80";
   if (stage === "new_lead") return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
   return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 }
@@ -118,8 +118,8 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
     // carry the "hot" semantics where they're meaningful.
     <Card className="rounded-2xl border-border/40 bg-card shadow-none transition-all hover:shadow-sm">
       <div className="flex items-center gap-2.5 px-5 pt-4 pb-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-900/30">
-          <Flame className="h-[18px] w-[18px] text-orange-500" />
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-warning/10 dark:bg-warning/80/30">
+          <Flame className="h-[18px] w-[18px] text-warning" />
         </div>
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-foreground leading-tight">
@@ -156,10 +156,10 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
                   <Flame
                     className={`h-[18px] w-[18px] ${
                       lead.engagement_score >= 80
-                        ? "text-red-500"
+                        ? "text-destructive"
                         : lead.engagement_score >= 50
-                        ? "text-orange-500"
-                        : "text-amber-400"
+                        ? "text-warning"
+                        : "text-warning"
                     }`}
                   />
                 </div>

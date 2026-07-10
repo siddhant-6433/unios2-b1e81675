@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,6 +13,7 @@ import { SelectField } from "@/components/ui/state-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
@@ -187,35 +189,35 @@ const FUNNEL_META: Record<FunnelStage, {
   iconBg: string; iconColor: string;
   tint: string; ring: string; bar: string;
 }> = {
-  in_progress:  { label: "In Progress",  icon: Clock,         iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
-  submitted:    { label: "Submitted",    icon: CheckCircle,   iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
-  paid:         { label: "Paid",         icon: CreditCard,    iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/60", ring: "ring-emerald-400", bar: "bg-emerald-400" },
-  approved:     { label: "Pending Offer", icon: ClipboardCheck,iconBg: "bg-orange-100",  iconColor: "text-orange-600",  tint: "bg-orange-50/60",  ring: "ring-orange-400",  bar: "bg-orange-400" },
+  in_progress:  { label: "In Progress",  icon: Clock,         iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",   tint: "bg-warning/5/60",   ring: "ring-amber-400",   bar: "bg-warning/40" },
+  submitted:    { label: "Submitted",    icon: CheckCircle,   iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-violet-400",  bar: "bg-primary/40" },
+  paid:         { label: "Paid",         icon: CreditCard,    iconBg: "bg-success/10", iconColor: "text-success", tint: "bg-success/5/60", ring: "ring-emerald-400", bar: "bg-success/50" },
+  approved:     { label: "Pending Offer", icon: ClipboardCheck,iconBg: "bg-warning/10",  iconColor: "text-warning-foreground",  tint: "bg-warning/5/60",  ring: "ring-orange-400",  bar: "bg-warning/50" },
   offer_sent:   { label: "Offer Sent",   icon: Gift,          iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
   token_paid:   { label: "Token Paid",   icon: Wallet,        iconBg: "bg-cyan-100",    iconColor: "text-cyan-600",    tint: "bg-cyan-50/60",    ring: "ring-cyan-400",    bar: "bg-cyan-400" },
-  pre_admitted: { label: "Pre-Admitted", icon: UserCheck,     iconBg: "bg-indigo-100",  iconColor: "text-indigo-600",  tint: "bg-indigo-50/60",  ring: "ring-indigo-400",  bar: "bg-indigo-400" },
-  admitted:     { label: "Admitted",     icon: GraduationCap, iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+  pre_admitted: { label: "Pre-Admitted", icon: UserCheck,     iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-indigo-400",  bar: "bg-primary/40" },
+  admitted:     { label: "Admitted",     icon: GraduationCap, iconBg: "bg-success/10",   iconColor: "text-success",   tint: "bg-success/5/60",   ring: "ring-green-400",   bar: "bg-success/50" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: "bg-amber-100 text-amber-700",
-  submitted: "bg-emerald-100 text-emerald-700",
-  under_review: "bg-blue-100 text-blue-700",
-  approved: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
+  draft: "bg-warning/10 text-warning-foreground",
+  submitted: "bg-success/10 text-success",
+  under_review: "bg-info/10 text-info-foreground",
+  approved: "bg-success/10 text-success",
+  rejected: "bg-destructive/10 text-destructive",
 };
 
 const PAYMENT_BADGE: Record<string, string> = {
-  paid: "bg-emerald-100 text-emerald-700",
-  pending: "bg-amber-100 text-amber-700",
-  failed: "bg-red-100 text-red-700",
+  paid: "bg-success/10 text-success",
+  pending: "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
 };
 
 const LEAD_STAGE_LABELS: Record<string, string> = {
@@ -226,14 +228,14 @@ const LEAD_STAGE_LABELS: Record<string, string> = {
 };
 
 const LEAD_STAGE_BADGE: Record<string, string> = {
-  application_in_progress: "bg-blue-100 text-blue-700",
-  application_submitted: "bg-violet-100 text-violet-700",
-  visit_scheduled: "bg-purple-100 text-purple-700",
-  interview: "bg-indigo-100 text-indigo-700",
+  application_in_progress: "bg-info/10 text-info-foreground",
+  application_submitted: "bg-primary/10 text-primary",
+  visit_scheduled: "bg-primary/10 text-primary",
+  interview: "bg-primary/10 text-primary",
   offer_sent: "bg-teal-100 text-teal-700",
   token_paid: "bg-cyan-100 text-cyan-700",
-  pre_admitted: "bg-emerald-100 text-emerald-700",
-  admitted: "bg-green-100 text-green-700",
+  pre_admitted: "bg-success/10 text-success",
+  admitted: "bg-success/10 text-success",
 };
 
 const applicationActivityTime = (app: Pick<AppRow, "updated_at" | "submitted_at" | "created_at">) =>
@@ -341,8 +343,8 @@ const buildRegistrationStatuses = (
 };
 
 const registrationStatusClass = (status: RegistrationStatusKind) => {
-  if (status === "registered") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "not_registered") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "registered") return "border-success/20 bg-success/5 text-success";
+  if (status === "not_registered") return "border-destructive/20 bg-destructive/5 text-destructive";
   return "border-border bg-muted/40 text-muted-foreground";
 };
 
@@ -1384,42 +1386,44 @@ export default function Applications() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{isCounsellor ? "My Applications" : "Applications"}</h1>
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
           {canExportApplications && (
-            <button
+            <Button
+              variant="pill-outline"
+              size="sm"
               onClick={handleExportApplications}
               disabled={exporting}
-              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+              className="gap-1.5 text-xs font-medium text-muted-foreground"
               title="Export applications matching the current filters"
             >
               {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Download CSV
-            </button>
+            </Button>
           )}
           {!isCounsellor && (
-            <button onClick={regenerateAll} disabled={!!bulkRegen}
-              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50">
+            <Button variant="pill-outline" size="sm" onClick={regenerateAll} disabled={!!bulkRegen}
+              className="gap-1.5 text-xs font-medium text-muted-foreground">
               {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
                 : selectedPdfApps.length > 0
                   ? `Regenerate Selected (${selectedPdfApps.length})`
                   : "Regenerate All PDFs"}
-            </button>
+            </Button>
           )}
           <button onClick={() => setSortMode(sortMode === "nudge" ? "date" : "nudge")}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-              sortMode === "nudge" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
+              sortMode === "nudge" ? "border-warning/30 bg-warning/5 text-warning-foreground" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
             }`}>
             <Sparkles className="h-3 w-3" />{sortMode === "nudge" ? "Nudge View" : "Sort: Activity"}
           </button>
@@ -1456,8 +1460,8 @@ export default function Applications() {
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                     stageFilter === "paid_no_offer"
-                      ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                      : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
+                      ? "border-destructive/30 bg-destructive/10 text-destructive ring-2 ring-rose-300"
+                      : "border-destructive/25 bg-destructive/5 text-destructive hover:bg-destructive/10 animate-pulse"
                   }`}
                   title="Paid candidates with no offer letter yet — counsellor action needed"
                 >
@@ -1527,7 +1531,7 @@ export default function Applications() {
               return (
                 <Fragment key={stage}>
                   {i > 0 && (
-                    <div className="flex flex-col items-center justify-center shrink-0 self-center">
+                    <div className="flex flex-col items-center justify-center shrink-0 self-center animate-rs-scale-in">
                       <div className={`text-[10px] font-semibold rounded-md border px-1.5 py-0.5 leading-tight ${conversionTone(conversion)}`}>
                         {conversion != null ? `${conversion}%` : "—"}
                       </div>
@@ -1543,23 +1547,23 @@ export default function Applications() {
                         selectApplicationCohort(dashboardApps.filter((app) => funnelStageOf(app) === stage), meta.label);
                       }
                     }}
-                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
+                    className={`group relative rounded-xl border transition-all duration-240 ease-standard text-left p-3 shrink-0 overflow-hidden animate-rs-slide-up ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
-                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
+                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis, animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
                     title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
-                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
+                    <div className="flex items-center justify-between mb-1.5 min-w-0">
+                      <p className="text-[10px] font-medium text-muted-foreground truncate">{meta.label}</p>
+                      <div className={`w-5 h-5 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-2.5 w-2.5 ${meta.iconColor}`} />
                       </div>
-                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     </div>
-                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
-                      <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                      <div className={`h-full ${meta.bar} transition-all duration-480 ease-standard`} style={{ width: `${reachPct}%` }} />
                     </div>
                     <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
                       <span className="font-semibold text-foreground/70">{reached}</span> reached
@@ -1681,12 +1685,12 @@ export default function Applications() {
       </Card>
 
       {/* Search + Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
+        <div className="relative min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          <Input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search name, phone, app ID, course..."
-            className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
+            className="w-full rounded-xl pl-9 pr-3" />
         </div>
         <SelectField
           value={courseFilter}
@@ -1816,23 +1820,22 @@ export default function Applications() {
       )}
 
       {/* Table */}
-      <Card className="border-border/60 shadow-none">
+      <Card className="border-border/60 shadow-none overflow-hidden rounded-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/30">
+              <tr className="border-b border-border bg-surface-subtle">
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-8"></th>
                 {!isCounsellor && (
                   <th className="px-2 py-2.5 text-left font-medium text-muted-foreground w-8">
-                    <input
-                      type="checkbox"
-                      className="cursor-pointer accent-primary"
+                    <Checkbox
+                      className="cursor-pointer"
                       title={canManageApplicationLists ? "Select all filtered lead-linked applications" : "Select all eligible for PDF regeneration"}
                       checked={allSelectableAppsSelected}
-                      onChange={(e) => {
+                      onCheckedChange={(checked) => {
                         setSelectedIds(prev => {
                           const next = new Set(prev);
-                          if (e.target.checked) selectableApps.forEach(a => next.add(a.id));
+                          if (checked) selectableApps.forEach(a => next.add(a.id));
                           else selectableApps.forEach(a => next.delete(a.id));
                           return next;
                         });
@@ -1840,19 +1843,19 @@ export default function Applications() {
                     />
                   </th>
                 )}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">App ID</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[240px] max-w-[280px]">Name</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[120px]">App ID</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground min-w-[180px] max-w-[240px]">Name</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Phone</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Course</th>
                 {/* Form-fill progress is meaningless on the Submitted tab — every
                     row is 7/7 by definition — so we drop the column there. */}
                 {statusFilter !== "submitted" && (
-                  <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Form</th>
+                  <th className="px-2 py-2 text-left font-medium text-muted-foreground">Form</th>
                 )}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[420px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
-                {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Active</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground min-w-[380px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
+                {!isCounsellor && <th className="px-2 py-2 text-left font-medium text-muted-foreground">Counsellor</th>}
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Active</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1873,23 +1876,22 @@ export default function Applications() {
 
                 return (
                   <Fragment key={app.id}>
-                  <tr className={`border-b border-border/40 ${app.status === "on_hold" ? "bg-amber-50/70 hover:bg-amber-100/70" : "hover:bg-muted/20"}`}>
-                    <td className="px-4 py-2.5">
+                  <tr className={`border-b border-border/40 transition-colors duration-160 ease-standard ${app.status === "on_hold" ? "bg-amber-50/70 hover:bg-amber-100/70" : "hover:bg-muted/20"}`}>
+                    <td className="px-2 py-2">
                       <button onClick={() => setExpandedId(isExpanded ? null : app.id)} className="text-muted-foreground hover:text-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
                     </td>
                     {!isCounsellor && (
-                      <td className="px-2 py-2.5">
+                      <td className="px-2 py-2">
                         {(canManageApplicationLists ? !!app.lead_id : canRegenerateFormPdf(app)) ? (
-                          <input
-                            type="checkbox"
-                            className="cursor-pointer accent-primary"
+                          <Checkbox
+                            className="cursor-pointer"
                             checked={selectedIds.has(app.id)}
-                            onChange={(e) => {
+                            onCheckedChange={(checked) => {
                               setSelectedIds(prev => {
                                 const next = new Set(prev);
-                                if (e.target.checked) next.add(app.id);
+                                if (checked) next.add(app.id);
                                 else next.delete(app.id);
                                 return next;
                               });
@@ -1898,10 +1900,10 @@ export default function Applications() {
                         ) : null}
                       </td>
                     )}
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    <td className="px-2 py-2 whitespace-nowrap">
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
-                    <td className="px-3 py-2.5 min-w-[240px] max-w-[280px]">
+                    <td className="px-2 py-2 min-w-[180px] max-w-[240px]">
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
@@ -1924,7 +1926,7 @@ export default function Applications() {
                       {app.status === "on_hold" && (
                         <div className="mt-1.5">
                           <span
-                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700 max-w-[260px]"
+                            className="inline-flex items-center gap-1 rounded-md border border-warning/20 bg-warning/5 px-2 py-0.5 text-[10px] text-warning-foreground max-w-[260px]"
                             title={app.hold_reason || "No reason provided"}
                           >
                             <PauseCircle className="h-3 w-3 shrink-0" />
@@ -1933,14 +1935,14 @@ export default function Applications() {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
-                    <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
+                    <td className="px-2 py-2 text-muted-foreground text-xs">{app.phone}</td>
+                    <td className="px-2 py-2 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
                     {/* Form-fill progress (sections completed in apply portal) — hidden on Submitted tab. */}
                     {statusFilter !== "submitted" && (
-                      <td className="px-3 py-2.5">
+                      <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
                           <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
+                            <div className={`h-full rounded-full transition-all duration-480 ease-standard ${progressPct === 100 ? "bg-success/50" : progressPct > 0 ? "bg-info/50" : "bg-gray-300"}`}
                               style={{ width: `${progressPct}%` }} />
                           </div>
                           <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
@@ -1948,7 +1950,7 @@ export default function Applications() {
                       </td>
                     )}
                     {/* Lifecycle stepper — labeled variant so each stage is readable at a glance. */}
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2">
                       <MiniLifecycleStepper
                         showLabels
                         app={app.dossier?.lifecycle.app || { status: app.status, payment_status: app.payment_status }}
@@ -1961,11 +1963,11 @@ export default function Applications() {
                         anDue={app.dossier?.lifecycle.anDue ?? app.an_due}
                       />
                     </td>
-                    {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
-                    <td className="px-3 py-2.5 text-[10px] text-muted-foreground">
+                    {!isCounsellor && <td className="px-2 py-2 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
+                    <td className="px-2 py-2 text-[10px] text-muted-foreground">
                       {new Date(applicationActivityTime(app)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2">
                       <div className="inline-flex items-center gap-2">
                         {/* Single "View" CTA — opens AdminApplicationView, which is the
                             unified surface for the application PDF, fee receipt,
@@ -2003,7 +2005,7 @@ export default function Applications() {
                           && (((app.an_due ?? 0) > 0) || ((app.year1_due ?? 0) > 0)) && (
                           <button
                             onClick={() => setNudgeTarget(app)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 whitespace-nowrap"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/5 px-2.5 py-1.5 text-xs font-medium text-success hover:bg-success/10 whitespace-nowrap"
                             title="Nudge candidate over WhatsApp to confirm admission"
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
@@ -2023,7 +2025,7 @@ export default function Applications() {
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: true, hold_reason: app.hold_reason ?? null,
                               })}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-1.5 text-xs font-medium text-warning-foreground hover:bg-warning/10 whitespace-nowrap"
                               title="This application is on hold — click to release"
                             >
                               <PauseCircle className="h-3.5 w-3.5" />
@@ -2038,7 +2040,7 @@ export default function Applications() {
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: false,
                               })}
-                              className="p-1.5 rounded text-muted-foreground hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                              className="p-1.5 rounded text-muted-foreground hover:text-warning-foreground hover:bg-warning/5 transition-colors"
                               title="Put application on hold (ineligible)"
                             >
                               <PauseCircle className="h-3.5 w-3.5" />
@@ -2065,7 +2067,7 @@ export default function Applications() {
                   {isExpanded && (
                     <tr className="border-b border-border/40">
                       <td colSpan={expandColSpan} className="p-0 bg-primary/5">
-                        <div className="border-l-4 border-primary/30 p-5 animate-fade-in">
+                        <div className="border-l-4 border-primary/30 p-5 animate-rs-slide-up">
                           <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                             <h3 className="text-sm font-bold text-foreground">{app.application_id} — {app.full_name}</h3>
                             <div className="flex items-center gap-2">
@@ -2131,7 +2133,7 @@ export default function Applications() {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="mt-2 h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                    className="mt-2 h-7 text-xs border-success/30 text-success hover:bg-success/5"
                                     onClick={() => setOfflinePaymentApp(app)}
                                   >
                                     <CreditCard className="h-3 w-3 mr-1" />Mark Offline Payment
@@ -2156,7 +2158,7 @@ export default function Applications() {
                               <div className="space-y-1.5">
                                 {Object.entries(cs).map(([key, done]) => (
                                   <div key={key} className="flex items-center gap-2">
-                                    {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
+                                    {done ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <AlertCircle className="h-3.5 w-3.5 text-warning" />}
                                     <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
                                   </div>
                                 ))}
@@ -2340,7 +2342,7 @@ export default function Applications() {
             </DialogTitle>
           </DialogHeader>
           {docsLoading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <PageLoader />
           ) : docs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Upload className="h-8 w-8 mx-auto mb-2 opacity-30" />

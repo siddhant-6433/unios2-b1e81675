@@ -156,7 +156,7 @@ export function HeaderSearch() {
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               autoFocus
             />
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
             {query && !loading && (
               <button onClick={() => { setQuery(""); setResults([]); }} className="text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />
@@ -176,9 +176,9 @@ export function HeaderSearch() {
                   className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left"
                 >
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    r.type === "lead" ? "bg-blue-100 text-blue-600" :
-                    r.type === "application" ? "bg-amber-100 text-amber-600" :
-                    "bg-emerald-100 text-emerald-600"
+                    r.type === "lead" ? "bg-info/10 text-info-foreground" :
+                    r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+                    "bg-success/10 text-success"
                   }`}>
                     {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
                      r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
@@ -204,7 +204,7 @@ export function HeaderSearch() {
                     <Badge className="text-[9px] border-0 bg-muted shrink-0">{stageLabels[r.stage] || r.stage}</Badge>
                   )}
                   {r.status && (
-                    <Badge className={`text-[9px] border-0 shrink-0 ${r.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-muted"}`}>{r.status}</Badge>
+                    <Badge className={`text-[9px] border-0 shrink-0 ${r.status === "active" ? "bg-success/10 text-success" : "bg-muted"}`}>{r.status}</Badge>
                   )}
                 </button>
               ))

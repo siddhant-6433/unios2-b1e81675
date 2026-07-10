@@ -39,19 +39,19 @@ const META: Record<LeadFunnelStage, {
   iconBg: string; iconColor: string; tint: string; ring: string; bar: string;
 }> = {
   untouched: { label: "Untouched", icon: Users,           iconBg: "bg-slate-100",   iconColor: "text-slate-600",   tint: "bg-slate-50/60",   ring: "ring-slate-400",   bar: "bg-slate-400" },
-  contacted: { label: "Contacted", icon: Phone,           iconBg: "bg-blue-100",    iconColor: "text-blue-600",    tint: "bg-blue-50/60",    ring: "ring-blue-400",    bar: "bg-blue-400" },
-  hot:       { label: "Hot",       icon: Flame,           iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
-  applied:   { label: "Applied",   icon: FileText,        iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
-  approved:  { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-orange-100", iconColor: "text-orange-600", tint: "bg-orange-50/60", ring: "ring-orange-400", bar: "bg-orange-400" },
+  contacted: { label: "Contacted", icon: Phone,           iconBg: "bg-info/10",    iconColor: "text-info-foreground",    tint: "bg-info/5/60",    ring: "ring-blue-400",    bar: "bg-info/40" },
+  hot:       { label: "Hot",       icon: Flame,           iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",   tint: "bg-warning/5/60",   ring: "ring-amber-400",   bar: "bg-warning/40" },
+  applied:   { label: "Applied",   icon: FileText,        iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-violet-400",  bar: "bg-primary/40" },
+  approved:  { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-warning/10", iconColor: "text-warning-foreground", tint: "bg-warning/5/60", ring: "ring-orange-400", bar: "bg-warning/50" },
   offered:   { label: "Offered",   icon: Gift,            iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
-  admitted:  { label: "Admitted",  icon: GraduationCap,   iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+  admitted:  { label: "Admitted",  icon: GraduationCap,   iconBg: "bg-success/10",   iconColor: "text-success",   tint: "bg-success/5/60",   ring: "ring-green-400",   bar: "bg-success/50" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 interface Props {
@@ -146,8 +146,8 @@ export function LeadPipeline({
                 onClick={() => onStageClick(activeStage === "hot" ? null : "hot")}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                   activeStage === "hot"
-                    ? "border-amber-400 bg-amber-100 text-amber-800 ring-2 ring-amber-300"
-                    : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    ? "border-warning/30 bg-warning/10 text-warning-foreground ring-2 ring-amber-300"
+                    : "border-warning/30 bg-warning/5 text-warning-foreground hover:bg-warning/10"
                 }`}
                 title="High-intent leads — counsellor-flagged"
               >
@@ -160,8 +160,8 @@ export function LeadPipeline({
                 onClick={() => onStageClick(activeStage === "leakage" ? null : "leakage")}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                   activeStage === "leakage"
-                    ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                    : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    ? "border-destructive/30 bg-destructive/10 text-destructive ring-2 ring-rose-300"
+                    : "border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10"
                 }`}
                 title={Object.entries(leakageByStage)
                   .map(([s, c]) => `${c} ${LEAKAGE_LABEL[s as LeakageStage]}`)

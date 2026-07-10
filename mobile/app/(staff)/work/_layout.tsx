@@ -21,6 +21,9 @@ export default function WorkStackLayout() {
       <Stack.Screen name="team" options={{ title: 'Team' }} />
       <Stack.Screen name="student-photos" options={{ title: 'Students' }} />
       <Stack.Screen name="classes" options={{ title: 'Classes' }} />
+      <Stack.Screen name="visits" options={{ title: 'Visits' }} />
+      <Stack.Screen name="visit/[id]" options={{ title: 'Visit' }} />
+      <Stack.Screen name="walk-in" options={{ title: 'Walk-in' }} />
     </Stack>
   );
 }

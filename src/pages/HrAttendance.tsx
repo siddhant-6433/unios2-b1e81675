@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -155,7 +156,7 @@ const HrAttendance = () => {
 
       {/* Attendance table */}
       {loading ? (
-        <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <PageLoader />
       ) : (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">
@@ -266,9 +267,9 @@ const HrAttendance = () => {
                     <td className="px-4 py-3">
                       {r.liveness_score !== null ? (
                         <Badge className={`text-[10px] border-0 ${
-                          r.liveness_score >= 85 ? "bg-emerald-100 text-emerald-700" :
-                          r.liveness_score >= 50 ? "bg-amber-100 text-amber-700" :
-                          "bg-red-100 text-red-700"
+                          r.liveness_score >= 85 ? "bg-success/10 text-success" :
+                          r.liveness_score >= 50 ? "bg-warning/10 text-warning-foreground" :
+                          "bg-destructive/10 text-destructive"
                         }`}>
                           {r.liveness_score}%
                         </Badge>

@@ -85,17 +85,17 @@ function downloadCSV(rows: string[][], filename: string) {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  paid:    "bg-green-100 text-green-700",
+  paid:    "bg-success/10 text-success",
   pending: "bg-yellow-100 text-yellow-700",
-  failed:  "bg-red-100  text-red-700",
+  failed:  "bg-destructive/10  text-destructive",
 };
 
 const MODE_COLORS: Record<string, string> = {
-  online:        "bg-blue-100  text-blue-700",
-  gateway:       "bg-blue-100  text-blue-700",
-  cash:          "bg-green-100 text-green-700",
-  cheque:        "bg-purple-100 text-purple-700",
-  upi:           "bg-orange-100 text-orange-700",
+  online:        "bg-info/10  text-info-foreground",
+  gateway:       "bg-info/10  text-info-foreground",
+  cash:          "bg-success/10 text-success",
+  cheque:        "bg-primary/10 text-primary",
+  upi:           "bg-warning/10 text-warning-foreground",
   bank_transfer: "bg-cyan-100  text-cyan-700",
 };
 
@@ -157,6 +157,8 @@ export default function TransactionHistoryPanel() {
   const [reconciling, setReconciling]     = useState(false);
   const [iciciVerifyingId, setIciciVerifyingId] = useState<string | null>(null);
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
+  // Admission numbers of students whose fee is consultant-managed (cashier note).
+  const [consultantManagedNos, setConsultantManagedNos] = useState<Set<string>>(new Set());
 
   const { selectedCampusId } = useCampus();
 
@@ -342,6 +344,31 @@ export default function TransactionHistoryPanel() {
     );
     setStudentPmts(merged);
     setLoadingStudent(false);
+
+    // Cashier note: resolve consultant-managed students → their admission /
+    // pre-admission numbers (rows here don't carry student_id uniformly).
+    try {
+      const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
+        .select("student_id, effective_hidden");
+      const flaggedIds = ((flags || []) as any[])
+        .filter((f) => f.effective_hidden)
+        .map((f) => f.student_id);
+      if (flaggedIds.length > 0) {
+        const { data: studs } = await (supabase.from("students") as any)
+          .select("id, admission_no, pre_admission_no")
+          .in("id", flaggedIds);
+        const nos = new Set<string>();
+        ((studs || []) as any[]).forEach((s) => {
+          if (s.admission_no) nos.add(s.admission_no);
+          if (s.pre_admission_no) nos.add(s.pre_admission_no);
+        });
+        setConsultantManagedNos(nos);
+      } else {
+        setConsultantManagedNos(new Set());
+      }
+    } catch {
+      // Non-critical decoration; ignore lookup failures.
+    }
   };
 
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
@@ -682,7 +709,7 @@ export default function TransactionHistoryPanel() {
           label="App Fees Collected"
           value={fmtAmount(appStats.total)}
           sub={`${appStats.paidCount} transactions`}
-          color="text-green-600"
+          color="text-success"
         />
         <StatCard
           label="App Fees Pending"
@@ -694,7 +721,7 @@ export default function TransactionHistoryPanel() {
           label="Student Payments"
           value={fmtAmount(studentStats.total)}
           sub={`${studentStats.count} transactions`}
-          color="text-blue-600"
+          color="text-info-foreground"
         />
         <StatCard
           label="Total Collected"
@@ -803,7 +830,7 @@ export default function TransactionHistoryPanel() {
             <button
               onClick={reconcileByUdf1}
               disabled={reconciling}
-              className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl border border-info/20 bg-info/5 px-3 py-2 text-sm font-medium text-info-foreground hover:bg-info/10 transition-colors disabled:opacity-50"
               title="Pull EaseBuzz transactions by date range and match to applications via UDF1 — recovers UPI-Intent webhook misses"
             >
               {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -830,7 +857,7 @@ export default function TransactionHistoryPanel() {
       </div>
 
       {reconcileResult && (
-        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2 border border-green-200">
+        <div className="flex items-center gap-2 text-sm text-success bg-success/5 rounded-xl px-4 py-2 border border-success/20">
           <CheckCircle2 className="h-4 w-4" />
           {reconcileResult}
         </div>
@@ -841,7 +868,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingApp ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : errorApp ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">
@@ -885,9 +912,9 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
-                          t.fee_type === "application_fee" ? "bg-blue-50 text-blue-700" :
-                          t.fee_type === "token_fee"       ? "bg-purple-50 text-purple-700" :
-                          t.fee_type === "registration_fee"? "bg-indigo-50 text-indigo-700" :
+                          t.fee_type === "application_fee" ? "bg-info/5 text-info-foreground" :
+                          t.fee_type === "token_fee"       ? "bg-primary/5 text-primary" :
+                          t.fee_type === "registration_fee"? "bg-primary/5 text-primary" :
                                                              "bg-gray-100 text-gray-700"
                         }`}>
                           {(t.fee_type || "application_fee").replace(/_/g, " ")}
@@ -918,7 +945,7 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         {t.leads?.pre_admission_no
-                          ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
+                          ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3">
@@ -929,8 +956,8 @@ export default function TransactionHistoryPanel() {
                             title={`Click to mark as ${t.applicant_type === "existing" ? "New" : "Existing"} parent`}
                             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold border transition-colors ${
                               t.applicant_type === "existing"
-                                ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
-                                : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                ? "bg-warning/5 text-warning-foreground border-warning/20 hover:bg-warning/10"
+                                : "bg-info/5 text-info-foreground border-info/20 hover:bg-info/10"
                             }`}
                           >
                             {togglingId === t.application_id
@@ -994,7 +1021,7 @@ export default function TransactionHistoryPanel() {
                             <button
                               onClick={() => markPaidByUtr(t.application_id)}
                               disabled={markingPaidId === t.application_id}
-                              className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
+                              className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-1 text-[11px] font-medium text-warning-foreground hover:bg-warning/10 transition-colors disabled:opacity-60"
                               title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
                             >
                               {markingPaidId === t.application_id
@@ -1029,7 +1056,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingStudent ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : errorStudent ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">
@@ -1073,6 +1100,15 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground">{p.students?.name || "—"}</p>
                         {p.students?.email && <p className="text-xs text-muted-foreground">{p.students.email}</p>}
+                        {((p.students?.admission_no && consultantManagedNos.has(p.students.admission_no)) ||
+                          (p.students?.pre_admission_no && consultantManagedNos.has(p.students.pre_admission_no))) && (
+                          <span
+                            className="mt-1 inline-flex rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning-foreground"
+                            title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
+                          >
+                            Consultant-managed fee
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{p.students?.phone || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground whitespace-nowrap">
@@ -1093,9 +1129,9 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         {p.students?.admission_no
-                          ? <span className="font-mono text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{p.students.admission_no}</span>
+                          ? <span className="font-mono text-xs bg-info/5 text-info-foreground px-2 py-0.5 rounded-md">{p.students.admission_no}</span>
                           : p.students?.pre_admission_no
-                          ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{p.students.pre_admission_no}</span>
+                          ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-0.5 rounded-md">{p.students.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">

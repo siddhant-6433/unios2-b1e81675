@@ -2,16 +2,15 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://deylhigsisuexszsmypq.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRleWxoaWdzaXN1ZXhzenNteXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3Nzg0MDgsImV4cCI6MjA4ODM1NDQwOH0.z8YWiwxkdIU-9zQhXu0z1BGFKu-GAUDcLrdNMnFxYEY";
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
 export const supabase = createClient<Database>(
-  SUPABASE_CONFIGURED ? SUPABASE_URL : "https://placeholder.supabase.co",
-  SUPABASE_CONFIGURED ? SUPABASE_PUBLISHABLE_KEY : "placeholder-publishable-key",
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
   {
     auth: {
       storage: localStorage,

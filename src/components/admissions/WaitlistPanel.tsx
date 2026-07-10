@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -71,7 +72,7 @@ export function WaitlistPanel({ courseId, campusId, courseName }: Props) {
     fetchWaitlist();
   };
 
-  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   if (entries.length === 0) {
     return (
@@ -98,7 +99,7 @@ export function WaitlistPanel({ courseId, campusId, courseName }: Props) {
             className="flex items-center gap-3 rounded-lg border border-border/50 px-3 py-2 hover:bg-muted/30 cursor-pointer transition-colors"
             onClick={() => navigate(`/admissions/${e.lead_id}`)}
           >
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-warning/10 dark:bg-warning/80/30 text-[10px] font-bold text-warning-foreground dark:text-warning">
               {e.position}
             </div>
             <div className="flex-1 min-w-0">

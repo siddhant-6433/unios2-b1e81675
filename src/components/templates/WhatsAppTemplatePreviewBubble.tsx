@@ -92,7 +92,7 @@ export function WhatsAppTemplatePreviewBubble({
   const showMediaPlaceholder = headerFormat && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) && !mediaUrl;
 
   return (
-    <div className={`rounded-xl border border-emerald-200/70 bg-[#dbe9df] p-3 ${className}`}>
+    <div className={`rounded-xl border border-success/20/70 bg-[#dbe9df] p-3 ${className}`}>
       <div className="mx-auto max-w-sm">
         <div className="overflow-hidden rounded-lg bg-white shadow-sm">
           {mediaUrl && (

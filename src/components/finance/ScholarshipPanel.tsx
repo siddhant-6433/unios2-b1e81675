@@ -38,7 +38,7 @@ export function ScholarshipPanel({ slug, name, code }: Props) {
       </div>
 
       {(hasMerit && hasEntrance) && (
-        <div className="px-3 py-1.5 bg-amber-50/50 dark:bg-amber-950/10 border-t border-border/40">
+        <div className="px-3 py-1.5 bg-warning/5/50 dark:bg-warning/90/10 border-t border-border/40">
           <p className="text-[10px] text-foreground">
             <span className="font-semibold">Either merit or entrance applies</span>
             {" — "}whichever gives the higher scholarship. Not both.
@@ -47,7 +47,7 @@ export function ScholarshipPanel({ slug, name, code }: Props) {
       )}
 
       {cahet && (
-        <div className="px-3 py-2 text-[11px] text-foreground bg-amber-50/50 dark:bg-amber-950/10 border-t border-border/40">
+        <div className="px-3 py-2 text-[11px] text-foreground bg-warning/5/50 dark:bg-warning/90/10 border-t border-border/40">
           Admission via CAHET counselling (ABVMU Lucknow). No separate institute
           entrance exam — slabs below apply once counselling allocates a seat.
         </div>

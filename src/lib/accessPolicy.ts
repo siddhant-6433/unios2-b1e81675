@@ -80,6 +80,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"], staffOnly: true },
   { path: "/pending-followups", permission: "leads:view", staffOnly: true },
   { path: "/fresh-leads", permission: "leads:view", staffOnly: true },
+  { path: "/visit-center", permission: "leads:view", staffOnly: true },
   { path: "/visit-monitor", permission: "leads:view", staffOnly: true },
   { path: "/call-log", permission: "call_log:view", staffOnly: true },
   { path: "/ai-call-log", permission: "call_log:view", staffOnly: true },

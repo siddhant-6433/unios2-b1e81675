@@ -28,6 +28,7 @@ interface StudentRow {
   admission_no: string | null;
   pre_admission_no: string | null;
   status: string;
+  archived_at: string | null;
   phone: string | null;
   photo_url: string | null;
   course_id: string | null;
@@ -220,6 +221,7 @@ const Students = () => {
   const [programFilters, setProgramFilters] = useState<string[]>([]);
   const [batchFilters, setBatchFilters] = useState<string[]>([]);
   const [termFilters, setTermFilters] = useState<string[]>([]);
+  const [archiveView, setArchiveView] = useState<"active" | "all" | "archived">("active");
   const [exporting, setExporting] = useState(false);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
@@ -230,13 +232,14 @@ const Students = () => {
   const fetchStudents = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const selectFields = "id, lead_id, name, admission_no, pre_admission_no, status, phone, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender, student_email, email, father_name, father_phone, mother_name, mother_phone, guardian_name, guardian_phone, address, city, state, pincode, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+    const selectFields = "id, lead_id, name, admission_no, pre_admission_no, status, archived_at, phone, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender, student_email, email, father_name, father_phone, mother_name, mother_phone, guardian_name, guardian_phone, address, city, state, pincode, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
     const fallbackSelectFields = selectFields.replace("section, semester,", "section,");
 
     const runQuery = (fields: string) => {
       let query = supabase
         .from("students")
         .select(fields)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(500);
       if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
@@ -358,9 +361,14 @@ const Students = () => {
       const matchesTerm = segregationMode !== "program" ||
         matchesSelected(termFilters, currentTermLabel);
 
-      return matchesSearch && matchesGroup && matchesBatch && matchesTerm;
+      const matchesArchive =
+        archiveView === "all" ? true
+        : archiveView === "archived" ? !!s.archived_at
+        : !s.archived_at; // "active" (default): hide archived
+
+      return matchesSearch && matchesGroup && matchesBatch && matchesTerm && matchesArchive;
     });
-  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters]);
+  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters, archiveView]);
 
   const hasActiveSegregation =
     classFilters.length > 0 ||
@@ -522,6 +530,19 @@ const Students = () => {
               />
             )}
 
+            <div className="inline-flex h-10 items-center rounded-xl border border-input bg-card p-1">
+              {([["active", "Active"], ["all", "All"], ["archived", "Archived"]] as const).map(([value, text]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setArchiveView(value)}
+                  className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-medium transition-colors ${archiveView === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+
             <Button type="button" variant="outline" size="sm" onClick={clearSegregation} disabled={!hasActiveSegregation} className="h-10 rounded-xl gap-1.5">
               <X className="h-4 w-4" />
               Reset
@@ -537,7 +558,7 @@ const Students = () => {
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         {loading ? (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : loadError ? (
           <div className="p-12 text-center">
@@ -585,8 +606,8 @@ const Students = () => {
                     <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{student.campus_name}</span>
                   </div>
                 </div>
-                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${statusStyles[student.status] || "bg-muted text-foreground/80"}`}>
-                  {student.status.replace("_", " ")}
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.archived_at ? "bg-amber-100 text-amber-800" : statusStyles[student.status] || "bg-muted text-foreground/80"}`}>
+                  {student.archived_at ? "Archived" : student.status.replace("_", " ")}
                 </span>
                 <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
               </Link>

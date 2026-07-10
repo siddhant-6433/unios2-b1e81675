@@ -6,69 +6,58 @@
 
 @layer base {
   :root {
-    /* ── Surface hierarchy ──
-       Warm cream palette inspired by the reference UIs — surfaces sit on a
-       neutral-warm canvas instead of the previous cool lavender. Brand
-       primary, foreground, destructive and chart tokens are unchanged so
-       no contrast/legibility regressions. */
-    --background: 30 14% 97%;
-    --foreground: 224 47% 11%;
+    /* ── RazorSense surface hierarchy ──
+       Cool blue-gray canvas (214° hue) from Blade's token system. */
+    --background: 214 20% 98%;
+    --foreground: 214 32% 12%;
 
-    /* Cards stay pure white so they pop slightly above the warmer canvas */
     --card: 0 0% 100%;
-    --card-foreground: 224 47% 11%;
+    --card-foreground: 214 32% 12%;
 
-    /* Popovers: glassmorphism handled via utility */
     --popover: 0 0% 100%;
-    --popover-foreground: 224 47% 11%;
+    --popover-foreground: 214 32% 12%;
 
-    /* ── Brand colors ── */
-    /* Primary: #0035C5 — authoritative academic blue */
+    /* Primary: #0035C5 — academic blue (kept) */
     --primary: 224 100% 39%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary: warm-tinted neutral for chips & secondary buttons */
-    --secondary: 30 10% 93%;
-    --secondary-foreground: 224 47% 11%;
+    --secondary: 214 15% 93%;
+    --secondary-foreground: 214 32% 12%;
 
-    /* Muted: subtle warm panel tone */
-    --muted: 30 10% 95%;
-    --muted-foreground: 220 13% 46%;
+    --muted: 214 15% 95%;
+    --muted-foreground: 214 15% 46%;
 
-    /* Accent: hover surfaces */
-    --accent: 30 10% 93%;
-    --accent-foreground: 224 47% 11%;
+    --accent: 214 15% 93%;
+    --accent-foreground: 214 32% 12%;
 
-    --destructive: 0 84% 60%;
+    --destructive: 4 76% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Ghost border — outline_variant, very subtle, warmed */
-    --border: 30 10% 90%;
-    --input: 30 10% 95%;
+    --border: 214 15% 89%;
+    --input: 214 15% 93%;
     --ring: 224 100% 39%;
 
-    /* Container radius bumped 8px → 12px for the softer card shape in
-       the reference. Affects rounded-sm/md/lg only; rounded-xl+ keep
-       their Tailwind defaults so badges and pills don't get over-rounded. */
     --radius: 0.75rem;
 
-    /* ── Warm secondary: #954919 — human accent (peach/orange) ── */
+    /* ── RazorSense surface layering ── */
+    --surface-subtle: 214 20% 98%;
+    --surface-moderate: 214 15% 95%;
+    --surface-intense: 214 15% 90%;
+
+    /* ── Warm secondary: #954919 — human accent (kept) ── */
     --warm: 23 71% 34%;
     --warm-foreground: 0 0% 100%;
     --warm-container: 23 80% 93%;
     --warm-on-container: 23 71% 25%;
 
-    /* ── Sidebar ──
-       Slightly tinted off-white so it sits visually between the warmer
-       canvas and the white cards in the main pane. Active items become
-       white pills against this tint, matching the reference look. */
-    --sidebar-background: 30 13% 96%;
-    --sidebar-foreground: 220 13% 46%;
+    /* ── Sidebar ── */
+    --sidebar-background: 214 18% 96%;
+    --sidebar-foreground: 214 15% 46%;
     --sidebar-primary: 224 100% 39%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 30 10% 95%;
-    --sidebar-accent-foreground: 224 47% 11%;
-    --sidebar-border: 30 10% 91%;
+    --sidebar-accent: 214 15% 95%;
+    --sidebar-accent-foreground: 214 32% 12%;
+    --sidebar-border: 214 15% 91%;
     --sidebar-ring: 224 100% 39%;
 
     /* ── Pastel tokens ── */
@@ -99,9 +88,12 @@
     --chart-5: 0 65% 55%;
 
     /* ── Semantic ── */
-    --success: 142 60% 40%;
-    --warning: 35 90% 55%;
-    --info: 224 80% 55%;
+    --success: 152 69% 38%;
+    --success-foreground: 152 69% 20%;
+    --warning: 25 95% 53%;
+    --warning-foreground: 25 60% 22%;
+    --info: 199 89% 48%;
+    --info-foreground: 199 70% 25%;
   }
 
   * {
@@ -117,35 +109,304 @@
     font-family: 'Manrope', 'Inter', system-ui, sans-serif;
     letter-spacing: -0.02em;
   }
-}
 
-@layer utilities {
-  /* Ambient shadow — no hard dark outlines */
-  .card-neo {
-    @apply bg-card;
-    box-shadow: 0 8px 24px -4px hsl(224 47% 11% / 0.06), 0 2px 8px -2px hsl(224 47% 11% / 0.04);
+  /* ── RazorSense global overrides ──
+     These cascade onto Tailwind utilities so every existing component
+     picks up the design language without per-file edits. */
+
+  /* Shadows → Blade elevation values (from razorpay/blade source) */
+  .shadow-sm {
+    box-shadow: 0px 2px 4px 0px hsla(200, 10%, 18%, 0.06) !important;
   }
-  .card-neo-hover {
-    @apply card-neo transition-all duration-200;
+  .shadow-md, .shadow {
+    box-shadow: 0px 16px 12px 0px hsla(200, 10%, 18%, 0.06) !important;
   }
-  .card-neo-hover:hover {
-    box-shadow: 0 12px 32px -4px hsl(224 47% 11% / 0.10), 0 4px 12px -2px hsl(224 47% 11% / 0.06);
+  .shadow-lg {
+    box-shadow: 0px 8px 24px -4px hsla(200, 10%, 18%, 0.06) !important;
+  }
+
+  /* Transitions → RazorSense standard curve (covers transition-colors everywhere) */
+  .transition-colors {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.3, 0, 0.2, 1);
+    transition-duration: 160ms;
+  }
+
+  /* Hardcoded semantic colors → RazorSense palette */
+  .text-red-600, .text-red-700, .text-red-800 { color: hsl(var(--destructive)) !important; }
+  .text-red-500 { color: hsl(var(--destructive) / 0.85) !important; }
+  .bg-red-50, .bg-red-100 { background-color: hsl(var(--destructive) / 0.06) !important; }
+  .border-red-200, .border-red-300 { border-color: hsl(var(--destructive) / 0.2) !important; }
+
+  .text-emerald-600, .text-emerald-700, .text-green-600, .text-green-700 { color: hsl(var(--success)) !important; }
+  .text-emerald-500, .text-green-500 { color: hsl(var(--success) / 0.85) !important; }
+  .bg-emerald-50, .bg-emerald-100, .bg-green-50, .bg-green-100 { background-color: hsl(var(--success) / 0.06) !important; }
+  .bg-green-500 { background-color: hsl(var(--success)) !important; }
+  .border-emerald-200, .border-green-200 { border-color: hsl(var(--success) / 0.2) !important; }
+
+  .text-amber-600, .text-amber-700 { color: hsl(var(--warning-foreground)) !important; }
+  .bg-amber-50, .bg-amber-100 { background-color: hsl(var(--warning) / 0.06) !important; }
+  .border-amber-200 { border-color: hsl(var(--warning) / 0.2) !important; }
+
+  .text-blue-600, .text-blue-700 { color: hsl(var(--info-foreground)) !important; }
+  .bg-blue-50, .bg-blue-100 { background-color: hsl(var(--info) / 0.06) !important; }
+  .border-blue-200 { border-color: hsl(var(--info) / 0.2) !important; }
+
+  /* Spinner → RazorSense bouncing dots.
+     When a Loader2 spinner sits inside a centered flex container (the standard
+     full-area loading pattern), hide the spinner and show thinking dots instead.
+     Inline spinners (inside buttons) keep spinning — they don't match the
+     parent selector. */
+  @keyframes rs-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Blade spinner: 960ms with overshoot easing (from spinnerTokens.ts) */
+  .animate-spin {
+    animation: blade-spin 960ms cubic-bezier(0.5, 0, 0.3, 1.5) infinite !important;
+    color: hsl(var(--primary));
+  }
+
+  /* Skeleton-like animate-pulse → Blade two-phase pulse
+     (fade in first, then color oscillation). Only targets empty
+     placeholders, not filled UI elements. */
+  .animate-pulse:empty,
+  .animate-pulse[class*="bg-muted"],
+  .animate-pulse[class*="bg-secondary"] {
+    background-color: hsl(var(--muted));
+    animation:
+      blade-fade-in 960ms cubic-bezier(0.3, 0, 0.2, 1) forwards,
+      blade-skeleton-pulse 1320ms cubic-bezier(0.3, 0, 0.2, 1) 960ms infinite alternate !important;
+    opacity: 0;
+  }
+
+  /* Skeleton placeholders that are loading areas: use the fluted glass sweep */
+  .animate-pulse[class*="rounded"][class*="bg-muted"]:empty {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Focus rings → RazorSense ring style */
+  .ring-offset-background {
+    --tw-ring-offset-color: hsl(var(--background));
+  }
+
+  /* ── RazorSense interactive card hover ──
+     Any card (border + rounded + bg-card/bg-background) that's clickable
+     gets the elevation lift on hover automatically. */
+  [class*="rounded"][class*="border"][class*="cursor-pointer"],
+  [class*="rounded"][class*="border"][role="button"],
+  a[class*="rounded"][class*="border"] {
+    transition: box-shadow 280ms cubic-bezier(0.3, 0, 0.2, 1),
+                transform 280ms cubic-bezier(0.3, 0, 0.2, 1);
+  }
+  [class*="rounded"][class*="border"][class*="cursor-pointer"]:hover,
+  [class*="rounded"][class*="border"][role="button"]:hover,
+  a[class*="rounded"][class*="border"]:hover {
+    box-shadow: 0 4px 12px -2px hsl(214 32% 12% / 0.08), 0 2px 6px -1px hsl(214 32% 12% / 0.05);
     transform: translateY(-1px);
   }
 
-  /* Glass — for modals and floating elements */
-  .glass {
-    background: hsl(0 0% 100% / 0.85);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+  /* Buttons → tactile press across the site */
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: scale(0.98);
   }
 
-  /* Legacy compat */
-  .card-shadow {
-    box-shadow: 0 8px 24px -4px hsl(224 47% 11% / 0.06), 0 2px 8px -2px hsl(224 47% 11% / 0.04);
+  /* ── Skeleton → flutes globally ──
+     Any element with animate-pulse that has no text content (loading placeholder)
+     gets the flutes gradient instead of plain opacity pulse. */
+  .animate-pulse[class*="rounded"][class*="bg-"] {
+    background: linear-gradient(135deg,
+      hsl(var(--muted)),
+      hsl(var(--primary) / 0.04),
+      hsl(var(--muted))
+    ) !important;
+    background-size: 200% 200% !important;
+    animation: flutes 3s ease infinite !important;
   }
-  .card-shadow-md {
-    box-shadow: 0 12px 32px -4px hsl(224 47% 11% / 0.10), 0 4px 12px -2px hsl(224 47% 11% / 0.06);
+
+  /* ── Page content entrance ──
+     Main content areas fade-slide in on mount */
+  main, [role="main"], .animate-fade-in {
+    animation: razorsense-slide-up 0.32s cubic-bezier(0, 0, 0.2, 1) both;
+  }
+
+  /* ── Tab content transitions ── */
+  [role="tabpanel"] {
+    animation: razorsense-slide-up 0.24s cubic-bezier(0, 0, 0.2, 1) both;
+  }
+
+  /* ── Dialog/sheet overlay backdrop ── */
+  [data-state="open"][class*="bg-black"] {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+}
+
+@layer components {
+  /* RazorSense thinking dots — replaces Loader2 spinners globally */
+  .rs-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .rs-thinking::before,
+  .rs-thinking::after,
+  .rs-thinking span {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+    animation: rs-dot-bounce 1.2s ease-in-out infinite;
+  }
+  .rs-thinking::after { animation-delay: 0.16s; }
+  .rs-thinking span { animation-delay: 0.32s; }
+
+  /* RazorSense success checkmark flash */
+  .rs-success-flash {
+    animation: rs-success-pulse 0.6s cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+@keyframes rs-dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 0.8; }
+}
+
+@layer utilities {
+  /* ── Blade elevation scale (from razorpay/blade source) ── */
+  .elevation-low {
+    box-shadow:
+      0px 2px 4px 0px hsla(200, 10%, 18%, 0.06);
+  }
+  .elevation-mid {
+    box-shadow:
+      0px 16px 12px 0px hsla(200, 10%, 18%, 0.06);
+  }
+  .elevation-high {
+    box-shadow:
+      0px 8px 24px -4px hsla(200, 10%, 18%, 0.06);
+  }
+  /* Blade Card surface — inset border + soft elevation (from makeSurfaceStyles.ts) */
+  .blade-surface {
+    box-shadow:
+      inset 0px 0px 0px 1px hsl(var(--border) / 0.6),
+      0px 2px 4px 0px hsla(200, 10%, 18%, 0.04);
+    border: none !important;
+    background-color: hsl(var(--card));
+  }
+  .blade-surface:hover {
+    box-shadow:
+      inset 0px 0px 0px 1px hsl(var(--border) / 0.6),
+      0px 8px 24px -4px hsla(200, 10%, 18%, 0.08);
+  }
+
+  .card-neo {
+    @apply bg-card elevation-low;
+  }
+  .card-neo-hover {
+    @apply card-neo transition-all duration-280 ease-standard;
+  }
+  .card-neo-hover:hover {
+    @apply elevation-high;
+    transform: translateY(-1px);
+  }
+
+  /* ── Frosted glass ── */
+  .glass {
+    background: hsl(0 0% 100% / 0.7);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid hsl(0 0% 100% / 0.3);
+  }
+
+  .card-shadow { @apply elevation-low; }
+  .card-shadow-md { @apply elevation-mid; }
+
+  /* ── Blade skeleton pulse (from razorpay/blade PulseAnimation.web.tsx) ──
+     Two-phase: fade in first, then oscillate between gray.default and
+     gray.highlighted with standard easing. */
+  .blade-skeleton {
+    background-color: hsl(var(--muted));
+    animation:
+      blade-fade-in 960ms cubic-bezier(0.3, 0, 0.2, 1) forwards,
+      blade-skeleton-pulse 1320ms cubic-bezier(0.3, 0, 0.2, 1) 960ms infinite alternate;
+    opacity: 0;
+  }
+
+  /* ── Skeleton shimmer — clean loading placeholder ──
+     ponytail: the real RzpGlass is a 925-line WebGL shader. CSS can't
+     replicate pixel displacement without looking cheap. This is a
+     standard shimmer sweep for loading skeletons only. */
+  .flutes {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(214 20% 91%) 40%,
+      hsl(var(--muted)) 80%
+    );
+    background-size: 200% 100%;
+    animation: shimmer-sweep 1.8s ease-in-out infinite;
+  }
+
+  /* ── Blade indeterminate progress bar (from progressBarTokens.ts) ──
+     A 5%-width fill that scales 1x→5x→1x while sliding left to right. */
+  .blade-indeterminate {
+    position: relative;
+    overflow: hidden;
+  }
+  .blade-indeterminate::after {
+    content: '';
+    position: absolute;
+    left: -8%;
+    width: 5%;
+    height: 100%;
+    background: inherit;
+    border-radius: inherit;
+    animation: blade-indeterminate-slide 960ms linear infinite;
+  }
+
+  /* ── Blade progress pulse overlay (from ProgressBarFilled.web.tsx) ──
+     White overlay that breathes 0→0.25→0 on the filled portion. */
+  .blade-progress-pulse {
+    position: relative;
+    overflow: hidden;
+  }
+  .blade-progress-pulse::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    animation: blade-pulse-overlay 960ms cubic-bezier(0.3, 0, 0.2, 1) 2000ms infinite;
+    border-radius: inherit;
+  }
+
+  /* Glass button — frosted pill */
+  .glass-btn {
+    background: hsl(0 0% 100% / 0.65);
+    backdrop-filter: blur(12px) saturate(1.3);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    border: 1px solid hsl(0 0% 100% / 0.4);
+    box-shadow: 0px 2px 4px 0px hsla(200, 10%, 18%, 0.06);
+    transition: all 240ms cubic-bezier(0.3, 0, 0.2, 1);
+  }
+  .glass-btn:hover {
+    background: hsl(0 0% 100% / 0.85);
+    box-shadow: 0px 8px 24px -4px hsla(200, 10%, 18%, 0.06);
+    transform: translateY(-1px);
+  }
+
+  /* Glass card — frosted panel */
+  .glass-card {
+    background: hsl(0 0% 100% / 0.6);
+    backdrop-filter: blur(16px) saturate(1.3);
+    -webkit-backdrop-filter: blur(16px) saturate(1.3);
+    border: 1px solid hsl(0 0% 100% / 0.3);
+    box-shadow: 0px 6px 32px 4px hsla(200, 10%, 18%, 0.06);
   }
 }
 
@@ -154,3 +415,46 @@
   from { width: 100%; }
   to { width: 0%; }
 }
+
+/* ── Blade keyframes (ported from razorpay/blade source) ── */
+
+/* Skeleton shimmer: light band sweeps left to right */
+@keyframes shimmer-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Skeleton: fade in on first render */
+@keyframes blade-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Skeleton: pulse between gray.default and gray.highlighted */
+@keyframes blade-skeleton-pulse {
+  0% { background-color: hsl(var(--muted)); }
+  25% { background-color: hsl(var(--muted)); }
+  100% { background-color: hsl(214 15% 85%); }
+}
+
+/* Progress indeterminate: 5% bar scales + slides across */
+@keyframes blade-indeterminate-slide {
+  0%   { left: -8%;  transform: scaleX(1); }
+  50%  { left: 50%;  transform: scaleX(5); }
+  100% { left: 103%; transform: scaleX(1); }
+}
+
+/* Progress pulse: white overlay breathes on filled bar */
+@keyframes blade-pulse-overlay {
+  0%   { opacity: 0; }
+  50%  { opacity: 0.25; }
+  100% { opacity: 0; }
+}
+
+/* Blade spinner: rotate with overshoot easing */
+@keyframes blade-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ponytail: dead keyframes removed — Tailwind generates rs-* variants from config */

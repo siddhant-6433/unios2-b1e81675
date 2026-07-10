@@ -311,11 +311,11 @@ function AcademicBlock({
   const isClass10 = prefix === 'class_10';
   const isClass12 = prefix === 'class_12';
   const variant = isGradBlock
-    ? { Icon: GraduationCap, accent: 'border-violet-500',  iconColor: 'text-violet-600',  bg: 'bg-violet-50/60'  }
+    ? { Icon: GraduationCap, accent: 'border-primary/35',  iconColor: 'text-primary',  bg: 'bg-primary/5/60'  }
     : isClass12
-    ? { Icon: BookText,      accent: 'border-emerald-500', iconColor: 'text-emerald-600', bg: 'bg-emerald-50/60' }
+    ? { Icon: BookText,      accent: 'border-success/35', iconColor: 'text-success', bg: 'bg-success/5/60' }
     : isClass10
-    ? { Icon: BookOpen,      accent: 'border-blue-500',    iconColor: 'text-blue-600',    bg: 'bg-blue-50/60'    }
+    ? { Icon: BookOpen,      accent: 'border-info/35',    iconColor: 'text-info-foreground',    bg: 'bg-info/5/60'    }
     : { Icon: BookOpen,      accent: 'border-border',      iconColor: 'text-muted-foreground', bg: 'bg-muted/30' };
   const { Icon, accent, iconColor, bg } = variant;
 
@@ -598,17 +598,17 @@ function EntranceExamSection({
   };
 
   return (
-    <section className="rounded-2xl border border-border bg-card overflow-hidden border-l-4 border-amber-500">
-      <header className="px-4 py-3 bg-amber-50/60 flex items-center justify-between">
+    <section className="rounded-2xl border border-border bg-card overflow-hidden border-l-4 border-warning/35">
+      <header className="px-4 py-3 bg-warning/5/60 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <ClipboardCheck className="h-5 w-5 text-amber-600" />
+          <ClipboardCheck className="h-5 w-5 text-warning-foreground" />
           <h3 className="text-base font-semibold text-foreground">Entrance Exams</h3>
         </div>
       </header>
       <div className="p-4 space-y-3">
       {recommendedAvailable.length > 0 && (
-        <div className="rounded-xl bg-amber-50/40 border border-amber-200/60 p-3">
-          <p className="text-xs font-medium text-amber-900 mb-2">
+        <div className="rounded-xl bg-warning/5/40 border border-warning/20/60 p-3">
+          <p className="text-xs font-medium text-warning-foreground mb-2">
             Recommended for your selected courses (optional — add if you've taken any):
           </p>
           <div className="flex flex-wrap gap-2">
@@ -617,7 +617,7 @@ function EntranceExamSection({
                 key={name}
                 type="button"
                 onClick={() => addRecommended(name)}
-                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 transition-colors"
+                className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-white px-3 py-1 text-[11px] font-medium text-warning-foreground hover:bg-warning/10 transition-colors"
               >
                 <Plus className="h-3 w-3" /> {name}
               </button>
@@ -1156,7 +1156,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
               invalidFields={graduationInvalidFields}
             />
             {parseInt(graduation.year) === SESSION_YEAR + 1 && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 text-blue-700 text-xs">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-info/5 dark:bg-info/90/20 border border-info/20 text-info-foreground text-xs">
                 <Info className="h-3.5 w-3.5 shrink-0" />
                 Graduation in {SESSION_YEAR + 1}: your application will be considered for the {SESSION_YEAR + 1}-{(SESSION_YEAR + 2).toString().slice(-2)} session.
               </div>
@@ -1169,7 +1169,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <div className="space-y-3">
               <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <GraduationCap className="h-5 w-5 text-violet-600" />
+                  <GraduationCap className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-sm font-semibold text-foreground">Add Graduation Details</p>
                     <p className="text-[11px] text-muted-foreground">Optional — useful to explain gap years or showcase prior degrees.</p>

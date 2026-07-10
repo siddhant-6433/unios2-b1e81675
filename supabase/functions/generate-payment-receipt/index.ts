@@ -15,10 +15,11 @@ const corsHeaders = {
 };
 
 const PAY_TYPE_LABELS: Record<string, string> = {
-  application_fee:  "Application Fee",
-  token_fee:        "Token / Admission Fee",
-  registration_fee: "Registration Fee",
-  other:            "Other Charges",
+  application_fee:     "Application Fee",
+  token_fee:           "Token / Admission Fee",
+  pre_admission_token: "Token Fee (prior to admission)",
+  registration_fee:    "Registration Fee",
+  other:               "Other Charges",
 };
 
 const MODE_LABELS: Record<string, string> = {
@@ -456,6 +457,14 @@ Deno.serve(async (req) => {
     rows.push(["Fee Head", PAY_TYPE_LABELS[lp.type] || lp.type]);
     rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
 
+    // Pre-admission token receipts must carry the adjustable-against-admission
+    // wording (owner requirement) so the candidate knows this money is credited
+    // toward the eventual admission fee.
+    const isPreAdmissionToken = lp.type === "pre_admission_token";
+    if (isPreAdmissionToken) {
+      rows.push(["Note", "Token fee prior to admission — adjustable against admission fee"]);
+    }
+
     // Counsellor / staff who recorded the offline receipt — gives the candidate
     // and auditors a name to attach to the transaction. We resolve the profile
     // here (not via the SELECT) because lead_payments → profiles isn't a
@@ -475,7 +484,7 @@ Deno.serve(async (req) => {
 
     const pdfBytes = await buildPdf({
       receiptNo:     lp.receipt_no || "—",
-      receiptTitle:  isApp ? "APPLICATION RECEIPT" : "PAYMENT RECEIPT",
+      receiptTitle:  isApp ? "APPLICATION RECEIPT" : isPreAdmissionToken ? "TOKEN FEE RECEIPT" : "PAYMENT RECEIPT",
       payerHeading:  isApp ? "APPLICANT DETAILS" : "PAYER DETAILS",
       rows,
       amount:        Number(lp.amount),

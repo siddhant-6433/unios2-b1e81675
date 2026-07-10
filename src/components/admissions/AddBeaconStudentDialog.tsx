@@ -382,7 +382,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
               <label className="block text-[11px] font-medium text-muted-foreground mb-2">
                 Fee Structure
                 {form.school_admission_no.trim() && (
-                  <Badge className="ml-2 text-[10px] bg-amber-100 text-amber-700 border-amber-200">Auto-set: Existing Parent</Badge>
+                  <Badge className="ml-2 text-[10px] bg-warning/10 text-warning-foreground border-warning/20">Auto-set: Existing Parent</Badge>
                 )}
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -392,7 +392,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
                   <p className="text-[10px] text-muted-foreground mt-0.5">Standard rates for new families joining Beacon</p>
                 </button>
                 <button onClick={() => set("fee_version", "existing_parent")}
-                  className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                  className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-warning/35 bg-warning/5" : "border-border"}`}>
                   <p className="text-xs font-semibold text-foreground">Existing Parent</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">CPI-revised rates for continuing families (2026–27)</p>
                 </button>

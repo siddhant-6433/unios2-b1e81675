@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -132,7 +133,7 @@ const Finance = () => {
     { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
   ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <>
@@ -178,7 +179,7 @@ const Finance = () => {
             className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <t.icon className="h-4 w-4" />{t.label}
             {t.badge > 0 && (
-              <span className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${tab === t.id ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>
+              <span className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${tab === t.id ? "bg-white/20 text-white" : "bg-warning/10 text-warning-foreground"}`}>
                 {t.badge}
               </span>
             )}

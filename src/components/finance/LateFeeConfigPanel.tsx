@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -180,20 +181,20 @@ export function LateFeeConfigPanel() {
   );
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   return (
     <div className="space-y-4">
       {/* Overdue stats banner */}
       {overdueStats.total > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0" />
+        <div className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/5 px-4 py-3">
+          <ShieldAlert className="h-5 w-5 text-warning-foreground shrink-0" />
           <div>
-            <p className="text-sm font-medium text-amber-800">
+            <p className="text-sm font-medium text-warning-foreground">
               {overdueStats.total} overdue items · ₹{(overdueStats.amount / 1000).toFixed(1)}K outstanding
             </p>
-            <p className="text-xs text-amber-600">
+            <p className="text-xs text-warning-foreground">
               Late fee cron runs daily at 6:00 AM IST — generates penalty rows for configured structures
             </p>
           </div>

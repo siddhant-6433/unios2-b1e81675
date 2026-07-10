@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,9 +31,9 @@ const STATUS_LABELS: Record<string, string> = {
   admitted: "Admitted", reward_applied: "Reward Applied", expired: "Expired",
 };
 const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-700", lead_created: "bg-blue-100 text-blue-700",
-  applied: "bg-violet-100 text-violet-700", admitted: "bg-emerald-100 text-emerald-700",
-  reward_applied: "bg-green-100 text-green-700", expired: "bg-muted text-muted-foreground",
+  pending: "bg-warning/10 text-warning-foreground", lead_created: "bg-info/10 text-info-foreground",
+  applied: "bg-primary/10 text-primary", admitted: "bg-success/10 text-success",
+  reward_applied: "bg-success/10 text-success", expired: "bg-muted text-muted-foreground",
 };
 
 const StudentReferrals = () => {
@@ -129,7 +130,7 @@ const StudentReferrals = () => {
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -247,7 +248,7 @@ const StudentReferrals = () => {
                     </td>
                     <td className="px-4 py-2.5 text-right text-xs">
                       {r.reward_amount ? (
-                        <span className="text-emerald-600 font-semibold">₹{r.reward_amount.toLocaleString("en-IN")}</span>
+                        <span className="text-success font-semibold">₹{r.reward_amount.toLocaleString("en-IN")}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}

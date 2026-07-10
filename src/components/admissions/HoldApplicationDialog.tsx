@@ -127,7 +127,7 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {isRelease ? <PlayCircle className="h-4 w-4 text-emerald-600" /> : <PauseCircle className="h-4 w-4 text-amber-600" />}
+            {isRelease ? <PlayCircle className="h-4 w-4 text-success" /> : <PauseCircle className="h-4 w-4 text-warning-foreground" />}
             {isRelease ? "Release hold" : "Put application on hold"}
           </DialogTitle>
           <DialogDescription className="text-xs">
@@ -159,7 +159,7 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
               <Checkbox checked={notify} onCheckedChange={(v) => setNotify(!!v)} className="mt-0.5" />
               <span className="text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1 font-medium text-foreground">
-                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" /> Notify candidate on WhatsApp
+                  <MessageCircle className="h-3.5 w-3.5 text-success" /> Notify candidate on WhatsApp
                 </span>
                 <br />
                 Sends the <code className="text-[10px] bg-muted px-1 rounded">application_on_hold_eligibility</code> template
@@ -172,12 +172,12 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           {isRelease ? (
-            <Button onClick={releaseHold} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={releaseHold} disabled={saving} className="bg-success hover:bg-success/90">
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <PlayCircle className="h-4 w-4 mr-1.5" />}
               Release hold
             </Button>
           ) : (
-            <Button onClick={putOnHold} disabled={saving} className="bg-amber-600 hover:bg-amber-700">
+            <Button onClick={putOnHold} disabled={saving} className="bg-warning hover:bg-warning/60">
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <PauseCircle className="h-4 w-4 mr-1.5" />}
               Put on hold
             </Button>

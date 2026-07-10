@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -100,7 +101,7 @@ export function CommissionApprovalPanel() {
     setProcessing(null);
   };
 
-  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">
@@ -157,9 +158,9 @@ export function CommissionApprovalPanel() {
                   <td className="px-4 py-2 text-xs text-muted-foreground">{req.requester?.display_name || "—"}</td>
                   <td className="px-4 py-2 text-center">
                     <Badge className={`text-[9px] border-0 ${
-                      req.status === "approved" ? "bg-emerald-100 text-emerald-700" :
-                      req.status === "rejected" ? "bg-red-100 text-red-700" :
-                      "bg-amber-100 text-amber-700"
+                      req.status === "approved" ? "bg-success/10 text-success" :
+                      req.status === "rejected" ? "bg-destructive/10 text-destructive" :
+                      "bg-warning/10 text-warning-foreground"
                     }`}>
                       {req.status}
                     </Badge>
@@ -170,7 +171,7 @@ export function CommissionApprovalPanel() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-50"
+                          className="h-7 w-7 p-0 text-success hover:bg-success/5"
                           onClick={() => handleApprove(req)}
                           disabled={processing === req.id}
                         >
@@ -179,7 +180,7 @@ export function CommissionApprovalPanel() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 w-7 p-0 text-red-600 hover:bg-red-50"
+                          className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5"
                           onClick={() => handleReject(req)}
                           disabled={processing === req.id}
                         >

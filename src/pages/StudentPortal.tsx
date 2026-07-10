@@ -56,6 +56,13 @@ export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
   const [fees, setFees] = useState<FeeItem[]>([]);
+  // Consultant-managed fee hiding: when the fee structure is hidden, the
+  // student-role fee_ledger SELECT returns zero rows. This holds the RPC-backed
+  // fallback (due total + receipts only — no structure/installments).
+  const [hiddenFee, setHiddenFee] = useState<{
+    due_total: number;
+    receipts: { receipt_no: string | null; amount: number; type: string; payment_date: string | null; receipt_url: string | null }[];
+  } | null>(null);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimError, setClaimError] = useState<string | null>(null);
@@ -170,6 +177,22 @@ export default function StudentPortal() {
           status: f.status,
           due_date: f.due_date,
         })));
+
+        // Zero visible rows can also mean the fee structure is consultant-
+        // managed and hidden for this student — fall back to the due-summary
+        // RPC (due + receipts only, no structure).
+        if (feeRes.data.length === 0) {
+          const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentData.id });
+          const dueTotal = Number((summary as any)?.due_total || 0);
+          const receipts = ((summary as any)?.receipts || []) as {
+            receipt_no: string | null; amount: number; type: string; payment_date: string | null; receipt_url: string | null;
+          }[];
+          if (dueTotal > 0 || receipts.length > 0) {
+            setHiddenFee({ due_total: dueTotal, receipts });
+          }
+        } else {
+          setHiddenFee(null);
+        }
       }
 
       if (attRes.data) {
@@ -248,7 +271,7 @@ export default function StudentPortal() {
     return (
       <PortalLayout {...studentLayoutProps}>
         <div className="rounded-2xl bg-white border border-gray-200 p-12 text-center">
-          <AlertCircle className="h-10 w-10 text-red-400 mx-auto mb-3" />
+          <AlertCircle className="h-10 w-10 text-destructive/80 mx-auto mb-3" />
           <h2 className="text-lg font-semibold text-gray-900 mb-1">Claim link could not be used</h2>
           <p className="text-sm text-gray-500 mb-5">{claimError}</p>
           <button
@@ -318,8 +341,59 @@ export default function StudentPortal() {
         ))}
       </div>
 
+      {/* Fees Tab — hidden-fee mode (consultant-managed): due + Pay + receipts only */}
+      {activeTab === "fees" && fees.length === 0 && hiddenFee && (
+        <div className="space-y-4">
+          {hiddenFee.due_total > 0 ? (
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-primary/70">Amount Due</p>
+                <p className="text-xl font-bold text-primary">₹{hiddenFee.due_total.toLocaleString("en-IN")}</p>
+              </div>
+              <button
+                onClick={() => openPayment("due")}
+                className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+              >
+                <CreditCard className="h-4 w-4" /> Pay Now
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-white border border-gray-200 p-8 text-center text-sm text-gray-400">
+              No fees due right now
+            </div>
+          )}
+
+          {hiddenFee.receipts.length > 0 && (
+            <div className="rounded-xl bg-white border border-gray-200 overflow-hidden divide-y divide-gray-100">
+              <div className="p-4 pb-2">
+                <p className="text-sm font-semibold text-gray-900">Receipts</p>
+              </div>
+              {hiddenFee.receipts.map((r, i) => (
+                <div key={r.receipt_no || i} className="flex items-center gap-3 p-4">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-success/10 shrink-0">
+                    <CheckCircle className="h-4 w-4 text-success" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">Receipt {r.receipt_no || "—"}</p>
+                    <p className="text-xs text-gray-400">
+                      {r.payment_date ? new Date(r.payment_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-semibold text-success">₹{Number(r.amount).toLocaleString("en-IN")}</p>
+                    {r.receipt_url && (
+                      <a href={r.receipt_url} target="_blank" rel="noopener" className="text-[11px] font-medium text-primary hover:underline">PDF</a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Fees Tab */}
-      {activeTab === "fees" && (
+      {activeTab === "fees" && !(fees.length === 0 && hiddenFee) && (
         <div className="space-y-4">
           {totalDueNow > 0 && (
             <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 flex items-center justify-between">
@@ -342,7 +416,7 @@ export default function StudentPortal() {
                 <p className="text-xs text-gray-500">Annual Pay All</p>
                 <p className="text-sm font-semibold text-gray-900">
                   ₹{payAllAmount.toLocaleString("en-IN")}
-                  <span className="ml-2 text-xs font-medium text-green-600">
+                  <span className="ml-2 text-xs font-medium text-success">
                     5% waiver saves ₹{payAllWaiver.toLocaleString("en-IN")}
                   </span>
                 </p>
@@ -367,11 +441,11 @@ export default function StudentPortal() {
                 return (
                 <div key={fee.id} className="flex items-center gap-3 p-4">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${
-                    paid ? "bg-green-100" : overdue ? "bg-red-100" : futureDue ? "bg-blue-100" : "bg-yellow-100"
+                    paid ? "bg-success/10" : overdue ? "bg-destructive/10" : futureDue ? "bg-info/10" : "bg-yellow-100"
                   }`}>
-                    {paid ? <CheckCircle className="h-4 w-4 text-green-600" /> :
-                     overdue ? <AlertCircle className="h-4 w-4 text-red-600" /> :
-                     <Clock className={`h-4 w-4 ${futureDue ? "text-blue-600" : "text-yellow-600"}`} />}
+                    {paid ? <CheckCircle className="h-4 w-4 text-success" /> :
+                     overdue ? <AlertCircle className="h-4 w-4 text-destructive" /> :
+                     <Clock className={`h-4 w-4 ${futureDue ? "text-info-foreground" : "text-yellow-600"}`} />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{fee.fee_code_name}</p>
@@ -380,11 +454,11 @@ export default function StudentPortal() {
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`text-sm font-semibold ${paid ? "text-green-600" : "text-gray-900"}`}>
+                    <p className={`text-sm font-semibold ${paid ? "text-success" : "text-gray-900"}`}>
                       ₹{(paid ? fee.paid_amount : fee.balance).toLocaleString("en-IN")}
                     </p>
                     <p className={`text-[10px] font-medium capitalize ${
-                      paid ? "text-green-600" : overdue ? "text-red-500" : futureDue ? "text-blue-600" : "text-yellow-600"
+                      paid ? "text-success" : overdue ? "text-destructive" : futureDue ? "text-info-foreground" : "text-yellow-600"
                     }`}>{futureDue ? "upcoming" : fee.status}</p>
                     {futureDue && (
                       <button
@@ -426,8 +500,8 @@ export default function StudentPortal() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "Present", value: attendance.present, color: "text-green-600", bg: "bg-green-50" },
-                  { label: "Absent", value: attendance.absent, color: "text-red-600", bg: "bg-red-50" },
+                  { label: "Present", value: attendance.present, color: "text-success", bg: "bg-success/5" },
+                  { label: "Absent", value: attendance.absent, color: "text-destructive", bg: "bg-destructive/5" },
                   { label: "Late", value: attendance.late, color: "text-yellow-600", bg: "bg-yellow-50" },
                 ].map((stat) => (
                   <div key={stat.label} className={`rounded-xl ${stat.bg} p-4 text-center`}>

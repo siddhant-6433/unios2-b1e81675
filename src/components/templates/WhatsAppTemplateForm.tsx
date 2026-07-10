@@ -346,7 +346,7 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
                 />
                 {mediaHandle ? (
                   <div className="flex items-center gap-2 text-xs">
-                    <ImageIcon className="h-4 w-4 text-emerald-600" />
+                    <ImageIcon className="h-4 w-4 text-success" />
                     <span className="flex-1 truncate text-foreground">{mediaFileName}</span>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setMediaHandle(null); setMediaFileName(null); }}>
                       <X className="h-3.5 w-3.5" />

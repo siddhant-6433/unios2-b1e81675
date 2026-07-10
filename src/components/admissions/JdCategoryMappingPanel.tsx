@@ -88,14 +88,14 @@ export function JdCategoryMappingPanel() {
   if (loading || pending.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-amber-200">
-        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+    <div className="rounded-xl border border-warning/20 bg-warning/5 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-warning/20">
+        <AlertTriangle className="h-4 w-4 text-warning-foreground shrink-0" />
         <div>
-          <p className="text-sm font-semibold text-amber-800">
+          <p className="text-sm font-semibold text-warning-foreground">
             JustDial: {pending.length} unknown categor{pending.length === 1 ? "y" : "ies"} need mapping
           </p>
-          <p className="text-[11px] text-amber-700 mt-0.5">
+          <p className="text-[11px] text-warning-foreground mt-0.5">
             These categories arrived via JustDial but couldn't be auto-matched to a course.
             Map them so future leads from the same category are resolved automatically.
           </p>
@@ -115,7 +115,7 @@ export function JdCategoryMappingPanel() {
 
             {/* Course selector */}
             <select
-              className="flex-1 min-w-[200px] rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+              className="flex-1 min-w-[200px] rounded-xl border border-warning/30 bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-amber-400/30"
               value={selected[m.id] || ""}
               onChange={e => setSelected(s => ({ ...s, [m.id]: e.target.value }))}>
               <option value="">— Select mapping —</option>
@@ -136,7 +136,7 @@ export function JdCategoryMappingPanel() {
                 size="sm"
                 disabled={!selected[m.id] || saving[m.id]}
                 onClick={() => handleSave(m)}
-                className="gap-1.5 h-8 text-xs bg-amber-600 hover:bg-amber-700">
+                className="gap-1.5 h-8 text-xs bg-warning hover:bg-warning/60">
                 {saving[m.id]
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <Check className="h-3.5 w-3.5" />}

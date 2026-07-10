@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useMemo, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -341,7 +342,7 @@ Buttons:
     ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
     : "Never";
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -383,12 +384,12 @@ Buttons:
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-blue-600" />
+                        <Mail className="h-4 w-4 text-info-foreground" />
                         <h3 className="text-sm font-semibold text-foreground">{t.name}</h3>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">Slug: {t.slug}</p>
                     </div>
-                    <Badge className={`text-[9px] border-0 ${t.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
+                    <Badge className={`text-[9px] border-0 ${t.is_active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>
                       {t.is_active ? "Active" : "Inactive"}
                     </Badge>
                   </div>
@@ -415,7 +416,7 @@ Buttons:
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(t)}>
                         <Edit className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-600" onClick={() => handleDelete(t.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(t.id)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -459,7 +460,7 @@ Buttons:
           </div>
 
           {coursesLoading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <PageLoader />
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-xs">
@@ -597,7 +598,7 @@ Buttons:
           </div>
 
           {waSettingsLoading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <PageLoader />
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-xs">
@@ -630,7 +631,7 @@ Buttons:
                           disabled={waToggling === s.template_key}
                           onClick={() => toggleWaSetting(s.template_key, !s.show_in_lead_picker)}
                           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            s.show_in_lead_picker ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"
+                            s.show_in_lead_picker ? "bg-success/50" : "bg-slate-300 dark:bg-slate-700"
                           } ${waToggling === s.template_key ? "opacity-60" : ""}`}
                         >
                           <span

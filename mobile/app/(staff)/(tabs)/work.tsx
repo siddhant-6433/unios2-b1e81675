@@ -16,6 +16,7 @@ import {
   Phone,
   Search,
   Users,
+  UserPlus,
 } from 'lucide-react-native';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
@@ -108,7 +109,7 @@ function AdmissionsWork({ displayName, isHead }: { displayName: string; isHead: 
       const [leadsRes, followupsRes, visitsRes, appsRes] = await Promise.all([
         supabase.from('leads').select('id', { count: 'exact', head: true }).eq('stage', 'new_lead'),
         supabase.from('lead_followups').select('id', { count: 'exact', head: true }).eq('status', 'pending').lte('scheduled_at', `${today}T23:59:59`),
-        supabase.from('campus_visits').select('id', { count: 'exact', head: true }).gte('scheduled_at', `${today}T00:00:00`).lte('scheduled_at', `${today}T23:59:59`),
+        supabase.from('campus_visits').select('id', { count: 'exact', head: true }).gte('visit_date', `${today}T00:00:00`).lte('visit_date', `${today}T23:59:59`),
         supabase.from('applications').select('id', { count: 'exact', head: true }),
       ]);
       setMetrics({
@@ -145,7 +146,8 @@ function AdmissionsWork({ displayName, isHead }: { displayName: string; isHead: 
         <ActionTile icon={Phone} label="Call queue" subtitle="Due and overdue" tone="purple" />
         <ActionTile icon={MessageCircle} label="WhatsApp replies" subtitle="Pending responses" tone="green" />
         <ActionTile icon={Users} label="Lead list" subtitle="New and active leads" tone="blue" />
-        <ActionTile icon={Calendar} label="Visits" subtitle="Today’s campus visits" tone="yellow" />
+        <ActionTile icon={Calendar} label="Visits" subtitle="Today’s campus visits" tone="yellow" onPress={() => router.push('/(staff)/work/visits' as any)} />
+        <ActionTile icon={UserPlus} label="Walk-in" subtitle="Record instantly" tone="purple" onPress={() => router.push('/(staff)/work/walk-in' as any)} />
       </View>
     </WorkScaffold>
   );

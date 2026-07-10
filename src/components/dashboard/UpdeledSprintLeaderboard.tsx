@@ -65,12 +65,12 @@ export function UpdeledSprintLeaderboard() {
   const days = stats ? daysRemaining(stats.deadline_at) : 0;
 
   return (
-    <Card className="rounded-2xl border-indigo-200 bg-gradient-to-br from-indigo-50/60 to-sky-50/40">
+    <Card className="rounded-2xl border-primary/20 bg-gradient-to-br from-indigo-50/60 to-sky-50/40">
       <CardContent className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100">
-              <GraduationCap className="h-4 w-4 text-indigo-700" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+              <GraduationCap className="h-4 w-4 text-primary" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">UPDELED Sprint Leaderboard</h3>
@@ -87,7 +87,7 @@ export function UpdeledSprintLeaderboard() {
           </div>
           <Link
             to="/updeled-sprint"
-            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
             Open sprint <ArrowRight className="h-3 w-3" />
           </Link>
@@ -109,25 +109,25 @@ export function UpdeledSprintLeaderboard() {
               const isLeader = i === 0;
               return (
                 <div key={r.counsellor_id} className="flex items-center gap-3 py-2">
-                  <div className={`w-6 text-center text-sm font-bold tabular-nums ${isLeader ? "text-amber-600" : "text-muted-foreground"}`}>
+                  <div className={`w-6 text-center text-sm font-bold tabular-nums ${isLeader ? "text-warning-foreground" : "text-muted-foreground"}`}>
                     {i + 1}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-medium text-foreground truncate">{r.counsellor_name}</span>
-                      {isLeader && <Trophy className="h-3.5 w-3.5 text-amber-500" />}
+                      {isLeader && <Trophy className="h-3.5 w-3.5 text-warning" />}
                       {streak && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-300 px-1.5 py-0 text-[10px] font-semibold">
                           <GraduationCap className="h-2.5 w-2.5" /> {r.today_count} today
                         </span>
                       )}
                     </div>
-                    <div className="h-1.5 w-full bg-indigo-100 rounded mt-1 overflow-hidden">
-                      <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress}%` }} />
+                    <div className="h-1.5 w-full bg-primary/10 rounded mt-1 overflow-hidden">
+                      <div className="h-full bg-primary/50 transition-all" style={{ width: `${progress}%` }} />
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="text-sm font-bold tabular-nums text-indigo-900">
+                    <div className="text-sm font-bold tabular-nums text-primary">
                       {r.total_count}
                       <span className="text-xs text-muted-foreground font-normal">/{TARGET_PER_COUNSELLOR}</span>
                     </div>

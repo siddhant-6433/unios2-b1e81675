@@ -131,7 +131,7 @@ function PublicApplicationDeadlineHeader({
       <div className="mx-auto flex w-full max-w-[112rem] flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold xl:flex-nowrap xl:justify-between xl:text-left">
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 xl:flex-nowrap xl:justify-start">
           <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+            <span className="h-2 w-2 rounded-full bg-success/50" aria-hidden="true" />
             Admissions 2026-27
           </span>
           <span className="min-w-0 text-sm font-bold text-white sm:text-base xl:truncate">
@@ -157,7 +157,7 @@ function PublicApplicationDeadlineHeader({
           <Link
             to={portalPath}
             style={{ color: portalPrimaryColor }}
-            className="inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
+            className="inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-info/10"
           >
             Apply Now
             <ArrowRight className="h-3.5 w-3.5" />

@@ -77,7 +77,7 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
     const documentUrl = registration?.document_signed_url || registration?.document_url || null;
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[10px] font-semibold"
+        className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success-foreground border border-success/30 px-2 py-0.5 text-[10px] font-semibold"
         title={registration?.registration_no ? `CAHET registration no: ${registration.registration_no}` : "CAHET registered"}
       >
         <Flame className="h-3 w-3" />
@@ -92,7 +92,7 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
             href={documentUrl}
             target="_blank"
             rel="noreferrer"
-            className="ml-0.5 rounded-full p-0.5 hover:bg-emerald-200"
+            className="ml-0.5 rounded-full p-0.5 hover:bg-success/15"
             title="Open CAHET registration proof"
             onClick={(e) => e.stopPropagation()}
           >
@@ -109,7 +109,7 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
       <button
         type="button"
         onClick={() => setOpen({ lead_id: leadId, lead_name: leadName, phone, course_name: courseName })}
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 px-2 py-0.5 text-[10px] font-semibold transition-colors"
+        className="inline-flex items-center gap-1 rounded-full bg-warning/10 text-warning-foreground border border-warning/30 hover:bg-warning/15 px-2 py-0.5 text-[10px] font-semibold transition-colors"
         title="Mark CAHET registration for this lead"
       >
         <Flame className="h-3 w-3" /> CAHET pending — register

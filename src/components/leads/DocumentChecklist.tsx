@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -41,9 +42,9 @@ interface Props {
 
 const STATUS_CONFIG: Record<string, { label: string; badge: string; icon: typeof Check }> = {
   pending: { label: "Pending", badge: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: FileText },
-  uploaded: { label: "Uploaded", badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", icon: Upload },
-  verified: { label: "Verified", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: ShieldCheck },
-  rejected: { label: "Rejected", badge: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", icon: X },
+  uploaded: { label: "Uploaded", badge: "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80", icon: Upload },
+  verified: { label: "Verified", badge: "bg-success/10 text-success dark:bg-success/80/30 dark:text-success", icon: ShieldCheck },
+  rejected: { label: "Rejected", badge: "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80", icon: X },
 };
 
 export function DocumentChecklist({ leadId, courseId }: Props) {
@@ -197,7 +198,7 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
   };
 
   if (loading) {
-    return <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   if (!courseId) {
@@ -215,11 +216,11 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
     <div className="space-y-3">
       {/* Summary */}
       <div className="flex items-center gap-3 text-xs">
-        <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 font-semibold">
+        <Badge className="bg-success/10 text-success dark:bg-success/80/30 dark:text-success border-0 font-semibold">
           {verifiedCount}/{rows.length} verified
         </Badge>
         {requiredMissing.length > 0 && (
-          <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0 font-semibold">
+          <Badge className="bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80 border-0 font-semibold">
             <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
             {requiredMissing.length} required missing
           </Badge>
@@ -237,15 +238,15 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <StatusIcon className={`h-4 w-4 flex-shrink-0 ${
-                    row.doc?.status === "verified" ? "text-emerald-500" :
-                    row.doc?.status === "rejected" ? "text-red-500" :
-                    row.doc?.status === "uploaded" ? "text-blue-500" : "text-muted-foreground"
+                    row.doc?.status === "verified" ? "text-success" :
+                    row.doc?.status === "rejected" ? "text-destructive" :
+                    row.doc?.status === "uploaded" ? "text-info" : "text-muted-foreground"
                   }`} />
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-medium text-foreground truncate">{row.document_name}</span>
                       {row.is_required && (
-                        <span className="text-[9px] text-red-500 font-bold uppercase flex-shrink-0">Required</span>
+                        <span className="text-[9px] text-destructive font-bold uppercase flex-shrink-0">Required</span>
                       )}
                     </div>
                     {row.doc?.file_name && (
@@ -275,7 +276,7 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                        className="h-7 w-7 text-success hover:text-success hover:bg-success/5"
                         onClick={() => handleVerify(row.doc!.id, row.document_name)}
                         title="Verify"
                       >
@@ -284,7 +285,7 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/5"
                         onClick={() => setRejectingId(row.doc!.id)}
                         title="Reject"
                       >
@@ -318,7 +319,7 @@ export function DocumentChecklist({ leadId, courseId }: Props) {
 
               {/* Rejection reason */}
               {row.doc?.status === "rejected" && row.doc.rejection_reason && (
-                <p className="text-[10px] text-red-600 mt-1.5 ml-6">Reason: {row.doc.rejection_reason}</p>
+                <p className="text-[10px] text-destructive mt-1.5 ml-6">Reason: {row.doc.rejection_reason}</p>
               )}
 
               {/* Reject reason input */}

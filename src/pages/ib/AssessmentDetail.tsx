@@ -72,10 +72,10 @@ const INPUT_CLASS =
 const RUBRIC_LEVELS = ["Beginning", "Approaching", "Meeting", "Exceeding"] as const;
 
 const RUBRIC_COLORS: Record<string, string> = {
-  Beginning: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  Approaching: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  Meeting: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  Exceeding: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+  Beginning: "bg-destructive/10 text-destructive dark:bg-destructive/80/40 dark:text-destructive/60",
+  Approaching: "bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/70",
+  Meeting: "bg-info/10 text-info-foreground dark:bg-info/80/40 dark:text-info/60",
+  Exceeding: "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60",
 };
 
 const ATL_SKILLS = [
@@ -328,10 +328,10 @@ export default function AssessmentDetail() {
 
   // ── Grading model badge color ──────────────────────────────────────────────
   const modelBadge: Record<string, string> = {
-    rubric: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-    criteria: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-    anecdotal: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    points: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    rubric: "bg-info/10 text-info-foreground dark:bg-info/80/40 dark:text-info/60",
+    criteria: "bg-primary/10 text-primary dark:bg-primary/80/40 dark:text-primary/50",
+    anecdotal: "bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/70",
+    points: "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60",
     checklist: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300",
   };
 
@@ -339,7 +339,7 @@ export default function AssessmentDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -375,7 +375,7 @@ export default function AssessmentDetail() {
             </Badge>
             <Badge variant="secondary">{assessment.type}</Badge>
             {assessment.status === "completed" && (
-              <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-0">
+              <Badge className="bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60 border-0">
                 <CheckCircle className="h-3 w-3 mr-1" /> Completed
               </Badge>
             )}
@@ -559,10 +559,10 @@ function StudentGradingCard({
                 <Badge
                   className={
                     (result.grade ?? 0) >= 5
-                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-0"
+                      ? "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60 border-0"
                       : (result.grade ?? 0) >= 3
-                      ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-0"
-                      : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0"
+                      ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/70 border-0"
+                      : "bg-destructive/10 text-destructive dark:bg-destructive/80/40 dark:text-destructive/60 border-0"
                   }
                 >
                   {result.grade ?? 0}
@@ -631,7 +631,7 @@ function StudentGradingCard({
               className={
                 "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium border transition-all " +
                 (result.checklist_complete
-                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                  ? "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60 border-success/20 dark:border-success/60"
                   : "border-border text-muted-foreground hover:bg-muted")
               }
             >
@@ -675,7 +675,7 @@ function StudentGradingCard({
                       className={
                         "rounded-full px-2.5 py-1 text-xs font-medium border transition-all " +
                         (active
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800"
+                          ? "bg-info/10 text-info-foreground dark:bg-info/80/40 dark:text-info/60 border-info/20 dark:border-info/50"
                           : "border-border text-muted-foreground hover:bg-muted")
                       }
                     >
@@ -699,7 +699,7 @@ function StudentGradingCard({
                       className={
                         "rounded-full px-2.5 py-1 text-xs font-medium border transition-all " +
                         (active
-                          ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+                          ? "bg-primary/10 text-primary dark:bg-primary/80/40 dark:text-primary/50 border-primary/20 dark:border-primary/50"
                           : "border-border text-muted-foreground hover:bg-muted")
                       }
                     >

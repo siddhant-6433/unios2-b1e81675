@@ -12,6 +12,7 @@ import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
 import { useLocation } from "react-router-dom";
+import { Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
@@ -90,7 +91,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex w-full">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-5">
+            <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border/60 bg-card/80 backdrop-blur-xl px-3 py-2 sm:px-5">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
                 <div className="flex min-w-0 items-center gap-1.5 text-sm">
@@ -116,7 +117,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {deferredShellReady && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">
-              {children}
+              <Suspense fallback={
+                <div className="animate-rs-slide-up space-y-6">
+                  <div className="blade-indeterminate h-0.5 w-full rounded-full bg-primary/20" />
+                  <div className="space-y-2">
+                    <div className="h-7 w-48 rounded-lg blade-skeleton" />
+                    <div className="h-4 w-80 rounded-md blade-skeleton" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="h-28 rounded-xl flutes" />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '80ms' }} />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '160ms' }} />
+                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '240ms' }} />
+                  </div>
+                  <div className="h-64 rounded-xl flutes" />
+                </div>
+              }>
+                {children}
+              </Suspense>
             </main>
           </div>
         </div>

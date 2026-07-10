@@ -54,10 +54,10 @@ interface Student {
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   proposal: { label: "Proposal", color: "bg-gray-100 text-gray-700" },
-  approved: { label: "Approved", color: "bg-blue-100 text-blue-800" },
+  approved: { label: "Approved", color: "bg-info/10 text-info-foreground" },
   in_progress: { label: "In Progress", color: "bg-yellow-100 text-yellow-800" },
-  presentation: { label: "Presentation", color: "bg-purple-100 text-purple-800" },
-  completed: { label: "Completed", color: "bg-green-100 text-green-800" },
+  presentation: { label: "Presentation", color: "bg-primary/10 text-primary" },
+  completed: { label: "Completed", color: "bg-success/10 text-success-foreground" },
 };
 
 const MYPProjects = () => {
@@ -252,7 +252,7 @@ const MYPProjects = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
