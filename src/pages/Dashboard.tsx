@@ -175,6 +175,12 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         </div>
       )}
 
+      {/* ── Hero banner with fluted glass ── */}
+      <div className="rounded-2xl flutes px-6 py-5 mb-1">
+        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
+      </div>
+
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat, i) => (
@@ -474,10 +480,6 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
-      </div>
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}

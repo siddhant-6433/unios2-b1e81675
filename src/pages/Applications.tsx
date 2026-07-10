@@ -1390,7 +1390,7 @@ export default function Applications() {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl flutes px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{isCounsellor ? "My Applications" : "Applications"}</h1>
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
