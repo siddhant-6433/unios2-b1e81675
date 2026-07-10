@@ -161,22 +161,22 @@
     to { transform: rotate(360deg); }
   }
 
+  /* Blade spinner: 960ms with overshoot easing (from spinnerTokens.ts) */
   .animate-spin {
-    animation: rs-spin 0.8s cubic-bezier(0.3, 0, 0.2, 1) infinite !important;
+    animation: blade-spin 960ms cubic-bezier(0.5, 0, 0.3, 1.5) infinite !important;
     color: hsl(var(--primary));
   }
 
-  /* Pulse → smoother RazorSense pulse.
-     Only fade skeleton-like placeholders (no text content).
-     Filled UI elements (buttons, pills) keep full opacity. */
-  @keyframes rs-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
+  /* Skeleton-like animate-pulse → Blade two-phase pulse
+     (fade in first, then color oscillation). Only targets empty
+     placeholders, not filled UI elements. */
   .animate-pulse:empty,
   .animate-pulse[class*="bg-muted"],
   .animate-pulse[class*="bg-secondary"] {
-    animation: rs-pulse 2s cubic-bezier(0.3, 0, 0.2, 1) infinite !important;
+    animation:
+      blade-fade-in 960ms cubic-bezier(0.3, 0, 0.2, 1) forwards,
+      blade-skeleton-pulse 1320ms cubic-bezier(0.3, 0, 0.2, 1) 960ms infinite alternate !important;
+    opacity: 0;
   }
 
   /* Focus rings → RazorSense ring style */
@@ -321,107 +321,72 @@
   .card-shadow { @apply elevation-low; }
   .card-shadow-md { @apply elevation-mid; }
 
-  /* ── RazorSense "flutes" — the signature fluted glass effect ──
-     Diagonal light streaks that look like ridged glass. Used for:
-     loading skeletons, card accents, hero backgrounds.
-     Four emotional variants: calm (blue), joyful (teal), caution (amber), regret (red). */
+  /* ── Blade skeleton pulse (from razorpay/blade PulseAnimation.web.tsx) ──
+     Two-phase: fade in first, then oscillate between gray.default and
+     gray.highlighted with standard easing. */
   .flutes {
+    background-color: hsl(var(--muted));
+    animation:
+      blade-fade-in 960ms cubic-bezier(0.3, 0, 0.2, 1) forwards,
+      blade-skeleton-pulse 1320ms cubic-bezier(0.3, 0, 0.2, 1) 960ms infinite alternate;
+    opacity: 0;
+  }
+
+  /* ── Blade indeterminate progress bar (from progressBarTokens.ts) ──
+     A 5%-width fill that scales 1x→5x→1x while sliding left to right. */
+  .blade-indeterminate {
     position: relative;
     overflow: hidden;
   }
-  .flutes::before {
+  .blade-indeterminate::after {
+    content: '';
+    position: absolute;
+    left: -8%;
+    width: 5%;
+    height: 100%;
+    background: inherit;
+    border-radius: inherit;
+    animation: blade-indeterminate-slide 960ms linear infinite;
+  }
+
+  /* ── Blade progress pulse overlay (from ProgressBarFilled.web.tsx) ──
+     White overlay that breathes 0→0.25→0 on the filled portion. */
+  .blade-progress-pulse {
+    position: relative;
+    overflow: hidden;
+  }
+  .blade-progress-pulse::after {
     content: '';
     position: absolute;
     inset: 0;
-    background:
-      repeating-linear-gradient(
-        110deg,
-        transparent,
-        hsl(var(--primary) / 0.03) 2px,
-        transparent 4px,
-        hsl(var(--primary) / 0.05) 8px,
-        transparent 12px,
-        hsl(var(--primary) / 0.02) 18px,
-        transparent 24px
-      ),
-      linear-gradient(
-        135deg,
-        hsl(var(--primary) / 0.04),
-        hsl(var(--info) / 0.06) 30%,
-        hsl(var(--primary) / 0.03) 60%,
-        hsl(var(--info) / 0.05)
-      );
-    background-size: 200% 200%;
-    animation: flutes-drift 6s ease-in-out infinite;
-    pointer-events: none;
-    z-index: 0;
-  }
-  .flutes > * { position: relative; z-index: 1; }
-
-  /* Joyful variant (success/green) */
-  .flutes-joyful::before {
-    background:
-      repeating-linear-gradient(
-        110deg,
-        transparent,
-        hsl(var(--success) / 0.03) 2px,
-        transparent 4px,
-        hsl(var(--success) / 0.05) 8px,
-        transparent 12px
-      ),
-      linear-gradient(135deg, hsl(var(--success) / 0.04), hsl(152 80% 70% / 0.08) 50%, hsl(var(--success) / 0.03));
+    background: white;
+    opacity: 0;
+    animation: blade-pulse-overlay 960ms cubic-bezier(0.3, 0, 0.2, 1) 2000ms infinite;
+    border-radius: inherit;
   }
 
-  /* Caution variant (warning/amber) */
-  .flutes-caution::before {
-    background:
-      repeating-linear-gradient(
-        110deg,
-        transparent,
-        hsl(var(--warning) / 0.03) 2px,
-        transparent 4px,
-        hsl(var(--warning) / 0.05) 8px,
-        transparent 12px
-      ),
-      linear-gradient(135deg, hsl(var(--warning) / 0.04), hsl(40 90% 65% / 0.08) 50%, hsl(var(--warning) / 0.03));
-  }
-
-  /* Regret variant (destructive/red) */
-  .flutes-regret::before {
-    background:
-      repeating-linear-gradient(
-        110deg,
-        transparent,
-        hsl(var(--destructive) / 0.03) 2px,
-        transparent 4px,
-        hsl(var(--destructive) / 0.05) 8px,
-        transparent 12px
-      ),
-      linear-gradient(135deg, hsl(var(--destructive) / 0.04), hsl(4 80% 65% / 0.08) 50%, hsl(var(--destructive) / 0.03));
-  }
-
-  /* Glass button — frosted pill sitting on fluted background */
+  /* Glass button — frosted pill */
   .glass-btn {
     background: hsl(0 0% 100% / 0.65);
     backdrop-filter: blur(12px) saturate(1.3);
     -webkit-backdrop-filter: blur(12px) saturate(1.3);
     border: 1px solid hsl(0 0% 100% / 0.4);
-    box-shadow: 0 2px 8px hsl(214 32% 12% / 0.06);
+    box-shadow: 0px 2px 4px 0px hsla(200, 10%, 18%, 0.06);
     transition: all 240ms cubic-bezier(0.3, 0, 0.2, 1);
   }
   .glass-btn:hover {
     background: hsl(0 0% 100% / 0.85);
-    box-shadow: 0 4px 16px hsl(214 32% 12% / 0.1);
+    box-shadow: 0px 8px 24px -4px hsla(200, 10%, 18%, 0.06);
     transform: translateY(-1px);
   }
 
-  /* Glass card — frosted card that sits on fluted backgrounds */
+  /* Glass card — frosted panel */
   .glass-card {
     background: hsl(0 0% 100% / 0.6);
     backdrop-filter: blur(16px) saturate(1.3);
     -webkit-backdrop-filter: blur(16px) saturate(1.3);
     border: 1px solid hsl(0 0% 100% / 0.3);
-    box-shadow: 0 4px 12px hsl(214 32% 12% / 0.06);
+    box-shadow: 0px 6px 32px 4px hsla(200, 10%, 18%, 0.06);
   }
 }
 
@@ -431,9 +396,39 @@
   to { width: 0%; }
 }
 
-@keyframes flutes-drift {
-  0%, 100% { background-position: 0% 0%; }
-  50% { background-position: 100% 100%; }
+/* ── Blade keyframes (ported from razorpay/blade source) ── */
+
+/* Skeleton: fade in on first render */
+@keyframes blade-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Skeleton: pulse between gray.default and gray.highlighted */
+@keyframes blade-skeleton-pulse {
+  0% { background-color: hsl(var(--muted)); }
+  25% { background-color: hsl(var(--muted)); }
+  100% { background-color: hsl(var(--surface-intense)); }
+}
+
+/* Progress indeterminate: 5% bar scales + slides across */
+@keyframes blade-indeterminate-slide {
+  0%   { left: -8%;  transform: scaleX(1); }
+  50%  { left: 50%;  transform: scaleX(5); }
+  100% { left: 103%; transform: scaleX(1); }
+}
+
+/* Progress pulse: white overlay breathes on filled bar */
+@keyframes blade-pulse-overlay {
+  0%   { opacity: 0; }
+  50%  { opacity: 0.25; }
+  100% { opacity: 0; }
+}
+
+/* Blade spinner: rotate with overshoot easing */
+@keyframes blade-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* RazorSense emotional state animations */

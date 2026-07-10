@@ -178,7 +178,7 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat, i) => (
-          <Card key={stat.label} className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up group flutes" style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}>
+          <Card key={stat.label} className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up group" style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}>
             <CardContent className="p-5 flex flex-col h-full">
               {/* Top: label + icon */}
               <div className="flex items-center justify-between">
