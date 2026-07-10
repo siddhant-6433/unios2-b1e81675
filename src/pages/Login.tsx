@@ -866,12 +866,12 @@ const Login = () => {
         <Suspense fallback={null}>
           <RazorSense
             preset="default"
-            width="800%"
-            height="800%"
+            width="400%"
+            height="400%"
             style={{
               position: 'absolute',
-              top: '-350%',
-              left: '-350%',
+              top: '-150%',
+              left: '-150%',
               zIndex: 0,
               opacity: 0.35,
               pointerEvents: 'none',
