@@ -335,9 +335,9 @@ export function AppSidebar() {
   // Reference-inspired sidebar items: soft hover background, active item
   // becomes a white pill with a subtle shadow that pops against the tinted
   // sidebar canvas. No DOM/structure change — just className tuning.
-  const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
-  const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(220_13%_46%/0.08)]";
-  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(214_32%_12%/0.08)]";
+  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -385,7 +385,7 @@ export function AppSidebar() {
                         <span className="flex-1">{item.title}</span>
                       )}
                       {!collapsed && item.badge && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground px-1">
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground px-1 animate-rs-scale-in">
                           {item.badge}
                         </span>
                       )}

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect, memo } from "react";
+import { useCountUp } from "@/hooks/useCountUp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
@@ -19,6 +20,11 @@ import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantV
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
+
+const AnimatedNumber = memo(({ value }: { value: number }) => {
+  const display = useCountUp(value);
+  return <>{display.toLocaleString("en-IN")}</>;
+});
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -171,8 +177,8 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
 
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((stat) => (
-          <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
+        {statCards.map((stat, i) => (
+          <Card key={stat.label} className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up" style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}>
             <CardContent className="p-5">
               <div className="flex items-start justify-between">
                 <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
@@ -182,7 +188,9 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
                   <ArrowUpRight className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
+              <p className="text-3xl font-bold text-foreground mt-4 tabular-nums">
+                <AnimatedNumber value={Number(stat.value) || 0} />
+              </p>
               <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
               <p className={`text-xs font-medium mt-1 ${stat.subColor}`}>{stat.sub}</p>
             </CardContent>

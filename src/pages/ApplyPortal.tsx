@@ -2651,7 +2651,9 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-6">
-            {renderStep()}
+            <div key={currentStep} className="animate-rs-slide-up">
+              {renderStep()}
+            </div>
           </CardContent>
         </Card>
 

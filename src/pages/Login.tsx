@@ -479,6 +479,9 @@ const Login = () => {
             </div>
           )}
 
+          {/* Login method forms — keyed for RazorSense entrance animation */}
+          <div key={method + (otpSent ? "-otp" : "")} className="animate-rs-slide-up">
+
           {/* Dev Password Login (localhost only) */}
           {method === "dev_password" && import.meta.env.DEV && (
             <form onSubmit={handleDevPasswordLogin} className="space-y-4">
@@ -839,6 +842,8 @@ const Login = () => {
             )}
             </div>
           )}
+
+          </div>{/* end keyed animation wrapper */}
 
           <p className="text-center text-[11px] text-muted-foreground">
             By signing in, you agree to our{" "}
