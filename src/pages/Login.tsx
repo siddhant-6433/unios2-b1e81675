@@ -436,41 +436,28 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex bg-background animate-fade-in">
-      {/* Left panel */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center relative overflow-hidden">
-        {/* RzpGlass WebGL background — the actual Razorpay fluted glass effect */}
-        <Suspense fallback={<div className="absolute inset-0 bg-primary" />}>
-          <RazorSense
-            preset="default"
-            width="100%"
-            height="100%"
-            style={{ position: 'absolute', inset: 0 }}
-            backgroundColor={[0.0, 0.13, 0.49]}
-          />
-        </Suspense>
-        {/* Content overlay */}
-        <div className="relative z-10 p-12">
-          <div className="absolute top-6 left-6">
-            <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
-          </div>
-          <div className="max-w-md text-center">
-            <img src={uniosLogo} alt="UniOs" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
-            <h1 className="text-3xl font-bold text-white mb-3">NIMT UniOs</h1>
-            <p className="text-white/70 text-base leading-relaxed">
-              Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
-            </p>
-          </div>
+      {/* Left panel — clean brand panel */}
+      <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
+        <div className="absolute top-6 left-6">
+          <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
+        </div>
+        <div className="max-w-md text-center">
+          <img src={uniosLogo} alt="UniOs" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
+          <h1 className="text-3xl font-bold text-primary-foreground mb-3">NIMT UniOs</h1>
+          <p className="text-primary-foreground/70 text-base leading-relaxed">
+            Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
+          </p>
         </div>
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-6 relative">
+      <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
         {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
         <div className="lg:hidden absolute top-5 right-5">
           <img src={nimtLogo} alt="NIMT" className="h-7 w-auto opacity-60" />
         </div>
 
-        <div className="w-full max-w-sm space-y-6">
+        <div className="w-full max-w-sm space-y-6 relative z-10">
           {/* Mobile logo */}
           <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
             <img src={uniosLogo} alt="UniOs" className="h-16 w-16 object-contain" />
@@ -874,6 +861,23 @@ const Login = () => {
             </a>
           </div>
         </div>
+
+        {/* RzpGlass — subtle light background behind the form */}
+        <Suspense fallback={null}>
+          <RazorSense
+            preset="default"
+            width="100%"
+            height="100%"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 0,
+              opacity: 0.12,
+              pointerEvents: 'none',
+            }}
+            backgroundColor={[0.95, 0.96, 0.98]}
+          />
+        </Suspense>
       </div>
     </div>
   );
