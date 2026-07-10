@@ -349,9 +349,9 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarContent className="bg-sidebar pt-4">
-        {/* Logo — fluted glass accent */}
+        {/* Logo */}
         <div className="px-3 pb-2">
-          <div className="flex items-center gap-3 rounded-xl flutes px-3 py-2.5">
+          <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-primary/5 to-transparent px-3 py-2.5">
             <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
             {!collapsed && (
               <div className="flex flex-col">

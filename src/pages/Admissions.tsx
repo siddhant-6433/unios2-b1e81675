@@ -1677,7 +1677,7 @@ const Admissions = () => {
           <CloudDialerNudge />
         </Suspense>
       )}
-      <div className="rounded-2xl flutes px-6 py-5 flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>

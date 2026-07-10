@@ -175,8 +175,8 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         </div>
       )}
 
-      {/* ── Hero banner with fluted glass ── */}
-      <div className="rounded-2xl flutes px-6 py-5 mb-1">
+      {/* ── Hero banner ── */}
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 mb-1">
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>

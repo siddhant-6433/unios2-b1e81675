@@ -337,60 +337,20 @@
     opacity: 0;
   }
 
-  /* ── Fluted glass — CSS approximation of Razorpay's RzpGlass WebGL shader ──
-     The real effect uses 45 angled glass slits at 0.13rad (~7.5°) with
-     pixel displacement + colorama color-cycling + bloom. CSS can't displace
-     pixels, but we approximate with:
-     1. repeating-linear-gradient at 97.5° (90+7.5) for the slit pattern
-     2. A color-shifting overlay that cycles hue over time
-     3. A soft radial glow for the bloom center */
+  /* ── Skeleton shimmer — clean loading placeholder ──
+     ponytail: the real RzpGlass is a 925-line WebGL shader. CSS can't
+     replicate pixel displacement without looking cheap. This is a
+     standard shimmer sweep for loading skeletons only. */
   .flutes {
-    position: relative;
-    overflow: hidden;
-    background: linear-gradient(135deg,
-      hsl(214 40% 94%) 0%,
-      hsl(210 50% 96%) 50%,
-      hsl(214 40% 94%) 100%
-    );
-  }
-  .flutes::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    /* 45 slit bands at ~7.5° matching the shader's numSegments + slitAngle */
-    background:
-      repeating-linear-gradient(
-        97.5deg,
-        hsl(var(--primary) / 0.0) 0px,
-        hsl(var(--primary) / 0.06) 4px,
-        hsl(var(--primary) / 0.0) 8px,
-        hsl(var(--info) / 0.04) 12px,
-        hsl(var(--primary) / 0.0) 16px
-      );
-    animation: flutes-shift 4s linear infinite;
-    pointer-events: none;
-    z-index: 0;
-  }
-  .flutes::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    /* Color-cycling overlay — shifts between blue and teal like colorama */
     background: linear-gradient(
-      135deg,
-      hsl(var(--primary) / 0.04) 0%,
-      hsl(var(--info) / 0.08) 25%,
-      hsl(180 60% 70% / 0.05) 50%,
-      hsl(var(--primary) / 0.06) 75%,
-      hsl(var(--info) / 0.04) 100%
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(214 20% 91%) 40%,
+      hsl(var(--muted)) 80%
     );
-    background-size: 300% 300%;
-    animation: flutes-color-cycle 6s ease-in-out infinite;
-    mix-blend-mode: overlay;
-    pointer-events: none;
-    z-index: 0;
+    background-size: 200% 100%;
+    animation: shimmer-sweep 1.8s ease-in-out infinite;
   }
-  .flutes > * { position: relative; z-index: 1; }
 
   /* ── Blade indeterminate progress bar (from progressBarTokens.ts) ──
      A 5%-width fill that scales 1x→5x→1x while sliding left to right. */
@@ -458,16 +418,10 @@
 
 /* ── Blade keyframes (ported from razorpay/blade source) ── */
 
-/* Fluted glass: slit pattern shifts laterally (like physical glass rotation) */
-@keyframes flutes-shift {
-  from { transform: translateX(0); }
-  to { transform: translateX(16px); }
-}
-/* Fluted glass: color overlay cycles through hues (like colorama) */
-@keyframes flutes-color-cycle {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+/* Skeleton shimmer: light band sweeps left to right */
+@keyframes shimmer-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* Skeleton: fade in on first render */
