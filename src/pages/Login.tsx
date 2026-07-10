@@ -862,7 +862,7 @@ const Login = () => {
           </div>
         </div>
 
-        {/* RzpGlass — subtle light background behind the form */}
+        {/* RzpGlass — covers entire right panel */}
         <Suspense fallback={null}>
           <RazorSense
             preset="default"
@@ -872,10 +872,10 @@ const Login = () => {
               position: 'absolute',
               inset: 0,
               zIndex: 0,
-              opacity: 0.12,
+              opacity: 0.35,
               pointerEvents: 'none',
             }}
-            backgroundColor={[0.95, 0.96, 0.98]}
+            backgroundColor={[0.92, 0.94, 0.97]}
           />
         </Suspense>
       </div>
