@@ -123,6 +123,18 @@ export function SendPaymentLinkDialog({
           </DialogTitle>
         </DialogHeader>
 
+        {!createdUrl && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-300 space-y-1">
+            <p className="font-semibold">How to use</p>
+            <ol className="list-decimal list-inside space-y-0.5">
+              <li>Select a purpose — token fee, fee due, or custom amount</li>
+              <li>Enter the amount and set link expiry (default 7 days)</li>
+              <li>Choose to send via WhatsApp, Email, or just copy the link</li>
+              <li>Click "Create Link" — the candidate receives a payment page</li>
+            </ol>
+          </div>
+        )}
+
         {createdUrl ? (
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">Payment link ready:</p>
