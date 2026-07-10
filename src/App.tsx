@@ -79,6 +79,7 @@ const Settings             = lazy(() => import("./pages/Settings"));
 const NotFound             = lazy(() => import("./pages/NotFound"));
 const Forbidden            = lazy(() => import("./pages/Forbidden"));
 const ApplicantPortal      = lazy(() => import("./pages/ApplicantPortal"));
+const About                = lazy(() => import("./pages/About"));
 const PrivacyPolicy        = lazy(() => import("./pages/PrivacyPolicy"));
 const TermsOfService       = lazy(() => import("./pages/TermsOfService"));
 const AlumniVerification   = lazy(() => import("./pages/AlumniVerification"));
@@ -260,6 +261,7 @@ const App = () => (
             <Route path="/apply/offer/:token" element={<OfferLinkRedirect />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
             <Route path="/publisher-login" element={<PublisherLogin />} />
+            <Route path="/about" element={<About />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/alumni-verification" element={<AlumniVerification />} />
