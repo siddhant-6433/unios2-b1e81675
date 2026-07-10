@@ -246,7 +246,7 @@ const WhatsAppHealth = () => {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground flex items-center gap-2">
-            <ShieldAlert className="h-6 w-6 text-amber-600" />
+            <ShieldAlert className="h-6 w-6 text-warning-foreground" />
             WhatsApp Health & Spam Triage
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -424,12 +424,12 @@ const WhatsAppHealth = () => {
                           title={`${d.day}: ${d.total} sent, ${d.failed} failed, ${d.read} read`}
                         >
                           <div
-                            className="bg-emerald-500 rounded-t-sm"
+                            className="bg-success/50 rounded-t-sm"
                             style={{ height: `${totalH - failedH}%` }}
                           />
                           {failedH > 0 && (
                             <div
-                              className="bg-red-500"
+                              className="bg-destructive/50"
                               style={{ height: `${failedH}%` }}
                             />
                           )}
@@ -442,8 +442,8 @@ const WhatsAppHealth = () => {
                     <span>{data.daily[data.daily.length - 1]?.day}</span>
                   </div>
                   <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-500 rounded-sm" /> Sent</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500 rounded-sm" /> Failed</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-success/50 rounded-sm" /> Sent</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-destructive/50 rounded-sm" /> Failed</span>
                   </div>
                 </div>
               )}
@@ -504,9 +504,9 @@ const WhatsAppHealth = () => {
                             <td className="text-right px-3 py-2">{t.failed.toLocaleString()}</td>
                             <td className={`text-right px-3 py-2 font-semibold ${
                               (t.failed_pct ?? 0) > 10
-                                ? "text-red-600"
+                                ? "text-destructive"
                                 : (t.failed_pct ?? 0) > 5
-                                ? "text-amber-600"
+                                ? "text-warning-foreground"
                                 : "text-muted-foreground"
                             }`}>
                               {t.failed_pct ?? "—"}
@@ -531,7 +531,7 @@ const WhatsAppHealth = () => {
                                             {e.meta_message || "—"}
                                           </div>
                                           {e.meta_code && META_CODE_HINTS[e.meta_code] && (
-                                            <div className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                                            <div className="text-[10px] text-warning-foreground dark:text-warning mt-0.5">
                                               {META_CODE_HINTS[e.meta_code]}
                                             </div>
                                           )}
@@ -591,9 +591,9 @@ const WhatsAppHealth = () => {
                         <td className="text-right px-3 py-2">{p.failed.toLocaleString()}</td>
                         <td className={`text-right px-3 py-2 font-semibold ${
                           (p.failed_pct ?? 0) > 10
-                            ? "text-red-600"
+                            ? "text-destructive"
                             : (p.failed_pct ?? 0) > 5
-                            ? "text-amber-600"
+                            ? "text-warning-foreground"
                             : "text-muted-foreground"
                         }`}>
                           {p.failed_pct ?? "—"}
@@ -610,7 +610,7 @@ const WhatsAppHealth = () => {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertTriangle className="h-4 w-4 text-warning-foreground" />
                 Meta error codes
                 <span className="text-xs font-normal text-muted-foreground">
                   Rows with codes 131048 / 131049 / 131026 are spam-rating signals
@@ -639,7 +639,7 @@ const WhatsAppHealth = () => {
                     {data.errors.map((e, i) => {
                       const isSpam = e.meta_code && SPAM_CODES.has(e.meta_code);
                       return (
-                        <tr key={i} className={`border-t border-border ${isSpam ? "bg-red-50/40 dark:bg-red-950/20" : ""}`}>
+                        <tr key={i} className={`border-t border-border ${isSpam ? "bg-destructive/5/40 dark:bg-destructive/90/20" : ""}`}>
                           <td className="px-3 py-2">
                             {e.meta_code ? (
                               <Badge variant={isSpam ? "destructive" : "outline"} className="font-mono text-[10px]">
@@ -656,7 +656,7 @@ const WhatsAppHealth = () => {
                               {e.meta_message || "—"}
                             </div>
                             {e.meta_code && META_CODE_HINTS[e.meta_code] && (
-                              <div className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                              <div className="text-[10px] text-warning-foreground dark:text-warning mt-0.5">
                                 {META_CODE_HINTS[e.meta_code]}
                               </div>
                             )}
@@ -793,9 +793,9 @@ const SummaryCard = ({
 }) => {
   const toneClass =
     tone === "bad"
-      ? "text-red-600 dark:text-red-400"
+      ? "text-destructive dark:text-destructive/80"
       : tone === "warn"
-      ? "text-amber-600 dark:text-amber-400"
+      ? "text-warning-foreground dark:text-warning"
       : "text-foreground";
   return (
     <Card>

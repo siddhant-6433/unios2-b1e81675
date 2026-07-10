@@ -30,11 +30,11 @@ interface AiCallLog {
 }
 
 const statusColors: Record<string, string> = {
-  completed: "bg-emerald-100 text-emerald-700",
-  busy: "bg-amber-100 text-amber-700",
-  "no-answer": "bg-orange-100 text-orange-700",
-  failed: "bg-red-100 text-red-700",
-  initiated: "bg-blue-100 text-blue-700",
+  completed: "bg-success/10 text-success",
+  busy: "bg-warning/10 text-warning-foreground",
+  "no-answer": "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
+  initiated: "bg-info/10 text-info-foreground",
 };
 
 export function AiCallLogsPanel() {
@@ -88,10 +88,10 @@ export function AiCallLogsPanel() {
     <div className="space-y-4">
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total AI Calls" value={String(totalCalls)} icon={<Bot className="h-[18px] w-[18px] text-blue-600" />} bg="bg-pastel-blue" />
-        <StatCard label="Connected" value={String(completedCalls)} icon={<PhoneCall className="h-[18px] w-[18px] text-emerald-600" />} bg="bg-pastel-green" />
-        <StatCard label="Total Duration" value={`${Math.floor(totalDuration / 60)}m ${totalDuration % 60}s`} icon={<Clock className="h-[18px] w-[18px] text-orange-600" />} bg="bg-pastel-orange" />
-        <StatCard label="Total Cost" value={`$${totalCost.toFixed(3)}`} icon={<Phone className="h-[18px] w-[18px] text-violet-600" />} bg="bg-pastel-purple" />
+        <StatCard label="Total AI Calls" value={String(totalCalls)} icon={<Bot className="h-[18px] w-[18px] text-info-foreground" />} bg="bg-pastel-blue" />
+        <StatCard label="Connected" value={String(completedCalls)} icon={<PhoneCall className="h-[18px] w-[18px] text-success" />} bg="bg-pastel-green" />
+        <StatCard label="Total Duration" value={`${Math.floor(totalDuration / 60)}m ${totalDuration % 60}s`} icon={<Clock className="h-[18px] w-[18px] text-warning-foreground" />} bg="bg-pastel-orange" />
+        <StatCard label="Total Cost" value={`$${totalCost.toFixed(3)}`} icon={<Phone className="h-[18px] w-[18px] text-primary" />} bg="bg-pastel-purple" />
       </div>
 
       {/* Call logs table */}
@@ -105,7 +105,7 @@ export function AiCallLogsPanel() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : logs.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
@@ -122,7 +122,7 @@ export function AiCallLogsPanel() {
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors text-left"
                       onClick={() => setExpandedId(isExpanded ? null : log.id)}
                     >
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${log.direction === "inbound" ? "bg-blue-100 text-blue-600" : "bg-primary/10 text-primary"}`}>
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${log.direction === "inbound" ? "bg-info/10 text-info-foreground" : "bg-primary/10 text-primary"}`}>
                         {log.direction === "inbound" ? <PhoneIncoming className="h-4 w-4" /> : <PhoneCall className="h-4 w-4" />}
                       </div>
                       <div className="flex-1 min-w-0">

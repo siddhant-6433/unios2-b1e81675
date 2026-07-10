@@ -69,19 +69,19 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
               <div className="flex items-center gap-2 flex-wrap">
                 {isManual
                   ? <Phone className="h-3 w-3 text-cyan-600 shrink-0" />
-                  : <Bot className="h-3 w-3 text-amber-600 shrink-0" />
+                  : <Bot className="h-3 w-3 text-warning-foreground shrink-0" />
                 }
                 <span className="text-[10px] text-muted-foreground">{dateLabel} {timeLabel}</span>
                 {durLabel && <span className="text-[10px] text-muted-foreground">{durLabel}</span>}
                 {prob != null && (
-                  <Badge className={`text-[9px] border-0 ${prob >= 70 ? "bg-emerald-100 text-emerald-700" : prob >= 40 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                  <Badge className={`text-[9px] border-0 ${prob >= 70 ? "bg-success/10 text-success" : prob >= 40 ? "bg-warning/10 text-warning-foreground" : "bg-destructive/10 text-destructive"}`}>
                     {prob}%
                   </Badge>
                 )}
                 {call.disposition && (
                   <Badge variant="outline" className="text-[9px] capitalize">{call.disposition.replace(/_/g, " ")}</Badge>
                 )}
-                <Badge className={`text-[9px] border-0 ${call.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}`}>
+                <Badge className={`text-[9px] border-0 ${call.status === "completed" ? "bg-success/10 text-success" : "bg-info/10 text-info-foreground"}`}>
                   {call.status}
                 </Badge>
                 <div className="flex items-center gap-2 ml-auto shrink-0">

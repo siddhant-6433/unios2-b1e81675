@@ -514,7 +514,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
 
           {gwLoading && (
             <div className="flex justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           )}
 
@@ -562,7 +562,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
                     )}
                   </div>
                   {elapsed >= 90 && (
-                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                    <p className="text-[11px] text-warning-foreground leading-relaxed">
                       Bank is taking longer than usual. If your payment was deducted it will reconcile automatically within 5 minutes — you can safely cancel and retry, or wait it out.
                     </p>
                   )}

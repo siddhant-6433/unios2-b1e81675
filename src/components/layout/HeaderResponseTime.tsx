@@ -105,16 +105,16 @@ export function HeaderResponseTime() {
         <TooltipTrigger asChild>
           <div className={`hidden md:flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs cursor-default select-none transition-colors ${
             isAlert
-              ? "border-red-400/60 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+              ? "border-destructive/25/60 bg-destructive/5 text-destructive dark:bg-destructive/90/30 dark:text-destructive/80"
               : "border-border/60 bg-muted/40 text-muted-foreground"
           }`}>
             {isAlert
-              ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-500" />
+              ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
               : <Timer className="h-3.5 w-3.5 shrink-0" />
             }
             <span className="hidden lg:inline font-medium">Avg Time to First Call</span>
             <span className="text-border mx-0.5 hidden lg:inline">·</span>
-            <span className={`font-medium ${isAlert ? "text-red-600" : "text-orange-500"}`}>{fmt(mine.manual)}</span>
+            <span className={`font-medium ${isAlert ? "text-destructive" : "text-warning"}`}>{fmt(mine.manual)}</span>
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs max-w-[260px]">
@@ -124,24 +124,24 @@ export function HeaderResponseTime() {
           </p>
           <div className="space-y-0.5">
             <p>
-              <span className="text-orange-500">●</span> {isGlobalRole ? "Team" : "Your"} avg: <strong>{fmt(mine.manual)}</strong>
+              <span className="text-warning">●</span> {isGlobalRole ? "Team" : "Your"} avg: <strong>{fmt(mine.manual)}</strong>
               {!isGlobalRole && global !== null && global.manual !== null && (
                 <span className="text-muted-foreground ml-1">(team: {fmt(global.manual)})</span>
               )}
-              {manualSlow && <span className="text-red-500 ml-1">↑ slower than team</span>}
+              {manualSlow && <span className="text-destructive ml-1">↑ slower than team</span>}
             </p>
           </div>
           {globalNudge && (
-            <div className="mt-2 rounded-md bg-red-50 border border-red-200 px-2.5 py-2 text-red-700">
+            <div className="mt-2 rounded-md bg-destructive/5 border border-destructive/20 px-2.5 py-2 text-destructive">
               <p className="font-semibold mb-0.5">🚨 Team response time is too slow</p>
               <p className="leading-snug">Pick up new leads and call them immediately — every hour of delay reduces conversion. Aim for under 30 minutes.</p>
             </div>
           )}
           {!globalNudge && manualSlow && (
-            <p className="mt-1.5 text-red-600 font-medium">You're slower than the team average. Call new leads faster.</p>
+            <p className="mt-1.5 text-destructive font-medium">You're slower than the team average. Call new leads faster.</p>
           )}
           {!isGlobalRole && !anySlow && !globalNudge && global !== null && (
-            <p className="mt-1.5 text-emerald-600">On par with or faster than team average.</p>
+            <p className="mt-1.5 text-success">On par with or faster than team average.</p>
           )}
         </TooltipContent>
       </Tooltip>

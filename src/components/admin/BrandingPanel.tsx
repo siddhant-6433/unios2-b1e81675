@@ -146,7 +146,7 @@ export function BrandingPanel() {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -192,7 +192,7 @@ export function BrandingPanel() {
                   />
                   <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{row.slug}</span>
                   {row.is_default && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 dark:bg-warning/90/40 px-2 py-0.5 text-[10px] font-semibold text-warning-foreground dark:text-warning">
                       <Star className="h-2.5 w-2.5" /> Default
                     </span>
                   )}
@@ -237,7 +237,7 @@ export function BrandingPanel() {
                   <Eye className="h-3 w-3" /> Preview
                 </button>
                 {!row.is_default && (
-                  <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-amber-600 underline">
+                  <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-warning-foreground underline">
                     Make default
                   </button>
                 )}
@@ -326,7 +326,7 @@ export function BrandingPanel() {
             <div className="flex-1 bg-muted/40 relative">
               {previewLoading && (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
               )}
               {previewUrl && (

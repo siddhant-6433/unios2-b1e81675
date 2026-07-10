@@ -297,7 +297,7 @@ export function ApplyMagicLinkButton({
                   className="shrink-0 rounded-md p-1.5 hover:bg-background transition-colors"
                   aria-label="Copy link"
                 >
-                  {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
               </div>
 
@@ -308,7 +308,7 @@ export function ApplyMagicLinkButton({
                 <Button variant="pill-outline" size="pill" onClick={copy}>
                   {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
                 </Button>
-                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-green-600 hover:bg-green-700">
+                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-success hover:bg-success/60">
                   <MessageCircle className="h-4 w-4" /> Send via WhatsApp
                 </Button>
               </div>

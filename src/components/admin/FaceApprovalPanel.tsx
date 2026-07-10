@@ -104,7 +104,7 @@ export default function FaceApprovalPanel() {
   const rejected = registrations.filter(r => r.status === "rejected");
 
   if (loading) {
-    return <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   const statusBadge = (status: string) => {

@@ -275,7 +275,7 @@ const Settings = () => {
 
             {passkeysLoading ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
               </div>
             ) : passkeys.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border p-6 text-center">
@@ -325,13 +325,13 @@ const Settings = () => {
             </Card>
           ) : deadlinesLoading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex gap-2 items-start">
-                <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-                <p className="text-xs text-blue-900 leading-relaxed">
+              <div className="rounded-xl border border-info/20 bg-info/5 p-3 flex gap-2 items-start">
+                <Info className="h-4 w-4 text-info-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-info-foreground leading-relaxed">
                   These dates apply to <strong>every active offer</strong>. Extend them here in one shot — applicant portals refresh automatically on next load.
                 </p>
               </div>
@@ -398,7 +398,7 @@ const Settings = () => {
             </Card>
           ) : loading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : (
             <div className="space-y-4">

@@ -560,7 +560,7 @@ const PendingFollowups = () => {
               {c > 0 && (
                 <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                   isActive ? "bg-primary-foreground/20 text-primary-foreground"
-                    : t.key === "overdue" || t.key === "unclosed_visits" ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                    : t.key === "overdue" || t.key === "unclosed_visits" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
                 }`}>{c}</span>
               )}
             </button>
@@ -646,7 +646,7 @@ const PendingFollowups = () => {
       )}
 
       {lastInlineCall && !inlineCall && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-success/20 bg-success/5 px-4 py-3 text-sm text-success-foreground">
           <Check className="h-4 w-4 shrink-0" />
           <span className="font-medium">Call logged: {lastInlineCall.label}</span>
           {lastInlineCall.nextItem ? (
@@ -662,11 +662,11 @@ const PendingFollowups = () => {
               Call next follow-up
             </Button>
           ) : (
-            <span className="ml-auto text-xs text-emerald-700">No more leads visible in this tab.</span>
+            <span className="ml-auto text-xs text-success">No more leads visible in this tab.</span>
           )}
           <button
             onClick={() => setLastInlineCall(null)}
-            className="rounded-md p-1 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-950 transition-colors"
+            className="rounded-md p-1 text-success hover:bg-success/10 hover:text-success-foreground transition-colors"
             aria-label="Dismiss call logged message"
           >
             <X className="h-4 w-4" />
@@ -678,7 +678,7 @@ const PendingFollowups = () => {
       <Card className="border-border/60 shadow-none overflow-x-auto">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -733,21 +733,21 @@ const PendingFollowups = () => {
                     </td>
                     <td className="px-3 py-2.5">
                       <Badge className={`text-[10px] border-0 ${
-                        r.type === "call" ? "bg-blue-100 text-blue-700"
-                        : r.type === "visit_confirmation" ? "bg-purple-100 text-purple-700"
-                        : r.type === "post_visit" ? "bg-amber-100 text-amber-700"
+                        r.type === "call" ? "bg-info/10 text-info-foreground"
+                        : r.type === "visit_confirmation" ? "bg-primary/10 text-primary"
+                        : r.type === "post_visit" ? "bg-warning/10 text-warning-foreground"
                         : "bg-muted text-muted-foreground"
                       }`}>{r.type.replace(/_/g, " ")}</Badge>
                     </td>
                     <td className="px-3 py-2.5 text-xs">
                       {(tab === "overdue" || tab === "unclosed_visits") && r.days_overdue !== undefined ? (
-                        <span className={`font-medium ${r.days_overdue > 2 ? "text-red-600" : "text-amber-600"}`}>
+                        <span className={`font-medium ${r.days_overdue > 2 ? "text-destructive" : "text-warning-foreground"}`}>
                           {fmtOverdue(r.days_overdue)}
                         </span>
                       ) : tab === "post_visit" && r.days_since_visit !== undefined ? (
-                        <span className="font-medium text-amber-600">{r.days_since_visit}d ago</span>
+                        <span className="font-medium text-warning-foreground">{r.days_since_visit}d ago</span>
                       ) : tab === "visit_confirm" && r.urgency ? (
-                        <Badge className={`text-[10px] border-0 ${r.urgency === "same_day" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                        <Badge className={`text-[10px] border-0 ${r.urgency === "same_day" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning-foreground"}`}>
                           {r.urgency === "same_day" ? "Today" : "Tomorrow"}
                         </Badge>
                       ) : (
@@ -767,13 +767,13 @@ const PendingFollowups = () => {
                         {tab === "unclosed_visits" && (
                           <>
                             <button onClick={(e) => openCompleteDialog(r.id, r.lead_id, r.lead_name, e)}
-                              className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 transition-colors"
+                              className="rounded-lg bg-success/10 px-2 py-1 text-[10px] font-medium text-success hover:bg-success/15 transition-colors"
                               title="Mark visit completed">Completed</button>
                             <button onClick={(e) => openNoShowDialog(r.id, r.lead_id, r.lead_name, null, e)}
-                              className="rounded-lg bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700 hover:bg-red-200 transition-colors"
+                              className="rounded-lg bg-destructive/10 px-2 py-1 text-[10px] font-medium text-destructive hover:bg-destructive/15 transition-colors"
                               title="Mark as no-show">No Show</button>
                             <button onClick={(e) => openRescheduleVisitDialog(r.id, r.lead_id, r.lead_name, e)}
-                              className="rounded-lg bg-amber-100 p-1.5 text-amber-700 hover:bg-amber-200 transition-colors"
+                              className="rounded-lg bg-warning/10 p-1.5 text-warning-foreground hover:bg-warning/15 transition-colors"
                               title="Reschedule visit"><CalendarClock className="h-3.5 w-3.5" /></button>
                             <button onClick={(e) => handleCloudCall(r.lead_id, e)}
                               disabled={cloudCallingId === r.lead_id}
@@ -835,7 +835,7 @@ const PendingFollowups = () => {
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Date <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Date <span className="text-destructive">*</span></label>
               <input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
@@ -867,13 +867,13 @@ const PendingFollowups = () => {
             </div>
             {followupAction === "followup" ? (
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Call Date <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Call Date <span className="text-destructive">*</span></label>
                 <input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
             ) : (
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date <span className="text-destructive">*</span></label>
                 <input type="datetime-local" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)}
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
@@ -895,7 +895,7 @@ const PendingFollowups = () => {
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">Pick a new date and time. The lead's stage moves back to "Visit Scheduled".</p>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-destructive">*</span></label>
               <input type="datetime-local" value={newVisitDate} onChange={e => setNewVisitDate(e.target.value)}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>

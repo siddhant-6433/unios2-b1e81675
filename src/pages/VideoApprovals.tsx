@@ -60,8 +60,8 @@ function fmtPostedAt(iso: string | null): string {
 function PostedLinks({ v }: { v: VideoRow }) {
   const items = [
     { url: v.instagram_url, posted: v.instagram_posted_on, Icon: Instagram, color: "text-pink-600", label: "Instagram" },
-    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-blue-700", label: "LinkedIn" },
-    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-red-600",  label: "YouTube" },
+    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-info-foreground", label: "LinkedIn" },
+    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-destructive",  label: "YouTube" },
   ].filter(i => i.url);
   if (items.length === 0) return null;
   return (
@@ -247,7 +247,7 @@ export default function VideoApprovals() {
   };
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   const tableRows = tab === "queue" ? queue : videos;
@@ -260,7 +260,7 @@ export default function VideoApprovals() {
           <p className="text-sm text-muted-foreground mt-1">Review video submissions and manage editors</p>
         </div>
         {queue.length > 0 && (
-          <Badge className="bg-amber-100 text-amber-700 border-0 text-sm font-bold gap-1">
+          <Badge className="bg-warning/10 text-warning-foreground border-0 text-sm font-bold gap-1">
             {queue.length} Pending
           </Badge>
         )}
@@ -311,12 +311,12 @@ export default function VideoApprovals() {
                     </td>
                     <td className="px-3 py-3 text-center text-xs">
                       {e.user_id
-                        ? <CheckCircle className="h-4 w-4 text-emerald-600 mx-auto" />
+                        ? <CheckCircle className="h-4 w-4 text-success mx-auto" />
                         : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-3 py-3 text-right font-medium">₹{Number(e.per_video_rate).toLocaleString("en-IN")}</td>
                     <td className="px-3 py-3 text-center">
-                      <Badge className={`border-0 text-[10px] ${e.active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>
+                      <Badge className={`border-0 text-[10px] ${e.active ? "bg-success/10 text-success" : "bg-gray-100 text-gray-700"}`}>
                         {e.active ? "Active" : "Inactive"}
                       </Badge>
                     </td>
@@ -430,8 +430,8 @@ export default function VideoApprovals() {
               <PostedLinks v={selected} />
 
               {selected.status === "rejected" && selected.rejection_reason && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs">
-                  <p className="font-semibold text-red-700 mb-1">Rejection reason</p>
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
+                  <p className="font-semibold text-destructive mb-1">Rejection reason</p>
                   <p>{selected.rejection_reason}</p>
                 </div>
               )}
@@ -444,11 +444,11 @@ export default function VideoApprovals() {
                       className={inputCls + " resize-none"} placeholder="e.g. Drive link not accessible, off-brand, etc." />
                   </div>
                   <div className="flex gap-2 pt-2 border-t border-border">
-                    <Button variant="outline" className="flex-1 gap-1.5 text-red-600 hover:bg-red-50"
+                    <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
                             onClick={handleReject} disabled={acting}>
                       {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />} Reject
                     </Button>
-                    <Button className="flex-1 gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                    <Button className="flex-1 gap-1.5 bg-success hover:bg-success/90"
                             onClick={handleApprove} disabled={acting}>
                       {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} Approve
                     </Button>
@@ -460,12 +460,12 @@ export default function VideoApprovals() {
               {isSuperAdmin && (
                 <div className="flex gap-2 pt-2 border-t border-border">
                   {(selected.status === "approved" || selected.status === "published") && (
-                    <Button variant="outline" className="flex-1 gap-1.5 text-amber-700 hover:bg-amber-50"
+                    <Button variant="outline" className="flex-1 gap-1.5 text-warning-foreground hover:bg-warning/5"
                             onClick={handleRevoke} disabled={acting}>
                       {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Revoke approval
                     </Button>
                   )}
-                  <Button variant="outline" className="flex-1 gap-1.5 text-red-600 hover:bg-red-50"
+                  <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
                           onClick={handleDelete} disabled={acting}>
                     {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete video
                   </Button>

@@ -1223,9 +1223,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     issued: "bg-pastel-blue", accepted: "bg-pastel-green", rejected: "bg-pastel-red", expired: "bg-muted",
   };
   const approvalColors: Record<string, string> = {
-    pending_principal: "bg-amber-100 text-amber-700 border-amber-200",
-    approved: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    rejected: "bg-red-100 text-red-700 border-red-200",
+    pending_principal: "bg-warning/10 text-warning-foreground border-warning/20",
+    approved: "bg-success/10 text-success border-success/20",
+    rejected: "bg-destructive/10 text-destructive border-destructive/20",
   };
 
   const selectedOffer = offers.find(o => o.id === selectedOfferId) || null;
@@ -1275,7 +1275,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 text-xs text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
                       No active programme fee structure published for this course + session. Publish one in Course & Campus master before issuing.
                     </div>
                   )}
@@ -1285,18 +1285,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                 </div>
 
                 {approvedFeeProposals.length > 0 && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs space-y-2 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+                  <div className="rounded-xl border border-success/20 bg-success/5/70 p-3 text-xs space-y-2 dark:border-success/60/40 dark:bg-success/90/20">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <label className="block text-[11px] font-semibold text-emerald-900 dark:text-emerald-100">
+                        <label className="block text-[11px] font-semibold text-success-foreground dark:text-success/30">
                           Apply approved fee proposal
                         </label>
-                        <p className="mt-0.5 text-[10px] text-emerald-800/80 dark:text-emerald-200/80">
+                        <p className="mt-0.5 text-[10px] text-success-foreground/80 dark:text-success/40/80">
                           Optional. Selected proposal waivers are copied as approved offer waivers.
                         </p>
                       </div>
                       {importedProposalWaiverTotal > 0 && (
-                        <Badge className="border-emerald-200 bg-white text-emerald-700 dark:bg-emerald-950">
+                        <Badge className="border-success/20 bg-white text-success dark:bg-success/90">
                           −₹{importedProposalWaiverTotal.toLocaleString("en-IN")}
                         </Badge>
                       )}
@@ -1307,7 +1307,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                         setSelectedFeeProposalId(e.target.value);
                         setSelectedProposalChildKey("");
                       }}
-                      className="w-full rounded-md border border-emerald-200 bg-background px-2 py-1.5 text-xs"
+                      className="w-full rounded-md border border-success/20 bg-background px-2 py-1.5 text-xs"
                     >
                       <option value="">Do not apply proposal</option>
                       {approvedFeeProposals.map((proposal) => {
@@ -1324,13 +1324,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
                     {selectedFeeProposal && proposalChildOptions.length !== 1 && (
                       <div>
-                        <label className="block text-[10px] font-medium text-emerald-900 dark:text-emerald-100 mb-0.5">
+                        <label className="block text-[10px] font-medium text-success-foreground dark:text-success/30 mb-0.5">
                           Proposal student <span className="text-destructive">*</span>
                         </label>
                         <select
                           value={selectedProposalChildKey}
                           onChange={(e) => setSelectedProposalChildKey(e.target.value)}
-                          className="w-full rounded-md border border-emerald-200 bg-background px-2 py-1.5 text-xs"
+                          className="w-full rounded-md border border-success/20 bg-background px-2 py-1.5 text-xs"
                         >
                           <option value="">Select student from proposal</option>
                           {proposalChildOptions.map(option => (
@@ -1338,7 +1338,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                           ))}
                         </select>
                         {proposalChildOptions.length === 0 && (
-                          <p className="mt-1 text-[10px] text-amber-700">
+                          <p className="mt-1 text-[10px] text-warning-foreground">
                             No child in this proposal matches this lead and course. Issue without proposal or choose a matching proposal.
                           </p>
                         )}
@@ -1347,19 +1347,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
                     {selectedFeeProposal && selectedProposalChildOption && (
                       <div className="space-y-1">
-                        <div className="rounded-md border border-emerald-200/80 bg-white/70 p-2 dark:bg-background/40">
+                        <div className="rounded-md border border-success/20/80 bg-white/70 p-2 dark:bg-background/40">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium text-emerald-950 dark:text-emerald-100">
+                            <span className="font-medium text-success-foreground dark:text-success/30">
                               {selectedProposalChildOption.label}
                             </span>
-                            <span className="tabular-nums font-semibold text-emerald-700">
+                            <span className="tabular-nums font-semibold text-success">
                               {importedProposalWaiverTotal > 0 ? `−₹${importedProposalWaiverTotal.toLocaleString("en-IN")}` : "No waiver"}
                             </span>
                           </div>
                           {importedProposalWaivers.length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1">
                               {importedProposalWaivers.map((waiver, index) => (
-                                <span key={`${waiver.term}-${index}`} className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-100">
+                                <span key={`${waiver.term}-${index}`} className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] text-success-foreground dark:bg-success/80/50 dark:text-success/30">
                                   {labelForTerm(waiver.term)}: ₹{waiver.amount.toLocaleString("en-IN")}
                                 </span>
                               ))}
@@ -1367,12 +1367,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                           )}
                         </div>
                         {proposalMismatch?.hasMismatch && (
-                          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          <p className="rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
                             Fee structure changed since proposal: proposal gross ₹{proposalMismatch.proposalGross.toLocaleString("en-IN")}, current gross ₹{proposalMismatch.currentGross.toLocaleString("en-IN")}. You can still issue; the offer gross fee uses the current active structure.
                           </p>
                         )}
                         {proposalLevelFullYearWaiver > 0 && (selectedFeeProposal.proposal?.children?.length || 0) > 1 && (
-                          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          <p className="rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
                             This proposal also has a proposal-level yearly-payment waiver of ₹{proposalLevelFullYearWaiver.toLocaleString("en-IN")}. It is not auto-split across children; add it manually if applicable.
                           </p>
                         )}
@@ -1424,7 +1424,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                           return (
                             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold border-t border-border/40 pt-1.5 mt-1">
                               <span>Net Programme Fee</span>
-                              <span className="tabular-nums text-emerald-700">₹{netFee.toLocaleString("en-IN")}</span>
+                              <span className="tabular-nums text-success">₹{netFee.toLocaleString("en-IN")}</span>
                             </div>
                           );
                         })()}
@@ -1478,7 +1478,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                           />
                         </div>
                         {!isSuperAdmin && (
-                          <p className="text-[10px] text-amber-700">
+                          <p className="text-[10px] text-warning-foreground">
                             This waiver will need super admin approval before it reflects on the offer letter.
                           </p>
                         )}
@@ -1694,7 +1694,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           )}
 
           {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
           ) : offers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">No offer letters yet</p>
           ) : (
@@ -1735,7 +1735,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                             <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
                           )}
                           {offer.source_fee_proposal_id && (
-                            <Badge className="text-[10px] border border-emerald-200 bg-emerald-50 text-emerald-700">
+                            <Badge className="text-[10px] border border-success/20 bg-success/5 text-success">
                               Fee proposal
                             </Badge>
                           )}
@@ -1795,9 +1795,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                             {offerWaivers.map(w => {
                               const yearLabel = labelForTerm(w.term);
                               const statusCls =
-                                w.status === "approved"  ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                                w.status === "rejected"  ? "bg-red-100 text-red-700 border-red-200" :
-                                                           "bg-amber-100 text-amber-700 border-amber-200";
+                                w.status === "approved"  ? "bg-success/10 text-success border-success/20" :
+                                w.status === "rejected"  ? "bg-destructive/10 text-destructive border-destructive/20" :
+                                                           "bg-warning/10 text-warning-foreground border-warning/20";
                               return (
                                 <div key={w.id} className="rounded-md border border-border/50 bg-background/50 p-2 text-xs space-y-1">
                                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1806,7 +1806,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                       <span className="text-foreground/70">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
                                       <Badge className={`text-[9px] border ${statusCls}`}>{w.status}</Badge>
                                       {w.source_type === "fee_proposal" && (
-                                        <Badge className="text-[9px] border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                        <Badge className="text-[9px] border border-success/20 bg-success/5 text-success">
                                           Fee proposal
                                         </Badge>
                                       )}
@@ -1816,7 +1816,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                         <button
                                           disabled={waiverDecidingId === w.id}
                                           onClick={() => handleDecideWaiver(w, "approved")}
-                                          className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                          className="rounded bg-success hover:bg-success/90 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
                                         >
                                           Approve
                                         </button>
@@ -1838,7 +1838,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                         <div>Requested by {w.requested_by_name}{w.requested_by_role ? ` (${w.requested_by_role})` : ""}</div>
                                       )}
                                       {w.status === "approved" && w.approved_by_name && (
-                                        <div className="text-emerald-700">Approved by {w.approved_by_name}</div>
+                                        <div className="text-success">Approved by {w.approved_by_name}</div>
                                       )}
                                       {w.status === "rejected" && w.rejection_reason && (
                                         <div className="text-destructive">Rejection: {w.rejection_reason}</div>
@@ -1896,7 +1896,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                   />
                                 </div>
                                 {!isSuperAdmin && (
-                                  <p className="text-[10px] text-amber-700">
+                                  <p className="text-[10px] text-warning-foreground">
                                     This waiver will need super admin approval before it appears on the offer letter.
                                   </p>
                                 )}
@@ -1920,7 +1920,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                         <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                           <Button
                             size="sm"
-                            className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                            className="text-xs gap-1.5 bg-success hover:bg-success/90"
                             onClick={() => decideOffer(offer.id, "approved")}
                             disabled={registrationOfferBlocked}
                             title={registrationOfferBlocked ? registrationOfferBlockMessage : undefined}
@@ -1965,36 +1965,36 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
                             {/* Pending edit requests — super admin sees approve/reject */}
                             {editReqs.map((req) => (
-                              <div key={req.id} className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 p-2 text-xs space-y-1.5">
+                              <div key={req.id} className="rounded-md border border-warning/20 bg-warning/5 dark:border-warning/60/40 dark:bg-warning/90/20 p-2 text-xs space-y-1.5">
                                 <div className="flex items-start justify-between gap-2 flex-wrap">
                                   <div className="space-y-0.5">
-                                    <p className="font-semibold text-amber-800 dark:text-amber-200">
+                                    <p className="font-semibold text-warning-foreground dark:text-warning/40">
                                       Edit requested by {req.requested_by_name || "staff"}
                                       {req.requested_by_role && <span className="font-normal"> ({req.requested_by_role})</span>}
                                     </p>
                                     {req.proposed_changes.acceptance_deadline && (
-                                      <p className="text-amber-700 dark:text-amber-300">
+                                      <p className="text-warning-foreground dark:text-warning/70">
                                         New deadline: {new Date(req.proposed_changes.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                                       </p>
                                     )}
                                     {(req.proposed_changes.token_fee_amount != null || parseTokenFeeFromEditReason(req.reason) != null) && (
-                                      <p className="text-amber-700 dark:text-amber-300">
+                                      <p className="text-warning-foreground dark:text-warning/70">
                                         New token fee: ₹{Number(req.proposed_changes.token_fee_amount ?? parseTokenFeeFromEditReason(req.reason)).toLocaleString("en-IN")}
                                       </p>
                                     )}
                                     {req.proposed_changes.course_id && (
-                                      <p className="text-amber-700 dark:text-amber-300">
+                                      <p className="text-warning-foreground dark:text-warning/70">
                                         New course: {courseNameForId(req.proposed_changes.course_id)}
                                       </p>
                                     )}
-                                    {req.reason && <p className="text-amber-600 dark:text-amber-400">Reason: {req.reason}</p>}
+                                    {req.reason && <p className="text-warning-foreground dark:text-warning">Reason: {req.reason}</p>}
                                   </div>
                                   {isSuperAdmin && (
                                     <div className="flex gap-1 shrink-0">
                                       <button
                                         disabled={editDecidingId === req.id}
                                         onClick={() => handleDecideEditRequest(req, "approved")}
-                                        className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                        className="rounded bg-success hover:bg-success/90 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
                                       >
                                         {editDecidingId === req.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
                                       </button>
@@ -2008,7 +2008,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     </div>
                                   )}
                                   {!isSuperAdmin && (
-                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 italic">Awaiting super admin</span>
+                                    <span className="text-[10px] text-warning-foreground dark:text-warning italic">Awaiting super admin</span>
                                   )}
                                 </div>
                               </div>
@@ -2078,7 +2078,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                   </div>
                                 )}
                                 {!isSuperAdmin && (
-                                  <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                                  <p className="text-[10px] text-warning-foreground dark:text-warning">
                                     This change requires super admin approval before it takes effect.
                                   </p>
                                 )}
@@ -2194,37 +2194,37 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                       </div>
 
                       {isCahetOffer && cahetRegistration && (
-                        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">CAHET Registration</p>
-                          <p className="mt-1 text-sm font-semibold text-emerald-950">
+                        <div className="rounded-md border border-success/20 bg-success/5 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-success">CAHET Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-success-foreground">
                             Registration No. {cahetRegistration.registration_no}
                           </p>
                           {cahetRegistration.notes && (
-                            <p className="mt-1 text-xs text-emerald-900/80">{cahetRegistration.notes}</p>
+                            <p className="mt-1 text-xs text-success-foreground/80">{cahetRegistration.notes}</p>
                           )}
                         </div>
                       )}
 
                       {isCahetOffer && !cahetRegistration && (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        <div className="rounded-md border border-warning/20 bg-warning/5 p-3 text-sm text-warning-foreground">
                           CAHET is selected, but this candidate is not marked CAHET registered yet. The registration number will appear on the final offer only after registration is recorded.
                         </div>
                       )}
 
                       {isUpdeledOffer && updeledRegistration && (
-                        <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700">UPDELED Registration</p>
-                          <p className="mt-1 text-sm font-semibold text-indigo-950">
+                        <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">UPDELED Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-primary">
                             Registration No. {updeledRegistration.registration_no}
                           </p>
                           {updeledRegistration.notes && (
-                            <p className="mt-1 text-xs text-indigo-900/80">{updeledRegistration.notes}</p>
+                            <p className="mt-1 text-xs text-primary/80">{updeledRegistration.notes}</p>
                           )}
                         </div>
                       )}
 
                       {isUpdeledOffer && !updeledRegistration && (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        <div className="rounded-md border border-warning/20 bg-warning/5 p-3 text-sm text-warning-foreground">
                           UPDELED is selected, but this candidate is not marked UPDELED registered yet. The registration number will appear on the final offer only after registration is recorded.
                         </div>
                       )}

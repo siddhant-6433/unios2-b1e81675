@@ -115,7 +115,7 @@ export function ConsultantFeesPanel() {
             </button>
           </div>
           {loading ? (
-            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
           ) : students.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               No students in an enabled course/session yet. Ask the admissions office to enable fee management for your courses.
@@ -141,7 +141,7 @@ export function ConsultantFeesPanel() {
                         {s.admission_no || "—"}{s.course_name ? ` · ${s.course_name}` : ""}{s.session_name ? ` · ${s.session_name}` : ""}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmt(s.paid_total)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-success">{fmt(s.paid_total)}</td>
                     <td className="px-4 py-3 text-right">{fmt(s.due_total)}</td>
                     <td className="px-4 py-3 text-center">
                       <Switch

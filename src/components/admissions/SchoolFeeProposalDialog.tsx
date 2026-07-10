@@ -168,9 +168,9 @@ function statusLabel(status: SchoolFeeProposalRow["status"]): string {
 }
 
 function statusClass(status: SchoolFeeProposalRow["status"]): string {
-  if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (status === "rejected") return "bg-red-100 text-red-700 border-red-200";
-  return "bg-amber-100 text-amber-700 border-amber-200";
+  if (status === "approved") return "bg-success/10 text-success border-success/20";
+  if (status === "rejected") return "bg-destructive/10 text-destructive border-destructive/20";
+  return "bg-warning/10 text-warning-foreground border-warning/20";
 }
 
 function revisionLabel(proposal: SchoolFeeProposalRow): string {
@@ -195,7 +195,7 @@ function proposalLifecycleSteps(proposal: SchoolFeeProposalRow) {
         ? new Date(proposal.whatsapp_sent_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
         : proposal.status === "approved" ? "Pending WhatsApp" : "Locked",
       className: proposal.whatsapp_sent_at
-        ? "bg-blue-100 text-blue-700 border-blue-200"
+        ? "bg-info/10 text-info-foreground border-info/20"
         : "bg-slate-100 text-slate-600 border-slate-200",
     },
   ];
@@ -1775,37 +1775,37 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
         </DialogHeader>
 
         {showGuide && (
-          <Card className="border-blue-200 bg-blue-50/80 shadow-none">
+          <Card className="border-info/20 bg-info/5/80 shadow-none">
             <CardContent className="p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">New feature</Badge>
-                    <h3 className="text-sm font-semibold text-blue-950">How to use fee proposals</h3>
+                    <Badge className="bg-info/10 text-info-foreground border-info/20">New feature</Badge>
+                    <h3 className="text-sm font-semibold text-info-foreground">How to use fee proposals</h3>
                   </div>
-                  <div className="grid gap-2 text-xs text-blue-950 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-md border border-blue-200 bg-white/70 p-2">
+                  <div className="grid gap-2 text-xs text-info-foreground md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-md border border-info/20 bg-white/70 p-2">
                       <div className="font-semibold">1. Select students</div>
-                      <p className="mt-1 text-blue-800">Add one or more linked leads, then choose the class or course and campus.</p>
+                      <p className="mt-1 text-info-foreground">Add one or more linked leads, then choose the class or course and campus.</p>
                     </div>
-                    <div className="rounded-md border border-blue-200 bg-white/70 p-2">
+                    <div className="rounded-md border border-info/20 bg-white/70 p-2">
                       <div className="font-semibold">2. Choose options</div>
-                      <p className="mt-1 text-blue-800">For schools, select boarding and transport so only relevant fee heads are shown.</p>
+                      <p className="mt-1 text-info-foreground">For schools, select boarding and transport so only relevant fee heads are shown.</p>
                     </div>
-                    <div className="rounded-md border border-blue-200 bg-white/70 p-2">
+                    <div className="rounded-md border border-info/20 bg-white/70 p-2">
                       <div className="font-semibold">3. Apply waivers</div>
-                      <p className="mt-1 text-blue-800">Pick no waiver, sibling, single parent, or custom waivers. Above-limit concessions go for approval.</p>
+                      <p className="mt-1 text-info-foreground">Pick no waiver, sibling, single parent, or custom waivers. Above-limit concessions go for approval.</p>
                     </div>
-                    <div className="rounded-md border border-blue-200 bg-white/70 p-2">
+                    <div className="rounded-md border border-info/20 bg-white/70 p-2">
                       <div className="font-semibold">4. Submit and share</div>
-                      <p className="mt-1 text-blue-800">Approved proposals unlock PDF and WhatsApp sharing. Revisions keep history for staff.</p>
+                      <p className="mt-1 text-info-foreground">Approved proposals unlock PDF and WhatsApp sharing. Revisions keep history for staff.</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-blue-800">
+                  <p className="text-[11px] text-info-foreground">
                     The PDF includes lead/student names, campus, payable-at-admission breakup, waivers, paid fees, issuer details, and Grayquest EMI eligibility.
                   </p>
                 </div>
-                <Button type="button" variant="ghost" size="sm" className="shrink-0 text-blue-800 hover:bg-blue-100" onClick={dismissGuide}>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0 text-info-foreground hover:bg-info/10" onClick={dismissGuide}>
                   Got it
                 </Button>
               </div>
@@ -1815,7 +1815,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
 
         {loading ? (
           <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
           </div>
         ) : (
           <div className="space-y-4">
@@ -2074,14 +2074,14 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                                     if (!hasCustomWaiver && groupAllowed === 0 && groupEntered === 0) return null;
                                     const groupOverLimit = groupEntered > groupAllowed;
                                     return (
-                                      <div key={group.label} className={`rounded-md border bg-background px-3 py-2 ${groupOverLimit ? "border-amber-300 bg-amber-50" : "border-border/70"}`}>
+                                      <div key={group.label} className={`rounded-md border bg-background px-3 py-2 ${groupOverLimit ? "border-warning/30 bg-warning/5" : "border-border/70"}`}>
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="text-xs font-semibold">{group.label}</div>
-                                          {groupOverLimit && <Badge className="h-5 bg-amber-100 px-1.5 text-[10px] text-amber-800 border-amber-200">Approval</Badge>}
+                                          {groupOverLimit && <Badge className="h-5 bg-warning/10 px-1.5 text-[10px] text-warning-foreground border-warning/20">Approval</Badge>}
                                         </div>
                                         <div className="mt-2">
                                           <div className="text-[10px] text-muted-foreground">Waiver applied</div>
-                                          <div className={`text-base font-semibold ${groupOverLimit ? "text-amber-700" : ""}`}>{formatInr(groupEntered)}</div>
+                                          <div className={`text-base font-semibold ${groupOverLimit ? "text-warning-foreground" : ""}`}>{formatInr(groupEntered)}</div>
                                         </div>
                                       </div>
                                     );
@@ -2114,13 +2114,13 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                                             const entered = waiverInputDisabled ? 0 : Number(child.feeHeaderWaivers[header.key] || 0);
                                             const overLimit = entered > autoLimit;
                                             return (
-                                              <div key={header.key} className={`grid grid-cols-1 gap-1.5 px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_8rem_8rem_7.5rem] md:items-center ${overLimit ? "bg-amber-50" : ""} ${waiverInputDisabled ? "opacity-75" : ""}`}>
+                                              <div key={header.key} className={`grid grid-cols-1 gap-1.5 px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_8rem_8rem_7.5rem] md:items-center ${overLimit ? "bg-warning/5" : ""} ${waiverInputDisabled ? "opacity-75" : ""}`}>
                                                 <div className="min-w-0 text-xs font-medium leading-snug break-words">{header.label}</div>
                                                 <div className="text-[11px] text-muted-foreground md:text-right">
                                                   <span className="md:hidden">Fee: </span>
                                                   <span className="font-medium text-foreground">{formatInr(header.total)}</span>
                                                 </div>
-                                                <div className={`text-[11px] md:text-right ${overLimit ? "text-amber-700" : "text-muted-foreground"}`}>
+                                                <div className={`text-[11px] md:text-right ${overLimit ? "text-warning-foreground" : "text-muted-foreground"}`}>
                                                   <span className="md:hidden">Allowed: </span>
                                                   {nonWaivableHeader ? "-" : (
                                                     <>
@@ -2194,7 +2194,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                   </div>
 
                   {!autoApprovalAllowed && (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <div className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning-foreground">
                       One or more concessions are above the applicable auto-approval limit, so this proposal requires super admin approval before PDF download or WhatsApp sending.
                     </div>
                   )}
@@ -2210,8 +2210,8 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Saved Proposals</h3>
               {proposalsTableMissing && (
-                <Card className="shadow-none border-amber-200 bg-amber-50">
-                  <CardContent className="p-4 text-sm text-amber-800">
+                <Card className="shadow-none border-warning/20 bg-warning/5">
+                  <CardContent className="p-4 text-sm text-warning-foreground">
                     <div className="font-medium">Migration required</div>
                     <div className="mt-1 text-xs">
                       The database does not have <span className="font-mono">public.fee_proposals</span> yet. Apply
@@ -2238,7 +2238,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge className={statusClass(proposal.status)}>{statusLabel(proposal.status)}</Badge>
                         <Badge variant="outline">{revisionLabel(proposal)}</Badge>
-                        <Badge className={isCurrent ? "bg-blue-100 text-blue-700 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
+                        <Badge className={isCurrent ? "bg-info/10 text-info-foreground border-info/20" : "bg-slate-100 text-slate-600 border-slate-200"}>
                           {isCurrent ? "Latest" : "Superseded"}
                         </Badge>
                       </div>
@@ -2306,7 +2306,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                       )}
                     </div>
                     {proposal.whatsapp_sent_at && (
-                      <p className="text-[11px] text-emerald-700">Sent on WhatsApp {new Date(proposal.whatsapp_sent_at).toLocaleString("en-IN")}</p>
+                      <p className="text-[11px] text-success">Sent on WhatsApp {new Date(proposal.whatsapp_sent_at).toLocaleString("en-IN")}</p>
                     )}
                   </CardContent>
                 </Card>

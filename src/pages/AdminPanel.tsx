@@ -403,7 +403,7 @@ const AdminPanel = () => {
   if (authLoading || !roleLoaded) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -634,7 +634,7 @@ const AdminPanel = () => {
               <div className="rounded-xl bg-card card-shadow overflow-x-auto">
                 {publishersLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   </div>
                 ) : publishers.length === 0 ? (
                   <div className="py-12 text-center text-sm text-muted-foreground">
@@ -656,7 +656,7 @@ const AdminPanel = () => {
                         <tr key={pub.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                           <td className="px-4 py-3 font-medium text-foreground">{pub.display_name}</td>
                           <td className="px-4 py-3">
-                            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-950/40 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400 capitalize">
+                            <span className="inline-flex items-center rounded-full bg-info/10 dark:bg-info/90/40 px-2.5 py-0.5 text-xs font-medium text-info-foreground dark:text-info/80 capitalize">
                               {pub.source}
                             </span>
                           </td>
@@ -665,7 +665,7 @@ const AdminPanel = () => {
                               const u = users.find(u => u.user_id === pub.user_id);
                               return (
                                 <div className="flex items-center gap-2">
-                                  <span className="text-green-700 dark:text-green-400 font-medium">
+                                  <span className="text-success dark:text-success font-medium">
                                     ✓ {u?.display_name || u?.email || pub.user_id.slice(0, 8) + "…"}
                                   </span>
                                   <button
@@ -673,7 +673,7 @@ const AdminPanel = () => {
                                       await supabase.from("publishers").update({ user_id: null }).eq("id", pub.id);
                                       await fetchPublishers();
                                     }}
-                                    className="text-[11px] text-muted-foreground hover:text-red-600 underline"
+                                    className="text-[11px] text-muted-foreground hover:text-destructive underline"
                                   >
                                     unlink
                                   </button>
@@ -718,7 +718,7 @@ const AdminPanel = () => {
                               </div>
                             ) : (
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-amber-600 dark:text-amber-400">⚠ No login yet</span>
+                                <span className="text-warning-foreground dark:text-warning">⚠ No login yet</span>
                                 <button
                                   onClick={() => {
                                     setInviteDefaults({ role: "publisher", source: pub.source, publisherId: pub.id });
@@ -739,7 +739,7 @@ const AdminPanel = () => {
                           </td>
                           <td className="px-4 py-3">
                             {pub.is_active ? (
-                              <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">Active</span>
+                              <span className="inline-flex items-center rounded-full bg-success/10 dark:bg-success/90/40 px-2 py-0.5 text-xs font-medium text-success dark:text-success">Active</span>
                             ) : (
                               <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">Inactive</span>
                             )}
@@ -758,7 +758,7 @@ const AdminPanel = () => {
             <div className="rounded-xl bg-card card-shadow overflow-x-auto" style={{ display: userSubTab === "publishers" ? "none" : undefined }}>
               {loading ? (
                 <div className="flex items-center justify-center py-16">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
               ) : subFiltered.length === 0 ? (
                 <div className="py-16 text-center">
@@ -792,13 +792,13 @@ const AdminPanel = () => {
                               <div className="relative shrink-0">
                                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials}</div>
                                 {isOnline(user.last_seen_at) && (
-                                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" title="Online now" />
+                                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-success/50 ring-2 ring-background" title="Online now" />
                                 )}
                               </div>
                               <div className="flex flex-col gap-0.5">
                                 <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
                                 {user.login_disabled && (
-                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-warning/50/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground dark:text-warning">
                                     <Lock className="h-2.5 w-2.5" /> Login disabled
                                   </span>
                                 )}
@@ -831,7 +831,7 @@ const AdminPanel = () => {
                                   <option value="none">No Role</option>
                                   {ALL_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                                 </select>
-                                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                                 <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
                               </div>
                             ) : (
@@ -869,7 +869,7 @@ const AdminPanel = () => {
                                 <>
                                   {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
-                                      className="rounded-lg bg-amber-500/10 p-1.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                                      className="rounded-lg bg-warning/50/10 p-1.5 text-warning-foreground dark:text-warning hover:bg-warning/50/20 transition-colors"
                                       title="Impersonate user">
                                       <UserCheck className="h-3.5 w-3.5" />
                                     </button>
@@ -901,8 +901,8 @@ const AdminPanel = () => {
                                       nextDisabled: !user.login_disabled,
                                     })}
                                       className={user.login_disabled
-                                        ? "rounded-lg bg-emerald-500/10 p-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                                        : "rounded-lg bg-amber-500/10 p-1.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"}
+                                        ? "rounded-lg bg-success/50/10 p-1.5 text-success dark:text-success hover:bg-success/50/20 transition-colors"
+                                        : "rounded-lg bg-warning/50/10 p-1.5 text-warning-foreground dark:text-warning hover:bg-warning/50/20 transition-colors"}
                                       title={user.login_disabled ? "Enable login" : "Disable login"}>
                                       {user.login_disabled
                                         ? <LockOpen className="h-3.5 w-3.5" />
@@ -914,7 +914,7 @@ const AdminPanel = () => {
                                       <button
                                         onClick={() => handleArchiveUser(user, false)}
                                         disabled={archivingUser === user.user_id}
-                                        className="rounded-lg bg-emerald-500/10 p-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                                        className="rounded-lg bg-success/50/10 p-1.5 text-success dark:text-success hover:bg-success/50/20 transition-colors disabled:opacity-50"
                                         title="Restore to main user list"
                                       >
                                         {archivingUser === user.user_id
@@ -936,7 +936,7 @@ const AdminPanel = () => {
                                   )}
                                   {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
                                     <button onClick={() => setTransferTarget({ profileId: user.profile_id, userId: user.user_id, name: user.display_name || "Unnamed" })}
-                                      className="rounded-lg bg-violet-500/10 p-1.5 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
+                                      className="rounded-lg bg-primary/50/10 p-1.5 text-primary dark:text-primary/60 hover:bg-primary/50/20 transition-colors"
                                       title="Transfer account data">
                                       <ArrowRightLeft className="h-3.5 w-3.5" />
                                     </button>
@@ -1033,8 +1033,8 @@ const AdminPanel = () => {
                     onClick={handleToggleLogin}
                     disabled={togglingLogin}
                     className={disableTarget?.nextDisabled
-                      ? "bg-amber-600 text-white hover:bg-amber-700"
-                      : "bg-emerald-600 text-white hover:bg-emerald-700"}
+                      ? "bg-warning text-white hover:bg-warning/60"
+                      : "bg-success text-white hover:bg-success/90"}
                   >
                     {togglingLogin && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                     {disableTarget?.nextDisabled ? "Disable login" : "Enable login"}
@@ -1533,7 +1533,7 @@ function OverdueFollowupEnforcementCard() {
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-4">
-        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${enabled ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
+        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${enabled ? "bg-warning/10 text-warning-foreground" : "bg-slate-100 text-slate-600"}`}>
           <AlertTriangle className="h-4 w-4" />
         </div>
         <div className="flex-1 min-w-[240px]">

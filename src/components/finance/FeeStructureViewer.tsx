@@ -242,7 +242,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     return { oneTime, tuition, boarding, transport, other };
   };
 
-  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
 
   if (structures.length === 0) {
     return <p className="text-xs text-muted-foreground text-center py-4">No fee structure available{courseId ? " for this course" : ""}</p>;
@@ -325,11 +325,11 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     if (highlights.length === 0 && yearData.length === 0) return null;
 
     return (
-      <div className="border-t border-amber-200/30">
+      <div className="border-t border-warning/20/30">
         {/* General highlights */}
         {highlights.length > 0 && (
-          <div className="px-3 py-2 bg-amber-50/50 dark:bg-amber-950/10">
-            <p className="text-[9px] font-semibold text-amber-800 dark:text-amber-400 uppercase mb-1">Fee Details</p>
+          <div className="px-3 py-2 bg-warning/5/50 dark:bg-warning/90/10">
+            <p className="text-[9px] font-semibold text-warning-foreground dark:text-warning uppercase mb-1">Fee Details</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
               {highlights.map((h, i) => (
                 <div key={i} className="flex items-center justify-between gap-1">
@@ -399,7 +399,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                           <>
                             <td className="py-1.5 text-right">
                               {y.discount > 0 ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-{fmt(y.discount)}</span>
+                                <span className="text-success dark:text-success font-semibold">-{fmt(y.discount)}</span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
                               )}
@@ -428,7 +428,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     <tr className="border-t border-border/50">
                       <td className="pt-1.5 font-semibold text-foreground">Total</td>
                       <td className="pt-1.5 text-right text-foreground">{fmt(yearData.reduce((s, y) => s + y.fee, 0))}</td>
-                      <td className="pt-1.5 text-right text-emerald-600 dark:text-emerald-400 font-semibold">
+                      <td className="pt-1.5 text-right text-success dark:text-success font-semibold">
                         -{fmt(yearData.reduce((s, y) => s + y.discount, 0))}
                       </td>
                       <td className="pt-1.5 text-right font-bold text-primary">
@@ -533,7 +533,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     <>
                       <span className="text-xs text-muted-foreground line-through mr-1.5">{fmt(fs.total)}</span>
                       <span className="text-sm font-bold text-primary">{fmt(totalAfterDiscount)}</span>
-                      <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Save {fmt(totalDiscount)} on annual payment</span>
+                      <span className="block text-[10px] text-success dark:text-success font-medium">Save {fmt(totalDiscount)} on annual payment</span>
                     </>
                   ) : (
                     <span className="text-sm font-bold text-primary">{fmt(headerTotal)}</span>

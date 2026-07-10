@@ -52,20 +52,20 @@ function LeaderboardWidget() {
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50/50 dark:bg-amber-950/10 border-b border-border/40">
-        <Trophy className="h-4 w-4 text-amber-500" />
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-warning/5/50 dark:bg-warning/90/10 border-b border-border/40">
+        <Trophy className="h-4 w-4 text-warning" />
         <span className="text-sm font-semibold text-foreground">Weekly Leaderboard</span>
         {myRank && myScore && (
           <div className="ml-auto flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Your rank:</span>
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${
-              myRank <= 3 ? "bg-amber-100 text-amber-700" : "bg-muted text-foreground"
+              myRank <= 3 ? "bg-warning/10 text-warning-foreground" : "bg-muted text-foreground"
             }`}>
               #{myRank}
             </span>
             {myScore.daily_score !== 0 && (
               <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                myScore.daily_score > 0 ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                myScore.daily_score > 0 ? "bg-success/10 dark:bg-success/80/30 text-success dark:text-success/60" : "bg-destructive/10 dark:bg-destructive/80/30 text-destructive dark:text-destructive/60"
               }`}>
                 Today: {myScore.daily_score > 0 ? `+${myScore.daily_score}` : myScore.daily_score}
               </span>
@@ -82,9 +82,9 @@ function LeaderboardWidget() {
           return (
             <div key={s.counsellor_id} className={`flex items-center gap-3 px-4 py-2 ${isMe ? "bg-primary/5" : ""}`}>
               <span className="w-6 text-center shrink-0">
-                {i === 0 ? <Trophy className="h-3.5 w-3.5 text-amber-500 mx-auto" /> :
+                {i === 0 ? <Trophy className="h-3.5 w-3.5 text-warning mx-auto" /> :
                  i === 1 ? <Trophy className="h-3.5 w-3.5 text-gray-400 mx-auto" /> :
-                 i === 2 ? <Trophy className="h-3.5 w-3.5 text-amber-700 mx-auto" /> :
+                 i === 2 ? <Trophy className="h-3.5 w-3.5 text-warning-foreground mx-auto" /> :
                  <span className="text-[10px] text-muted-foreground">{i + 1}</span>}
               </span>
               <span className={`flex-1 text-xs truncate ${isMe ? "font-bold text-foreground" : "text-foreground"}`}>
@@ -92,12 +92,12 @@ function LeaderboardWidget() {
                 {isMe && <span className="text-[9px] text-primary ml-1">(You)</span>}
               </span>
               {s.daily_score !== 0 && (
-                <span className={`text-[9px] font-bold ${s.daily_score > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                <span className={`text-[9px] font-bold ${s.daily_score > 0 ? "text-success" : "text-destructive"}`}>
                   {s.daily_score > 0 ? `+${s.daily_score}` : s.daily_score}
                 </span>
               )}
               <span className={`text-xs font-bold ${
-                s.total_score > 0 ? "text-primary" : s.total_score < 0 ? "text-red-600" : "text-muted-foreground"
+                s.total_score > 0 ? "text-primary" : s.total_score < 0 ? "text-destructive" : "text-muted-foreground"
               }`}>
                 {s.total_score}
               </span>
@@ -207,7 +207,7 @@ export function ActionCenterView({
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -246,32 +246,32 @@ export function ActionCenterView({
       {/* Summary bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
         {totalActions === 0 ? (
-          <span className="text-sm font-medium text-green-600 dark:text-green-400">All caught up! No pending actions.</span>
+          <span className="text-sm font-medium text-success dark:text-success">All caught up! No pending actions.</span>
         ) : (
           <>
             <span className="text-sm font-medium text-foreground mr-1">{totalActions} pending actions:</span>
             {counts.overdue > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-900/30 px-2.5 py-1 text-xs font-semibold text-red-700 dark:text-red-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 dark:bg-destructive/80/30 px-2.5 py-1 text-xs font-semibold text-destructive dark:text-destructive/60">
                 {counts.overdue} Overdue
               </span>
             )}
             {counts.newLeads > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/30 px-2.5 py-1 text-xs font-semibold text-orange-700 dark:text-orange-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 dark:bg-warning/80/30 px-2.5 py-1 text-xs font-semibold text-warning-foreground dark:text-warning/60">
                 {counts.newLeads} Untouched
               </span>
             )}
             {counts.today > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-info/10 dark:bg-info/80/30 px-2.5 py-1 text-xs font-semibold text-info-foreground dark:text-info/60">
                 {counts.today} Today
               </span>
             )}
             {counts.visits > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 dark:bg-primary/80/30 px-2.5 py-1 text-xs font-semibold text-primary dark:text-primary/50">
                 {counts.visits} Visits
               </span>
             )}
             {counts.postVisit > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 dark:bg-warning/80/30 px-2.5 py-1 text-xs font-semibold text-warning-foreground dark:text-warning/70">
                 {counts.postVisit} Post-Visit
               </span>
             )}
@@ -292,8 +292,8 @@ export function ActionCenterView({
         <ActionBucketSection
           title="Overdue Follow-ups"
           icon="🔴"
-          color="border-red-400"
-          headerBg="bg-red-50 dark:bg-red-950/20"
+          color="border-destructive/25"
+          headerBg="bg-destructive/5 dark:bg-destructive/90/20"
           variant="overdue"
           leads={data.overdueFollowups}
           storageKey="overdue"
@@ -304,8 +304,8 @@ export function ActionCenterView({
         <ActionBucketSection
           title="New Leads to Contact"
           icon="🟠"
-          color="border-orange-400"
-          headerBg="bg-orange-50 dark:bg-orange-950/20"
+          color="border-warning/30"
+          headerBg="bg-warning/5 dark:bg-warning/90/20"
           variant="new_lead"
           leads={data.newLeads}
           storageKey="new_leads"
@@ -316,8 +316,8 @@ export function ActionCenterView({
         <ActionBucketSection
           title="Today's Follow-ups"
           icon="🔵"
-          color="border-blue-400"
-          headerBg="bg-blue-50 dark:bg-blue-950/20"
+          color="border-info/30"
+          headerBg="bg-info/5 dark:bg-info/90/20"
           variant="today_followup"
           leads={data.todayFollowups}
           storageKey="today_followups"
@@ -328,8 +328,8 @@ export function ActionCenterView({
         <ActionBucketSection
           title="Today's Visits"
           icon="🟣"
-          color="border-violet-400"
-          headerBg="bg-violet-50 dark:bg-violet-950/20"
+          color="border-primary/30"
+          headerBg="bg-primary/5 dark:bg-primary/90/20"
           variant="today_visit"
           leads={data.todayVisits}
           storageKey="today_visits"
@@ -344,8 +344,8 @@ export function ActionCenterView({
         <ActionBucketSection
           title="Post-Visit Pending"
           icon="🟡"
-          color="border-amber-400"
-          headerBg="bg-amber-50 dark:bg-amber-950/20"
+          color="border-warning/30"
+          headerBg="bg-warning/5 dark:bg-warning/90/20"
           variant="post_visit"
           leads={data.postVisitPending}
           storageKey="post_visit"

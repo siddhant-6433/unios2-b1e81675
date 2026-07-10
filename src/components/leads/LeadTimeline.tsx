@@ -129,19 +129,19 @@ const ACTIVITY_CONFIG: Record<string, {
 }> = {
   lead_created: {
     icon: <Plus className="h-3.5 w-3.5" />,
-    bg: "bg-emerald-500 text-white",
+    bg: "bg-success/50 text-white",
     getTitle: () => "Lead created",
     getSub: (a) => a.description || null,
   },
   stage_change: {
     icon: <ArrowRight className="h-3.5 w-3.5" />,
-    bg: "bg-violet-500 text-white",
+    bg: "bg-primary/50 text-white",
     getTitle: () => "Stage changed",
     getSub: (a) => a.description?.replace(/^Stage changed from /i, "") || null,
   },
   ai_call: {
     icon: <Bot className="h-3.5 w-3.5" />,
-    bg: "bg-amber-500 text-white",
+    bg: "bg-warning/50 text-white",
     getTitle: () => "AI Outbound Call",
     getSub: (a) => {
       const parts: string[] = [];
@@ -156,7 +156,7 @@ const ACTIVITY_CONFIG: Record<string, {
   },
   call: {
     icon: <Phone className="h-3.5 w-3.5" />,
-    bg: "bg-blue-500 text-white",
+    bg: "bg-info/50 text-white",
     getTitle: () => "Outbound call",
   },
   note: {
@@ -166,7 +166,7 @@ const ACTIVITY_CONFIG: Record<string, {
   },
   whatsapp: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    bg: "bg-green-500 text-white",
+    bg: "bg-success/50 text-white",
     getTitle: () => "WhatsApp sent",
     getSub: (a) => {
       if (a.description?.toLowerCase().includes("template")) {
@@ -178,17 +178,17 @@ const ACTIVITY_CONFIG: Record<string, {
   },
   visit: {
     icon: <MapPin className="h-3.5 w-3.5" />,
-    bg: "bg-purple-500 text-white",
+    bg: "bg-primary/50 text-white",
     getTitle: () => "Campus visit",
   },
   visit_completed: {
     icon: <CheckCircle className="h-3.5 w-3.5" />,
-    bg: "bg-emerald-600 text-white",
+    bg: "bg-success text-white",
     getTitle: () => "Visit Completed",
   },
   followup: {
     icon: <CalendarCheck className="h-3.5 w-3.5" />,
-    bg: "bg-orange-500 text-white",
+    bg: "bg-warning text-white",
     getTitle: () => "Follow-up",
   },
   offer: {
@@ -198,12 +198,12 @@ const ACTIVITY_CONFIG: Record<string, {
   },
   interview: {
     icon: <UserCheck className="h-3.5 w-3.5" />,
-    bg: "bg-indigo-500 text-white",
+    bg: "bg-primary/50 text-white",
     getTitle: () => "Interview",
   },
   conversion: {
     icon: <GraduationCap className="h-3.5 w-3.5" />,
-    bg: "bg-emerald-600 text-white",
+    bg: "bg-success text-white",
     getTitle: () => "Conversion",
   },
   application_progress: {
@@ -213,7 +213,7 @@ const ACTIVITY_CONFIG: Record<string, {
   },
   email: {
     icon: <Mail className="h-3.5 w-3.5" />,
-    bg: "bg-blue-400 text-white",
+    bg: "bg-info/40 text-white",
     getTitle: () => "Email sent",
   },
   info_update: {
@@ -224,49 +224,49 @@ const ACTIVITY_CONFIG: Record<string, {
   // Engagement events
   page_view: {
     icon: <Globe className="h-3.5 w-3.5" />,
-    bg: "bg-orange-400 text-white",
+    bg: "bg-warning/50 text-white",
     getTitle: () => "Visited Website",
     getSub: (a) => a.description || null,
   },
   chat_open: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    bg: "bg-orange-500 text-white",
+    bg: "bg-warning text-white",
     getTitle: () => "Opened Chat",
   },
   chat_message: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    bg: "bg-orange-500 text-white",
+    bg: "bg-warning text-white",
     getTitle: () => "Sent Chat Message",
   },
   navya_click: {
     icon: <Phone className="h-3.5 w-3.5" />,
-    bg: "bg-orange-500 text-white",
+    bg: "bg-warning text-white",
     getTitle: () => "Clicked Talk to Navya",
   },
   whatsapp_click: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    bg: "bg-green-500 text-white",
+    bg: "bg-success/50 text-white",
     getTitle: () => "Clicked WhatsApp",
   },
   email_open: {
     icon: <Mail className="h-3.5 w-3.5" />,
-    bg: "bg-orange-400 text-white",
+    bg: "bg-warning/50 text-white",
     getTitle: () => "Opened Email",
   },
   form_start: {
     icon: <ClipboardList className="h-3.5 w-3.5" />,
-    bg: "bg-orange-500 text-white",
+    bg: "bg-warning text-white",
     getTitle: () => "Started Form",
   },
   apply_click: {
     icon: <MousePointer className="h-3.5 w-3.5" />,
-    bg: "bg-red-500 text-white",
+    bg: "bg-destructive/50 text-white",
     getTitle: () => "Clicked Apply Now",
     getSub: (a) => a.description || null,
   },
   whatsapp_reply: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    bg: "bg-green-500 text-white",
+    bg: "bg-success/50 text-white",
     getTitle: () => "Replied on WhatsApp",
   },
 };
@@ -436,7 +436,7 @@ function CallsList({ callLogs, leadId }: { callLogs: any[]; leadId?: string }) {
 
           return (
             <div key={c.id} className="relative flex gap-3 py-2.5">
-              <div className={`relative z-10 flex h-7 w-7 items-center justify-center rounded-full shrink-0 -ml-5 shadow-sm ${isAi ? "bg-amber-500 text-white" : "bg-blue-500 text-white"}`}>
+              <div className={`relative z-10 flex h-7 w-7 items-center justify-center rounded-full shrink-0 -ml-5 shadow-sm ${isAi ? "bg-warning/50 text-white" : "bg-info/50 text-white"}`}>
                 {isAi ? <Bot className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
               </div>
               <div className="flex-1 min-w-0">

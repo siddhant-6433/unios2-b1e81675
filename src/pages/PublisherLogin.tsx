@@ -124,7 +124,7 @@ const PublisherLogin = () => {
             <button
               type="submit"
               disabled={submitting || !email.trim() || !password.trim()}
-              className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-white hover:bg-primary/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}
             </button>
@@ -133,7 +133,7 @@ const PublisherLogin = () => {
           <p className="text-center text-[11px] text-muted-foreground">
             This portal is for authorized lead publishers only.
             <br />
-            Contact <a href="mailto:admissions@nimt.ac.in" className="text-indigo-600 hover:underline">admissions@nimt.ac.in</a> for access.
+            Contact <a href="mailto:admissions@nimt.ac.in" className="text-primary hover:underline">admissions@nimt.ac.in</a> for access.
           </p>
         </div>
       </div>

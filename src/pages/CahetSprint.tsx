@@ -28,11 +28,11 @@ import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 // counsellors see the same options. If you add/rename a disposition there,
 // update here too.
 const DISPOSITIONS: { value: string; label: string; tone: string; icon: any; primary?: boolean }[] = [
-  { value: "interested",     label: "Interested",     icon: CheckCircle2, tone: "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600", primary: true },
-  { value: "call_back",      label: "Call Back",      icon: Clock,        tone: "bg-blue-100 hover:bg-blue-200 text-blue-800 border-blue-300" },
-  { value: "not_answered",   label: "Not Answered",   icon: PhoneMissed,  tone: "bg-amber-100 hover:bg-amber-200 text-amber-800 border-amber-300" },
-  { value: "not_interested", label: "Not Interested", icon: XCircle,      tone: "bg-red-100 hover:bg-red-200 text-red-800 border-red-300" },
-  { value: "ineligible",     label: "Ineligible",     icon: AlertTriangle,tone: "bg-purple-100 hover:bg-purple-200 text-purple-800 border-purple-300" },
+  { value: "interested",     label: "Interested",     icon: CheckCircle2, tone: "bg-success hover:bg-success/90 text-white border-success/40", primary: true },
+  { value: "call_back",      label: "Call Back",      icon: Clock,        tone: "bg-info/10 hover:bg-info/15 text-info-foreground border-info/30" },
+  { value: "not_answered",   label: "Not Answered",   icon: PhoneMissed,  tone: "bg-warning/10 hover:bg-warning/15 text-warning-foreground border-warning/30" },
+  { value: "not_interested", label: "Not Interested", icon: XCircle,      tone: "bg-destructive/10 hover:bg-destructive/15 text-destructive border-destructive/30" },
+  { value: "ineligible",     label: "Ineligible",     icon: AlertTriangle,tone: "bg-primary/10 hover:bg-primary/15 text-primary border-primary/25" },
 ];
 
 type CallStatus = "idle" | "calling" | "connected" | "ended" | "saving";
@@ -90,24 +90,24 @@ interface Stats {
 // long list of touched rows reads as visited-but-secondary, not as a
 // loud color blast competing with the active queue.
 const CALLED_BADGE: Record<string, { label: string; tone: string; icon: any }> = {
-  interested:     { label: "Interested",     icon: CheckCircle2, tone: "bg-emerald-100 text-emerald-800 border-emerald-300" },
-  call_back:      { label: "Call back",      icon: Clock,        tone: "bg-blue-100 text-blue-800 border-blue-300" },
-  not_answered:   { label: "No answer",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
-  not_interested: { label: "Not interested", icon: XCircle,      tone: "bg-red-100 text-red-800 border-red-300" },
-  ineligible:     { label: "Ineligible",     icon: AlertTriangle,tone: "bg-purple-100 text-purple-800 border-purple-300" },
-  busy:           { label: "Busy",           icon: PhoneOff,     tone: "bg-orange-100 text-orange-800 border-orange-300" },
-  voicemail:      { label: "Voicemail",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
+  interested:     { label: "Interested",     icon: CheckCircle2, tone: "bg-success/10 text-success-foreground border-success/30" },
+  call_back:      { label: "Call back",      icon: Clock,        tone: "bg-info/10 text-info-foreground border-info/30" },
+  not_answered:   { label: "No answer",      icon: PhoneMissed,  tone: "bg-warning/10 text-warning-foreground border-warning/30" },
+  not_interested: { label: "Not interested", icon: XCircle,      tone: "bg-destructive/10 text-destructive border-destructive/30" },
+  ineligible:     { label: "Ineligible",     icon: AlertTriangle,tone: "bg-primary/10 text-primary border-primary/25" },
+  busy:           { label: "Busy",           icon: PhoneOff,     tone: "bg-warning/10 text-warning-foreground border-warning/25" },
+  voicemail:      { label: "Voicemail",      icon: PhoneMissed,  tone: "bg-warning/10 text-warning-foreground border-warning/30" },
 };
 
 const BUCKET_META: Record<Bucket, { label: string; tone: string; icon: any }> = {
-  paid_application:     { label: "Paid",              tone: "bg-emerald-100 text-emerald-800 border-emerald-300", icon: FileCheck2 },
+  paid_application:     { label: "Paid",              tone: "bg-success/10 text-success-foreground border-success/30", icon: FileCheck2 },
   partial_application:  { label: "Partial",           tone: "bg-teal-100 text-teal-800 border-teal-300",          icon: FileEdit },
-  unreplied_whatsapp:   { label: "WA unreplied",      tone: "bg-rose-100 text-rose-800 border-rose-300",          icon: MessageSquareWarning },
+  unreplied_whatsapp:   { label: "WA unreplied",      tone: "bg-destructive/10 text-destructive border-destructive/25",          icon: MessageSquareWarning },
   priority_interested:  { label: "Priority (AI)",     tone: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300", icon: AlertTriangle },
-  engaged_whatsapp:     { label: "WA engaged",        tone: "bg-blue-100 text-blue-800 border-blue-300",          icon: MessageSquare },
-  past_visit:           { label: "Past visit",        tone: "bg-amber-100 text-amber-800 border-amber-300",       icon: Footprints },
+  engaged_whatsapp:     { label: "WA engaged",        tone: "bg-info/10 text-info-foreground border-info/30",          icon: MessageSquare },
+  past_visit:           { label: "Past visit",        tone: "bg-warning/10 text-warning-foreground border-warning/30",       icon: Footprints },
   in_followup:          { label: "Followup",          tone: "bg-slate-100 text-slate-700 border-slate-300",       icon: Clock },
-  overdue_followup:     { label: "Overdue followup",  tone: "bg-orange-100 text-orange-800 border-orange-300",    icon: AlertTriangle },
+  overdue_followup:     { label: "Overdue followup",  tone: "bg-warning/10 text-warning-foreground border-warning/25",    icon: AlertTriangle },
   fresh_cold:           { label: "Fresh / cold",      tone: "bg-sky-50 text-sky-800 border-sky-200",              icon: Snowflake },
 };
 
@@ -605,15 +605,15 @@ const CahetSprint = () => {
   return (
     <div className="space-y-4">
       {/* Sprint summary card */}
-      <Card className="border-rose-300 bg-gradient-to-r from-rose-50 to-amber-50">
+      <Card className="border-destructive/25 bg-gradient-to-r from-rose-50 to-amber-50">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 text-rose-800 font-semibold">
+              <div className="flex items-center gap-2 text-destructive font-semibold">
                 <AlertTriangle className="h-5 w-5" />
                 CAHET Counselling Registration Sprint
               </div>
-              <div className="text-sm text-rose-700/80 mt-0.5">
+              <div className="text-sm text-destructive/80 mt-0.5">
                 Last date <strong>{deadlineLabel}</strong> ({days} {days === 1 ? "day" : "days"} left). Target: {TARGET_PER_COUNSELLOR}/counsellor.
               </div>
             </div>
@@ -621,11 +621,11 @@ const CahetSprint = () => {
               {isCounsellor && stats && (
                 <div className="text-right">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">You</div>
-                  <div className="text-2xl font-bold text-rose-900">
+                  <div className="text-2xl font-bold text-destructive">
                     {stats.own_count}<span className="text-base text-muted-foreground">/{TARGET_PER_COUNSELLOR}</span>
                   </div>
-                  <div className="h-1.5 w-32 bg-rose-100 rounded mt-1 overflow-hidden">
-                    <div className="h-full bg-rose-500" style={{ width: `${ownProgress}%` }} />
+                  <div className="h-1.5 w-32 bg-destructive/10 rounded mt-1 overflow-hidden">
+                    <div className="h-full bg-destructive/50" style={{ width: `${ownProgress}%` }} />
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">+{stats.own_today} today</div>
                 </div>
@@ -693,7 +693,7 @@ const CahetSprint = () => {
           <Button
             size="sm"
             variant="outline"
-            className="h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
+            className="h-8 border-primary/25 text-primary hover:bg-primary/5"
             onClick={() => setShowSaveList(true)}
             disabled={filtered.length === 0}
             title="Save the currently filtered queue as a reusable list for bulk WhatsApp / email"
@@ -704,7 +704,7 @@ const CahetSprint = () => {
           <Button
             size="sm"
             variant="outline"
-            className="h-8 border-rose-300 text-rose-700 hover:bg-rose-50"
+            className="h-8 border-destructive/25 text-destructive hover:bg-destructive/5"
             onClick={() => setPickerOpen(true)}
             title="Find any BPT/BMRIT lead (even outside this filter)"
           >
@@ -749,7 +749,7 @@ const CahetSprint = () => {
                   There {stats!.pool_remaining === 1 ? "is" : "are"} still <strong>{stats!.pool_remaining}</strong> unregistered lead{stats!.pool_remaining === 1 ? "" : "s"} in the shared pool.
                 </div>
                 <div className="mt-3 flex items-center justify-center gap-2">
-                  <Button size="sm" onClick={() => setScope("all")} className="bg-rose-600 hover:bg-rose-700 text-white">
+                  <Button size="sm" onClick={() => setScope("all")} className="bg-destructive hover:bg-destructive text-white">
                     Show whole pool
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
@@ -759,7 +759,7 @@ const CahetSprint = () => {
               </div>
             ) : (
               <div className="p-10 text-center text-muted-foreground">
-                <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500 mb-2" />
+                <CheckCircle2 className="h-10 w-10 mx-auto text-success mb-2" />
                 <div className="font-medium">Nothing left in this view.</div>
                 <div className="text-sm">Try changing the filter or scope, or register the next 15 from another bucket.</div>
               </div>
@@ -779,9 +779,9 @@ const CahetSprint = () => {
                     ref={(el) => { rowRefs.current[r.lead_id] = el; }}
                     onClick={() => setSelectedId(r.lead_id)}
                     className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors ${
-                      flashLeadId === r.lead_id ? "bg-rose-200/70 border-l-2 border-rose-600"
+                      flashLeadId === r.lead_id ? "bg-destructive/15/70 border-l-2 border-destructive/40"
                       : calledDisp ? "bg-slate-50/70 opacity-60 hover:opacity-100 border-l-2 border-slate-300"
-                      : isSelected ? "bg-rose-50/60 border-l-2 border-rose-500"
+                      : isSelected ? "bg-destructive/5/60 border-l-2 border-destructive/35"
                       : "border-l-2 border-transparent"
                     }`}
                   >
@@ -846,7 +846,7 @@ const CahetSprint = () => {
                       </Button>
                       <Button
                         size="sm"
-                        className="h-8 bg-rose-600 hover:bg-rose-700 text-white"
+                        className="h-8 bg-destructive hover:bg-destructive text-white"
                         onClick={(e) => { e.stopPropagation(); setRegisterFor(r); }}
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
@@ -903,7 +903,7 @@ const CahetSprint = () => {
               onChange={(e) => setNewListName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !savingList && newListName.trim()) handleSaveList(); }}
             />
-            <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
               Filters: <span className="font-medium">{BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label}</span>
               {scope === "mine" && <span> · my leads</span>}
               {search && <span> · search "{search}"</span>}
@@ -944,8 +944,8 @@ function CallControlBar({
   const ss = (elapsed % 60).toString().padStart(2, "0");
 
   const tone =
-    status === "calling"   ? "border-amber-300 bg-amber-50" :
-    status === "connected" ? "border-emerald-300 bg-emerald-50" :
+    status === "calling"   ? "border-warning/30 bg-warning/5" :
+    status === "connected" ? "border-success/30 bg-success/5" :
     status === "ended"     ? "border-slate-300 bg-slate-50" :
                              "border-slate-200 bg-slate-50/70";
 
@@ -955,8 +955,8 @@ function CallControlBar({
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <div className={`h-9 w-9 rounded-full flex items-center justify-center ${
-              status === "calling"   ? "bg-amber-200 text-amber-800" :
-              status === "connected" ? "bg-emerald-200 text-emerald-800 animate-pulse" :
+              status === "calling"   ? "bg-warning/15 text-warning-foreground" :
+              status === "connected" ? "bg-success/15 text-success-foreground animate-pulse" :
               status === "ended"     ? "bg-slate-200 text-slate-700" :
                                        "bg-slate-200 text-slate-600"
             }`}>
@@ -964,8 +964,8 @@ function CallControlBar({
             </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">
-                {status === "calling"   && <>Calling your phone — pick up to connect to <span className="text-amber-900">{lead.lead_name}</span></>}
-                {status === "connected" && <>Connected with <span className="text-emerald-900">{lead.lead_name}</span></>}
+                {status === "calling"   && <>Calling your phone — pick up to connect to <span className="text-warning-foreground">{lead.lead_name}</span></>}
+                {status === "connected" && <>Connected with <span className="text-success-foreground">{lead.lead_name}</span></>}
                 {status === "ended"     && <>Call ended with <span className="text-slate-900">{lead.lead_name}</span> — pick a disposition</>}
                 {status === "saving"    && <>Saving disposition…</>}
               </div>
@@ -975,7 +975,7 @@ function CallControlBar({
                   <span className="ml-2 tabular-nums font-medium text-foreground">{mm}:{ss}</span>
                 )}
                 {preDisposition && status === "connected" && (
-                  <span className="ml-2 text-emerald-700">· queued: {preDisposition.replace("_", " ")}</span>
+                  <span className="ml-2 text-success">· queued: {preDisposition.replace("_", " ")}</span>
                 )}
               </div>
             </div>
@@ -1005,7 +1005,7 @@ function CallControlBar({
               {status === "ended" && (
                 <Button
                   size="sm"
-                  className="h-8 bg-rose-600 hover:bg-rose-700 text-white"
+                  className="h-8 bg-destructive hover:bg-destructive text-white"
                   onClick={onRegister}
                   title="Skip disposition and go straight to CAHET registration"
                 >
@@ -1020,7 +1020,7 @@ function CallControlBar({
             <Button
               size="sm"
               variant="outline"
-              className="h-8 border-rose-300 text-rose-700 hover:bg-rose-50"
+              className="h-8 border-destructive/25 text-destructive hover:bg-destructive/5"
               onClick={onCancel}
               title="Cancel call (Esc)"
             >
@@ -1123,7 +1123,7 @@ function CahetLeadPicker({
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-sm font-medium truncate">{r.lead_name}</span>
                       {r.registered && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full bg-success/10 text-success-foreground border border-success/30 px-1.5 py-0">
                           <CheckCircle2 className="h-2.5 w-2.5" /> registered
                         </span>
                       )}
@@ -1144,7 +1144,7 @@ function CahetLeadPicker({
                   {!r.registered && (
                     <Button
                       size="sm"
-                      className="h-7 text-xs bg-rose-600 hover:bg-rose-700 text-white"
+                      className="h-7 text-xs bg-destructive hover:bg-destructive text-white"
                       onClick={() => onRegisterDirect({
                         lead_id: r.lead_id,
                         lead_name: r.lead_name,

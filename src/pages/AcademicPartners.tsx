@@ -252,14 +252,14 @@ const humanize = (value: string | null | undefined) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase()) || "Unknown";
 const stageBadgeClass = (stage: string | null | undefined) => {
-  if (stage === "admitted") return "bg-emerald-100 text-emerald-700";
-  if (stage === "rejected" || stage === "lost") return "bg-rose-100 text-rose-700";
+  if (stage === "admitted") return "bg-success/10 text-success";
+  if (stage === "rejected" || stage === "lost") return "bg-destructive/10 text-destructive";
   return "bg-sky-100 text-sky-700";
 };
 const studentStatusBadgeClass = (status: string | null | undefined) => {
-  if (status === "active") return "bg-emerald-100 text-emerald-700";
-  if (status === "inactive" || status === "dropped") return "bg-rose-100 text-rose-700";
-  return "bg-amber-100 text-amber-700";
+  if (status === "active") return "bg-success/10 text-success";
+  if (status === "inactive" || status === "dropped") return "bg-destructive/10 text-destructive";
+  return "bg-warning/10 text-warning-foreground";
 };
 const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
 const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?: boolean }[] = [
@@ -814,7 +814,7 @@ export default function AcademicPartners() {
     payout: dashboard.reduce((sum, row) => sum + Number(row.pending_payout || 0), 0),
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -878,8 +878,8 @@ export default function AcademicPartners() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-semibold text-foreground">{partner.name}</h3>
-                        {partner.user_id && <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">Linked</Badge>}
-                        <Badge className={`border-0 text-[10px] ${partner.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{partner.status}</Badge>
+                        {partner.user_id && <Badge className="border-0 bg-success/10 text-success text-[10px]">Linked</Badge>}
+                        <Badge className={`border-0 text-[10px] ${partner.status === "active" ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>{partner.status}</Badge>
                         {canManagePayout && <Badge variant="secondary" className="text-[10px]">{Number(partner.default_payout_percentage || 0)}% payout</Badge>}
                       </div>
                       {partner.organization && <p className="mt-0.5 text-sm text-primary">{partner.organization}</p>}
@@ -903,7 +903,7 @@ export default function AcademicPartners() {
                 <div className="mt-4 grid grid-cols-3 md:grid-cols-6 gap-3">
                   <div><p className="text-lg font-bold">{row?.total_leads || 0}</p><p className="text-xs text-muted-foreground">Leads</p></div>
                   <div><p className="text-lg font-bold text-sky-600">{row?.pipeline || 0}</p><p className="text-xs text-muted-foreground">In Pipeline</p></div>
-                  <div><p className="text-lg font-bold text-emerald-600">{row?.conversions || 0}</p><p className="text-xs text-muted-foreground">Admitted</p></div>
+                  <div><p className="text-lg font-bold text-success">{row?.conversions || 0}</p><p className="text-xs text-muted-foreground">Admitted</p></div>
                   <div><p className="text-lg font-bold">{row?.total_candidates || 0}</p><p className="text-xs text-muted-foreground">Students</p></div>
                   <div><p className="text-lg font-bold">{fmt(row?.total_fee_collected)}</p><p className="text-xs text-muted-foreground">Fee</p></div>
                   <div><p className="text-lg font-bold">{fmt(row?.pending_payout)}</p><p className="text-xs text-muted-foreground">Pending Payout</p></div>
@@ -1377,12 +1377,12 @@ export default function AcademicPartners() {
               </select>
             </div>
             {selectedLead?.academic_partner_id && selectedLead.academic_partner_id !== leadAssignmentPartnerId && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning-foreground">
                 This lead is currently assigned to another academic partner. Saving will replace that owner.
               </div>
             )}
             {selectedLead?.consultant_id && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning-foreground">
                 This lead currently has a consultant owner. Saving will replace it with this academic partner.
               </div>
             )}

@@ -71,8 +71,8 @@ function fmtPostedAt(iso: string | null): string {
 function SocialLinkIcons({ v }: { v: VideoRow }) {
   const items = [
     { url: v.instagram_url, posted: v.instagram_posted_on, Icon: Instagram, color: "text-pink-600", label: "Instagram" },
-    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-blue-700", label: "LinkedIn" },
-    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-red-600",  label: "YouTube" },
+    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-info-foreground", label: "LinkedIn" },
+    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-destructive",  label: "YouTube" },
   ];
   return (
     <div className="flex items-center justify-center gap-1.5">
@@ -257,14 +257,14 @@ export default function VideoEditorPortal() {
   };
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   if (!editor) {
     return (
       <div className="space-y-4 animate-fade-in">
         <h1 className="text-2xl font-bold">Video Portal</h1>
-        <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+        <Card className="border-warning/20 bg-warning/5 dark:bg-warning/90/20">
           <CardContent className="p-6">
             <p className="text-sm">
               Your account is not yet linked to a Video Editor profile. Please contact the super admin
@@ -300,7 +300,7 @@ export default function VideoEditorPortal() {
                 <div key={m.month} className="rounded-xl border border-border p-3">
                   <p className="text-[10px] text-muted-foreground">{new Date(m.month + "-01").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
                   <p className="text-lg font-bold">{m.count} <span className="text-xs font-normal text-muted-foreground">videos</span></p>
-                  <p className="text-xs text-emerald-600 font-medium">₹{m.amount.toLocaleString("en-IN")}</p>
+                  <p className="text-xs text-success font-medium">₹{m.amount.toLocaleString("en-IN")}</p>
                 </div>
               ))}
             </div>
@@ -369,7 +369,7 @@ export default function VideoEditorPortal() {
                         <td className="px-3 py-3 text-center">
                           <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</Badge>
                           {v.status === "rejected" && v.rejection_reason && (
-                            <div className="mt-1 text-[10px] text-red-600 max-w-[180px] mx-auto">{v.rejection_reason}</div>
+                            <div className="mt-1 text-[10px] text-destructive max-w-[180px] mx-auto">{v.rejection_reason}</div>
                           )}
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -377,7 +377,7 @@ export default function VideoEditorPortal() {
                         </td>
                         <td className="px-3 py-3 text-center">
                           {v.is_billable
-                            ? <CheckCircle className="h-4 w-4 text-emerald-600 mx-auto" />
+                            ? <CheckCircle className="h-4 w-4 text-success mx-auto" />
                             : <span className="text-[10px] text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -461,7 +461,7 @@ export default function VideoEditorPortal() {
                   value={socialForm.instagram_posted_on} onChange={e => setSocialForm(p => ({ ...p, instagram_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium flex items-center gap-1.5"><Linkedin className="h-3.5 w-3.5 text-blue-700" /> LinkedIn
+                <label className="text-xs font-medium flex items-center gap-1.5"><Linkedin className="h-3.5 w-3.5 text-info-foreground" /> LinkedIn
                   {socialForm.linkedin_url.trim() && (
                     <a href={socialForm.linkedin_url.trim()} target="_blank" rel="noreferrer"
                        className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline">
@@ -475,7 +475,7 @@ export default function VideoEditorPortal() {
                   value={socialForm.linkedin_posted_on} onChange={e => setSocialForm(p => ({ ...p, linkedin_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium flex items-center gap-1.5"><Youtube className="h-3.5 w-3.5 text-red-600" /> YouTube
+                <label className="text-xs font-medium flex items-center gap-1.5"><Youtube className="h-3.5 w-3.5 text-destructive" /> YouTube
                   {socialForm.youtube_url.trim() && (
                     <a href={socialForm.youtube_url.trim()} target="_blank" rel="noreferrer"
                        className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline">

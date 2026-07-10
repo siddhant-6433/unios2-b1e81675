@@ -221,7 +221,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
                 {draftStatus === "saving" ? (
                   <><CloudUpload className="h-3 w-3 animate-pulse" />Saving draft…</>
                 ) : (
-                  <><CheckCircle2 className="h-3 w-3 text-emerald-600" />Draft saved</>
+                  <><CheckCircle2 className="h-3 w-3 text-success" />Draft saved</>
                 )}
               </span>
             )}
@@ -285,8 +285,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
             />
           </div>
           {asksCnetAppeared && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-              <label className="block text-[11px] font-medium text-blue-900 dark:text-blue-200 mb-2">
+            <div className="rounded-xl border border-info/20 bg-info/5/60 p-3 dark:border-info/60/50 dark:bg-info/90/20">
+              <label className="block text-[11px] font-medium text-info-foreground dark:text-info/40 mb-2">
                 CNET appeared? <span className="text-destructive">*</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -297,8 +297,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
                     onClick={() => setForm(p => ({ ...p, cnet_appeared: value }))}
                     className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                       form.cnet_appeared === value
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                        ? "border-info/40 bg-info text-white"
+                        : "border-info/20 bg-background text-foreground hover:bg-info/5 dark:border-info/60"
                     }`}
                   >
                     {value === "yes" ? "Yes" : "No"}
@@ -308,8 +308,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
             </div>
           )}
           {asksCahetRegistered && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
-              <label className="block text-[11px] font-medium text-rose-900 dark:text-rose-200 mb-2">
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5/60 p-3 dark:border-destructive/60/50 dark:bg-destructive/90/20">
+              <label className="block text-[11px] font-medium text-destructive dark:text-destructive/40 mb-2">
                 Registered for CAHET? <span className="text-destructive">*</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -320,8 +320,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
                     onClick={() => setForm(p => ({ ...p, cahet_registered: value }))}
                     className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                       form.cahet_registered === value
-                        ? "border-rose-600 bg-rose-600 text-white"
-                        : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                        ? "border-destructive/40 bg-destructive text-white"
+                        : "border-destructive/20 bg-background text-foreground hover:bg-destructive/5 dark:border-destructive/60"
                     }`}
                   >
                     {value === "yes" ? "Yes" : "No"}

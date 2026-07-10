@@ -71,14 +71,14 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
         className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 hover:bg-muted/50 transition-colors"
       >
         {isHot ? (
-          <Flame className="h-3.5 w-3.5 text-orange-500 animate-pulse" />
+          <Flame className="h-3.5 w-3.5 text-warning animate-pulse" />
         ) : (
-          <Trophy className={`h-3.5 w-3.5 ${score.weekly_score >= 50 ? "text-amber-500" : "text-muted-foreground"}`} />
+          <Trophy className={`h-3.5 w-3.5 ${score.weekly_score >= 50 ? "text-warning" : "text-muted-foreground"}`} />
         )}
         <span className="text-[11px] font-bold text-foreground">{score.total_score}</span>
         {score.daily_score !== 0 && (
           <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-            score.daily_score > 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+            score.daily_score > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
           }`}>
             {score.daily_score > 0 ? `+${score.daily_score}` : score.daily_score}
           </span>
@@ -96,7 +96,7 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
               const isMe = r.counsellor_id === profileId;
               return (
                 <div key={r.counsellor_id} className={`flex items-center gap-2.5 px-3 py-1.5 ${isMe ? "bg-primary/10" : "hover:bg-muted/30"}`}>
-                  <span className={`w-5 text-right text-[11px] font-bold ${i === 0 ? "text-amber-500" : i === 1 ? "text-gray-400" : i === 2 ? "text-orange-400" : "text-muted-foreground"}`}>
+                  <span className={`w-5 text-right text-[11px] font-bold ${i === 0 ? "text-warning" : i === 1 ? "text-gray-400" : i === 2 ? "text-warning" : "text-muted-foreground"}`}>
                     {i + 1}
                   </span>
                   <span className={`text-[12px] flex-1 truncate ${isMe ? "font-bold text-primary" : "text-foreground"}`}>
@@ -104,7 +104,7 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
                   </span>
                   <span className="text-[11px] font-bold text-foreground tabular-nums">{r.total_score}</span>
                   {r.daily_score !== 0 && (
-                    <span className={`text-[9px] font-bold ${r.daily_score > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    <span className={`text-[9px] font-bold ${r.daily_score > 0 ? "text-success" : "text-destructive"}`}>
                       {r.daily_score > 0 ? `+${r.daily_score}` : r.daily_score}
                     </span>
                   )}

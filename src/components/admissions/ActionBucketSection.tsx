@@ -6,7 +6,7 @@ import type { ActionLead } from "@/hooks/useActionCenter";
 interface ActionBucketSectionProps {
   title: string;
   icon: string; // emoji
-  color: string; // tailwind border color class e.g. "border-red-500"
+  color: string; // tailwind border color class e.g. "border-destructive/35"
   headerBg: string; // tailwind bg class for header
   variant: BucketVariant;
   leads: ActionLead[];
@@ -68,7 +68,7 @@ export function ActionBucketSection({
         <div>
           {leads.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-5 text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <CheckCircle2 className="h-4 w-4 text-success" />
               <span className="text-xs font-medium">All caught up!</span>
             </div>
           ) : (

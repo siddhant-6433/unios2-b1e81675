@@ -234,7 +234,7 @@ export function ScholarshipCalculator({
     return (
       <Card className="border-border/60">
         <CardContent className="p-4 flex h-16 items-center justify-center">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
         </CardContent>
       </Card>
     );
@@ -263,7 +263,7 @@ export function ScholarshipCalculator({
         </div>
 
         {!ctx.baseFee && (
-          <p className="text-[11px] text-amber-700 dark:text-amber-400">
+          <p className="text-[11px] text-warning-foreground dark:text-warning">
             No year-1 base fee found for this course. Add a fee structure or set{" "}
             <code className="text-[10px]">courses.fee_per_year</code> to enable
             the calculator.
@@ -340,7 +340,7 @@ export function ScholarshipCalculator({
                     key={`${opt.kind}-${i}`}
                     className={
                       opt.isWinner
-                        ? "bg-emerald-50/60 dark:bg-emerald-950/20 border-t border-emerald-200/60 dark:border-emerald-900/40"
+                        ? "bg-success/5/60 dark:bg-success/90/20 border-t border-success/20/60 dark:border-success/60/40"
                         : "border-t border-border/40 opacity-70"
                     }
                   >
@@ -350,7 +350,7 @@ export function ScholarshipCalculator({
                         {opt.isWinner && (
                           <Badge
                             variant="outline"
-                            className="text-[8px] px-1 py-0 h-3.5 border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
+                            className="text-[8px] px-1 py-0 h-3.5 border-success/30 dark:border-success/50 text-success dark:text-success"
                           >
                             Offered
                           </Badge>
@@ -361,7 +361,7 @@ export function ScholarshipCalculator({
                     <td className="px-2 py-1.5 text-right font-semibold text-foreground">
                       {opt.percent}%
                     </td>
-                    <td className="px-2 py-1.5 text-right text-emerald-700 dark:text-emerald-400 font-medium">
+                    <td className="px-2 py-1.5 text-right text-success dark:text-success font-medium">
                       -{fmt(opt.scholarship)}
                     </td>
                     <td className="px-2.5 py-1.5 text-right font-bold text-primary">

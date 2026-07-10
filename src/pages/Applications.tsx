@@ -187,35 +187,35 @@ const FUNNEL_META: Record<FunnelStage, {
   iconBg: string; iconColor: string;
   tint: string; ring: string; bar: string;
 }> = {
-  in_progress:  { label: "In Progress",  icon: Clock,         iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
-  submitted:    { label: "Submitted",    icon: CheckCircle,   iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
-  paid:         { label: "Paid",         icon: CreditCard,    iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/60", ring: "ring-emerald-400", bar: "bg-emerald-400" },
-  approved:     { label: "Pending Offer", icon: ClipboardCheck,iconBg: "bg-orange-100",  iconColor: "text-orange-600",  tint: "bg-orange-50/60",  ring: "ring-orange-400",  bar: "bg-orange-400" },
+  in_progress:  { label: "In Progress",  icon: Clock,         iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",   tint: "bg-warning/5/60",   ring: "ring-amber-400",   bar: "bg-warning/40" },
+  submitted:    { label: "Submitted",    icon: CheckCircle,   iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-violet-400",  bar: "bg-primary/40" },
+  paid:         { label: "Paid",         icon: CreditCard,    iconBg: "bg-success/10", iconColor: "text-success", tint: "bg-success/5/60", ring: "ring-emerald-400", bar: "bg-success/50" },
+  approved:     { label: "Pending Offer", icon: ClipboardCheck,iconBg: "bg-warning/10",  iconColor: "text-warning-foreground",  tint: "bg-warning/5/60",  ring: "ring-orange-400",  bar: "bg-warning/50" },
   offer_sent:   { label: "Offer Sent",   icon: Gift,          iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
   token_paid:   { label: "Token Paid",   icon: Wallet,        iconBg: "bg-cyan-100",    iconColor: "text-cyan-600",    tint: "bg-cyan-50/60",    ring: "ring-cyan-400",    bar: "bg-cyan-400" },
-  pre_admitted: { label: "Pre-Admitted", icon: UserCheck,     iconBg: "bg-indigo-100",  iconColor: "text-indigo-600",  tint: "bg-indigo-50/60",  ring: "ring-indigo-400",  bar: "bg-indigo-400" },
-  admitted:     { label: "Admitted",     icon: GraduationCap, iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+  pre_admitted: { label: "Pre-Admitted", icon: UserCheck,     iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-indigo-400",  bar: "bg-primary/40" },
+  admitted:     { label: "Admitted",     icon: GraduationCap, iconBg: "bg-success/10",   iconColor: "text-success",   tint: "bg-success/5/60",   ring: "ring-green-400",   bar: "bg-success/50" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: "bg-amber-100 text-amber-700",
-  submitted: "bg-emerald-100 text-emerald-700",
-  under_review: "bg-blue-100 text-blue-700",
-  approved: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
+  draft: "bg-warning/10 text-warning-foreground",
+  submitted: "bg-success/10 text-success",
+  under_review: "bg-info/10 text-info-foreground",
+  approved: "bg-success/10 text-success",
+  rejected: "bg-destructive/10 text-destructive",
 };
 
 const PAYMENT_BADGE: Record<string, string> = {
-  paid: "bg-emerald-100 text-emerald-700",
-  pending: "bg-amber-100 text-amber-700",
-  failed: "bg-red-100 text-red-700",
+  paid: "bg-success/10 text-success",
+  pending: "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
 };
 
 const LEAD_STAGE_LABELS: Record<string, string> = {
@@ -226,14 +226,14 @@ const LEAD_STAGE_LABELS: Record<string, string> = {
 };
 
 const LEAD_STAGE_BADGE: Record<string, string> = {
-  application_in_progress: "bg-blue-100 text-blue-700",
-  application_submitted: "bg-violet-100 text-violet-700",
-  visit_scheduled: "bg-purple-100 text-purple-700",
-  interview: "bg-indigo-100 text-indigo-700",
+  application_in_progress: "bg-info/10 text-info-foreground",
+  application_submitted: "bg-primary/10 text-primary",
+  visit_scheduled: "bg-primary/10 text-primary",
+  interview: "bg-primary/10 text-primary",
   offer_sent: "bg-teal-100 text-teal-700",
   token_paid: "bg-cyan-100 text-cyan-700",
-  pre_admitted: "bg-emerald-100 text-emerald-700",
-  admitted: "bg-green-100 text-green-700",
+  pre_admitted: "bg-success/10 text-success",
+  admitted: "bg-success/10 text-success",
 };
 
 const applicationActivityTime = (app: Pick<AppRow, "updated_at" | "submitted_at" | "created_at">) =>
@@ -341,8 +341,8 @@ const buildRegistrationStatuses = (
 };
 
 const registrationStatusClass = (status: RegistrationStatusKind) => {
-  if (status === "registered") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "not_registered") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "registered") return "border-success/20 bg-success/5 text-success";
+  if (status === "not_registered") return "border-destructive/20 bg-destructive/5 text-destructive";
   return "border-border bg-muted/40 text-muted-foreground";
 };
 
@@ -1383,7 +1383,7 @@ export default function Applications() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -1418,7 +1418,7 @@ export default function Applications() {
           )}
           <button onClick={() => setSortMode(sortMode === "nudge" ? "date" : "nudge")}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-              sortMode === "nudge" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
+              sortMode === "nudge" ? "border-warning/30 bg-warning/5 text-warning-foreground" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
             }`}>
             <Sparkles className="h-3 w-3" />{sortMode === "nudge" ? "Nudge View" : "Sort: Activity"}
           </button>
@@ -1455,8 +1455,8 @@ export default function Applications() {
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                     stageFilter === "paid_no_offer"
-                      ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                      : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
+                      ? "border-destructive/30 bg-destructive/10 text-destructive ring-2 ring-rose-300"
+                      : "border-destructive/25 bg-destructive/5 text-destructive hover:bg-destructive/10 animate-pulse"
                   }`}
                   title="Paid candidates with no offer letter yet — counsellor action needed"
                 >
@@ -1889,7 +1889,7 @@ export default function Applications() {
                       {app.status === "on_hold" && (
                         <div className="mt-1.5">
                           <span
-                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700 max-w-[260px]"
+                            className="inline-flex items-center gap-1 rounded-md border border-warning/20 bg-warning/5 px-2 py-0.5 text-[10px] text-warning-foreground max-w-[260px]"
                             title={app.hold_reason || "No reason provided"}
                           >
                             <PauseCircle className="h-3 w-3 shrink-0" />
@@ -1905,7 +1905,7 @@ export default function Applications() {
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-2">
                           <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
+                            <div className={`h-full rounded-full ${progressPct === 100 ? "bg-success/50" : progressPct > 0 ? "bg-info/50" : "bg-gray-300"}`}
                               style={{ width: `${progressPct}%` }} />
                           </div>
                           <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
@@ -1968,7 +1968,7 @@ export default function Applications() {
                           && (((app.an_due ?? 0) > 0) || ((app.year1_due ?? 0) > 0)) && (
                           <button
                             onClick={() => setNudgeTarget(app)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 whitespace-nowrap"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/5 px-2.5 py-1.5 text-xs font-medium text-success hover:bg-success/10 whitespace-nowrap"
                             title="Nudge candidate over WhatsApp to confirm admission"
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
@@ -1988,7 +1988,7 @@ export default function Applications() {
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: true, hold_reason: app.hold_reason ?? null,
                               })}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-1.5 text-xs font-medium text-warning-foreground hover:bg-warning/10 whitespace-nowrap"
                               title="This application is on hold — click to release"
                             >
                               <PauseCircle className="h-3.5 w-3.5" />
@@ -2003,7 +2003,7 @@ export default function Applications() {
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: false,
                               })}
-                              className="p-1.5 rounded text-muted-foreground hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                              className="p-1.5 rounded text-muted-foreground hover:text-warning-foreground hover:bg-warning/5 transition-colors"
                               title="Put application on hold (ineligible)"
                             >
                               <PauseCircle className="h-3.5 w-3.5" />
@@ -2096,7 +2096,7 @@ export default function Applications() {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="mt-2 h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                    className="mt-2 h-7 text-xs border-success/30 text-success hover:bg-success/5"
                                     onClick={() => setOfflinePaymentApp(app)}
                                   >
                                     <CreditCard className="h-3 w-3 mr-1" />Mark Offline Payment
@@ -2121,7 +2121,7 @@ export default function Applications() {
                               <div className="space-y-1.5">
                                 {Object.entries(cs).map(([key, done]) => (
                                   <div key={key} className="flex items-center gap-2">
-                                    {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
+                                    {done ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <AlertCircle className="h-3.5 w-3.5 text-warning" />}
                                     <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
                                   </div>
                                 ))}
@@ -2305,7 +2305,7 @@ export default function Applications() {
             </DialogTitle>
           </DialogHeader>
           {docsLoading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
           ) : docs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Upload className="h-8 w-8 mx-auto mb-2 opacity-30" />

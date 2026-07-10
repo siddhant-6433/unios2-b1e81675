@@ -45,8 +45,8 @@ function monthOptions(): { value: string; label: string }[] {
 
 const BILL_STATUS: Record<string, { label: string; color: string }> = {
   draft:    { label: "Draft",    color: "bg-gray-100 text-gray-700" },
-  approved: { label: "Approved", color: "bg-blue-100 text-blue-700" },
-  paid:     { label: "Paid",     color: "bg-emerald-100 text-emerald-700" },
+  approved: { label: "Approved", color: "bg-info/10 text-info-foreground" },
+  paid:     { label: "Paid",     color: "bg-success/10 text-success" },
 };
 
 export default function VideoBills() {
@@ -137,7 +137,7 @@ export default function VideoBills() {
   const totalForMonth = bills.reduce((s, b) => s + Number(b.total_amount), 0);
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -210,7 +210,7 @@ export default function VideoBills() {
                         <td className="px-3 py-3 text-xs text-muted-foreground">{VIDEO_BRAND_LABEL[brand]}</td>
                         <td className="px-3 py-3 text-right font-medium">
                           {count}
-                          {stale && <div className="text-[9px] text-amber-600">live: {live}</div>}
+                          {stale && <div className="text-[9px] text-warning-foreground">live: {live}</div>}
                         </td>
                         <td className="px-3 py-3 text-right">₹{rate.toLocaleString("en-IN")}</td>
                         <td className="px-3 py-3 text-right font-semibold">₹{amount.toLocaleString("en-IN")}</td>
@@ -230,13 +230,13 @@ export default function VideoBills() {
                                 </Button>
                               )}
                               {bill?.status === "draft" && (
-                                <Button size="sm" className="gap-1 h-7 text-xs bg-blue-600 hover:bg-blue-700" disabled={marking === bill.id}
+                                <Button size="sm" className="gap-1 h-7 text-xs bg-info hover:bg-info/60" disabled={marking === bill.id}
                                   onClick={() => handleMark(bill, "approved")}>
                                   {marking === bill.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />} Approve
                                 </Button>
                               )}
                               {bill?.status === "approved" && (
-                                <Button size="sm" className="gap-1 h-7 text-xs bg-emerald-600 hover:bg-emerald-700" disabled={marking === bill.id}
+                                <Button size="sm" className="gap-1 h-7 text-xs bg-success hover:bg-success/90" disabled={marking === bill.id}
                                   onClick={() => handleMark(bill, "paid")}>
                                   {marking === bill.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />} Mark Paid
                                 </Button>

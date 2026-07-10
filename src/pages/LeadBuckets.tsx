@@ -25,11 +25,11 @@ function getUrgency(createdAt: string) {
   const hours = mins / 60;
   const days = hours / 24;
 
-  if (mins < 30) return { level: "fresh", label: `${Math.floor(mins)}m`, color: "text-emerald-600", bg: "bg-emerald-500", barWidth: "100%", pulse: false };
-  if (hours < 2) return { level: "warm", label: `${Math.floor(mins)}m`, color: "text-amber-600", bg: "bg-amber-400", barWidth: "75%", pulse: false };
-  if (hours < 6) return { level: "cooling", label: `${Math.round(hours)}h`, color: "text-orange-600", bg: "bg-orange-500", barWidth: "50%", pulse: false };
-  if (hours < 24) return { level: "urgent", label: `${Math.round(hours)}h`, color: "text-red-600", bg: "bg-red-500", barWidth: "25%", pulse: true };
-  return { level: "critical", label: `${Math.round(days)}d`, color: "text-red-700", bg: "bg-red-700", barWidth: "10%", pulse: true };
+  if (mins < 30) return { level: "fresh", label: `${Math.floor(mins)}m`, color: "text-success", bg: "bg-success/50", barWidth: "100%", pulse: false };
+  if (hours < 2) return { level: "warm", label: `${Math.floor(mins)}m`, color: "text-warning-foreground", bg: "bg-warning/40", barWidth: "75%", pulse: false };
+  if (hours < 6) return { level: "cooling", label: `${Math.round(hours)}h`, color: "text-warning-foreground", bg: "bg-warning", barWidth: "50%", pulse: false };
+  if (hours < 24) return { level: "urgent", label: `${Math.round(hours)}h`, color: "text-destructive", bg: "bg-destructive/50", barWidth: "25%", pulse: true };
+  return { level: "critical", label: `${Math.round(days)}d`, color: "text-destructive", bg: "bg-destructive/60", barWidth: "10%", pulse: true };
 }
 
 function UrgencyBadge({ createdAt }: { createdAt: string }) {
@@ -126,10 +126,10 @@ interface SourceChipsProps {
 
 function SourceChips({ breakdown, onPick }: SourceChipsProps) {
   const chips: Array<{ key: string; label: string; count: number; cls: string }> = [
-    { key: "meta_ads", label: "Meta", count: breakdown.meta_ads, cls: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900" },
-    { key: "google_ads", label: "Google", count: breakdown.google_ads, cls: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900" },
-    { key: "website", label: "Website", count: breakdown.website, cls: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900" },
-    { key: "web_chat", label: "Web Chat", count: breakdown.web_chat, cls: "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900" },
+    { key: "meta_ads", label: "Meta", count: breakdown.meta_ads, cls: "bg-info/5 text-info-foreground ring-blue-200 dark:bg-info/90/30 dark:text-info/60 dark:ring-blue-900" },
+    { key: "google_ads", label: "Google", count: breakdown.google_ads, cls: "bg-warning/5 text-warning-foreground ring-amber-200 dark:bg-warning/90/30 dark:text-warning/70 dark:ring-amber-900" },
+    { key: "website", label: "Website", count: breakdown.website, cls: "bg-success/5 text-success ring-emerald-200 dark:bg-success/90/30 dark:text-success/60 dark:ring-emerald-900" },
+    { key: "web_chat", label: "Web Chat", count: breakdown.web_chat, cls: "bg-primary/5 text-primary ring-violet-200 dark:bg-primary/90/30 dark:text-primary/50 dark:ring-violet-900" },
   ];
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
@@ -804,20 +804,20 @@ export default function LeadBuckets() {
         </Card>
 
         <Card
-          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-violet-50/50 dark:bg-violet-950/10" : "border-border/60"}`}
+          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-primary/5/50 dark:bg-primary/90/10" : "border-border/60"}`}
           onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
-                <School className="h-5 w-5 text-violet-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 dark:bg-primary/80/30 shrink-0">
+                <School className="h-5 w-5 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">Mirai IB Leads</p>
                 <p className="text-xs text-muted-foreground">Mirai Experiential School</p>
               </div>
-              <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
+              <span className="text-xl font-bold text-primary">{miraiSchoolCount}</span>
             </div>
             <AiCallChips
               breakdown={miraiAiCalls}
@@ -1042,7 +1042,7 @@ export default function LeadBuckets() {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -1075,8 +1075,8 @@ export default function LeadBuckets() {
               {filtered.map((lead) => {
                 const urgency = getUrgency(lead.created_at);
                 const rowBg = selectedIds.has(lead.id) ? "bg-primary/5"
-                  : urgency.level === "critical" ? "bg-red-50/60 dark:bg-red-950/10"
-                  : urgency.level === "urgent" ? "bg-red-50/30 dark:bg-red-950/5"
+                  : urgency.level === "critical" ? "bg-destructive/5/60 dark:bg-destructive/90/10"
+                  : urgency.level === "urgent" ? "bg-destructive/5/30 dark:bg-destructive/90/5"
                   : "";
                 return (
                 <tr
@@ -1130,7 +1130,7 @@ export default function LeadBuckets() {
                       const hint = jdCategoryHint(lead.jd_category);
                       return (
                         <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate max-w-[260px]">
-                          <span className="font-semibold text-orange-700 dark:text-orange-400">JD:</span>{" "}
+                          <span className="font-semibold text-warning-foreground dark:text-warning">JD:</span>{" "}
                           {lead.jd_category}
                           {hint && <span className="text-muted-foreground"> · {hint}</span>}
                         </p>

@@ -89,7 +89,7 @@ export function AddSecondaryCounsellorDialog({ open, onOpenChange, leadId, leadN
         </DialogHeader>
 
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
         ) : (
           <div className="space-y-4 mt-2">
             {existing.length > 0 && (

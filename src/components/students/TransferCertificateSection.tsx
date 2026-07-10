@@ -75,9 +75,11 @@ const emptyForm = (): TcForm => ({
 export function TransferCertificateSection({
   studentId,
   leadId,
+  archived,
 }: {
   studentId: string;
   leadId: string | null;
+  archived: boolean;
 }) {
   const { role } = useAuth();
   const { toast } = useToast();
@@ -215,9 +217,9 @@ export function TransferCertificateSection({
     if (!request) return null;
     const map: Record<TcRequest["status"], { label: string; cls: string; icon: JSX.Element }> = {
       draft: { label: "Draft", cls: "bg-muted text-muted-foreground", icon: <Clock className="h-3.5 w-3.5" /> },
-      pending_approval: { label: "Pending approval", cls: "bg-amber-100 text-amber-800", icon: <Clock className="h-3.5 w-3.5" /> },
-      approved: { label: "Approved", cls: "bg-emerald-100 text-emerald-800", icon: <Check className="h-3.5 w-3.5" /> },
-      rejected: { label: "Rejected", cls: "bg-red-100 text-red-800", icon: <X className="h-3.5 w-3.5" /> },
+      pending_approval: { label: "Pending approval", cls: "bg-warning/10 text-warning-foreground", icon: <Clock className="h-3.5 w-3.5" /> },
+      approved: { label: "Approved", cls: "bg-success/10 text-success-foreground", icon: <Check className="h-3.5 w-3.5" /> },
+      rejected: { label: "Rejected", cls: "bg-destructive/10 text-destructive", icon: <X className="h-3.5 w-3.5" /> },
     };
     const m = map[request.status];
     return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${m.cls}`}>{m.icon}{m.label}</span>;
@@ -225,7 +227,7 @@ export function TransferCertificateSection({
 
   if (!canIssue && !canApprove) return null;
 
-  const showIssueButton = canIssue && (!request || request.status === "rejected");
+  const showIssueButton = canIssue && archived && (!request || request.status === "rejected");
 
   return (
     <div className="rounded-xl border bg-card p-4">
@@ -250,7 +252,7 @@ export function TransferCertificateSection({
           {request.tc_number && <p><span className="text-muted-foreground">TC No.:</span> <span className="font-medium">{request.tc_number}</span></p>}
           {request.issue_date && <p><span className="text-muted-foreground">Issued:</span> {fmtDate(request.issue_date)}</p>}
           {request.status === "rejected" && request.decision_notes && (
-            <p className="text-red-700"><AlertCircle className="mr-1 inline h-3.5 w-3.5" />{request.decision_notes}</p>
+            <p className="text-destructive"><AlertCircle className="mr-1 inline h-3.5 w-3.5" />{request.decision_notes}</p>
           )}
 
           {request.status === "pending_approval" && canApprove && (
@@ -279,7 +281,11 @@ export function TransferCertificateSection({
           )}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-muted-foreground">No transfer certificate issued yet.</p>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {canIssue && !archived
+            ? "Archive the student first — a transfer certificate can only be issued for an archived student."
+            : "No transfer certificate issued yet."}
+        </p>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -292,7 +298,7 @@ export function TransferCertificateSection({
           </DialogHeader>
 
           {feeBlocked && (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <div className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
               <AlertCircle className="h-4 w-4" />
               Outstanding dues of {dues}. A TC cannot be issued until fees are fully cleared.
             </div>

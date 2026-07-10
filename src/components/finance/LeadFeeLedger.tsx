@@ -235,7 +235,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     return rows;
   }, [preview, payments]);
 
-  if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
   if (payments.length === 0 && ledger.length === 0 && preview.length === 0) {
     return (
       <>
@@ -321,14 +321,14 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                   <td className="px-3 py-2 text-foreground">
                     {PAY_TYPE_LABELS[p.type] || p.type}
                     {p.type === "pre_admission_token" && preview.length > 0 && (
-                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400">Adjusted against admission fee</p>
+                      <p className="text-[10px] text-success dark:text-success">Adjusted against admission fee</p>
                     )}
                     {p.waiver_reason && (
                       <p className="text-[10px] text-muted-foreground/70">{p.waiver_reason}</p>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(p.amount)}</td>
-                  <td className="px-3 py-2 text-right text-amber-700">{p.concession_amount > 0 ? fmt(p.concession_amount) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-warning-foreground">{p.concession_amount > 0 ? fmt(p.concession_amount) : "—"}</td>
                   <td className="px-3 py-2 text-muted-foreground">
                     <span>{MODE_LABELS[p.payment_mode] || p.payment_mode}</span>
                     {p.transaction_ref && <span className="ml-1 font-mono text-[10px]">· {p.transaction_ref}</span>}
@@ -336,9 +336,9 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                   <td className="px-3 py-2 text-muted-foreground">{fmtDate(p.payment_date || p.created_at)}</td>
                   <td className="px-3 py-2">
                     <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      p.status === "confirmed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                      : p.status === "pending" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                      : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                      p.status === "confirmed" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
+                      : p.status === "pending" ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
+                      : "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
                     }`}>{p.status}</span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -407,13 +407,13 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                 : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
               <IndianRupee className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="text-xs font-semibold text-foreground">Fee Ledger</span>
-              <span className="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">PREVIEW</span>
+              <span className="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning">PREVIEW</span>
               <span className="text-[10px] text-muted-foreground hidden sm:inline">Locks in once pre-admitted</span>
               <span className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground tabular-nums">
                 <span>{itemCount} items</span>
                 <span>· {fmt(grandTotal)}</span>
-                {grandPaid > 0 && <span className="text-emerald-700 font-semibold">· {fmt(grandPaid)} paid</span>}
-                <span className={grandDue > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
+                {grandPaid > 0 && <span className="text-success font-semibold">· {fmt(grandPaid)} paid</span>}
+                <span className={grandDue > 0 ? "text-destructive font-semibold" : "text-success font-semibold"}>
                   · {fmt(grandDue)} {grandDue > 0 ? "due" : "settled"}
                 </span>
               </span>
@@ -450,7 +450,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                           <td className="px-3 py-2 text-center">
                             {r.paid_amount > 0 ? (
                               <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
-                                <span className="text-emerald-700 font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
+                                <span className="text-success font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
                                 {firstPayment && (
                                   <>
                                     <span className="text-muted-foreground/60">·</span>
@@ -460,7 +460,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                                         href={firstPayment.receipt_url}
                                         target="_blank"
                                         rel="noopener"
-                                        className="text-emerald-700 hover:underline text-[11px] font-medium"
+                                        className="text-success hover:underline text-[11px] font-medium"
                                       >
                                         PDF
                                       </a>
@@ -476,7 +476,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                             )}
                           </td>
                           <td className="px-3 py-2 text-center tabular-nums">
-                            <span className={due > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
+                            <span className={due > 0 ? "text-destructive font-semibold" : "text-success font-semibold"}>
                               {fmt(due)}
                             </span>
                           </td>
@@ -534,11 +534,11 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                         </td>
                         <td className="px-3 py-2 text-center text-muted-foreground capitalize">{r.term.replace(/_/g, " ")}</td>
                         <td className="px-3 py-2 text-center text-foreground tabular-nums">{fmt(r.total_amount)}</td>
-                        <td className="px-3 py-2 text-center text-amber-700 tabular-nums">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
+                        <td className="px-3 py-2 text-center text-warning-foreground tabular-nums">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
                         <td className="px-3 py-2 text-center">
                           {r.paid_amount > 0 ? (
                             <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
-                              <span className="text-emerald-700 font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
+                              <span className="text-success font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
                               {firstPayment && (
                                 <>
                                   <span className="text-muted-foreground/60">·</span>
@@ -549,7 +549,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                                       target="_blank"
                                       rel="noopener"
                                       onClick={(e) => e.stopPropagation()}
-                                      className="text-emerald-700 hover:underline text-[11px] font-medium"
+                                      className="text-success hover:underline text-[11px] font-medium"
                                     >
                                       PDF
                                     </a>
@@ -565,14 +565,14 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                           )}
                         </td>
                         <td className="px-3 py-2 text-center tabular-nums">
-                          <span className={r.balance > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>{fmt(r.balance)}</span>
+                          <span className={r.balance > 0 ? "text-destructive font-semibold" : "text-success font-semibold"}>{fmt(r.balance)}</span>
                         </td>
                         <td className="px-3 py-2 text-center text-muted-foreground whitespace-nowrap">{fmtDate(r.due_date)}</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            r.status === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            : r.status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                            r.status === "paid" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
+                            : r.status === "overdue" ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
+                            : "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
                           }`}>{r.status}</span>
                         </td>
                       </tr>
@@ -587,7 +587,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                                   <span>Receipt <span className="font-mono text-foreground">{p?.receipt_no || "—"}</span></span>
                                   <span>· {fmt(l.amount)} paid{l.concession_amount > 0 ? ` + ${fmt(l.concession_amount)} concession` : ""}</span>
                                   <span>· {fmtDate(l.applied_at)}</span>
-                                  {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-emerald-700 hover:underline font-medium">PDF</a>}
+                                  {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-success hover:underline font-medium">PDF</a>}
                                   {l.notes && <span className="italic">· {l.notes}</span>}
                                 </div>
                               );
@@ -626,9 +626,9 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "amber" | "emerald" | "red" }) {
   const cls =
-    tone === "amber"   ? "border-amber-200 bg-amber-50 text-amber-900" :
-    tone === "emerald" ? "border-emerald-200 bg-emerald-50 text-emerald-900" :
-    tone === "red"     ? "border-red-200 bg-red-50 text-red-900" :
+    tone === "amber"   ? "border-warning/20 bg-warning/5 text-warning-foreground" :
+    tone === "emerald" ? "border-success/20 bg-success/5 text-success-foreground" :
+    tone === "red"     ? "border-destructive/20 bg-destructive/5 text-destructive" :
     "border-border bg-card text-foreground";
   return (
     <div className={`rounded-xl border ${cls} px-3 py-2`}>

@@ -599,10 +599,10 @@ export default function AlumniVerification() {
                       const svc = SERVICE_TYPES.find(s => s.key === (req.request_type || "verification"));
                       const statusCfg: Record<string, { label: string; color: string }> = {
                         pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
-                        paid: { label: "Under Review", color: "bg-blue-100 text-blue-700" },
-                        under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
-                        verified: { label: "Verified", color: "bg-emerald-100 text-emerald-700" },
-                        rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
+                        paid: { label: "Under Review", color: "bg-info/10 text-info-foreground" },
+                        under_review: { label: "Under Review", color: "bg-warning/10 text-warning-foreground" },
+                        verified: { label: "Verified", color: "bg-success/10 text-success" },
+                        rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
                       };
                       const st = statusCfg[req.status] || statusCfg.pending_payment;
                       const SvcIcon = svc?.icon || Shield;
@@ -880,8 +880,8 @@ export default function AlumniVerification() {
             {/* Step 4: Payment */}
             {step === "payment" && (
               <div className="space-y-6 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-900/30 mx-auto">
-                  <currentService.icon className="h-7 w-7 text-amber-600" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-warning/10 dark:bg-warning/80/30 mx-auto">
+                  <currentService.icon className="h-7 w-7 text-warning-foreground" />
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-foreground">Payment Required</h2>

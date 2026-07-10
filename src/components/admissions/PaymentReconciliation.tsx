@@ -65,7 +65,7 @@ export function PaymentReconciliation() {
   );
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
@@ -88,7 +88,7 @@ export function PaymentReconciliation() {
         </Card>
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-emerald-600">{fmt(totals.total)}</p>
+            <p className="text-2xl font-bold text-success">{fmt(totals.total)}</p>
             <p className="text-xs text-muted-foreground">Total Collected</p>
           </CardContent>
         </Card>
@@ -150,12 +150,12 @@ export function PaymentReconciliation() {
                     <Badge variant="outline" className="text-[10px]">{STAGE_LABELS[r.stage] || r.stage}</Badge>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className={`font-medium ${Number(r.application_fee_paid) > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
+                    <span className={`font-medium ${Number(r.application_fee_paid) > 0 ? "text-success" : "text-muted-foreground"}`}>
                       {Number(r.application_fee_paid) > 0 ? fmt(r.application_fee_paid) : "—"}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className={`font-medium ${Number(r.token_fee_paid) > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
+                    <span className={`font-medium ${Number(r.token_fee_paid) > 0 ? "text-success" : "text-muted-foreground"}`}>
                       {Number(r.token_fee_paid) > 0 ? fmt(r.token_fee_paid) : "—"}
                     </span>
                   </td>
@@ -164,7 +164,7 @@ export function PaymentReconciliation() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     {r.token_amount && Number(r.token_amount) > 0 ? (
-                      <span className={`font-medium ${Number(r.token_balance) > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                      <span className={`font-medium ${Number(r.token_balance) > 0 ? "text-destructive" : "text-success"}`}>
                         {Number(r.token_balance) > 0 ? fmt(r.token_balance) : "Paid"}
                       </span>
                     ) : (
@@ -183,8 +183,8 @@ export function PaymentReconciliation() {
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                   <td className="px-4 py-3 text-foreground" colSpan={2}>Total ({filtered.length} leads)</td>
-                  <td className="px-4 py-3 text-right text-emerald-600">{fmt(totals.appFee)}</td>
-                  <td className="px-4 py-3 text-right text-emerald-600">{fmt(totals.tokenFee)}</td>
+                  <td className="px-4 py-3 text-right text-success">{fmt(totals.appFee)}</td>
+                  <td className="px-4 py-3 text-right text-success">{fmt(totals.tokenFee)}</td>
                   <td className="px-4 py-3 text-right text-foreground">{fmt(totals.total)}</td>
                   <td className="px-4 py-3" />
                 </tr>

@@ -179,24 +179,24 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, re
   return (
     <Card className={`border-border/60 shadow-none ${
       isRejected
-        ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/10'
+        ? 'border-destructive/25 bg-destructive/5/40 dark:bg-destructive/90/10'
         : invalid ? 'border-destructive ring-1 ring-destructive/30 bg-destructive/5'
-        : isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'
+        : isUploaded ? 'border-success/20 bg-success/5/30 dark:bg-success/90/10' : doc.required ? '' : 'border-dashed'
     }`}>
       <CardContent className="p-4 text-center">
         {isRejected ? (
-          <AlertCircle className="h-5 w-5 text-rose-600 mx-auto mb-1.5" />
+          <AlertCircle className="h-5 w-5 text-destructive mx-auto mb-1.5" />
         ) : isUploaded ? (
-          <CheckCircle className="h-5 w-5 text-emerald-600 mx-auto mb-1.5" />
+          <CheckCircle className="h-5 w-5 text-success mx-auto mb-1.5" />
         ) : isUploading ? (
-          <Loader2 className="h-5 w-5 text-muted-foreground animate-spin mx-auto mb-1.5" />
+          <Loader2 className="h-5 w-5 text-primary animate-spin mx-auto mb-1.5" />
         ) : (
           <Upload className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
         )}
         <h4 className="text-sm font-semibold text-foreground">
           {doc.label} {doc.required && <span className="text-destructive">*</span>}
         </h4>
-        <p className={`text-[10px] mt-0.5 ${isRejected ? "text-rose-700" : "text-muted-foreground"}`}>
+        <p className={`text-[10px] mt-0.5 ${isRejected ? "text-destructive" : "text-muted-foreground"}`}>
           {isRejected ? (reviewNotes || "Rejected. Please re-upload this document.") : isUploaded ? "Uploaded successfully" : doc.desc}
         </p>
         <div className="flex items-center justify-center gap-2 mt-2">

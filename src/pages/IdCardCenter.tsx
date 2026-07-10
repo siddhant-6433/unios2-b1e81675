@@ -345,7 +345,7 @@ const IdCardCenter = () => {
 
       {loading ? (
         <div className="print:hidden flex h-48 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
         <div className="print:hidden rounded-xl bg-card card-shadow overflow-hidden">

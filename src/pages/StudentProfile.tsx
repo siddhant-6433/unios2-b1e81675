@@ -7,11 +7,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
 import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
@@ -338,8 +339,47 @@ const StudentProfile = () => {
   const [editForm, setEditForm] = useState<EditFormState>(() => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, ""])) as EditFormState);
   const [editReason, setEditReason] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [removalAction, setRemovalAction] = useState<null | "archive" | "delete">(null);
+  const [removalReason, setRemovalReason] = useState("");
+  const [removalBusy, setRemovalBusy] = useState(false);
+
+  const canArchive = role === "office_assistant" || role === "principal" || role === "super_admin";
+  const canDelete = role === "super_admin";
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
+
+  const submitRemoval = async () => {
+    if (!student || !removalAction) return;
+    if (!removalReason.trim()) {
+      toast({ variant: "destructive", title: "Reason required", description: `Please give a reason for ${removalAction === "archive" ? "archiving" : "deleting"} this student.` });
+      return;
+    }
+    setRemovalBusy(true);
+    const rpc = removalAction === "archive" ? "archive_student" : "delete_student";
+    const { error } = await supabase.rpc(rpc as never, { _student_id: student.id, _reason: removalReason.trim() } as never);
+    setRemovalBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Action failed", description: error.message });
+      return;
+    }
+    toast({ title: removalAction === "archive" ? "Student archived" : "Student deleted" });
+    setRemovalAction(null);
+    setRemovalReason("");
+    fetchStudent();
+  };
+
+  const unarchiveStudent = async () => {
+    if (!student) return;
+    setRemovalBusy(true);
+    const { error } = await supabase.rpc("unarchive_student" as never, { _student_id: student.id } as never);
+    setRemovalBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Could not unarchive", description: error.message });
+      return;
+    }
+    toast({ title: "Student restored" });
+    fetchStudent();
+  };
 
   const logStudentAudit = async (rows: Array<{
     event_type: string;
@@ -535,7 +575,7 @@ const StudentProfile = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   if (!student) {
     return (
@@ -878,6 +918,11 @@ const StudentProfile = () => {
               <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.status === "active" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                 {student.status.replace("_", " ")}
               </span>
+              {(student as { archived_at?: string | null }).archived_at && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                  <Archive className="h-3 w-3" /> Archived
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {headerAcademicItems.map((item, index) => (
@@ -898,6 +943,22 @@ const StudentProfile = () => {
           {canCorrectProfile && (
             <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openEditDialog}>
               <Edit3 className="h-3.5 w-3.5" /> Correct Information
+            </Button>
+          )}
+          {canArchive && (
+            (student as { archived_at?: string | null }).archived_at ? (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={unarchiveStudent} disabled={removalBusy}>
+                <ArchiveRestore className="h-3.5 w-3.5" /> Unarchive
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={() => { setRemovalReason(""); setRemovalAction("archive"); }}>
+                <Archive className="h-3.5 w-3.5" /> Archive
+              </Button>
+            )
+          )}
+          {canDelete && (
+            <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
           )}
         </div>
@@ -1224,7 +1285,7 @@ const StudentProfile = () => {
 
         <TabsContent value="documents">
           <div className="mt-4 space-y-4">
-            <TransferCertificateSection studentId={student.id} leadId={student.lead_id} />
+            <TransferCertificateSection studentId={student.id} leadId={student.lead_id} archived={!!(student as { archived_at?: string | null }).archived_at} />
             {canUploadDocuments && (
               <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1338,10 +1399,10 @@ const StudentProfile = () => {
                 <div className="divide-y divide-border">
                   {leadDocs.map((doc) => {
                     const statusIcon = doc.status === "verified"
-                      ? <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                      ? <ShieldCheck className="h-4 w-4 text-success" />
                       : doc.status === "rejected"
-                      ? <AlertCircle className="h-4 w-4 text-rose-500" />
-                      : <Clock3 className="h-4 w-4 text-amber-500" />;
+                      ? <AlertCircle className="h-4 w-4 text-destructive" />
+                      : <Clock3 className="h-4 w-4 text-warning" />;
                     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name ?? "");
                     return (
                       <div key={doc.id} className="flex items-center gap-3 py-2.5">
@@ -1351,7 +1412,7 @@ const StudentProfile = () => {
                         }
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-foreground truncate">{doc.document_name}</p>
-                          {doc.rejection_reason && <p className="text-[11px] text-rose-500 truncate">{doc.rejection_reason}</p>}
+                          {doc.rejection_reason && <p className="text-[11px] text-destructive truncate">{doc.rejection_reason}</p>}
                         </div>
                         <div title={doc.status} className="shrink-0">{statusIcon}</div>
                         {doc.file_url && (
@@ -1471,6 +1532,31 @@ const StudentProfile = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={removalAction !== null} onOpenChange={(o) => { if (!o) { setRemovalAction(null); setRemovalReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{removalAction === "delete" ? "Delete Student" : "Archive Student"}</DialogTitle>
+            <DialogDescription>
+              {removalAction === "delete"
+                ? "This removes the student from active lists. Fee, attendance and audit history are preserved. A reason is required."
+                : "Archiving marks the student as left/inactive. It is reversible and is required before a transfer certificate can be issued. A reason is required."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="removal-reason">Reason</Label>
+            <Textarea id="removal-reason" value={removalReason} onChange={(e) => setRemovalReason(e.target.value)} rows={3}
+              placeholder={removalAction === "delete" ? "Reason for deletion" : "Reason for archiving"} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRemovalAction(null); setRemovalReason(""); }} disabled={removalBusy}>Cancel</Button>
+            <Button variant={removalAction === "delete" ? "destructive" : "default"} onClick={submitRemoval} disabled={removalBusy || !removalReason.trim()}>
+              {removalBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removalAction === "delete" ? "Delete" : "Archive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-4xl">

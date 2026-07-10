@@ -22,9 +22,9 @@ type AssociationRequest = {
 };
 
 const statusClass: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-700",
-  approved: "bg-emerald-100 text-emerald-700",
-  rejected: "bg-red-100 text-red-700",
+  pending: "bg-warning/10 text-warning-foreground",
+  approved: "bg-success/10 text-success",
+  rejected: "bg-destructive/10 text-destructive",
 };
 
 interface Props {
@@ -84,7 +84,7 @@ export function LeadAssociationRequestsPanel({ requesterType }: Props) {
     setProcessing(null);
   };
 
-  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-4">
@@ -163,10 +163,10 @@ export function LeadAssociationRequestsPanel({ requesterType }: Props) {
                     {isSuperAdmin && filter === "pending" && (
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-50" onClick={() => review(request, true)} disabled={processing === request.id}>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-success hover:bg-success/5" onClick={() => review(request, true)} disabled={processing === request.id}>
                             {processing === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                           </Button>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-600 hover:bg-red-50" onClick={() => review(request, false)} disabled={processing === request.id}>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => review(request, false)} disabled={processing === request.id}>
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>

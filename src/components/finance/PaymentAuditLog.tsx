@@ -34,9 +34,9 @@ interface AuditRow {
 }
 
 const OP_BADGE: Record<string, string> = {
-  INSERT: "bg-emerald-100 text-emerald-700",
-  UPDATE: "bg-amber-100 text-amber-700",
-  DELETE: "bg-red-100 text-red-700",
+  INSERT: "bg-success/10 text-success",
+  UPDATE: "bg-warning/10 text-warning-foreground",
+  DELETE: "bg-destructive/10 text-destructive",
 };
 const OP_ICON: Record<string, typeof PlusCircle> = {
   INSERT: PlusCircle,
@@ -187,7 +187,7 @@ export function PaymentAuditLog() {
         {/* Table */}
         {loading ? (
           <div className="flex h-32 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="py-12 text-center">
@@ -267,9 +267,9 @@ export function PaymentAuditLog() {
                                   {Object.entries(r.delta).map(([field, { from, to }]) => (
                                     <div key={field} className="flex items-start gap-2">
                                       <span className="font-semibold text-foreground/80 min-w-[160px]">{field}</span>
-                                      <span className="text-red-600 line-through">{formatVal(from)}</span>
+                                      <span className="text-destructive line-through">{formatVal(from)}</span>
                                       <span className="text-muted-foreground">→</span>
-                                      <span className="text-emerald-600">{formatVal(to)}</span>
+                                      <span className="text-success">{formatVal(to)}</span>
                                     </div>
                                   ))}
                                 </div>

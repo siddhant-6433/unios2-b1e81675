@@ -85,9 +85,9 @@ function statusVisual(status: string) {
     : status === "PENDING" ? Clock
     : status === "REJECTED" ? XCircle
     : AlertTriangle;
-  const color = status === "APPROVED" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-    : status === "PENDING" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-    : status === "REJECTED" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+  const color = status === "APPROVED" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
+    : status === "PENDING" ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
+    : status === "REJECTED" ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
     : "bg-muted text-muted-foreground";
   return { Icon, color };
 }
@@ -143,7 +143,7 @@ function TemplateCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-green-600 shrink-0" />
+              <MessageSquare className="h-4 w-4 text-success shrink-0" />
               <h3 className="text-sm font-semibold text-foreground font-mono truncate">{template.name}</h3>
             </div>
             <p className="text-[11px] text-muted-foreground mt-1 font-mono">
@@ -174,9 +174,9 @@ function TemplateCard({
         )}
 
         {template.status === "REJECTED" && template.reject_reason && (
-          <div className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/20 px-3 py-2">
-            <p className="text-[10px] font-semibold text-red-700 dark:text-red-400 uppercase mb-0.5">Rejection reason</p>
-            <p className="text-xs text-red-700/90 dark:text-red-300">{template.reject_reason}</p>
+          <div className="mt-3 rounded-lg bg-destructive/5 dark:bg-destructive/90/20 px-3 py-2">
+            <p className="text-[10px] font-semibold text-destructive dark:text-destructive/80 uppercase mb-0.5">Rejection reason</p>
+            <p className="text-xs text-destructive/90 dark:text-destructive/60">{template.reject_reason}</p>
           </div>
         )}
 
@@ -196,7 +196,7 @@ function TemplateCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-red-600"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
               disabled={deleting === template.name}
               onClick={() => onDelete(template)}
               title="Delete template from Meta"
@@ -275,7 +275,7 @@ function TemplatePreviewPanel({
         <Button
           variant="ghost"
           size="sm"
-          className="ml-auto h-8 gap-1.5 text-muted-foreground hover:text-red-600"
+          className="ml-auto h-8 gap-1.5 text-muted-foreground hover:text-destructive"
           disabled={deleting === template.name}
           onClick={() => onDelete(template)}
           title="Delete template from Meta"
@@ -469,7 +469,7 @@ export function WhatsAppTemplateTab() {
           description="Ready for one-to-one sends, automations, and bulk campaigns."
         />
         {loading ? (
-          <div className="flex h-28 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex h-28 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
         ) : approvedRows.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
             No approved templates synced from Meta yet.
