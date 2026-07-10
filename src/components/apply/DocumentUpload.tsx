@@ -382,7 +382,7 @@ export function DocumentUpload({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         {docs.map(doc => (
           <DocCard
             key={doc.key}

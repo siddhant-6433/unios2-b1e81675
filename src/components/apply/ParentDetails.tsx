@@ -130,9 +130,9 @@ function SchoolParentBlock({
   const maxDob = new Date(today.getFullYear() - 15, today.getMonth(), today.getDate());
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
         {/* Row 1: First Name, Last Name, DOB */}
         <TextField
           label="First Name"
@@ -230,7 +230,7 @@ function SchoolParentBlock({
 
         <div className="sm:col-span-3 space-y-3 border-t border-border pt-4">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Employment Details</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-4 gap-y-5">
             <SelectField
               label="Employment Status"
               required
@@ -314,7 +314,7 @@ function SimpleParentBlock({
   const phoneMissing = required && !PHONE_DIGITS_RE.test((value.phone || '').replace(/\D/g, ''));
   const isOtherOccupation = value.occupation === 'Other';
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
       <TextField
         label="Name"
         required={required}
@@ -403,7 +403,7 @@ function GuardianBlock({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         <TextField
           label="Name"
           required
@@ -472,7 +472,7 @@ function GuardianBlock({
         <p className="text-xs font-semibold text-foreground uppercase tracking-wide">
           Guardian Address <span className="text-destructive">*</span>
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
           <TextField
             label="Address Line"
             required

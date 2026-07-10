@@ -960,10 +960,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 mb-1">
               <Sparkles className="h-3.5 w-3.5 text-yellow-300" />
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-info/40">Offer Issued</p>
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-white/60">Offer Issued</p>
             </div>
             <h3 className="text-xl font-bold leading-tight">Congratulations! 🎉</h3>
-            <p className="text-sm text-info/30 mt-1 leading-snug">
+            <p className="text-sm text-white/60 mt-1 leading-snug">
               Your seat is reserved. Complete the steps below to secure your admission.
             </p>
           </div>
@@ -991,7 +991,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 Token fee due by {deadlineDate.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
               </p>
               <p className={`text-[11px] font-medium mt-0.5 ${
-                isExpired ? "text-destructive/40" : isUrgent ? "text-warning/40" : "text-info/40"
+                isExpired ? "text-white/70" : isUrgent ? "text-white/70" : "text-white/60"
               }`}>
                 {isExpired
                   ? "Deadline passed — contact admissions immediately"
@@ -1000,7 +1000,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </p>
             </div>
             {isUrgent && !isExpired && (
-              <span className="shrink-0 text-[10px] font-bold text-warning/40 bg-warning/30 rounded-full px-2 py-0.5 animate-pulse">URGENT</span>
+              <span className="shrink-0 text-[10px] font-bold text-white bg-white/20 rounded-full px-2 py-0.5 animate-pulse">URGENT</span>
             )}
           </div>
         )}
