@@ -136,32 +136,32 @@ const FeeCollections = () => {
 
         {/* Stats row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-green mb-4">
                 <IndianRupee className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(todayTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">{isToday ? "Today's" : "Day's"} Collections</p>
+              <p className="text-xs font-medium text-muted-foreground">{isToday ? "Today's" : "Day's"} Collections</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(todayTotal / 1000).toFixed(1)}K</p>
               <p className="text-xs font-medium mt-1 text-primary">{filtered.length} transactions</p>
             </CardContent>
           </Card>
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-blue mb-4">
                 <Receipt className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(cashTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">Cash</p>
+              <p className="text-xs font-medium text-muted-foreground">Cash</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(cashTotal / 1000).toFixed(1)}K</p>
             </CardContent>
           </Card>
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-purple mb-4">
                 <CheckCircle className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(onlineTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">Online / UPI</p>
+              <p className="text-xs font-medium text-muted-foreground">Online / UPI</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(onlineTotal / 1000).toFixed(1)}K</p>
             </CardContent>
           </Card>
         </div>

@@ -131,31 +131,31 @@ export function FinanceOverview() {
     <div className="space-y-6">
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-green mb-4">
               <IndianRupee className="h-5 w-5 text-foreground/70" />
             </div>
-            <p className="text-3xl font-bold text-foreground">₹{(totalCollected / 100000).toFixed(1)}L</p>
-            <p className="text-sm text-muted-foreground mt-0.5">Total Collected</p>
+            <p className="text-xs font-medium text-muted-foreground">Total Collected</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(totalCollected / 100000).toFixed(1)}L</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-yellow mb-4">
               <AlertTriangle className="h-5 w-5 text-foreground/70" />
             </div>
-            <p className="text-3xl font-bold text-foreground">₹{(totalPending / 100000).toFixed(1)}L</p>
-            <p className="text-sm text-muted-foreground mt-0.5">Pending</p>
+            <p className="text-xs font-medium text-muted-foreground">Pending</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(totalPending / 100000).toFixed(1)}L</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
           <CardContent className="p-5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-blue mb-4">
               <TrendingUp className="h-5 w-5 text-foreground/70" />
             </div>
-            <p className="text-3xl font-bold text-foreground">{collectionRate}%</p>
-            <p className="text-sm text-muted-foreground mt-0.5">Collection Rate</p>
+            <p className="text-xs font-medium text-muted-foreground">Collection Rate</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{collectionRate}%</p>
           </CardContent>
         </Card>
       </div>

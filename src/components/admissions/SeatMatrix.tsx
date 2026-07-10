@@ -75,35 +75,50 @@ export function SeatMatrix() {
     <div className="space-y-4">
       {/* Summary cards — college seats only */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "0ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-foreground">{totals.seats}</p>
-            <p className="text-xs text-muted-foreground">College Seats</p>
+            <p className="text-xs font-medium text-muted-foreground">College Seats</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{totals.seats}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "60ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-primary">{totals.admitted}</p>
-            <p className="text-xs text-muted-foreground">College Admitted</p>
+            <p className="text-xs font-medium text-muted-foreground">College Admitted</p>
+            <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{totals.admitted}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "120ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-success">{totals.available}</p>
-            <p className="text-xs text-muted-foreground">Available</p>
+            <p className="text-xs font-medium text-muted-foreground">Available</p>
+            <p className="text-2xl font-bold text-success mt-2 tabular-nums">{totals.available}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "180ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-warning-foreground">{totals.pipeline}</p>
-            <p className="text-xs text-muted-foreground">In Pipeline</p>
+            <p className="text-xs font-medium text-muted-foreground">In Pipeline</p>
+            <p className="text-2xl font-bold text-warning-foreground mt-2 tabular-nums">{totals.pipeline}</p>
           </CardContent>
         </Card>
         {schoolRows.length > 0 && (
-          <Card className="border-border/60 shadow-none border-primary/20 dark:border-primary/50">
+          <Card
+            className="border-border/60 shadow-none border-primary/20 dark:border-primary/50 hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+            style={{ animationDelay: "240ms" }}
+          >
             <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-primary">{schoolAdmitted}</p>
-              <p className="text-xs text-muted-foreground">School Enrolled</p>
+              <p className="text-xs font-medium text-muted-foreground">School Enrolled</p>
+              <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{schoolAdmitted}</p>
             </CardContent>
           </Card>
         )}

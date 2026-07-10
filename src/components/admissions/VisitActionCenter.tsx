@@ -48,7 +48,7 @@ interface Props {
 }
 
 const tile = (active: boolean, tint: string, ring: string) =>
-  `rounded-2xl border transition-all cursor-pointer ${
+  `rounded-2xl border transition-all duration-280 ease-standard cursor-pointer hover:elevation-mid hover:-translate-y-1 ${
     active
       ? `${tint} ring-2 ${ring} border-transparent`
       : "border-border/40 bg-card hover:bg-muted/30 hover:border-border"
@@ -154,12 +154,13 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
           <span className="text-xs text-muted-foreground">callbacks · visits · check-ins · follow-ups</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {cards.map((c) => {
+          {cards.map((c, i) => {
             const Icon = c.icon;
             const isActive = active === c.key;
             const cls = `${tile(isActive, c.tint, c.ring)} ${
               c.pulse && !isActive ? "ring-1 ring-offset-0 ring-rose-200/0 [&_.pulse]:animate-pulse" : ""
-            } p-4 text-left block`;
+            } p-4 text-left block animate-rs-slide-up`;
+            const style = { animationDelay: `${i * 60}ms`, animationFillMode: "both" as const };
             const body = (
               <div className="flex items-start gap-3">
                 <div className={`w-10 h-10 rounded-xl ${c.iconBg} flex items-center justify-center shrink-0 ${c.pulse ? "pulse" : ""}`}>
@@ -167,11 +168,11 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-2xl font-bold text-foreground leading-none tracking-tight tabular-nums">{c.value}</p>
+                    <p className="text-[11px] font-medium text-foreground/90">{c.label}</p>
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-muted-foreground" />
                   </div>
-                  <p className="text-[11px] font-medium text-foreground/90 mt-1.5">{c.label}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.sub}</p>
+                  <p className="text-2xl font-bold text-foreground leading-none tracking-tight tabular-nums mt-1.5">{c.value}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 truncate">{c.sub}</p>
                 </div>
               </div>
             );
@@ -183,6 +184,7 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
                   target="_blank"
                   rel="noreferrer"
                   className={cls}
+                  style={style}
                   title="Opens the dedicated Missed Calls page in a new tab — each entry has a Cloud Call & Close action that places the call and clears it from the queue"
                 >
                   {body}
@@ -194,6 +196,7 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
                 key={c.key}
                 onClick={() => onClick(isActive ? null : c.key)}
                 className={cls}
+                style={style}
               >
                 {body}
               </button>

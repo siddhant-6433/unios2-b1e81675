@@ -463,14 +463,18 @@ const Consultants = () => {
         <LeadAssociationRequestsPanel requesterType="consultant" />
       ) : (<>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {stats.map(s => (
-          <Card key={s.label} className="border-border/60 shadow-none">
+        {stats.map((s, i) => (
+          <Card
+            key={s.label}
+            className="border-border/60 shadow-none transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1 animate-rs-slide-up"
+            style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
+          >
             <CardContent className="p-4">
               <div className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${s.color} mb-2`}>
                 <Users className="h-4 w-4 text-foreground/70" />
               </div>
-              <p className="text-2xl font-bold text-foreground">{s.value}</p>
               <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className="text-2xl font-bold text-foreground mt-1.5">{s.value}</p>
             </CardContent>
           </Card>
         ))}
