@@ -173,9 +173,8 @@ export default {
           "100%": { boxShadow: "0 0 0 0 hsl(152 69% 38% / 0)" },
         },
         "rs-error-pulse": {
-          "0%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0.3)" },
-          "70%": { boxShadow: "0 0 0 8px hsl(4 76% 50% / 0)" },
-          "100%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0)" },
+          "0%, 100%": { boxShadow: "0 0 0 0 hsl(4 76% 50% / 0.4), 0 0 12px 0 hsl(4 76% 50% / 0)" },
+          "50%": { boxShadow: "0 0 0 6px hsl(4 76% 50% / 0), 0 0 20px 4px hsl(4 76% 50% / 0.25)" },
         },
         "rs-slide-up": {
           from: { opacity: "0", transform: "translateY(12px)" },
