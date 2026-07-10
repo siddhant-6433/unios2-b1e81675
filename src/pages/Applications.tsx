@@ -1189,6 +1189,7 @@ export default function Applications() {
   }
   const totalApps = dashboardApps.length;
   const paidNoOffer = dashboardApps.filter(isPaidBeforeOfferStage).length;
+  const onHoldCount = dashboardApps.filter(a => a.status === "on_hold").length;
 
   const handleDelete = async () => {
     if (!deleteTarget || !isSuperAdmin) return;
@@ -1476,6 +1477,40 @@ export default function Applications() {
               `py-1.5 -my-1.5` keeps layout space identical while giving the
               ring room to render. */}
           <div className="flex items-stretch gap-1.5 overflow-x-auto py-1.5 -my-1.5 px-1 -mx-1">
+            {/* On Hold card — always visible so admins can spot blocked applications */}
+            {!isCounsellor && (
+              <>
+                <div className="w-px self-stretch bg-border/50 shrink-0 mx-1" />
+                <button
+                  onClick={() => {
+                    const active = statusFilter === "on_hold";
+                    setStatusFilter(active ? "all" : "on_hold");
+                    setStageFilter(null);
+                    setPaymentFilter("all");
+                    if (!active) selectApplicationCohort(dashboardApps.filter(a => a.status === "on_hold"), "On Hold");
+                  }}
+                  className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
+                    statusFilter === "on_hold"
+                      ? "bg-amber-50 ring-2 ring-amber-400 border-transparent"
+                      : "border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-300"
+                  }`}
+                  style={{ flex: "0 0 124px", width: 124 }}
+                  title={`${onHoldCount} application${onHoldCount === 1 ? "" : "s"} currently on hold`}
+                >
+                  <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                    <div className="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                      <PauseCircle className="h-3 w-3 text-amber-600" />
+                    </div>
+                    <p className="whitespace-nowrap text-xl font-bold text-amber-700 leading-none tracking-tight tabular-nums">{onHoldCount}</p>
+                  </div>
+                  <p className="text-[11px] font-medium text-amber-700/80 truncate">On Hold</p>
+                  <div className="mt-2 h-1 rounded-full bg-amber-100 overflow-hidden">
+                    <div className="h-full bg-amber-400 transition-all" style={{ width: totalApps > 0 ? `${(onHoldCount / totalApps) * 100}%` : "0%" }} />
+                  </div>
+                  <p className="mt-1.5 truncate text-[10px] text-amber-600/70">blocked</p>
+                </button>
+              </>
+            )}
             {FUNNEL_ORDER.map((stage, i) => {
               const meta = FUNNEL_META[stage];
               const Icon = meta.icon;
@@ -1841,7 +1876,7 @@ export default function Applications() {
 
                 return (
                   <Fragment key={app.id}>
-                  <tr className="border-b border-border/40 hover:bg-muted/20 transition-colors duration-160 ease-standard">
+                  <tr className={`border-b border-border/40 transition-colors duration-160 ease-standard ${app.status === "on_hold" ? "bg-amber-50/70 hover:bg-amber-100/70" : "hover:bg-muted/20"}`}>
                     <td className="px-2 py-2">
                       <button onClick={() => setExpandedId(isExpanded ? null : app.id)} className="text-muted-foreground hover:text-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
