@@ -12,6 +12,7 @@ import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
 import { useLocation } from "react-router-dom";
+import { Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
@@ -116,7 +117,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {deferredShellReady && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">
-              {children}
+              <Suspense fallback={
+                <div className="animate-rs-slide-up space-y-6">
+                  <div className="space-y-2">
+                    <div className="h-7 w-48 rounded-lg flutes" />
+                    <div className="h-4 w-80 rounded-md flutes" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="h-28 rounded-lg flutes" />
+                    <div className="h-28 rounded-lg flutes" />
+                    <div className="h-28 rounded-lg flutes" />
+                    <div className="h-28 rounded-lg flutes" />
+                  </div>
+                  <div className="h-64 rounded-lg flutes" />
+                </div>
+              }>
+                {children}
+              </Suspense>
             </main>
           </div>
         </div>
