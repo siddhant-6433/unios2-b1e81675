@@ -439,29 +439,25 @@ function dispatchDispositionWhatsApp(args: RecordCallDispositionArgs, _label: st
     }
   }
 
-  // Optional course-info follow-up.
-  if (data.send_course_info) {
-    sends.push({ template_key: "course_info_v4" });
-  }
-
-  if (sends.length === 0) return;
+  if (sends.length === 0 && !data.send_course_info) return;
 
   void (async () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData.session?.access_token;
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken || anonKey}`,
+      apikey: anonKey,
+    };
 
     for (const send of sends) {
       const body: Record<string, string | string[]> = { template_key: send.template_key, phone, lead_id: leadId };
       if (send.params) body.params = send.params;
       fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken || anonKey}`,
-          apikey: anonKey,
-        },
+        headers,
         body: JSON.stringify(body),
       }).then(async res => {
         if (!res.ok) {
@@ -469,6 +465,41 @@ function dispatchDispositionWhatsApp(args: RecordCallDispositionArgs, _label: st
           console.error(`Auto WA (${send.template_key}) after disposition failed:`, errBody);
         }
       }).catch(e => console.error(`Auto WA (${send.template_key}) exception:`, e));
+    }
+
+    // Send course info as free-form text instead of a MARKETING template.
+    // Uses the 24hr reply window opened by the lead's inbound message.
+    if (data.send_course_info) {
+      try {
+        const { data: resolved } = await supabase.rpc("fn_resolve_course_info_params", { p_lead_id: leadId });
+        if (resolved && typeof resolved === "object") {
+          const r = resolved as Record<string, string>;
+          const courseUrl = r.course_url || "https://nimt.ac.in";
+          const videoUrl = r.video_url || courseUrl;
+          const msg = [
+            `Hi ${r.student_name}, here are the details for ${r.course_name} at NIMT Educational Institutions:`,
+            "",
+            `Duration: ${r.duration}`,
+            `Eligibility: ${r.eligibility}`,
+            `Approval: ${r.approval}`,
+            `Course video: ${videoUrl}`,
+            "",
+            `Open the course page for fees and application steps: ${courseUrl}`,
+          ].join("\n");
+          fetch(`${supabaseUrl}/functions/v1/whatsapp-reply`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ phone, message: msg, lead_id: leadId }),
+          }).then(async res => {
+            if (!res.ok) {
+              const errBody = await res.json().catch(() => ({}));
+              console.error("Course info free-form reply failed:", errBody);
+            }
+          }).catch(e => console.error("Course info free-form reply exception:", e));
+        }
+      } catch (e) {
+        console.error("fn_resolve_course_info_params failed:", e);
+      }
     }
   })();
 }
