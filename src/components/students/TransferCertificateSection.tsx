@@ -75,9 +75,11 @@ const emptyForm = (): TcForm => ({
 export function TransferCertificateSection({
   studentId,
   leadId,
+  archived,
 }: {
   studentId: string;
   leadId: string | null;
+  archived: boolean;
 }) {
   const { role } = useAuth();
   const { toast } = useToast();
@@ -225,7 +227,7 @@ export function TransferCertificateSection({
 
   if (!canIssue && !canApprove) return null;
 
-  const showIssueButton = canIssue && (!request || request.status === "rejected");
+  const showIssueButton = canIssue && archived && (!request || request.status === "rejected");
 
   return (
     <div className="rounded-xl border bg-card p-4">
@@ -279,7 +281,11 @@ export function TransferCertificateSection({
           )}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-muted-foreground">No transfer certificate issued yet.</p>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {canIssue && !archived
+            ? "Archive the student first — a transfer certificate can only be issued for an archived student."
+            : "No transfer certificate issued yet."}
+        </p>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
