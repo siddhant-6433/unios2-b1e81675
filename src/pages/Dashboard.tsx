@@ -81,11 +81,11 @@ function AnalyticsFallback() {
         <div className="flex-1 border-t border-border/50" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 bg-muted/20" />
-        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 bg-muted/20" />
+        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 flutes" />
+        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 flutes" />
       </div>
-      <div className="h-72 rounded-lg border border-border/60 bg-muted/20" />
-      <div className="h-48 rounded-lg border border-border/60 bg-muted/20" />
+      <div className="h-72 rounded-lg border border-border/60 flutes" />
+      <div className="h-48 rounded-lg border border-border/60 flutes" />
     </div>
   );
 }
@@ -211,13 +211,13 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
           </CardHeader>
           <CardContent className="space-y-3.5">
             {funnel.map((item, i) => (
-              <div key={item.stage} className="flex items-center gap-4">
+              <div key={item.stage} className="flex items-center gap-4 animate-rs-slide-up cursor-pointer hover:opacity-80 transition-opacity duration-160 ease-standard" style={{ animationDelay: `${i * 50}ms`, animationFillMode: "both" }}>
                 <span className="text-sm text-muted-foreground w-28 shrink-0">{item.stage}</span>
                 <div className="flex-1 h-8 bg-muted rounded-lg overflow-hidden relative">
                   <div
-                    className={`h-full ${funnelColors[i] || "bg-primary"} rounded-lg flex items-center justify-end pr-3 transition-all duration-500`}
+                    className={`h-full ${funnelColors[i] || "bg-primary"} rounded-lg flex items-center justify-end pr-3 transition-all duration-640 ease-standard`}
                     style={{ width: `${Math.max((item.count / funnelMax) * 100, 5)}%` }}>
-                    <span className="text-xs font-semibold text-primary-foreground">{item.count}</span>
+                    <span className="text-xs font-semibold text-primary-foreground tabular-nums">{item.count}</span>
                   </div>
                 </div>
               </div>
@@ -235,10 +235,11 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
             </div>
           </CardHeader>
           <CardContent className="space-y-0">
-            {recentLeads.map((lead: any) => (
+            {recentLeads.map((lead: any, i: number) => (
               <Link to={`/admissions/${lead.id}`} key={lead.id}
-                className="flex items-center gap-3 py-3 border-b border-border/30 last:border-0 hover:bg-muted/30 transition-colors">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-pastel-purple text-xs font-bold text-foreground/70">
+                className="flex items-center gap-3 py-3 border-b border-border/30 last:border-0 hover:bg-muted/30 hover:-translate-x-0.5 transition-all duration-160 ease-standard animate-rs-slide-up"
+                style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-pastel-purple text-xs font-bold text-foreground/70 animate-rs-scale-in">
                   {lead.initials}
                 </div>
                 <div className="flex-1 min-w-0">
