@@ -669,16 +669,16 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         {result ? (
           <div className="text-center py-10 space-y-3">
             {result.failed > 0
-              ? <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto" />
+              ? <AlertTriangle className="h-12 w-12 text-warning mx-auto" />
               : <CheckCircle className="h-12 w-12 text-primary mx-auto" />}
             <p className="text-lg font-semibold text-foreground">
               {result.failed > 0 ? "Import Finished with Issues" : "Import Complete"}
             </p>
             <p className="text-sm text-muted-foreground">{result.success} students imported · {result.failed} failed</p>
             {result.errors.length > 0 && (
-              <div className="mx-auto max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
-                <p className="text-xs font-semibold text-amber-800">Database response</p>
-                <ul className="mt-2 space-y-1 text-xs text-amber-800">
+              <div className="mx-auto max-w-lg rounded-lg border border-warning/20 bg-warning/5 p-3 text-left">
+                <p className="text-xs font-semibold text-warning-foreground">Database response</p>
+                <ul className="mt-2 space-y-1 text-xs text-warning-foreground">
                   {result.errors.slice(0, 5).map((error, index) => <li key={index}>{error}</li>)}
                 </ul>
               </div>
@@ -733,13 +733,13 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
             {/* Fee override toggle — school institutions only */}
             {isSchool && (
-              <label className="flex items-start gap-3 p-3 rounded-xl border border-amber-200 bg-amber-50 cursor-pointer select-none">
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-warning/20 bg-warning/5 cursor-pointer select-none">
                 <input type="checkbox" checked={applyExistingFeeToAll}
                   onChange={e => setApplyExistingFeeToAll(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600" />
+                  className="mt-0.5 h-4 w-4 rounded border-warning/30 text-warning-foreground" />
                 <div>
-                  <p className="text-xs font-semibold text-amber-800">Apply existing parent fee structure to all rows</p>
-                  <p className="text-[11px] text-amber-700 mt-0.5">
+                  <p className="text-xs font-semibold text-warning-foreground">Apply existing parent fee structure to all rows</p>
+                  <p className="text-[11px] text-warning-foreground mt-0.5">
                     Use CPI-revised rates (2026–27) for all imported students. Rows with an admission number already auto-apply existing rates.
                     Without this, rows without an admission no. receive new admission rates.
                   </p>
@@ -782,14 +782,14 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="bg-pastel-green text-foreground/70 border-0">{validCount} valid</Badge>
                   {invalidCount > 0 && <Badge className="bg-pastel-red text-foreground/70 border-0">{invalidCount} invalid</Badge>}
-                  {isSchool && existingCount > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200">{existingCount} existing parent rates</Badge>}
-                  {isSchool && newCount > 0 && <Badge className="bg-blue-100 text-blue-700 border-blue-200">{newCount} new admission rates</Badge>}
-                  {siblingGroupCount > 0 && <Badge className="bg-violet-100 text-violet-700 border-violet-200">{siblingGroupCount} sibling groups detected</Badge>}
+                  {isSchool && existingCount > 0 && <Badge className="bg-warning/10 text-warning-foreground border-warning/20">{existingCount} existing parent rates</Badge>}
+                  {isSchool && newCount > 0 && <Badge className="bg-info/10 text-info-foreground border-info/20">{newCount} new admission rates</Badge>}
+                  {siblingGroupCount > 0 && <Badge className="bg-primary/10 text-primary border-primary/20">{siblingGroupCount} sibling groups detected</Badge>}
                   <span className="text-xs text-muted-foreground ml-auto">{parsed.length} rows total</span>
                 </div>
 
                 {(!selectedCampusId || !selectedInstitutionId || !selectedSessionId) && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-warning/5 border border-warning/20 text-xs text-warning-foreground">
                     <AlertTriangle className="h-4 w-4 shrink-0" />
                     Please select campus, institution and session above before importing.
                   </div>
@@ -838,8 +838,8 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                           {isSchool && (
                             <td className="px-3 py-2">
                               {r.fee_version === "existing_parent"
-                                ? <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Existing</span>
-                                : <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">New</span>}
+                                ? <span className="px-1.5 py-0.5 rounded bg-warning/10 text-warning-foreground font-medium">Existing</span>
+                                : <span className="px-1.5 py-0.5 rounded bg-info/5 text-info-foreground font-medium">New</span>}
                             </td>
                           )}
                           <td className="px-3 py-2 text-muted-foreground">

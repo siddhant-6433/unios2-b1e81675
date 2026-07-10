@@ -219,11 +219,11 @@ interface ExistingList {
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
   const color = pct === 100
-    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
     : pct >= 50
-    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+    ? "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
     : pct > 0
-    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
     : "bg-muted text-muted-foreground";
   const label = paymentStatus === "paid" && pct < 100 ? `${pct}% · 💳 Paid` : `${pct}%`;
   return (
@@ -1595,7 +1595,7 @@ const Admissions = () => {
   // like the course multi-select popover preserve their state — an empty
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   if (loadError && leads.length === 0) {
@@ -1705,29 +1705,29 @@ const Admissions = () => {
       {role === "counsellor" && (todayFollowups > 0 || overdueFollowups > 0) && view !== "action_center" && (
         <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
           overdueFollowups > 0
-            ? "border-red-400/50 bg-red-50 dark:bg-red-950/30"
-            : "border-amber-400/50 bg-amber-50 dark:bg-amber-950/30"
+            ? "border-destructive/25/50 bg-destructive/5 dark:bg-destructive/90/30"
+            : "border-warning/30/50 bg-warning/5 dark:bg-warning/90/30"
         }`}>
           <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
-            overdueFollowups > 0 ? "bg-red-500/20" : "bg-amber-500/20"
+            overdueFollowups > 0 ? "bg-destructive/50/20" : "bg-warning/50/20"
           }`}>
-            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`} />
+            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-destructive dark:text-destructive/80" : "text-warning-foreground dark:text-warning"}`} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground">
               {overdueFollowups > 0 && todayFollowups > 0 ? (
                 <>
-                  <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue</span>
+                  <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue</span>
                   <span className="mx-1.5 text-muted-foreground">/</span>
-                  <span className="text-amber-700 dark:text-amber-300">{todayFollowups} due today</span>
+                  <span className="text-warning-foreground dark:text-warning/70">{todayFollowups} due today</span>
                 </>
               ) : overdueFollowups > 0 ? (
-                <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
+                <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
               ) : (
-                <span className="text-amber-800 dark:text-amber-200">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
+                <span className="text-warning-foreground dark:text-warning/40">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
               )}
             </p>
-            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-red-600/80 dark:text-red-400/80" : "text-amber-700/80 dark:text-amber-300/80"}`}>
+            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-destructive/80 dark:text-destructive/80/80" : "text-warning-foreground/80 dark:text-warning/70/80"}`}>
               Don't let these leads wait - call them before end of day
             </p>
           </div>
@@ -1735,7 +1735,7 @@ const Admissions = () => {
             {todayFollowups > 0 && (
               <Button
                 size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white shadow-none gap-1.5"
+                className="bg-warning hover:bg-warning/60 text-white shadow-none gap-1.5"
                 onClick={() => navigate("/pending-followups?tab=today")}
               >
                 <Phone className="h-3.5 w-3.5" />
@@ -1745,7 +1745,7 @@ const Admissions = () => {
             {overdueFollowups > 0 && (
               <Button
                 size="sm"
-                className="bg-red-600 hover:bg-red-700 text-white shadow-none gap-1.5"
+                className="bg-destructive hover:bg-destructive/60 text-white shadow-none gap-1.5"
                 onClick={() => navigate("/pending-followups?tab=overdue")}
               >
                 <Clock className="h-3.5 w-3.5" />
@@ -2005,15 +2005,15 @@ const Admissions = () => {
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
       {myDefaults && myDefaults.total_defaults > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/10 dark:border-red-900/30 px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
-            <Clock className="h-4 w-4 text-red-600" />
+        <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 dark:bg-destructive/90/10 dark:border-destructive/60/30 px-4 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 dark:bg-destructive/80/30">
+            <Clock className="h-4 w-4 text-destructive" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+            <p className="text-sm font-semibold text-destructive dark:text-destructive/60">
               You have {myDefaults.total_defaults} pending action{myDefaults.total_defaults > 1 ? "s" : ""}
             </p>
-            <p className="text-xs text-red-600 dark:text-red-400">
+            <p className="text-xs text-destructive dark:text-destructive/80">
               {[
                 myDefaults.new_leads_overdue > 0 && `${myDefaults.new_leads_overdue} new leads to contact`,
                 myDefaults.overdue_followups > 0 && `${myDefaults.overdue_followups} overdue follow-ups`,
@@ -2024,7 +2024,7 @@ const Admissions = () => {
           <Button
             size="sm"
             variant="outline"
-            className="border-red-300 text-red-700 hover:bg-red-100 shrink-0"
+            className="border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
             onClick={() => setView("action_center")}
           >
             View Details
@@ -2033,14 +2033,14 @@ const Admissions = () => {
       )}
 
       {inactiveIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-amber-600" />
-          <span className="font-medium text-amber-800 dark:text-amber-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/70">
             Showing {inactiveIds.size} inactive lead{inactiveIds.size !== 1 ? "s" : ""} past threshold
           </span>
           <button
             onClick={() => setInactiveIds(null)}
-            className="ml-2 rounded-md bg-amber-200 dark:bg-amber-800 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/25 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -2048,14 +2048,14 @@ const Admissions = () => {
       )}
 
       {followupLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-orange-600" />
-          <span className="font-medium text-orange-800 dark:text-orange-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/50/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/60">
             Showing {followupLeadIds.size} lead{followupLeadIds.size !== 1 ? "s" : ""} with pending follow-ups
           </span>
           <button
             onClick={() => setFollowupLeadIds(null)}
-            className="ml-2 rounded-md bg-orange-200 dark:bg-orange-800 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200 hover:bg-orange-300 dark:hover:bg-orange-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/30 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -2063,14 +2063,14 @@ const Admissions = () => {
       )}
 
       {visitLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800/40 px-3 py-2 text-sm">
-          <MapPin className="h-3.5 w-3.5 text-violet-600" />
-          <span className="font-medium text-violet-800 dark:text-violet-300">
+        <div className="flex items-center gap-2 rounded-lg bg-primary/5 dark:bg-primary/90/20 border border-primary/20 dark:border-primary/50/40 px-3 py-2 text-sm">
+          <MapPin className="h-3.5 w-3.5 text-primary" />
+          <span className="font-medium text-primary dark:text-primary/50">
             Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with campus visits
           </span>
           <button
             onClick={() => setVisitLeadIds(null)}
-            className="ml-2 rounded-md bg-violet-200 dark:bg-violet-800 px-2 py-0.5 text-xs font-medium text-violet-800 dark:text-violet-200 hover:bg-violet-300 dark:hover:bg-violet-700"
+            className="ml-2 rounded-md bg-primary/15 dark:bg-primary/70 px-2 py-0.5 text-xs font-medium text-primary dark:text-primary/40 hover:bg-primary/25 dark:hover:bg-primary/60"
           >
             Clear filter
           </button>
@@ -2078,14 +2078,14 @@ const Admissions = () => {
       )}
 
       {notCalledIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm">
-          <Phone className="h-3.5 w-3.5 text-red-600" />
-          <span className="font-medium text-red-800 dark:text-red-300">
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/5 dark:bg-destructive/90/20 border border-destructive/20 dark:border-destructive/50/40 px-3 py-2 text-sm">
+          <Phone className="h-3.5 w-3.5 text-destructive" />
+          <span className="font-medium text-destructive dark:text-destructive/60">
             Showing {notCalledIds.size} not-called lead{notCalledIds.size !== 1 ? "s" : ""} — select and transfer to reassign
           </span>
           <button
             onClick={() => { setNotCalledIds(null); setCounsellorFilter("all"); }}
-            className="ml-2 rounded-md bg-red-200 dark:bg-red-800 px-2 py-0.5 text-xs font-medium text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-700"
+            className="ml-2 rounded-md bg-destructive/15 dark:bg-destructive/70 px-2 py-0.5 text-xs font-medium text-destructive dark:text-destructive/40 hover:bg-destructive/25 dark:hover:bg-destructive/60"
           >
             Clear filter
           </button>
@@ -2679,13 +2679,13 @@ const Admissions = () => {
                           />
                         </span>
                         {lead.ai_called && (
-                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30 shrink-0" title="AI Called">
-                            <Bot className="h-2.5 w-2.5 text-violet-600" />
+                          <span className="flex h-4 w-4 items-center justify-center rounded bg-primary/10 dark:bg-primary/80/30 shrink-0" title="AI Called">
+                            <Bot className="h-2.5 w-2.5 text-primary" />
                           </span>
                         )}
                         {postVisitPendingIds.has(lead.id) && (
-                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1 shrink-0" title="Post-visit followup pending">
-                            <MapPin className="h-2.5 w-2.5 text-amber-600" />
+                          <span className="flex h-4 items-center gap-0.5 rounded bg-warning/10 dark:bg-warning/80/30 px-1 shrink-0" title="Post-visit followup pending">
+                            <MapPin className="h-2.5 w-2.5 text-warning-foreground" />
                           </span>
                         )}
                       </div>

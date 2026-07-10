@@ -32,10 +32,10 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  new_lead: "bg-orange-100 text-orange-700",
-  counsellor_call: "bg-blue-100 text-blue-700",
-  application_in_progress: "bg-violet-100 text-violet-700",
-  visit_scheduled: "bg-emerald-100 text-emerald-700",
+  new_lead: "bg-warning/10 text-warning-foreground",
+  counsellor_call: "bg-info/10 text-info-foreground",
+  application_in_progress: "bg-primary/10 text-primary",
+  visit_scheduled: "bg-success/10 text-success",
   application_fee_paid: "bg-cyan-100 text-cyan-700",
 };
 
@@ -233,20 +233,20 @@ export function LiveCallBar() {
   return (
     <>
     <div className={`border-b border-border px-5 py-1.5 ${
-      hasInbound ? "bg-amber-50/50 dark:bg-amber-950/10" : "bg-emerald-50/50 dark:bg-emerald-950/10"
+      hasInbound ? "bg-warning/5/50 dark:bg-warning/90/10" : "bg-success/5/50 dark:bg-success/90/10"
     }`}>
       <div className="flex items-center gap-4 overflow-x-auto">
         <div className="flex items-center gap-1.5 shrink-0">
           <div className="relative">
-            {hasInbound ? <PhoneIncoming className="h-3.5 w-3.5 text-amber-600" /> : <Phone className="h-3.5 w-3.5 text-emerald-600" />}
-            <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full animate-pulse ${hasInbound ? "bg-amber-500" : "bg-emerald-500"}`} />
+            {hasInbound ? <PhoneIncoming className="h-3.5 w-3.5 text-warning-foreground" /> : <Phone className="h-3.5 w-3.5 text-success" />}
+            <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full animate-pulse ${hasInbound ? "bg-warning/50" : "bg-success/50"}`} />
           </div>
-          <span className={`text-[11px] font-semibold uppercase tracking-wide ${hasInbound ? "text-amber-700" : "text-emerald-700"}`}>
+          <span className={`text-[11px] font-semibold uppercase tracking-wide ${hasInbound ? "text-warning-foreground" : "text-success"}`}>
             Live {calls.length === 1 ? "Call" : `${calls.length} Calls`}
           </span>
         </div>
 
-        <div className="h-4 w-px bg-emerald-200 shrink-0" />
+        <div className="h-4 w-px bg-success/15 shrink-0" />
 
         {calls.map(call => {
           const elapsed = Math.floor((now - new Date(call.created_at).getTime()) / 1000);
@@ -254,16 +254,16 @@ export function LiveCallBar() {
           return (
             <a key={call.id} href={`/admissions/${call.lead_id}`} target="_blank" rel="noreferrer"
               className={`flex items-center gap-2.5 shrink-0 rounded-lg px-2.5 py-1 transition-colors group ${
-                isInbound ? "hover:bg-amber-100/50 dark:hover:bg-amber-900/20 ring-1 ring-amber-300" : "hover:bg-emerald-100/50 dark:hover:bg-emerald-900/20"
+                isInbound ? "hover:bg-warning/10/50 dark:hover:bg-warning/80/20 ring-1 ring-amber-300" : "hover:bg-success/10/50 dark:hover:bg-success/80/20"
               }`}>
               {/* Status icon */}
-              {isInbound && call.status === "calling" && <PhoneIncoming className="h-3 w-3 animate-bounce text-amber-600 shrink-0" />}
+              {isInbound && call.status === "calling" && <PhoneIncoming className="h-3 w-3 animate-bounce text-warning-foreground shrink-0" />}
               {!isInbound && call.status === "calling" && <Loader2 className="h-3 w-3 animate-spin text-cyan-600 shrink-0" />}
-              {call.status === "connected" && <Volume2 className="h-3 w-3 text-emerald-600 animate-pulse shrink-0" />}
-              {call.status === "disposing" && <PhoneMissed className="h-3 w-3 text-amber-600 shrink-0" />}
+              {call.status === "connected" && <Volume2 className="h-3 w-3 text-success animate-pulse shrink-0" />}
+              {call.status === "disposing" && <PhoneMissed className="h-3 w-3 text-warning-foreground shrink-0" />}
 
               {/* Direction badge for inbound */}
-              {isInbound && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1 py-0.5 rounded shrink-0">IN</span>}
+              {isInbound && <span className="text-[9px] font-bold text-warning-foreground bg-warning/10 px-1 py-0.5 rounded shrink-0">IN</span>}
 
               {/* Counsellor */}
               <span className="text-[11px] font-semibold text-foreground">{isInbound ? call.lead_name : call.counsellor_name.split(" ")[0]}</span>
@@ -281,10 +281,10 @@ export function LiveCallBar() {
 
               {/* Status label */}
               <span className={`text-[10px] font-medium ${
-                isInbound && call.status === "calling" ? "text-amber-600" :
+                isInbound && call.status === "calling" ? "text-warning-foreground" :
                 call.status === "calling" ? "text-cyan-600" :
-                call.status === "connected" ? "text-emerald-600" :
-                "text-amber-600"
+                call.status === "connected" ? "text-success" :
+                "text-warning-foreground"
               }`}>
                 {isInbound && call.status === "calling" ? "Incoming" : call.status === "calling" ? "Calling" : call.status === "connected" ? "On Call" : "Ending"}
               </span>
@@ -308,16 +308,16 @@ export function LiveCallBar() {
         <div key={`popup-${ic.call_uuid}`} className="fixed z-50 animate-bounce-slow inset-x-3 top-3 sm:inset-x-auto sm:left-auto sm:right-6 sm:top-auto sm:bottom-6">
           <a href={`/admissions/${ic.lead_id}`} target="_blank" rel="noreferrer"
             className={`flex items-start gap-4 rounded-2xl border-2 bg-white dark:bg-card shadow-2xl px-5 py-4 w-full max-w-none min-w-0 sm:w-auto sm:min-w-[360px] sm:max-w-[420px] hover:shadow-3xl transition-shadow ${
-              isXfer ? "border-red-500 ring-4 ring-red-200 dark:ring-red-900/40" : "border-amber-400"
+              isXfer ? "border-destructive/35 ring-4 ring-red-200 dark:ring-red-900/40" : "border-warning/30"
             }`}>
             <div className="relative shrink-0">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isXfer ? "bg-red-100" : "bg-amber-100"}`}>
-                <PhoneIncoming className={`h-6 w-6 animate-pulse ${isXfer ? "text-red-600" : "text-amber-600"}`} />
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isXfer ? "bg-destructive/10" : "bg-warning/10"}`}>
+                <PhoneIncoming className={`h-6 w-6 animate-pulse ${isXfer ? "text-destructive" : "text-warning-foreground"}`} />
               </div>
-              <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full animate-ping ${isXfer ? "bg-red-500" : "bg-amber-500"}`} />
+              <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full animate-ping ${isXfer ? "bg-destructive/50" : "bg-warning/50"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`text-xs font-bold uppercase tracking-wide ${isXfer ? "text-red-600" : "text-amber-600"}`}>
+              <p className={`text-xs font-bold uppercase tracking-wide ${isXfer ? "text-destructive" : "text-warning-foreground"}`}>
                 {isXfer ? "🚨 Live Transfer from AI" : "Incoming Call"}
               </p>
               <p className="text-base font-bold text-foreground truncate">{ic.lead_name}</p>
@@ -328,7 +328,7 @@ export function LiveCallBar() {
                 {formatTime(Math.floor((now - new Date(ic.created_at).getTime()) / 1000))}
               </p>
               {isXfer && ic.transfer_reason && (
-                <p className="mt-1.5 text-xs font-medium text-red-700 dark:text-red-400 italic line-clamp-2">
+                <p className="mt-1.5 text-xs font-medium text-destructive dark:text-destructive/80 italic line-clamp-2">
                   "{ic.transfer_reason}"
                 </p>
               )}

@@ -593,7 +593,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
         <div className="space-y-6">
           <SectionCard title="Father" icon={User}
-            accent="border-blue-500" iconColor="text-blue-600" bg="bg-blue-50/60">
+            accent="border-info/35" iconColor="text-info-foreground" bg="bg-info/5/60">
             {isSchool ? (
               <SchoolParentBlock title="" value={data.father} onChange={v => onChange({ father: v })} showErrors={showErrors} />
             ) : (
@@ -614,9 +614,9 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
             title="Guardian"
             subtitle="Optional — add if a guardian other than parents should also be on record."
             icon={guardianOn ? Users : UserPlus}
-            accent={guardianOn ? "border-violet-500" : "border-border"}
-            iconColor={guardianOn ? "text-violet-600" : "text-muted-foreground"}
-            bg={guardianOn ? "bg-violet-50/60" : "bg-muted/30"}
+            accent={guardianOn ? "border-primary/35" : "border-border"}
+            iconColor={guardianOn ? "text-primary" : "text-muted-foreground"}
+            bg={guardianOn ? "bg-primary/5/60" : "bg-muted/30"}
             headerRight={
               <Switch checked={guardianOn} onCheckedChange={setGuardianOn} aria-label="Toggle guardian section" />
             }

@@ -158,8 +158,8 @@ export function VoiceMessageRecorder({ consultantId, onSent }: VoiceMessageRecor
           <div className="flex flex-col items-center justify-center py-6 space-y-3 rounded-xl border-2 border-dashed border-border/60">
             {recording ? (
               <>
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 animate-pulse">
-                  <div className="h-3 w-3 rounded-full bg-red-500" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/50/10 animate-pulse">
+                  <div className="h-3 w-3 rounded-full bg-destructive/50" />
                 </div>
                 <p className="text-sm font-mono text-foreground">{formatTime(duration)}</p>
                 <Button onClick={stopRecording} size="sm" variant="destructive" className="gap-2">

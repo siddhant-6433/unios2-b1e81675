@@ -65,15 +65,15 @@ export function CloudDialerNudge() {
   };
 
   return (
-    <div className="rounded-xl border border-violet-200/60 bg-gradient-to-r from-violet-50 via-indigo-50 to-blue-50 dark:from-violet-950/30 dark:via-indigo-950/30 dark:to-blue-950/30 dark:border-violet-800/40 px-4 py-3">
+    <div className="rounded-xl border border-primary/20/60 bg-gradient-to-r from-violet-50 via-indigo-50 to-blue-50 dark:from-violet-950/30 dark:via-indigo-950/30 dark:to-blue-950/30 dark:border-primary/50/40 px-4 py-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 dark:bg-primary/80/40 text-primary dark:text-primary/50">
           <Phone className="h-4 w-4" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-foreground">Try the Cloud Dialer</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 dark:bg-primary/80/50 px-2 py-0.5 text-[10px] font-semibold text-primary dark:text-primary/50">
               <Zap className="h-2.5 w-2.5" /> Faster calls
             </span>
           </div>
@@ -83,7 +83,7 @@ export function CloudDialerNudge() {
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Button asChild size="sm" className="h-8 gap-1.5 bg-violet-600 hover:bg-violet-700 text-white">
+          <Button asChild size="sm" className="h-8 gap-1.5 bg-primary hover:bg-primary/60 text-white">
             <Link to="/cloud-dialer">
               Open Dialer <ArrowRight className="h-3.5 w-3.5" />
             </Link>

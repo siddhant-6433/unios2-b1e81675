@@ -220,14 +220,14 @@ export function RecordPaymentDialog({
               <span className="text-muted-foreground">Token (10%)</span>
               <span className="text-foreground">
                 ₹{tokenPaidForProgress.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
-                {feeStatus.token_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+                {feeStatus.token_complete && <span className="ml-1 text-success">✓ complete</span>}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Towards AN threshold</span>
               <span className="text-foreground">
                 ₹{feeStatus.total_paid.toLocaleString("en-IN")} / ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}
-                {feeStatus.twenty_five_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+                {feeStatus.twenty_five_complete && <span className="ml-1 text-success">✓ complete</span>}
               </span>
             </div>
             {type === "token_fee" && tokenOutstanding > 0 && !feeStatus.token_complete && (
@@ -236,12 +236,12 @@ export function RecordPaymentDialog({
               </p>
             )}
             {tokenShortfallAfterThis > 0 && parseFloat(amount || "0") >= minInstalment && (
-              <p className="pt-1 text-[11px] text-amber-700 font-medium">
+              <p className="pt-1 text-[11px] text-warning-foreground font-medium">
                 ⚠ ₹{tokenShortfallAfterThis.toLocaleString("en-IN")} more needed after this to cross the 10% line and advance to Pre-Admitted.
               </p>
             )}
             {willCrossTokenThreshold && (
-              <p className="pt-1 text-[11px] text-emerald-700 font-medium">
+              <p className="pt-1 text-[11px] text-success font-medium">
                 ✓ This payment crosses the 10% line — candidate will be Pre-Admitted (PAN issued).
               </p>
             )}

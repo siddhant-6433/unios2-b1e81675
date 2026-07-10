@@ -30,21 +30,21 @@ const FUNNEL_META: Record<ApplicationFunnelStage, {
   label: string; icon: any;
   iconBg: string; iconColor: string; tint: string; ring: string; bar: string;
 }> = {
-  in_progress:  { label: "In Progress",   icon: Clock,          iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
-  submitted:    { label: "Submitted",     icon: CheckCircle,    iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
-  paid:         { label: "Paid",          icon: CreditCard,     iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/60", ring: "ring-emerald-400", bar: "bg-emerald-400" },
-  approved:     { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-orange-100",  iconColor: "text-orange-600",  tint: "bg-orange-50/60",  ring: "ring-orange-400",  bar: "bg-orange-400" },
+  in_progress:  { label: "In Progress",   icon: Clock,          iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",   tint: "bg-warning/5/60",   ring: "ring-amber-400",   bar: "bg-warning/40" },
+  submitted:    { label: "Submitted",     icon: CheckCircle,    iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-violet-400",  bar: "bg-primary/40" },
+  paid:         { label: "Paid",          icon: CreditCard,     iconBg: "bg-success/10", iconColor: "text-success", tint: "bg-success/5/60", ring: "ring-emerald-400", bar: "bg-success/50" },
+  approved:     { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-warning/10",  iconColor: "text-warning-foreground",  tint: "bg-warning/5/60",  ring: "ring-orange-400",  bar: "bg-warning/50" },
   offer_sent:   { label: "Offer Sent",    icon: Gift,           iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
   token_paid:   { label: "Token Paid",    icon: Wallet,         iconBg: "bg-cyan-100",    iconColor: "text-cyan-600",    tint: "bg-cyan-50/60",    ring: "ring-cyan-400",    bar: "bg-cyan-400" },
-  pre_admitted: { label: "Pre-Admitted",  icon: UserCheck,      iconBg: "bg-indigo-100",  iconColor: "text-indigo-600",  tint: "bg-indigo-50/60",  ring: "ring-indigo-400",  bar: "bg-indigo-400" },
-  admitted:     { label: "Admitted",      icon: GraduationCap,  iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+  pre_admitted: { label: "Pre-Admitted",  icon: UserCheck,      iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-indigo-400",  bar: "bg-primary/40" },
+  admitted:     { label: "Admitted",      icon: GraduationCap,  iconBg: "bg-success/10",   iconColor: "text-success",   tint: "bg-success/5/60",   ring: "ring-green-400",   bar: "bg-success/50" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 interface Props {

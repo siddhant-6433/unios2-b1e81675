@@ -535,7 +535,7 @@ const StudentProfile = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   if (!student) {
     return (
@@ -1338,10 +1338,10 @@ const StudentProfile = () => {
                 <div className="divide-y divide-border">
                   {leadDocs.map((doc) => {
                     const statusIcon = doc.status === "verified"
-                      ? <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                      ? <ShieldCheck className="h-4 w-4 text-success" />
                       : doc.status === "rejected"
-                      ? <AlertCircle className="h-4 w-4 text-rose-500" />
-                      : <Clock3 className="h-4 w-4 text-amber-500" />;
+                      ? <AlertCircle className="h-4 w-4 text-destructive" />
+                      : <Clock3 className="h-4 w-4 text-warning" />;
                     const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name ?? "");
                     return (
                       <div key={doc.id} className="flex items-center gap-3 py-2.5">
@@ -1351,7 +1351,7 @@ const StudentProfile = () => {
                         }
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-foreground truncate">{doc.document_name}</p>
-                          {doc.rejection_reason && <p className="text-[11px] text-rose-500 truncate">{doc.rejection_reason}</p>}
+                          {doc.rejection_reason && <p className="text-[11px] text-destructive truncate">{doc.rejection_reason}</p>}
                         </div>
                         <div title={doc.status} className="shrink-0">{statusIcon}</div>
                         {doc.file_url && (

@@ -46,15 +46,15 @@ export function DuplicateLeadWarning({ phone, excludeId }: Props) {
   if (duplicates.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
+    <div className="rounded-lg border border-warning/20 dark:border-warning/60/40 bg-warning/5 dark:bg-warning/90/20 px-3 py-2.5 space-y-2">
       <div className="flex items-center gap-1.5">
-        <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
-        <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+        <AlertTriangle className="h-3.5 w-3.5 text-warning-foreground flex-shrink-0" />
+        <span className="text-xs font-semibold text-warning-foreground dark:text-warning/70">
           Duplicate phone number found
         </span>
       </div>
       {duplicates.map((d) => (
-        <div key={d.id} className="flex items-center justify-between gap-2 rounded-md bg-amber-100/60 dark:bg-amber-900/20 px-2.5 py-1.5">
+        <div key={d.id} className="flex items-center justify-between gap-2 rounded-md bg-warning/10/60 dark:bg-warning/80/20 px-2.5 py-1.5">
           <div>
             <span className="text-xs font-medium text-foreground">{d.name}</span>
             <span className="text-[10px] text-muted-foreground ml-2">{STAGE_LABELS[d.stage] || d.stage}</span>
@@ -70,7 +70,7 @@ export function DuplicateLeadWarning({ phone, excludeId }: Props) {
           </a>
         </div>
       ))}
-      <p className="text-[10px] text-amber-700 dark:text-amber-400">
+      <p className="text-[10px] text-warning-foreground dark:text-warning">
         A lead with this phone number already exists. You can still proceed if this is intentional.
       </p>
     </div>

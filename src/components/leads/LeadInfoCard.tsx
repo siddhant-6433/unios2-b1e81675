@@ -186,7 +186,7 @@ export function LeadInfoCard({
           {/* Course — grouped dropdown */}
           <EditableSelectRow
             icon={<GraduationCap className="h-4 w-4" />}
-            iconColor="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
+            iconColor="bg-primary/10 text-primary dark:bg-primary/80/30 dark:text-primary/60"
             label="Course"
             value={lead.course_id}
             displayValue={courseName || "Not set"}
@@ -207,7 +207,7 @@ export function LeadInfoCard({
           {/* Campus — filtered by course */}
           <EditableSelectRow
             icon={<Building2 className="h-4 w-4" />}
-            iconColor="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+            iconColor="bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
             label="Campus"
             value={lead.campus_id}
             displayValue={campusName || "Not set"}
@@ -222,7 +222,7 @@ export function LeadInfoCard({
           {campusCity && (
             <InfoRow
               icon={<MapPin className="h-4 w-4" />}
-              iconColor="bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
+              iconColor="bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/70"
               label="City"
               value={campusCity}
             />
@@ -231,14 +231,14 @@ export function LeadInfoCard({
           {/* Email — inline text edit */}
           <EditableInfoRow
             icon={<Mail className="h-4 w-4" />}
-            iconColor="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            iconColor="bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
             label="Email" field="email" fieldLabel="Email"
             value={lead.email || ""} onSave={onFieldUpdate}
           />
 
           <InfoRow
             icon={<Globe className="h-4 w-4" />}
-            iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+            iconColor="bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
             label="Source"
             value={[
               lead.source,
@@ -255,7 +255,7 @@ export function LeadInfoCard({
           {lead.jd_category && (
             <InfoRow
               icon={<FileText className="h-4 w-4" />}
-              iconColor="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+              iconColor="bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
               label="JD Keyword"
               value={
                 jdCategoryHint(lead.jd_category)
@@ -294,9 +294,9 @@ export function LeadInfoCard({
             <span className="text-sm text-muted-foreground">Interest Level</span>
             <Badge
               className={`text-xs font-semibold border-0 ${
-                lead.interview_score >= 7 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                lead.interview_score >= 7 ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
                 : lead.interview_score >= 4 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                : "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
               }`}
             >
               {lead.interview_score >= 7 ? "High" : lead.interview_score >= 4 ? "Medium" : "Low"}
@@ -486,7 +486,7 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
 
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning">
         <User className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">

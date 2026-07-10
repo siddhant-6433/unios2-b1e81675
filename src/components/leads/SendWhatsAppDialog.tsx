@@ -486,7 +486,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-green-600" />
+            <MessageSquare className="h-5 w-5 text-success" />
             Send WhatsApp
           </DialogTitle>
         </DialogHeader>
@@ -520,20 +520,20 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
                 onClick={() => setSelectedTemplate(t.key)}
                 className={`w-full text-left px-4 py-2.5 transition-colors flex items-start gap-3 ${
                   selectedTemplate === t.key
-                    ? "bg-green-50 dark:bg-green-950/20 border-l-2 border-l-green-500"
+                    ? "bg-success/5 dark:bg-success/90/20 border-l-2 border-l-green-500"
                     : "text-foreground hover:bg-muted/50 border-l-2 border-l-transparent"
                 }`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className={`text-sm font-medium ${selectedTemplate === t.key ? "text-green-700 dark:text-green-400" : ""}`}>{t.label}</p>
-                    {t.badge === "Video" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600">VIDEO</span>}
-                    {t.badge === "Location" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">LOCATION</span>}
-                    {(t as any).isQuickReply && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-600">KB</span>}
+                    <p className={`text-sm font-medium ${selectedTemplate === t.key ? "text-success dark:text-success" : ""}`}>{t.label}</p>
+                    {t.badge === "Video" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">VIDEO</span>}
+                    {t.badge === "Location" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-info/10 text-info-foreground">LOCATION</span>}
+                    {(t as any).isQuickReply && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">KB</span>}
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5">{t.description}</p>
                 </div>
-                {selectedTemplate === t.key && <Check className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />}
+                {selectedTemplate === t.key && <Check className="h-4 w-4 text-success shrink-0 mt-0.5" />}
               </button>
             ))}
           </div>
@@ -560,7 +560,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
           <Button
             onClick={handleSend}
             disabled={!selectedTemplate || sending || sent}
-            className="gap-2 bg-green-600 hover:bg-green-700"
+            className="gap-2 bg-success hover:bg-success/60"
           >
             {sending ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Sending...</>

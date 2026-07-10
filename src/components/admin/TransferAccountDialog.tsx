@@ -200,7 +200,7 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
             <p className="text-muted-foreground">Transferring all data from</p>
             <p className="font-semibold text-foreground mt-0.5">{source?.name}</p>
             {loadingCount ? (
-              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Counting leads…</p>
+              <p className="text-xs text-primary mt-1 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Counting leads…</p>
             ) : leadCount !== null ? (
               <p className="text-xs text-muted-foreground mt-1">
                 <span className="font-medium text-foreground">{leadCount}</span> lead{leadCount !== 1 ? "s" : ""} will be transferred

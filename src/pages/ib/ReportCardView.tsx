@@ -94,7 +94,7 @@ const ReportCardView = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -198,12 +198,12 @@ const ReportCardView = () => {
                 <p className="text-lg font-bold text-foreground">{attendance.total_days ?? "—"}</p>
                 <p className="text-xs text-muted-foreground">Total Days</p>
               </div>
-              <div className="rounded-xl bg-green-50 p-3 text-center">
-                <p className="text-lg font-bold text-green-700">{attendance.present ?? "—"}</p>
+              <div className="rounded-xl bg-success/5 p-3 text-center">
+                <p className="text-lg font-bold text-success">{attendance.present ?? "—"}</p>
                 <p className="text-xs text-muted-foreground">Present</p>
               </div>
-              <div className="rounded-xl bg-red-50 p-3 text-center">
-                <p className="text-lg font-bold text-red-700">{attendance.absent ?? "—"}</p>
+              <div className="rounded-xl bg-destructive/5 p-3 text-center">
+                <p className="text-lg font-bold text-destructive">{attendance.absent ?? "—"}</p>
                 <p className="text-xs text-muted-foreground">Absent</p>
               </div>
             </div>

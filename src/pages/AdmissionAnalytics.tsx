@@ -123,7 +123,7 @@ const AdmissionAnalytics = () => {
   const totalAdmitted = seatMatrix.reduce((s: number, r: any) => s + Number(r.admitted), 0);
   const overallFill = totalSeats > 0 ? Math.round((totalAdmitted / totalSeats) * 100) : 0;
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -220,7 +220,7 @@ const AdmissionAnalytics = () => {
                       <td className="px-4 py-2 text-center text-muted-foreground">{d.dropOff || "—"}</td>
                       <td className="px-4 py-2 text-center">
                         {d.dropPct > 0 ? (
-                          <Badge className={`text-[10px] border-0 font-semibold ${d.dropPct > 50 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : d.dropPct > 25 ? "bg-amber-100 text-amber-700" : "bg-muted text-muted-foreground"}`}>
+                          <Badge className={`text-[10px] border-0 font-semibold ${d.dropPct > 50 ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80" : d.dropPct > 25 ? "bg-warning/10 text-warning-foreground" : "bg-muted text-muted-foreground"}`}>
                             {d.dropPct}%
                           </Badge>
                         ) : "—"}
@@ -301,7 +301,7 @@ const AdmissionAnalytics = () => {
                       <td className="px-4 py-2 text-center">{r.applied}</td>
                       <td className="px-4 py-2 text-center font-semibold text-primary">{r.admitted}</td>
                       <td className="px-4 py-2 text-center">
-                        <Badge className={`text-[10px] border-0 ${Number(r.conversion_pct) >= 20 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
+                        <Badge className={`text-[10px] border-0 ${Number(r.conversion_pct) >= 20 ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>
                           {r.conversion_pct}%
                         </Badge>
                       </td>
@@ -356,7 +356,7 @@ const AdmissionAnalytics = () => {
                         <td className="px-4 py-2 text-center font-bold text-primary">{c.conversions}</td>
                         <td className="px-4 py-2 text-center">
                           {Number(c.followups_overdue) > 0 ? (
-                            <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0 text-[10px]">{c.followups_overdue}</Badge>
+                            <Badge className="bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80 border-0 text-[10px]">{c.followups_overdue}</Badge>
                           ) : "0"}
                         </td>
                         <td className="px-4 py-2 text-center">
@@ -364,7 +364,7 @@ const AdmissionAnalytics = () => {
                             <span className="text-muted-foreground">—</span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5">
-                              <Badge className={`text-[10px] border-0 ${avg != null && avg >= 4 ? "bg-emerald-100 text-emerald-700" : avg != null && avg <= 2 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                              <Badge className={`text-[10px] border-0 ${avg != null && avg >= 4 ? "bg-success/10 text-success" : avg != null && avg <= 2 ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning-foreground"}`}>
                                 {avg != null ? `★ ${avg}` : "—"}
                               </Badge>
                               <span className="text-[11px] text-muted-foreground">({responses}{lowRating > 0 ? `, ${lowRating}↓` : ""})</span>
@@ -399,7 +399,7 @@ const AdmissionAnalytics = () => {
                         </div>
                         <div className="flex-1 h-6 bg-muted rounded-full overflow-hidden">
                           <div
-                            className={`h-full rounded-full transition-all flex items-center justify-end px-2 ${pct >= 95 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-primary"}`}
+                            className={`h-full rounded-full transition-all flex items-center justify-end px-2 ${pct >= 95 ? "bg-destructive/50" : pct >= 80 ? "bg-warning/50" : "bg-primary"}`}
                             style={{ width: `${Math.max(pct, 3)}%` }}
                           >
                             {pct >= 15 && <span className="text-[10px] font-bold text-white">{pct}%</span>}
@@ -438,14 +438,14 @@ const AdmissionAnalytics = () => {
                         <td className="px-4 py-2 font-medium text-foreground">{STAGE_LABELS[s.stage] || s.stage}</td>
                         <td className="px-4 py-2 text-center">{s.lead_count}</td>
                         <td className="px-4 py-2 text-center">
-                          <span className={Number(s.avg_days_in_stage) > 7 ? "text-red-600 font-semibold" : "text-muted-foreground"}>
+                          <span className={Number(s.avg_days_in_stage) > 7 ? "text-destructive font-semibold" : "text-muted-foreground"}>
                             {s.avg_days_in_stage}d
                           </span>
                         </td>
                         <td className="px-4 py-2 text-center text-muted-foreground">{s.max_days_in_stage}d</td>
                         <td className="px-4 py-2 text-center">
                           {Number(s.stale_count) > 0 ? (
-                            <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0 text-[10px]">{s.stale_count}</Badge>
+                            <Badge className="bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80 border-0 text-[10px]">{s.stale_count}</Badge>
                           ) : "0"}
                         </td>
                       </tr>

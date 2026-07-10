@@ -49,10 +49,10 @@ interface FeedbackEntry {
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   proposal: { label: "Proposal", color: "bg-gray-100 text-gray-700" },
-  approved: { label: "Approved", color: "bg-blue-100 text-blue-800" },
+  approved: { label: "Approved", color: "bg-info/10 text-info-foreground" },
   in_progress: { label: "In Progress", color: "bg-yellow-100 text-yellow-800" },
-  presentation: { label: "Presentation", color: "bg-purple-100 text-purple-800" },
-  completed: { label: "Completed", color: "bg-green-100 text-green-800" },
+  presentation: { label: "Presentation", color: "bg-primary/10 text-primary" },
+  completed: { label: "Completed", color: "bg-success/10 text-success-foreground" },
 };
 
 const ProjectDetail = () => {
@@ -224,7 +224,7 @@ const ProjectDetail = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -401,7 +401,7 @@ const ProjectDetail = () => {
                         href={entry.evidence_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                        className="text-xs text-info-foreground hover:underline mt-1 inline-block"
                       >
                         View Evidence
                       </a>

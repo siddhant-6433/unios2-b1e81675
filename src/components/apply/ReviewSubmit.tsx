@@ -268,7 +268,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
           {/* Other board alerts */}
           {((academic as any).class_12?.board === 'Other' || (academic as any).class_10?.board === 'Other' || (academic as any).graduation?.university === 'Other') && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+            <div className="p-3 rounded-xl bg-warning/5 border border-warning/20 text-warning-foreground text-xs">
               ⚠️ <strong>Note:</strong> One or more boards/universities marked as "Other" — please verify eligibility with the admissions team.
             </div>
           )}

@@ -30,10 +30,10 @@ interface VisitRow {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  scheduled: "bg-blue-100 text-blue-700",
+  scheduled: "bg-info/10 text-info-foreground",
   confirmed: "bg-teal-100 text-teal-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  no_show: "bg-rose-100 text-rose-700",
+  completed: "bg-success/10 text-success",
+  no_show: "bg-destructive/10 text-destructive",
 };
 
 function fmtTime(iso: string) {
@@ -112,7 +112,7 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
   };
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -141,11 +141,11 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
                       {v.lead_name}
                     </Link>
                     {v.visit_type === "walk_in" && (
-                      <Badge className="border-0 bg-purple-100 text-purple-700 text-[10px] gap-1"><Footprints className="h-2.5 w-2.5" /> Walk-in</Badge>
+                      <Badge className="border-0 bg-primary/10 text-primary text-[10px] gap-1"><Footprints className="h-2.5 w-2.5" /> Walk-in</Badge>
                     )}
                     <Badge className={`border-0 text-[10px] ${STATUS_BADGE[v.status] || ""}`}>{v.status}</Badge>
                     {v.checked_in_at && (
-                      <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">Checked in</Badge>
+                      <Badge className="border-0 bg-success/10 text-success text-[10px]">Checked in</Badge>
                     )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
@@ -165,7 +165,7 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setCompleteVisit(v)}>
                     <CheckCircle2 className="h-3.5 w-3.5" /> Complete
                   </Button>
-                  <Button size="sm" variant="ghost" className="gap-1.5 text-rose-600" onClick={() => markNoShow(v)} disabled={busyId === v.id}>
+                  <Button size="sm" variant="ghost" className="gap-1.5 text-destructive" onClick={() => markNoShow(v)} disabled={busyId === v.id}>
                     <XCircle className="h-3.5 w-3.5" /> No-show
                   </Button>
                   <Link to={`/admissions/${v.lead_id}`} className="text-muted-foreground hover:text-foreground">

@@ -112,8 +112,8 @@ function buildLeadListUrl(opts: {
 
 // "Not interested" is a loss metric — higher is worse, so colors invert.
 function notInterestedClass(pct: number): string {
-  if (pct >= 30) return "text-rose-700 bg-rose-50";
-  if (pct >= 10) return "text-amber-700 bg-amber-50";
+  if (pct >= 30) return "text-destructive bg-destructive/5";
+  if (pct >= 10) return "text-warning-foreground bg-warning/5";
   return "text-muted-foreground bg-muted/40";
 }
 
@@ -124,9 +124,9 @@ function pctClass(pct: number, kind: "engaged" | "submitted" | "admitted"): stri
     : kind === "submitted"
     ? { good: 15, warn: 5 }
     : { good: 50, warn: 25 };
-  if (pct >= thresholds.good) return "text-emerald-700 bg-emerald-50";
-  if (pct >= thresholds.warn) return "text-amber-700 bg-amber-50";
-  return "text-rose-700 bg-rose-50";
+  if (pct >= thresholds.good) return "text-success bg-success/5";
+  if (pct >= thresholds.warn) return "text-warning-foreground bg-warning/5";
+  return "text-destructive bg-destructive/5";
 }
 
 export default function PublisherAnalytics() {
@@ -252,7 +252,7 @@ export default function PublisherAnalytics() {
   }, [metrics]);
 
   if (!roleLoaded) {
-    return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
   if (role !== "super_admin") {
     return <Navigate to="/" replace />;
@@ -284,12 +284,12 @@ export default function PublisherAnalytics() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <SummaryCard label="Total Leads"    value={summary.total}     Icon={Users}        iconBg="bg-blue-100"     iconColor="text-blue-600" />
-        <SummaryCard label="Engaged"        value={summary.engaged}   Icon={Phone}        iconBg="bg-violet-100"   iconColor="text-violet-600"
+        <SummaryCard label="Total Leads"    value={summary.total}     Icon={Users}        iconBg="bg-info/10"     iconColor="text-info-foreground" />
+        <SummaryCard label="Engaged"        value={summary.engaged}   Icon={Phone}        iconBg="bg-primary/10"   iconColor="text-primary"
           sub={summary.total ? `${Math.round((summary.engaged / summary.total) * 100)}% of leads` : undefined} />
-        <SummaryCard label="Submitted Apps" value={summary.submitted} Icon={FileText}     iconBg="bg-amber-100"    iconColor="text-amber-600"
+        <SummaryCard label="Submitted Apps" value={summary.submitted} Icon={FileText}     iconBg="bg-warning/10"    iconColor="text-warning-foreground"
           sub={summary.total ? `${Math.round((summary.submitted / summary.total) * 100)}% of leads` : undefined} />
-        <SummaryCard label="Admitted"       value={summary.admitted}  Icon={GraduationCap} iconBg="bg-emerald-100"  iconColor="text-emerald-600"
+        <SummaryCard label="Admitted"       value={summary.admitted}  Icon={GraduationCap} iconBg="bg-success/10"  iconColor="text-success"
           sub={summary.total ? `${Math.round((summary.admitted / summary.total) * 100)}% of leads` : undefined} />
       </div>
 
@@ -328,7 +328,7 @@ export default function PublisherAnalytics() {
       </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
       ) : metrics.length === 0 ? (
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-12 text-center text-muted-foreground text-sm">

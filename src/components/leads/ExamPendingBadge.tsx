@@ -81,7 +81,7 @@ export function ExamPendingBadge({ leadId, leadName, phone, courseName, campusNa
           href={docUrl}
           target="_blank"
           rel="noreferrer"
-          className="ml-0.5 inline-flex rounded-full p-0.5 text-emerald-700 hover:bg-emerald-100"
+          className="ml-0.5 inline-flex rounded-full p-0.5 text-success hover:bg-success/10"
           title={`Open ${label} registration proof`}
           onClick={(e) => e.stopPropagation()}
         >

@@ -363,7 +363,7 @@ const ActionService = () => {
 
             {loadingActions ? (
               <div className="flex justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
               </div>
             ) : actions.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
@@ -409,7 +409,7 @@ const ActionService = () => {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  className="h-7 w-7 p-0 text-success hover:text-success hover:bg-success/5"
                                   onClick={() => updateActionStatus(a.id, "approved")}
                                 >
                                   <CheckCircle className="h-4 w-4" />
@@ -417,7 +417,7 @@ const ActionService = () => {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/5"
                                   onClick={() => updateActionStatus(a.id, "rejected")}
                                 >
                                   <XCircle className="h-4 w-4" />
@@ -458,7 +458,7 @@ const ActionService = () => {
 
             {loadingServices ? (
               <div className="flex justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
               </div>
             ) : services.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">

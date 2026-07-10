@@ -100,11 +100,11 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
             {receiptNo && <span className="text-xs font-mono text-muted-foreground">#{receiptNo}</span>}
             {rows.length > 0 && (
               allOk ? (
-                <Badge className="ml-auto bg-emerald-100 text-emerald-700 border-0 text-[10px] gap-1">
+                <Badge className="ml-auto bg-success/10 text-success border-0 text-[10px] gap-1">
                   <ShieldCheck className="h-3 w-3" /> Chain intact
                 </Badge>
               ) : (
-                <Badge className="ml-auto bg-rose-100 text-rose-700 border-0 text-[10px] gap-1">
+                <Badge className="ml-auto bg-destructive/10 text-destructive border-0 text-[10px] gap-1">
                   <ShieldAlert className="h-3 w-3" /> Chain broken
                 </Badge>
               )
@@ -119,7 +119,7 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
         )}
 
         {error && (
-          <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 px-3 py-2 text-xs">
+          <div className="rounded-lg bg-destructive/5 border border-destructive/20 text-destructive px-3 py-2 text-xs">
             {error}
           </div>
         )}
@@ -135,9 +135,9 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
             const ok = verify[r.id] !== false;
             const ActionIcon = r.action === "INSERT" ? Plus : r.action === "UPDATE" ? Pencil : Trash2;
             const actionColor =
-              r.action === "INSERT" ? "bg-blue-100 text-blue-700"
-              : r.action === "UPDATE" ? "bg-amber-100 text-amber-700"
-              : "bg-rose-100 text-rose-700";
+              r.action === "INSERT" ? "bg-info/10 text-info-foreground"
+              : r.action === "UPDATE" ? "bg-warning/10 text-warning-foreground"
+              : "bg-destructive/10 text-destructive";
 
             return (
               <li key={r.id} className="rounded-xl border border-border bg-card p-3 text-xs">
@@ -156,7 +156,7 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
                     )}
                   </span>
                   {!ok && (
-                    <Badge className="bg-rose-100 text-rose-700 border-0 ml-auto gap-1">
+                    <Badge className="bg-destructive/10 text-destructive border-0 ml-auto gap-1">
                       <ShieldAlert className="h-3 w-3" /> hash mismatch
                     </Badge>
                   )}
@@ -184,8 +184,8 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
                         .map(f => (
                           <tr key={f} className="border-t border-border/50">
                             <td className="py-1 pr-3 font-mono text-[11px]">{f}</td>
-                            <td className="py-1 pr-3 text-rose-700">{fmtVal((r.before_row || {})[f])}</td>
-                            <td className="py-1 text-emerald-700">{fmtVal((r.after_row || {})[f])}</td>
+                            <td className="py-1 pr-3 text-destructive">{fmtVal((r.before_row || {})[f])}</td>
+                            <td className="py-1 text-success">{fmtVal((r.after_row || {})[f])}</td>
                           </tr>
                         ))}
                     </tbody>

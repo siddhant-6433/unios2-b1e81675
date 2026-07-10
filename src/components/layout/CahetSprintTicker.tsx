@@ -97,8 +97,8 @@ export function CahetSprintTicker() {
     <div
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-xs border-b sm:px-4 ${
         urgent
-          ? "bg-rose-600 text-white border-rose-700"
-          : "bg-rose-50 text-rose-900 border-rose-200"
+          ? "bg-destructive text-white border-destructive/40"
+          : "bg-destructive/5 text-destructive border-destructive/20"
       }`}
     >
       <Flame className={`h-3.5 w-3.5 flex-shrink-0 ${urgent ? "animate-pulse" : ""}`} />
@@ -112,12 +112,12 @@ export function CahetSprintTicker() {
           <span>
             You: <strong className="tabular-nums">{stats.own_count}/{TARGET_PER_COUNSELLOR}</strong>
             {stats.own_today > 0 && (
-              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-rose-600"}>(+{stats.own_today} today)</span>
+              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-destructive"}>(+{stats.own_today} today)</span>
             )}
           </span>
-          <div className={`hidden h-1.5 w-24 rounded overflow-hidden sm:block ${urgent ? "bg-rose-800/40" : "bg-rose-200"}`}>
+          <div className={`hidden h-1.5 w-24 rounded overflow-hidden sm:block ${urgent ? "bg-destructive/70/40" : "bg-destructive/15"}`}>
             <div
-              className={urgent ? "h-full bg-white" : "h-full bg-rose-600"}
+              className={urgent ? "h-full bg-white" : "h-full bg-destructive"}
               style={{ width: `${ownProgress}%` }}
             />
           </div>
@@ -132,7 +132,7 @@ export function CahetSprintTicker() {
           <span>
             Team <strong className="tabular-nums">{stats.team_count}</strong>
             {stats.team_today > 0 && (
-              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-rose-600"}>(+{stats.team_today} today)</span>
+              <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-destructive"}>(+{stats.team_today} today)</span>
             )}
           </span>
           <span className="opacity-80">·</span>
@@ -143,7 +143,7 @@ export function CahetSprintTicker() {
       )}
       <Link
         to="/cahet-sprint"
-        className={`ml-auto inline-flex items-center gap-1 whitespace-nowrap font-medium hover:underline ${urgent ? "" : "text-rose-700"}`}
+        className={`ml-auto inline-flex items-center gap-1 whitespace-nowrap font-medium hover:underline ${urgent ? "" : "text-destructive"}`}
       >
         Open Sprint <ArrowRight className="h-3 w-3" />
       </Link>
@@ -151,7 +151,7 @@ export function CahetSprintTicker() {
         type="button"
         aria-label="Dismiss"
         onClick={dismiss}
-        className={`opacity-60 hover:opacity-100 transition-opacity ${urgent ? "text-white" : "text-rose-900"}`}
+        className={`opacity-60 hover:opacity-100 transition-opacity ${urgent ? "text-white" : "text-destructive"}`}
       >
         <X className="h-3.5 w-3.5" />
       </button>

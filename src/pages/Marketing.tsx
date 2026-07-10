@@ -113,12 +113,12 @@ interface RecipientRow {
 
 const statusTone = (status: string) => {
   if (status === "scheduled") return "bg-sky-100 text-sky-700";
-  if (status === "completed") return "bg-emerald-100 text-emerald-700";
-  if (status === "failed") return "bg-red-100 text-red-700";
-  if (status === "sending") return "bg-blue-100 text-blue-700";
+  if (status === "completed") return "bg-success/10 text-success";
+  if (status === "failed") return "bg-destructive/10 text-destructive";
+  if (status === "sending") return "bg-info/10 text-info-foreground";
   if (status === "paused") return "bg-slate-100 text-slate-700";
   if (status === "terminated") return "bg-zinc-200 text-zinc-700";
-  return "bg-amber-100 text-amber-700";
+  return "bg-warning/10 text-warning-foreground";
 };
 
 function scheduledDatePart(value: string) {
@@ -1225,7 +1225,7 @@ export default function Marketing() {
             </div>
           )}
 
-          {launchError && <p className="text-sm text-red-600">{launchError}</p>}
+          {launchError && <p className="text-sm text-destructive">{launchError}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
               DNC leads and members without the selected channel destination are skipped at queue time.
@@ -1265,7 +1265,7 @@ export default function Marketing() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp sent</p>
                 <p className="mt-1 text-2xl font-bold">{totals.whatsapp.toLocaleString("en-IN")}</p>
               </div>
-              <MessageSquare className="h-8 w-8 text-emerald-600" />
+              <MessageSquare className="h-8 w-8 text-success" />
             </CardContent>
           </Card>
           <Card>
@@ -1274,7 +1274,7 @@ export default function Marketing() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email sent</p>
                 <p className="mt-1 text-2xl font-bold">{totals.email.toLocaleString("en-IN")}</p>
               </div>
-              <Mail className="h-8 w-8 text-blue-600" />
+              <Mail className="h-8 w-8 text-info-foreground" />
             </CardContent>
           </Card>
         </div>
@@ -1285,7 +1285,7 @@ export default function Marketing() {
           <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-semibold">Executed Campaigns</p>
-              {queueError && <p className="mt-1 text-xs text-red-600">{queueError}</p>}
+              {queueError && <p className="mt-1 text-xs text-destructive">{queueError}</p>}
             </div>
             <Button variant="outline" size="sm" onClick={downloadCampaignReport} disabled={campaigns.length === 0}>
               <Download className="mr-2 h-4 w-4" />
@@ -1294,7 +1294,7 @@ export default function Marketing() {
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : campaigns.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">No campaigns yet.</div>
@@ -1326,7 +1326,7 @@ export default function Marketing() {
                           {campaign.template || "No template"}{campaign.listName ? ` - ${campaign.listName}` : ""}
                         </p>
                         {campaign.workerError && (
-                          <p className="mt-1 text-xs text-red-600">{campaign.workerError}</p>
+                          <p className="mt-1 text-xs text-destructive">{campaign.workerError}</p>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -1339,8 +1339,8 @@ export default function Marketing() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right text-emerald-700">{campaign.sent.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right text-red-700">{campaign.failed.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right text-success">{campaign.sent.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right text-destructive">{campaign.failed.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
                         <div className="text-[11px] text-muted-foreground">{pct(campaign.responded, campaign.total)}</div>
@@ -1405,7 +1405,7 @@ export default function Marketing() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="text-red-700 hover:text-red-700"
+                            className="text-destructive hover:text-destructive"
                             onClick={() => terminateCampaign(campaign)}
                             disabled={queueingId === campaign.id}
                           >
@@ -1436,7 +1436,7 @@ export default function Marketing() {
           <DialogHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertTriangle className="h-4 w-4 text-warning-foreground" />
                 Campaign recipients
               </DialogTitle>
               <Button variant="outline" size="sm" onClick={downloadRecipientReport} disabled={recipients.length === 0}>
@@ -1447,7 +1447,7 @@ export default function Marketing() {
           </DialogHeader>
           {recipientsLoading ? (
             <div className="flex items-center justify-center py-10">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : recipients.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">No recipients found.</div>
@@ -1534,9 +1534,9 @@ function Metric({
 }) {
   const toneClass = {
     slate: "text-slate-600 bg-slate-100",
-    emerald: "text-emerald-600 bg-emerald-100",
-    red: "text-red-600 bg-red-100",
-    blue: "text-blue-600 bg-blue-100",
+    emerald: "text-success bg-success/10",
+    red: "text-destructive bg-destructive/10",
+    blue: "text-info-foreground bg-info/10",
   }[tone];
 
   return (

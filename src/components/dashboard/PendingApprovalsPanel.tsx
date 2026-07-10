@@ -69,14 +69,14 @@ export function PendingApprovalsPanel() {
   return (
     <button
       onClick={() => navigate("/inbox")}
-      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg bg-amber-50/60 dark:bg-amber-950/10 border border-amber-200/60 hover:bg-amber-100/50 dark:hover:bg-amber-950/20 transition-colors text-left"
+      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg bg-warning/5/60 dark:bg-warning/90/10 border border-warning/20/60 hover:bg-warning/10/50 dark:hover:bg-warning/90/20 transition-colors text-left"
     >
-      <ShieldCheck className="h-4 w-4 text-amber-600 shrink-0" />
+      <ShieldCheck className="h-4 w-4 text-warning-foreground shrink-0" />
       <span className="flex-1 text-sm">
         <span className="font-semibold text-foreground">{items.length} pending approval{items.length !== 1 ? "s" : ""}</span>
         <span className="text-muted-foreground"> — view in Inbox</span>
       </span>
-      <ChevronRight className="h-4 w-4 text-amber-600/60 shrink-0" />
+      <ChevronRight className="h-4 w-4 text-warning-foreground/60 shrink-0" />
     </button>
   );
 }

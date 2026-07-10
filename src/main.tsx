@@ -22,7 +22,7 @@ function MissingSupabaseConfig({ missing }: { missing: string[] }) {
   return (
     <main className="min-h-screen bg-[#f0f2f5] px-6 py-10 text-slate-900">
       <section className="mx-auto max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
+        <div className="mb-4 inline-flex rounded-full bg-warning/10 px-3 py-1 text-sm font-medium text-warning-foreground">
           Local setup required
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Supabase config is missing</h1>
@@ -45,8 +45,8 @@ function BootError({ error }: { error: unknown }) {
 
   return (
     <main className="min-h-screen bg-[#f0f2f5] px-6 py-10 text-slate-900">
-      <section className="mx-auto max-w-2xl rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 inline-flex rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700">
+      <section className="mx-auto max-w-2xl rounded-lg border border-destructive/20 bg-white p-6 shadow-sm">
+        <div className="mb-4 inline-flex rounded-full bg-destructive/10 px-3 py-1 text-sm font-medium text-destructive">
           App failed to boot
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Startup error</h1>

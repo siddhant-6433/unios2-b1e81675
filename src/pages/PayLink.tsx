@@ -153,7 +153,7 @@ export default function PayLink() {
   };
 
   return (
-    <div className="min-h-screen bg-muted/30 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-muted/30 flex flex-col items-center justify-center p-4 animate-fade-in">
       <div className="w-full max-w-md rounded-2xl border bg-card shadow-sm p-6">
         <img src={uniosLogo} alt="NIMT" className="h-10 mx-auto mb-4" />
 
@@ -173,7 +173,7 @@ export default function PayLink() {
 
         {step === "done" && (
           <div className="flex flex-col items-center py-8 text-center">
-            <CheckCircle className="h-10 w-10 text-emerald-500 mb-2" />
+            <CheckCircle className="h-10 w-10 text-success mb-2" />
             <p className="text-base font-semibold text-foreground">Payment received</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Thank you{link ? `, ${link.payer_name}` : ""}. Your receipt will be sent to you shortly.

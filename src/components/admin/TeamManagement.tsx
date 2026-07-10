@@ -142,7 +142,7 @@ export default function TeamManagement() {
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   if (loading) {
-    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -181,7 +181,7 @@ export default function TeamManagement() {
                         <Badge variant="secondary" className="text-[10px]">{team.members.length} members</Badge>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <Crown className="h-3 w-3 text-amber-500" />
+                        <Crown className="h-3 w-3 text-warning" />
                         <span className="text-xs text-muted-foreground">{team.leader_name}</span>
                       </div>
                     </div>

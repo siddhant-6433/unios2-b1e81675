@@ -537,7 +537,7 @@ const Students = () => {
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         {loading ? (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : loadError ? (
           <div className="p-12 text-center">

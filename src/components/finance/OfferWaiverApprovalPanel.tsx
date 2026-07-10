@@ -9,7 +9,7 @@ import { Loader2, CheckCircle, XCircle, Tag } from "lucide-react";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
-  pending:  "bg-amber-100 text-amber-700",
+  pending:  "bg-warning/10 text-warning-foreground",
   approved: "bg-success/10 text-success",
   rejected: "bg-destructive/10 text-destructive",
 };
@@ -178,7 +178,7 @@ export function OfferWaiverApprovalPanel() {
   const pendingCount = waivers.filter(w => w.status === "pending").length;
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -188,7 +188,7 @@ export function OfferWaiverApprovalPanel() {
           <Tag className="h-5 w-5 text-muted-foreground" />
           <h3 className="text-base font-semibold text-foreground">Offer Waivers</h3>
           {pendingCount > 0 && (
-            <Badge className="bg-amber-100 text-amber-700 border-amber-200">{pendingCount} pending</Badge>
+            <Badge className="bg-warning/10 text-warning-foreground border-warning/20">{pendingCount} pending</Badge>
           )}
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-input bg-card p-1">
@@ -209,7 +209,7 @@ export function OfferWaiverApprovalPanel() {
       </div>
 
       {!isSuperAdmin && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="rounded-lg border border-warning/20 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
           Only super admins can approve or reject waivers. You can view all requests here.
         </div>
       )}
@@ -263,7 +263,7 @@ export function OfferWaiverApprovalPanel() {
                     <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">
                       −₹{w.amount.toLocaleString("en-IN")}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700">
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-success">
                       {applicable != null ? `₹${applicable.toLocaleString("en-IN")}` : "—"}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={w.reason || undefined}>

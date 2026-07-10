@@ -110,7 +110,7 @@ export function UpdeledRegisterDialog({ target, onClose, onSaved }: Props) {
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="updeled-reg-no">
-              UPDELED registration no. <span className="text-rose-600">*</span>
+              UPDELED registration no. <span className="text-destructive">*</span>
             </Label>
             <Input
               id="updeled-reg-no"
@@ -151,7 +151,7 @@ export function UpdeledRegisterDialog({ target, onClose, onSaved }: Props) {
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">
+          <Button onClick={submit} disabled={saving} className="bg-primary hover:bg-primary/60">
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
             ) : (

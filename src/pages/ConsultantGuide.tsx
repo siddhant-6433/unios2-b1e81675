@@ -138,10 +138,10 @@ export default function ConsultantGuide() {
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { icon: Users, label: "Add & manage leads", color: "bg-blue-100 text-blue-700" },
-              { icon: TrendingUp, label: "Track admissions", color: "bg-green-100 text-green-700" },
-              { icon: IndianRupee, label: "Earn commission", color: "bg-purple-100 text-purple-700" },
-              { icon: Mic, label: "Voice-chat admin", color: "bg-orange-100 text-orange-700" },
+              { icon: Users, label: "Add & manage leads", color: "bg-info/10 text-info-foreground" },
+              { icon: TrendingUp, label: "Track admissions", color: "bg-success/10 text-success" },
+              { icon: IndianRupee, label: "Earn commission", color: "bg-primary/10 text-primary" },
+              { icon: Mic, label: "Voice-chat admin", color: "bg-warning/10 text-warning-foreground" },
             ].map((f, i) => (
               <div key={i} className="flex flex-col items-center text-center p-3 rounded-xl border border-border/60">
                 <div className={`flex h-10 w-10 items-center justify-center rounded-xl mb-2 ${f.color}`}>
@@ -177,8 +177,8 @@ export default function ConsultantGuide() {
             </span> button in the top right. A form opens where you enter the student's details:
           </p>
           <MockAddLeadForm />
-          <div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200/50">
-            <p className="text-xs text-blue-900 dark:text-blue-200">
+          <div className="mt-4 p-3 rounded-xl bg-info/5 dark:bg-info/90/20 border border-info/20/50">
+            <p className="text-xs text-info-foreground dark:text-info/40">
               <strong>Tip:</strong> Name, phone and course are mandatory. Email helps our team reach the student.
               Once submitted, the lead enters your pipeline and we'll get an instant notification.
             </p>
@@ -234,9 +234,9 @@ export default function ConsultantGuide() {
           </p>
           <MockCommissionTable />
           <div className="mt-4 flex items-center gap-4 flex-wrap text-xs">
-            <StatusLegend color="bg-amber-100 text-amber-700" label="Pending — awaiting review" />
-            <StatusLegend color="bg-blue-100 text-blue-700" label="Approved — scheduled for payout" />
-            <StatusLegend color="bg-emerald-100 text-emerald-700" label="Paid — money transferred" />
+            <StatusLegend color="bg-warning/10 text-warning-foreground" label="Pending — awaiting review" />
+            <StatusLegend color="bg-info/10 text-info-foreground" label="Approved — scheduled for payout" />
+            <StatusLegend color="bg-success/10 text-success" label="Paid — money transferred" />
           </div>
         </Section>
 
@@ -395,14 +395,14 @@ function MockAddLeadForm() {
 function MockPipeline() {
   const stages = [
     { label: "New Lead", color: "bg-gray-100 text-gray-700" },
-    { label: "App in Progress", color: "bg-amber-100 text-amber-700" },
-    { label: "Submitted", color: "bg-blue-100 text-blue-700" },
-    { label: "In Follow Up", color: "bg-purple-100 text-purple-700" },
-    { label: "Visit Scheduled", color: "bg-violet-100 text-violet-700" },
-    { label: "Interview", color: "bg-indigo-100 text-indigo-700" },
+    { label: "App in Progress", color: "bg-warning/10 text-warning-foreground" },
+    { label: "Submitted", color: "bg-info/10 text-info-foreground" },
+    { label: "In Follow Up", color: "bg-primary/10 text-primary" },
+    { label: "Visit Scheduled", color: "bg-primary/10 text-primary" },
+    { label: "Interview", color: "bg-primary/10 text-primary" },
     { label: "Offer Sent", color: "bg-teal-100 text-teal-700" },
     { label: "Token Paid", color: "bg-cyan-100 text-cyan-700" },
-    { label: "Admitted", color: "bg-emerald-100 text-emerald-700" },
+    { label: "Admitted", color: "bg-success/10 text-success" },
   ];
   return (
     <div className="rounded-xl border border-dashed border-border/60 p-3 bg-muted/10 overflow-x-auto">
@@ -465,9 +465,9 @@ function MockVoiceRecorder() {
           <p className="text-sm font-semibold">Send Voice Message</p>
         </div>
         <div className="flex flex-col items-center justify-center py-4 rounded-xl border-2 border-dashed border-border/60">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 relative">
-            <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-            <div className="absolute inset-0 rounded-full border-2 border-red-400/50 animate-ping" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/50/10 relative">
+            <div className="h-2.5 w-2.5 rounded-full bg-destructive/50 animate-pulse" />
+            <div className="absolute inset-0 rounded-full border-2 border-destructive/25/50 animate-ping" />
           </div>
           <p className="text-xs font-mono mt-2 text-foreground">0:07</p>
           <div className="mt-2 flex items-center gap-1 px-2.5 py-1 rounded-md bg-destructive text-destructive-foreground text-[10px] font-medium">
@@ -482,9 +482,9 @@ function MockVoiceRecorder() {
 
 function MockCommissionTable() {
   const rows = [
-    { lead: "Rohan Kumar", course: "B.Sc Nursing", amount: "₹8,000", status: "paid", color: "bg-emerald-100 text-emerald-700" },
-    { lead: "Priya Singh", course: "GNM", amount: "₹6,500", status: "approved", color: "bg-blue-100 text-blue-700" },
-    { lead: "Amit Sharma", course: "DPT", amount: "₹5,200", status: "pending", color: "bg-amber-100 text-amber-700" },
+    { lead: "Rohan Kumar", course: "B.Sc Nursing", amount: "₹8,000", status: "paid", color: "bg-success/10 text-success" },
+    { lead: "Priya Singh", course: "GNM", amount: "₹6,500", status: "approved", color: "bg-info/10 text-info-foreground" },
+    { lead: "Amit Sharma", course: "DPT", amount: "₹5,200", status: "pending", color: "bg-warning/10 text-warning-foreground" },
   ];
   return (
     <div className="rounded-xl border border-dashed border-border/60 p-3 bg-muted/10">
