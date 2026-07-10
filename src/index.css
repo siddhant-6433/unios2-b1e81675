@@ -152,13 +152,52 @@
   .bg-blue-50, .bg-blue-100 { background-color: hsl(var(--info) / 0.06) !important; }
   .border-blue-200 { border-color: hsl(var(--info) / 0.2) !important; }
 
-  /* Spinner → RazorSense gradient spinner */
+  /* Spinner → RazorSense bouncing dots.
+     When a Loader2 spinner sits inside a centered flex container (the standard
+     full-area loading pattern), hide the spinner and show thinking dots instead.
+     Inline spinners (inside buttons) keep spinning — they don't match the
+     parent selector. */
   @keyframes rs-spin {
     to { transform: rotate(360deg); }
   }
+
+  /* Inline spinners: keep spinning with RazorSense easing */
   .animate-spin {
     animation: rs-spin 0.8s cubic-bezier(0.3, 0, 0.2, 1) infinite !important;
     color: hsl(var(--primary));
+  }
+
+  /* Full-area loading containers → RazorSense thinking dots */
+  .items-center.justify-center:has(> .animate-spin:only-child) {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .items-center.justify-center > .animate-spin:only-child {
+    width: auto !important;
+    height: auto !important;
+    animation: none !important;
+    border: none !important;
+    color: transparent !important;
+  }
+  .items-center.justify-center > .animate-spin:only-child::before {
+    content: '';
+    display: flex;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: hsl(var(--primary) / 0.5);
+    animation: rs-dot-bounce 1.2s ease-in-out infinite;
+    box-shadow:
+      16px 0 0 hsl(var(--primary) / 0.5),
+      32px 0 0 hsl(var(--primary) / 0.5);
+  }
+  .items-center.justify-center > .animate-spin:only-child::after {
+    content: 'Loading…';
+    display: block;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    margin-top: 8px;
+    letter-spacing: -0.01em;
   }
 
   /* Pulse → smoother RazorSense pulse.
