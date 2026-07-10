@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,7 +66,7 @@ export function PaymentReconciliation() {
   );
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;

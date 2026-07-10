@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 // TodayVisitBoard — today's and upcoming visits for the Visit Center, with
 // inline Check-in / Complete / No-show actions. Reads campus_visits directly
 // (staff RLS allows manage); writes go through the visit_check_in RPC and a
@@ -112,7 +113,7 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
   };
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   return (

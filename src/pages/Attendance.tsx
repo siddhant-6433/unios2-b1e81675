@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -184,7 +185,7 @@ const Attendance = () => {
       </div>
 
       {loading ? (
-        <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        <PageLoader />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Left Column: Calendar + Summary */}

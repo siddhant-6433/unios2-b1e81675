@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { SelectField } from "@/components/ui/state-fields";
@@ -122,7 +123,7 @@ const HrEmployeeDirectory = () => {
       </div>
 
       {loading ? (
-        <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        <PageLoader />
       ) : (
         <div className="rounded-xl bg-card card-shadow overflow-hidden">
           <div className="divide-y divide-border">

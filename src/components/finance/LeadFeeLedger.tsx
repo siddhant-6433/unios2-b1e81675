@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useEffect, useMemo, useState, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -235,7 +236,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     return rows;
   }, [preview, payments]);
 
-  if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
   if (payments.length === 0 && ledger.length === 0 && preview.length === 0) {
     return (
       <>

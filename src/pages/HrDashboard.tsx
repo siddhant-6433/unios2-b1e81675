@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -107,7 +108,7 @@ const HrDashboard = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6 animate-fade-in">

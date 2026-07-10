@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -1363,7 +1364,7 @@ export default function CloudDialer() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   // ── Mobile Call Mode ──────────────────────────────────────────────────────
   // A thumb-first layout for counsellors working their queue on a phone.

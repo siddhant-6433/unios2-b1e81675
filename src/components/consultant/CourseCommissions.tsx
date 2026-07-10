@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -143,7 +144,7 @@ export function CourseCommissions({ consultantId }: Props) {
 
   const pendingReqMap = new Map(requests.map(r => [r.course_id, r]));
 
-  if (loading) return <div className="flex h-10 items-center justify-center"><Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-3">

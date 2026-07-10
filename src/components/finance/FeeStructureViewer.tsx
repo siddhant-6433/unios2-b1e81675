@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -242,7 +243,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     return { oneTime, tuition, boarding, transport, other };
   };
 
-  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   if (structures.length === 0) {
     return <p className="text-xs text-muted-foreground text-center py-4">No fee structure available{courseId ? " for this course" : ""}</p>;

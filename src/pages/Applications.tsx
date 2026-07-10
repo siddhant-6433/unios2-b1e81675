@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1383,7 +1384,7 @@ export default function Applications() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -2305,7 +2306,7 @@ export default function Applications() {
             </DialogTitle>
           </DialogHeader>
           {docsLoading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <PageLoader />
           ) : docs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Upload className="h-8 w-8 mx-auto mb-2 opacity-30" />

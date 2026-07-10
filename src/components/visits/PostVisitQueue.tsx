@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 // PostVisitQueue — pending post-visit follow-ups (lead_followups where
 // visit_id IS NOT NULL). Complete or reschedule inline. Mirrors the
 // PendingFollowups complete/reschedule writes (direct lead_followups updates).
@@ -88,7 +89,7 @@ export function PostVisitQueue({ refreshKey, onChanged }: Props) {
   };
 
   if (loading) {
-    return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   return (

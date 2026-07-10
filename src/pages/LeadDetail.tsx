@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -982,7 +983,7 @@ const LeadDetail = () => {
     }
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
   if (!lead) {
     // Distinguish "this lead exists but isn't assigned to you" from "no such lead".
     // assignmentInfo comes from the SECURITY DEFINER lead_assignment_info RPC.

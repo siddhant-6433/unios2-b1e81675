@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -469,7 +470,7 @@ export function WhatsAppTemplateTab() {
           description="Ready for one-to-one sends, automations, and bulk campaigns."
         />
         {loading ? (
-          <div className="flex h-28 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          <PageLoader />
         ) : approvedRows.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
             No approved templates synced from Meta yet.

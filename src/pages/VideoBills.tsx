@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -137,7 +138,7 @@ export default function VideoBills() {
   const totalForMonth = bills.reduce((s, b) => s + Number(b.total_amount), 0);
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   return (

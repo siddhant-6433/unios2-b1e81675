@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
@@ -1595,7 +1596,7 @@ const Admissions = () => {
   // like the course multi-select popover preserve their state — an empty
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return <PageLoader />;
   }
 
   if (loadError && leads.length === 0) {

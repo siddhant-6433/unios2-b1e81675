@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useParams, Link } from "react-router-dom";
@@ -618,7 +619,7 @@ const StudentProfile = () => {
     setLoading(false);
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  if (loading) return <PageLoader />;
 
   if (!student) {
     return (
