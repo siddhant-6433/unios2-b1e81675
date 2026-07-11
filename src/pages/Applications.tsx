@@ -18,7 +18,7 @@ import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
   Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
-  ListPlus, PauseCircle,
+  ListPlus, PauseCircle, StickyNote,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -58,6 +58,7 @@ import { fetchExamRegistrationsForLeads } from "@/lib/examRegistrationClient";
 import { ExamRegistrationBadge } from "@/components/leads/ExamRegistrationBadge";
 import { ExamRegisterDialog, type ExamRegisterTarget } from "@/components/leads/ExamRegisterDialog";
 import { HoldApplicationDialog, type HoldApplicationTarget } from "@/components/admissions/HoldApplicationDialog";
+import { PendingOfferNoteDialog, type PendingOfferNoteTarget } from "@/components/admissions/PendingOfferNoteDialog";
 import { useToast } from "@/hooks/use-toast";
 
 type RegistrationExamKey = "cahet" | "upget" | "updeled";
@@ -103,6 +104,7 @@ interface AppRow {
   payment_status: string | null;
   payment_ref: string | null;
   hold_reason?: string | null;
+  pending_offer_note?: string | null;
   fee_amount: number | null;
   program_category: string | null;
   course_selections: any[];
@@ -396,6 +398,7 @@ export default function Applications() {
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [examRegTarget, setExamRegTarget] = useState<ExamRegisterTarget | null>(null);
   const [holdTarget, setHoldTarget] = useState<HoldApplicationTarget | null>(null);
+  const [pendingOfferNoteTarget, setPendingOfferNoteTarget] = useState<PendingOfferNoteTarget | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportingCourseSplit, setExportingCourseSplit] = useState(false);
@@ -1934,6 +1937,17 @@ export default function Applications() {
                           </span>
                         </div>
                       )}
+                      {app.status === "approved" && app.pending_offer_note && (
+                        <div className="mt-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-[10px] text-orange-700 max-w-[260px]"
+                            title={app.pending_offer_note}
+                          >
+                            <StickyNote className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{app.pending_offer_note}</span>
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-2 py-2 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
@@ -2010,6 +2024,21 @@ export default function Applications() {
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
                             Nudge
+                          </button>
+                        )}
+                        {/* Pending-offer note — for approved apps awaiting offer issuance. */}
+                        {!isCounsellor && app.status === "approved" && !app.has_offer && (
+                          <button
+                            onClick={() => setPendingOfferNoteTarget({
+                              id: app.id, application_id: app.application_id, lead_id: app.lead_id,
+                              full_name: app.full_name, phone: app.phone,
+                              course_name: primaryCourseName(app),
+                              pending_offer_note: app.pending_offer_note ?? null,
+                            })}
+                            className={`p-1.5 rounded transition-colors ${app.pending_offer_note ? "text-orange-600 hover:text-orange-700 hover:bg-orange-50" : "text-muted-foreground hover:text-orange-600 hover:bg-orange-50"}`}
+                            title={app.pending_offer_note || "Add note — why is offer pending?"}
+                          >
+                            <StickyNote className="h-3.5 w-3.5" />
                           </button>
                         )}
                         {/* Put on hold / release — for applications that can't
@@ -2435,6 +2464,12 @@ export default function Applications() {
         target={holdTarget}
         onClose={() => setHoldTarget(null)}
         onSaved={() => { setHoldTarget(null); setRefreshKey((k) => k + 1); }}
+      />
+
+      <PendingOfferNoteDialog
+        target={pendingOfferNoteTarget}
+        onClose={() => setPendingOfferNoteTarget(null)}
+        onSaved={() => { setPendingOfferNoteTarget(null); setRefreshKey((k) => k + 1); }}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => {
