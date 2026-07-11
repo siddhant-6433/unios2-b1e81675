@@ -2039,7 +2039,7 @@ export default function Applications() {
                                 course_name: primaryCourseName(app),
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: false,
-                                from_status: app.status,
+                                show_counselling_preset: !new Set(["token_paid", "pre_admitted", "admitted"]).has(funnelStageOf(app)),
                               })}
                               className="p-1.5 rounded text-muted-foreground hover:text-warning-foreground hover:bg-warning/5 transition-colors"
                               title="Put application on hold (ineligible)"

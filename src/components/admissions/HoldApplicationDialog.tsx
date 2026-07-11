@@ -23,8 +23,8 @@ export interface HoldApplicationTarget {
   /** Whether the application is already on hold (dialog switches to "release"). */
   on_hold?: boolean;
   hold_reason?: string | null;
-  /** Current application status — when "approved", shows the "Waiting for Counselling" preset. */
-  from_status?: string | null;
+  /** Show "Waiting for Counselling" quick-select (hidden for token_paid and above). */
+  show_counselling_preset?: boolean;
 }
 
 interface Props {
@@ -52,7 +52,7 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
     setNotify(true);
     setReason(
       target.hold_reason ||
-        (target.from_status === "approved"
+        (target.show_counselling_preset
           ? ""
           : examName
             ? `Not registered for the required entrance exam (${examName}) and not eligible / interested in an alternative course.`
@@ -149,7 +149,7 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            {target.from_status === "approved" && (
+            {target.show_counselling_preset && (
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Quick select</Label>
                 <div className="flex flex-wrap gap-1.5">
