@@ -1279,11 +1279,18 @@ export default function AdminApplicationView() {
             </p>
           )}
           {app.status === "approved" && (
-            <p className="text-[11px] text-muted-foreground">
-              <span className="font-medium">Application approved</span>
-              {applicationApproverName && <> by <span className="font-medium text-foreground">{applicationApproverName}</span></>}
-              {app.approved_at && <> on {new Date(app.approved_at).toLocaleString("en-IN")}</>}
-            </p>
+            <>
+              <p className="text-[11px] text-muted-foreground">
+                <span className="font-medium">Application approved</span>
+                {applicationApproverName && <> by <span className="font-medium text-foreground">{applicationApproverName}</span></>}
+                {app.approved_at && <> on {new Date(app.approved_at).toLocaleString("en-IN")}</>}
+              </p>
+              {(app as any).pending_offer_note && (
+                <p className="text-[11px] text-orange-700 inline-flex items-center gap-1">
+                  <span className="font-medium">Pending offer note:</span> {(app as any).pending_offer_note}
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
