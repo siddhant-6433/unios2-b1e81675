@@ -27,6 +27,7 @@ import {
   sarvamSTT, sarvamTTS, detectSarvamLanguageCode,
 } from "./sarvam.ts";
 import { elevenLabsTTS } from "./elevenlabs.ts";
+import { cartesiaTTS, cartesiaTTSPcm, cartesiaSTT, CartesiaSttStream, CartesiaTtsStream } from "./cartesia.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
@@ -99,7 +100,7 @@ interface ActiveCall extends CallContext {
   userTurnEndAtMsList?: number[]; // each timestamp the caller stopped speaking (VAD)
   agentTurnStartAtMsList?: number[]; // matching agent-started timestamps
   voiceSwitchCount?: number;      // cascade EL→Sarvam fallbacks during this call
-  agentProvider?: "gemini-live" | "cascade"; // which path was used end-to-end
+  agentProvider?: "gemini-live" | "cascade" | "cartesia-cascade"; // which path was used end-to-end
 }
 const activeCallContexts = new Map<string, ActiveCall>();
 
@@ -1234,11 +1235,16 @@ async function executeTool(
 
         if (waTemplateKey) {
           try {
-            await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+            const waRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
               body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
             });
+            if (!waRes.ok) {
+              const body = await waRes.text().catch(() => "");
+              console.error(`[WhatsApp] send failed ${waRes.status}: ${body.slice(0, 300)}`);
+              return { success: false, message: "WhatsApp send failed — tell the caller the counsellor will send it instead. Do NOT claim it was sent." };
+            }
             console.log(`[WhatsApp] Sent ${waTemplateKey} to ${waLead.phone}`);
             return { success: true, type: args.message_type };
           } catch (e: any) {
@@ -1550,7 +1556,14 @@ async function executeTool(
               params: [ld.name || "there", courseName],
               lead_id: callCtx.leadId,
             }),
-          }).catch((e) => console.error(`[request_human_callback] WA send failed:`, e?.message));
+          })
+            .then(async (r) => {
+              if (!r.ok) {
+                const body = await r.text().catch(() => "");
+                console.error(`[request_human_callback] WA send failed ${r.status}: ${body.slice(0, 300)}`);
+              }
+            })
+            .catch((e) => console.error(`[request_human_callback] WA send failed:`, e?.message));
         }
 
         // 5) Audit note for the timeline.
@@ -1569,6 +1582,69 @@ async function executeTool(
           scheduled_at: scheduledAt,
           whatsapp_sent: !!ld.phone,
         };
+      }
+
+      case "flag_knowledge_gap": {
+        // Self-improving loop: the AI couldn't answer confidently. Record the
+        // gap so an admin can supply a verified answer, notify super_admins,
+        // and leave a timeline note. The gap insert is the only awaited call;
+        // everything else is fire-and-forget so a slow notify never blocks
+        // the live call.
+        const callerTail = (callCtx.callerTranscript || []).slice(-3).map((t) => `Caller: ${t}`);
+        const aiTail = (callCtx.aiTranscript || []).slice(-3).map((t) => `Navya: ${t}`);
+        const snippet = [...callerTail, ...aiTail].join("\n") || null;
+
+        const gapRes = await fetch(`${SUPABASE_URL}/rest/v1/voice_knowledge_gaps`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            call_id: callCtx.callLogId || null,
+            lead_id: callCtx.leadId || null,
+            question_text: args.question,
+            ai_answer_given: args.answer_given || null,
+            transcript_snippet: snippet,
+          }),
+        });
+        if (!gapRes.ok) {
+          const body = await gapRes.text().catch(() => "");
+          console.error(`[flag_knowledge_gap] insert failed ${gapRes.status}: ${body.slice(0, 300)}`);
+          return { success: false, message: "Could not record the query — the counsellor will follow up." };
+        }
+
+        // Notify every super_admin (fire-and-forget).
+        fetch(`${SUPABASE_URL}/rest/v1/user_roles?role=eq.super_admin&select=user_id`, { headers })
+          .then((r) => r.json())
+          .then((rows: any[]) => {
+            for (const row of rows || []) {
+              if (!row?.user_id) continue;
+              fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+                method: "POST",
+                headers: { ...headers, Prefer: "return=minimal" },
+                body: JSON.stringify({
+                  user_id: row.user_id,
+                  type: "system",
+                  title: "Navya needs an answer",
+                  body: String(args.question).slice(0, 200),
+                  link: "/admin/navya-knowledge",
+                }),
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+
+        // Timeline note (fire-and-forget).
+        if (callCtx.leadId) {
+          fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+            method: "POST",
+            headers: { ...headers, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              lead_id: callCtx.leadId,
+              content: `🤖 Navya couldn't answer: ${args.question} — forwarded to senior counsellor`,
+            }),
+          }).catch(() => {});
+        }
+
+        return { success: true, message: "Query forwarded to senior counsellor team." };
       }
 
       default:
@@ -2786,7 +2862,7 @@ Deno.serve({ port: PORT }, async (req) => {
 
               // Send WhatsApp if template was determined
               if (reconciliation.templateKey && reconciliation.phone) {
-                await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+                const recWaRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
                   body: JSON.stringify({
@@ -2797,7 +2873,12 @@ Deno.serve({ port: PORT }, async (req) => {
                     ...(reconciliation.buttonUrls ? { button_urls: reconciliation.buttonUrls } : {}),
                   }),
                 });
-                console.log(`[${callId}] Post-call WhatsApp: ${reconciliation.templateKey}`);
+                if (!recWaRes.ok) {
+                  const body = await recWaRes.text().catch(() => "");
+                  console.error(`[${callId}] Post-call WhatsApp send failed ${recWaRes.status}: ${body.slice(0, 300)}`);
+                } else {
+                  console.log(`[${callId}] Post-call WhatsApp: ${reconciliation.templateKey}`);
+                }
               }
 
               // Append reconciliation actions to call record summary
@@ -2814,6 +2895,38 @@ Deno.serve({ port: PORT }, async (req) => {
             }
           } catch (waErr: any) {
             console.error(`[${callId}] Post-call reconciliation failed:`, waErr.message);
+          }
+        }
+
+        // Post-call gap mining: catch cases where the AI verbally deferred to a
+        // senior counsellor ("senior counsellor se confirm karke...") but never
+        // called flag_knowledge_gap. Pair each deferral line with the nearest
+        // caller question and record it as a pending gap. Skipped entirely if
+        // the AI already flagged a gap explicitly this call.
+        if (plivoStatus === "completed" && leadId && callCtx) {
+          const alreadyFlagged = (callCtx.toolCallsMade || []).some((tc) => tc.name === "flag_knowledge_gap");
+          if (!alreadyFlagged) {
+            const aiLines = callCtx.aiTranscript || [];
+            const callerLines = callCtx.callerTranscript || [];
+            const deferRe = /senior counsellor (se confirm|batayengi|ko forward)|confirm kar(ke|wa)/i;
+            let mined = 0;
+            for (let i = 0; i < aiLines.length && mined < 3; i++) {
+              if (!deferRe.test(aiLines[i])) continue;
+              const question = callerLines[Math.min(i, callerLines.length - 1)] || aiLines[i];
+              mined++;
+              fetch(`${SUPABASE_URL}/rest/v1/voice_knowledge_gaps`, {
+                method: "POST",
+                headers: { ...dbHeaders, Prefer: "return=minimal" },
+                body: JSON.stringify({
+                  call_id: callLogId || null,
+                  lead_id: leadId,
+                  question_text: question,
+                  ai_answer_given: aiLines[i],
+                  transcript_snippet: [`Caller: ${question}`, `Navya: ${aiLines[i]}`].join("\n"),
+                }),
+              }).catch((e) => console.error(`[${callId}] Gap mining insert failed:`, e?.message));
+            }
+            if (mined > 0) console.log(`[${callId}] Post-call gap mining: ${mined} gap(s) recorded`);
           }
         }
       } catch (e: any) {
@@ -3285,7 +3398,8 @@ Deno.serve({ port: PORT }, async (req) => {
       // events and never set plivoStreamId.
       const provider = getVoiceProviderSync();
       console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
-      if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
+      if (provider === "cartesia") handlePlivoStreamCartesia(socket, callId);
+      else if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
       else if (provider === "plivo") {
         // Plivo Voice AI Agents normally ingest at the answer-URL XML
         // stage (with their own Connect verb), not over our /ws handler.
@@ -3321,7 +3435,7 @@ Deno.serve({ port: PORT }, async (req) => {
 //              Scaffolded behind a feature flag — handler logs a warning
 //              and falls back to "gemini" until the integration is
 //              completed (see voice-agent/PLIVO_INTEGRATION.md).
-type VoiceProvider = "gemini" | "sarvam" | "plivo";
+type VoiceProvider = "gemini" | "sarvam" | "plivo" | "cartesia";
 let providerCache: VoiceProvider = "gemini";
 async function refreshProviderCache() {
   try {
@@ -3331,7 +3445,7 @@ async function refreshProviderCache() {
     );
     const rows = await res.json().catch(() => []);
     const v = rows?.[0]?.value;
-    if (v === "sarvam" || v === "gemini" || v === "plivo") providerCache = v;
+    if (v === "sarvam" || v === "gemini" || v === "plivo" || v === "cartesia") providerCache = v;
   } catch (e) {
     console.warn(`[provider] _app_config refresh failed:`, (e as Error).message);
   }
@@ -3375,6 +3489,10 @@ type VoiceSettings = {
   /** EL model — eleven_v3 = expressive multilingual, eleven_turbo_v2_5 = fast.
    *  v3 is slower (~30% more latency) but handles Hinglish prosody better. */
   elevenLabsModel: "eleven_turbo_v2_5" | "eleven_v3" | "eleven_multilingual_v2";
+  cartesiaVoiceId: string;
+  cartesiaModel: string;
+  cartesiaLanguage: string;
+  cartesiaFillerThresholdMs: number;
 };
 const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   geminiSilenceMs: 1500,
@@ -3394,6 +3512,10 @@ const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   elevenLabsStability: 0.45,
   elevenLabsSimilarity: 0.75,
   elevenLabsModel: "eleven_turbo_v2_5",
+  cartesiaVoiceId: "95d51f79-c397-46f9-b49a-23763d3eaa2d", // Arushi - Hinglish Speaker
+  cartesiaModel: "sonic-3.5",
+  cartesiaLanguage: "hi",
+  cartesiaFillerThresholdMs: 1200,
 };
 const SAFE_GEMINI_AUDIO_MODELS = new Set([
   "gemini-2.5-flash-native-audio-latest",
@@ -3439,6 +3561,10 @@ async function refreshVoiceSettingsCache() {
       elevenLabsModel:           (["eleven_turbo_v2_5","eleven_v3","eleven_multilingual_v2"].includes(parsed.elevenlabs_model)
                                     ? parsed.elevenlabs_model
                                     : VOICE_SETTINGS_DEFAULT.elevenLabsModel) as VoiceSettings["elevenLabsModel"],
+      cartesiaVoiceId:             String(parsed.cartesia_voice_id   ?? VOICE_SETTINGS_DEFAULT.cartesiaVoiceId),
+      cartesiaModel:               String(parsed.cartesia_model      ?? VOICE_SETTINGS_DEFAULT.cartesiaModel),
+      cartesiaLanguage:            String(parsed.cartesia_language    ?? VOICE_SETTINGS_DEFAULT.cartesiaLanguage),
+      cartesiaFillerThresholdMs:   Number(parsed.cartesia_filler_threshold_ms ?? VOICE_SETTINGS_DEFAULT.cartesiaFillerThresholdMs),
     };
   } catch (e) {
     console.warn(`[voice-settings] refresh failed, using defaults:`, (e as Error).message);
@@ -3461,6 +3587,7 @@ setInterval(refreshVoiceSettingsCache, 30_000);
 
 const SARVAM_API_KEY = Deno.env.get("SARVAM_API_KEY") || "";
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") || "";
+const CARTESIA_API_KEY = Deno.env.get("CARTESIA_API_KEY") || "";
 // Reuse the same key the Gemini Live path uses — Cloud Run env has it under
 // GOOGLE_AI_API_KEY, with GEMINI_API_KEY as a fallback for any environment
 // that named it that way.
@@ -3534,6 +3661,8 @@ function currentFillerSig(): string {
     s.sarvamSpeaker,
     s.sarvamPace,
     s.sarvamBulbulModel,
+    s.cartesiaVoiceId,
+    s.cartesiaModel,
   ].join("|");
 }
 async function warmFillerCache(): Promise<void> {
@@ -3549,33 +3678,54 @@ async function warmFillerCache(): Promise<void> {
   fillerWarming = true;
   try {
     const settings = getVoiceSettings();
-    const useElevenForFiller = settings.cascadeTtsProvider === "elevenlabs"
+    const provider = getVoiceProviderSync();
+    const useCartesiaForFiller = provider === "cartesia"
+      && !!CARTESIA_API_KEY
+      && !!settings.cartesiaVoiceId;
+    const useElevenForFiller = !useCartesiaForFiller
+      && settings.cascadeTtsProvider === "elevenlabs"
       && !!ELEVENLABS_API_KEY
       && !!settings.elevenLabsVoiceId;
     for (let i = 0; i < FILLER_TEXTS.length; i++) {
       if (fillerMulawCache[i]) continue;
-      const pcm = useElevenForFiller
-        ? await elevenLabsTTS({
-            apiKey: ELEVENLABS_API_KEY,
-            text: FILLER_TEXTS[i],
-            voiceId: settings.elevenLabsVoiceId,
-            model: settings.elevenLabsModel,
-            speed: settings.sarvamPace,
-            style: settings.elevenLabsStyle,
-            stability: settings.elevenLabsStability,
-            similarityBoost: settings.elevenLabsSimilarity,
-          })
-        : await sarvamTTS({
-            apiKey: SARVAM_API_KEY,
-            text: FILLER_TEXTS[i],
-            speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
-            languageCode: "hi-IN",
-            pace: settings.sarvamPace,
-            model: settings.sarvamBulbulModel,
-          });
-      if (pcm) {
-        fillerMulawCache[i] = pcm16ToMulawBase64(pcm);
-        console.log(`[sarvam-filler] cached "${FILLER_TEXTS[i]}" (${fillerMulawCache[i]!.length}b)`);
+      if (useCartesiaForFiller) {
+        // Cartesia outputs mulaw directly — no PCM intermediate
+        const mulaw = await cartesiaTTS({
+          apiKey: CARTESIA_API_KEY,
+          text: FILLER_TEXTS[i],
+          voiceId: settings.cartesiaVoiceId,
+          model: settings.cartesiaModel,
+          language: settings.cartesiaLanguage,
+          speed: settings.sarvamPace,
+        });
+        if (mulaw) {
+          fillerMulawCache[i] = mulaw;
+          console.log(`[cartesia-filler] cached "${FILLER_TEXTS[i]}" (${mulaw.length}b)`);
+        }
+      } else {
+        const pcm = useElevenForFiller
+          ? await elevenLabsTTS({
+              apiKey: ELEVENLABS_API_KEY,
+              text: FILLER_TEXTS[i],
+              voiceId: settings.elevenLabsVoiceId,
+              model: settings.elevenLabsModel,
+              speed: settings.sarvamPace,
+              style: settings.elevenLabsStyle,
+              stability: settings.elevenLabsStability,
+              similarityBoost: settings.elevenLabsSimilarity,
+            })
+          : await sarvamTTS({
+              apiKey: SARVAM_API_KEY,
+              text: FILLER_TEXTS[i],
+              speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+              languageCode: "hi-IN",
+              pace: settings.sarvamPace,
+              model: settings.sarvamBulbulModel,
+            });
+        if (pcm) {
+          fillerMulawCache[i] = pcm16ToMulawBase64(pcm);
+          console.log(`[sarvam-filler] cached "${FILLER_TEXTS[i]}" (${fillerMulawCache[i]!.length}b)`);
+        }
       }
     }
     fillerCacheSig = currentFillerSig();
@@ -3595,6 +3745,516 @@ function nextFiller(): string | null {
 }
 // Fire-and-forget at module init so the first call doesn't pay the cost.
 warmFillerCache();
+
+// ─── Cartesia streaming pipeline (Ink-2 WS → Gemini text → Sonic WS) ──
+//
+// Matches Cartesia's reference (Line) design: streaming STT transcribes
+// WHILE the caller speaks (finalize at end-of-turn returns the transcript
+// near-instantly), streaming TTS forwards mulaw chunks to Plivo as Sonic
+// generates them (~40-100ms TTFB), and barge-in cancels the in-flight
+// generation + flushes Plivo's buffer. No fillers needed on this path.
+// Everything stays mulaw 8kHz end-to-end — zero PCM conversion except a
+// cheap RMS decode for VAD.
+
+function handlePlivoStreamCartesia(plivoWs: WebSocket, callId: string) {
+  const callCtx = activeCallContexts.get(callId);
+  if (!callCtx) {
+    console.error(`[${callId}] No call context found for Cartesia handler`);
+    plivoWs.close();
+    return;
+  }
+
+  const history: GeminiContent[] = [];
+  let voiceFrames = 0;
+  let silenceFrames = 0;
+  let agentSpeaking = false;   // TTS chunks currently being forwarded to Plivo
+  let processingTurn = false;  // STT finalize → Gemini → TTS in flight
+  let lastUserText = "";
+  let bargeInFrames = 0;       // sustained-speech counter while agent talks
+  let currentTtsContext: string | null = null;
+  let utteranceBuffer: number[] = []; // primary utterance PCM (buffer path — non-English STT & English fallback)
+  let turnAborted = false;     // barge-in aborts the rest of the current model turn
+  // Adaptive VAD state (buffer path)
+  const preRoll: Int16Array[] = []; // last ~15 frames (~300ms) of decoded PCM to recover the syllable onset
+  let noiseFloor = 200;             // EMA of RMS energy on silence frames only
+  let voicedSampleCount = 0;        // voiced samples in the current utterance (min-utterance gate)
+
+  const settings = () => getVoiceSettings();
+
+  // Streaming connections — established on Plivo stream start.
+  const stt = new CartesiaSttStream({ apiKey: CARTESIA_API_KEY, language: settings().cartesiaLanguage });
+  const tts = new CartesiaTtsStream({ apiKey: CARTESIA_API_KEY });
+  let sttReady = false;
+  let ttsReady = false;
+
+  const connectStreams = async () => {
+    // Cartesia Ink streaming STT is only usable for English on 8kHz phone
+    // audio — its Hindi accuracy is unusable. For non-English we rely on the
+    // PCM buffer path + Sarvam Saarika batch STT (see processTurn), so skip
+    // connecting the streaming WS entirely.
+    if (settings().cartesiaLanguage === "en") {
+      try {
+        await stt.connect();
+        sttReady = true;
+        console.log(`[${callId}] Cartesia STT stream connected (ink-2, en)`);
+      } catch (e) {
+        console.error(`[${callId}] ⚠ Cartesia STT WS failed — falling back to batch STT:`, (e as Error).message);
+      }
+    } else {
+      console.log(`[${callId}] Non-English (${settings().cartesiaLanguage}) — Cartesia streaming STT skipped, using Sarvam Saarika batch`);
+    }
+    try {
+      await tts.connect();
+      ttsReady = true;
+      console.log(`[${callId}] Cartesia TTS stream connected (sonic)`);
+    } catch (e) {
+      console.error(`[${callId}] ⚠ Cartesia TTS WS failed — falling back to batch TTS:`, (e as Error).message);
+    }
+  };
+
+  // Garbage-transcript filter: Whisper-family models hallucinate repeated
+  // tokens on noise ("बब बब बब बब"). Drop those + ultra-short fragments.
+  const isGarbageTranscript = (text: string): boolean => {
+    if (text.length < 2) return true;
+    if (/(\S+)( \1){3,}/.test(text)) return true;
+    return false;
+  };
+
+  let bargedIn = false; // set by the barge-in detector to abort the playback hold
+
+  const sendTtsToPlivo = async (text: string) => {
+    agentSpeaking = true;
+    bargeInFrames = 0;
+    bargedIn = false;
+    const s = settings();
+    try {
+      if (ttsReady && tts.ready && s.cartesiaVoiceId) {
+        const contextId = crypto.randomUUID();
+        currentTtsContext = contextId;
+        let firstChunk = true;
+        let firstChunkAt = 0;
+        let totalRawBytes = 0;
+        await tts.speak({
+          text,
+          voiceId: s.cartesiaVoiceId,
+          model: s.cartesiaModel,
+          language: s.cartesiaLanguage,
+          speed: s.sarvamPace,
+          contextId,
+          onChunk: (b64) => {
+            if (plivoWs.readyState !== WebSocket.OPEN) return;
+            if (currentTtsContext !== contextId) return; // cancelled by barge-in
+            if (firstChunk) {
+              firstChunk = false;
+              firstChunkAt = Date.now();
+              if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
+              callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+              callCtx.agentTurnStartAtMsList.push(Date.now());
+            }
+            totalRawBytes += Math.floor(b64.length * 3 / 4);
+            plivoWs.send(JSON.stringify({
+              event: "playAudio",
+              media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: b64 },
+            }));
+          },
+        });
+        if (currentTtsContext === contextId) currentTtsContext = null;
+        // Generation finishes before playback: hold until Plivo has had
+        // time to play everything (1 byte = 1 sample @ 8kHz), abortable
+        // by barge-in which flushes the buffer anyway.
+        if (firstChunkAt && !bargedIn) {
+          const playbackEndsAt = firstChunkAt + (totalRawBytes / 8000) * 1000 + 300;
+          while (Date.now() < playbackEndsAt && !bargedIn) {
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
+        return;
+      }
+
+      // Fallback: batch Cartesia → Sarvam (streaming WS unavailable)
+      let mulawB64 = await cartesiaTTS({
+        apiKey: CARTESIA_API_KEY, text,
+        voiceId: s.cartesiaVoiceId, model: s.cartesiaModel,
+        language: s.cartesiaLanguage, speed: s.sarvamPace,
+      });
+      if (!mulawB64) {
+        console.warn(`[${callId}] Cartesia TTS failed → falling back to Sarvam`);
+        callCtx.voiceSwitchCount = (callCtx.voiceSwitchCount || 0) + 1;
+        const pcm = await sarvamTTS({
+          apiKey: SARVAM_API_KEY, text,
+          speaker: s.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+          languageCode: detectSarvamLanguageCode(text),
+          pace: s.sarvamPace, model: s.sarvamBulbulModel,
+        });
+        if (pcm) mulawB64 = pcm16ToMulawBase64(pcm);
+      }
+      if (!mulawB64 || plivoWs.readyState !== WebSocket.OPEN) return;
+      if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
+      callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+      callCtx.agentTurnStartAtMsList.push(Date.now());
+      plivoWs.send(JSON.stringify({
+        event: "playAudio",
+        media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: mulawB64 },
+      }));
+      // Batch path still needs the playback-duration hold
+      const rawBytes = mulawB64.length * 3 / 4;
+      await new Promise(r => setTimeout(r, Math.min(15000, (rawBytes / 8000) * 1000 + 600)));
+    } finally {
+      agentSpeaking = false;
+      bargeInFrames = 0;
+    }
+  };
+
+  // Gemini text-gen — reuse the same multi-model retry logic as Sarvam cascade
+  const callGemini = async (): Promise<any[]> => {
+    const cascadeAddendum = `
+
+CASCADED-PATH OUTPUT SCRIPT RULE (STRICT — affects pronunciation):
+Your written response is fed verbatim to a Hindi/English TTS engine. The
+engine picks pronunciation from the script you write in.
+- Any Hindi or Hinglish word MUST be written in Devanagari (देवनागरी), NOT in Latin transliteration.
+  ✗ Bad:  "Main Navya bol rahi hoon, NIMT se."
+  ✓ Good: "मैं नव्या बोल रही हूँ, N I M T से।"
+- Pure-English sentences stay in Latin script.
+- Mixed sentences keep English brand names / acronyms in Latin and Hindi words in Devanagari.
+  ✓ Good: "नमस्ते, आपने M B A के बारे में enquiry की थी।"
+
+ACRONYM AND COURSE-NAME FORMATTING (STRICT — Cartesia reads each spaced letter separately):
+1. Brand acronyms (NIMT, AICTE, UGC, NCTE, BCI, INC, AKTU):
+   ALWAYS write with spaces between letters: "N I M T", "A I C T E", "U G C"
+2. Course initialisms (MBA, BBA, BCA, GNM, PGDM):
+   Write with spaces: "M B A", "B B A", "G N M"
+3. Mixed course names (BSc, BTech, BEd, LLB):
+   "B Sc Nursing", "B Tech", "B Ed", "L L B"
+
+TOOL ARGUMENTS — IMPORTANT EXCEPTION:
+Pass PLAIN database-style names as tool arguments, with NO spaces or periods.
+  ✓ Good: get_course_info({ course_name: "BSc Nursing" })
+
+TOOL CALLS ARE SILENT (STRICT):
+Invoke tools ONLY through the function-calling mechanism. NEVER write tool calls,
+code, "tool_code", print(...), function syntax, template names, or any internal
+mechanics in your spoken text — the caller hears every word you write. Speak only
+natural conversation.
+
+NATURAL CADENCE:
+- Open replies occasionally with a short softener: "जी,", "हम्म,", "अच्छा,". Use ONE per turn.
+- Short replies are better. 2 sentences is the sweet spot. Never more than 3.
+
+NO FAKE SEARCHING (STRICT):
+Never say "मैं देखती हूँ", "ek second", "check कर रही हूँ", or any "let me look that up"
+phrase unless you are ACTUALLY calling a tool in this same turn. If you already know
+the answer, just say it directly.
+
+WHEN YOU DON'T KNOW (STRICT): Agar exact fact aapke paas nahi hai (hospital names, specific dates, koi bhi specific detail) — kabhi mat guess karo. Bolo: 'Yeh specific jaankari main senior counsellor se confirm karke aapko bhijwa deti hoon.' Phir flag_knowledge_gap call karo, aur agar caller chahe to request_human_callback bhi.
+
+ANSWER WHAT WAS ASKED (STRICT — phone STT is imperfect):
+- The caller's transcribed words may be garbled. If their last utterance is unclear
+  or doesn't parse, say "माफ़ कीजिएगा, एक बार फिर बोलिएगा?" and WAIT. Do NOT guess,
+  do NOT continue your script, do NOT move to the next question in the arc.
+- When the caller asks a question (fees, placement, hostel, eligibility — anything),
+  answer THAT question first. Never respond to a question with a different topic or
+  the next scripted step. Return to your flow only after their question is answered.
+
+REFUSAL = CLOSE (this rule OUTRANKS the qualification gate below):
+If the caller indicates disinterest or asks you to stop — "nahi chahiye", "interested
+nahi hoon", "not interested", "mat karo call", "time nahi hai" — do NOT ask another
+question and do NOT continue qualifying. Empathize in ONE short sentence, then
+immediately call set_call_disposition("not_interested") (or "call_back" with
+followup_date if they said they're busy right now), say a brief goodbye, and stop.
+
+QUALIFICATION GATE — DO NOT FORGET:
+After answering the caller's questions and they sound satisfied, you MUST ask:
+  "बहुत अच्छा। क्या आप course के लिए online apply करना चाहेंगे, या पहले हमारा campus visit करेंगे?"
+Never close the call without: schedule_visit, send_whatsapp_to_lead(apply_link), or request_human_callback.
+Then call set_call_disposition.`;
+    const systemPrompt = buildSystemInstruction(callCtx) + cascadeAddendum;
+    const cascadeSettings = settings();
+    const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: history,
+      tools: [{ functionDeclarations: VOICE_AGENT_TOOLS }],
+      generationConfig: {
+        temperature: cascadeSettings.cascadeTemperature,
+        maxOutputTokens: cascadeSettings.cascadeMaxTokens,
+      },
+    });
+    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+    const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+    const tryOnce = async (model: string) => {
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY_FOR_TEXT}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body },
+        );
+        return { status: r.status, res: r };
+      } catch (e) {
+        console.error(`[${callId}] Gemini ${model} fetch threw:`, (e as Error).message);
+        return null;
+      }
+    };
+    let attempt = 0;
+    for (const model of MODELS) {
+      for (let retry = 0; retry < 2; retry++) {
+        attempt++;
+        const result = await tryOnce(model);
+        if (!result) break;
+        if (result.res.ok) {
+          if (attempt > 1) console.log(`[${callId}] Gemini succeeded on attempt ${attempt} (${model})`);
+          const data = await result.res.json();
+          return data?.candidates?.[0]?.content?.parts || [];
+        }
+        const errBody = await result.res.text().catch(() => "");
+        console.error(`[${callId}] Gemini ${model} ${result.status}: ${errBody.slice(0, 200)}`);
+        if (!TRANSIENT.has(result.status)) return [];
+        if (retry === 0) await new Promise(r => setTimeout(r, 600));
+      }
+    }
+    return [];
+  };
+
+  // Gemini sometimes writes tool calls as TEXT (```tool_code ...```,
+  // print(default_api.foo(...))) instead of using function calling. Our
+  // pipeline speaks every text part verbatim — without this strip the
+  // caller hears "tool_code send_whatsapp_to_lead template equals..."
+  // read aloud. Remove code fences and tool-syntax spills; if nothing
+  // conversational remains, stay silent for that part.
+  const sanitizeSpoken = (t: string): string => t
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*$/g, " ")
+    .replace(/\btool_code\b[\s\S]*/gi, " ")
+    .replace(/\bprint\s*\([\s\S]*/gi, " ")
+    .replace(/\bdefault_api\.\w+\s*\([\s\S]*/gi, " ")
+    .replace(/\b\w+\s*\(\s*\{[\s\S]*/g, " ")
+    .replace(/\s+/g, " ").trim();
+
+  const runModelTurn = async () => {
+    turnAborted = false;
+    let safety = 0;
+    while (safety++ < 5) {
+      const parts = await callGemini();
+      if (!parts.length) return;
+      history.push({ role: "model", parts });
+
+      const rawSpoken = parts.filter((p: any) => typeof p.text === "string" && p.text.trim())
+        .map((p: any) => p.text).join(" ").trim();
+      const spokenText = sanitizeSpoken(rawSpoken);
+      if (rawSpoken && !spokenText) {
+        console.warn(`[${callId}] Suppressed textual tool-call spill: "${rawSpoken.slice(0, 120)}"`);
+      }
+      if (spokenText && !turnAborted) {
+        console.log(`[${callId}] AI said (cartesia): ${spokenText}`);
+        callCtx.aiTranscript.push(spokenText);
+        await sendTtsToPlivo(spokenText);
+      }
+
+      // Caller interrupted — stop the scripted flow, let their next
+      // utterance drive the conversation instead.
+      if (turnAborted) {
+        console.log(`[${callId}] Model turn aborted by barge-in`);
+        return;
+      }
+
+      const fnCalls = parts.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      if (!fnCalls.length) return;
+
+      console.log(`[${callId}] Tool calls (cartesia):`, fnCalls.map((fc: any) => fc.name));
+      const responses = await Promise.all(fnCalls.map(async (fc: any) => {
+        const result = await executeTool(fc.name, fc.args || {}, callCtx);
+        callCtx.toolCallsMade.push({ name: fc.name, args: fc.args, result });
+        return { name: fc.name, response: result };
+      }));
+
+      history.push({
+        role: "user",
+        parts: responses.map(r => ({ functionResponse: { name: r.name, response: r.response } })),
+      });
+
+      const dispositionCall = fnCalls.find((fc: any) => fc.name === "set_call_disposition");
+      if (dispositionCall && TERMINAL_DISPOSITIONS.has(dispositionCall.args?.disposition)) {
+        const delay = dispositionCall.args.disposition === "voicemail" ? 3000 : 5000;
+        console.log(`[${callId}] Terminal disposition "${dispositionCall.args.disposition}" — auto-hangup in ${delay / 1000}s`);
+        setTimeout(() => {
+          if (plivoWs.readyState === WebSocket.OPEN) plivoWs.close();
+        }, delay);
+        return;
+      }
+    }
+    console.warn(`[${callId}] Cartesia tool-loop hit safety cap (5 iterations)`);
+  };
+
+  // End-of-turn: STT stream has been transcribing while the caller spoke;
+  // finalize returns the assembled transcript near-instantly.
+  const processTurn = async () => {
+    if (processingTurn) return;
+    processingTurn = true;
+    voiceFrames = 0;
+    silenceFrames = 0;
+
+    callCtx.userTurnEndAtMsList = callCtx.userTurnEndAtMsList || [];
+    callCtx.userTurnEndAtMsList.push(Date.now());
+
+    try {
+      let userText: string;
+      if (stt.ready) {
+        // English streaming path — Ink has been transcribing live.
+        userText = (await stt.finalize()).trim();
+      } else {
+        // Buffer path (primary for non-English, fallback for English).
+        const voiced = voicedSampleCount;
+        const pcm = new Int16Array(utteranceBuffer);
+        utteranceBuffer = [];
+        voicedSampleCount = 0;
+        if (!pcm.length) return;
+        // Min-utterance gate: <300ms of voiced audio (< 2400 samples @ 8kHz)
+        // is a blip/noise — skip STT entirely.
+        if (voiced < 2400) {
+          console.log(`[${callId}] Utterance too short (${voiced} voiced samples) — skipping STT`);
+          return;
+        }
+        if (settings().cartesiaLanguage !== "en") {
+          // Sarvam Saarika batch is the proven Hindi telephony STT; Cartesia
+          // Ink's 8kHz Hindi accuracy is unusable. Fall back to Cartesia batch
+          // only if Sarvam returns nothing.
+          const res = await sarvamSTT({ apiKey: SARVAM_API_KEY, pcm, languageCode: "unknown" });
+          userText = (res?.transcript || "").trim();
+          if (!userText) {
+            const fb = await cartesiaSTT({ apiKey: CARTESIA_API_KEY, pcm, language: settings().cartesiaLanguage });
+            userText = (fb?.transcript || "").trim();
+          }
+        } else {
+          // English but streaming WS unavailable — batch fallback.
+          const res = await cartesiaSTT({ apiKey: CARTESIA_API_KEY, pcm, language: settings().cartesiaLanguage })
+            || await sarvamSTT({ apiKey: SARVAM_API_KEY, pcm, languageCode: "unknown" });
+          userText = (res?.transcript || "").trim();
+        }
+      }
+      if (!userText || userText === lastUserText) return;
+      if (isGarbageTranscript(userText)) {
+        console.log(`[${callId}] Dropped garbage transcript: "${userText.slice(0, 80)}"`);
+        return;
+      }
+      lastUserText = userText;
+
+      console.log(`[${callId}] Caller said (cartesia): ${userText}`);
+      callCtx.callerTranscript.push(userText);
+
+      history.push({ role: "user", parts: [{ text: userText }] });
+      await runModelTurn();
+    } finally {
+      processingTurn = false;
+    }
+  };
+
+  plivoWs.onopen = () => console.log(`[${callId}] Plivo WS open (cartesia)`);
+
+  plivoWs.onmessage = async (event) => {
+    try {
+      const msg = JSON.parse(event.data as string);
+      if (msg.event === "start") {
+        console.log(`[${callId}] Plivo stream started (cartesia streaming)`);
+        callCtx.callStartedAtMs = Date.now();
+        callCtx.agentProvider = "cartesia-cascade" as any;
+        callCtx.userTurnEndAtMsList = callCtx.userTurnEndAtMsList || [];
+        callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+        await connectStreams();
+        // Guard with processingTurn so an early caller "hello" can't race
+        // a second greeting while the kickoff turn is still speaking.
+        processingTurn = true;
+        try {
+          history.push({ role: "user", parts: [{ text: "(call connected — greet me now)" }] });
+          await runModelTurn();
+        } finally {
+          processingTurn = false;
+        }
+        return;
+      }
+      if (msg.event !== "media" || !msg.media?.payload) return;
+
+      // Cheap RMS decode for VAD — the audio itself goes to Ink as mulaw
+      // (English) or accumulates in the utterance buffer (non-English).
+      const pcm = mulawBase64ToPcm16(msg.media.payload);
+      const energy = rmsEnergy(pcm);
+      // Adaptive threshold: track a noise floor from silence frames only and
+      // require voice to sit well above it. Clips fewer real syllables and
+      // rejects steady line noise better than the fixed RMS threshold.
+      const voiceThreshold = Math.max(400, noiseFloor * 3);
+      const isVoice = energy >= voiceThreshold;
+      if (!isVoice) noiseFloor = 0.95 * noiseFloor + 0.05 * energy;
+
+      // Feed STT continuously — INCLUDING while the agent speaks. If the
+      // caller talks over/during a pause in Navya's answer, their words must
+      // still be transcribed; the earlier echo-gate dropped those questions
+      // entirely and Navya carried on with her script. Telephony carriers do
+      // echo cancellation; the garbage filter + dedupe catch what leaks.
+      if (stt.ready) {
+        const bytes = Uint8Array.from(atob(msg.media.payload), c => c.charCodeAt(0));
+        stt.sendAudio(bytes);
+      } else {
+        // Buffer path — always accumulate PCM while the caller is speaking.
+        // On the first voiced frame of a new utterance, prepend the pre-roll
+        // ring so the syllable onset isn't clipped.
+        if (isVoice && voiceFrames === 0) {
+          for (const frame of preRoll) {
+            for (let i = 0; i < frame.length; i++) utteranceBuffer.push(frame[i]);
+          }
+        }
+        if (isVoice || voiceFrames > 0) {
+          for (let i = 0; i < pcm.length; i++) utteranceBuffer.push(pcm[i]);
+          if (isVoice) voicedSampleCount += pcm.length;
+        }
+      }
+      // Pre-roll ring: keep the last ~15 frames (~300ms) of prior PCM.
+      preRoll.push(pcm);
+      if (preRoll.length > 15) preRoll.shift();
+
+      if (isVoice) {
+        voiceFrames++;
+        silenceFrames = 0;
+      } else {
+        silenceFrames++;
+      }
+
+      if (agentSpeaking) {
+        // Barge-in: sustained caller speech while Navya talks → cancel TTS,
+        // flush Plivo's buffer, abort the rest of the model turn.
+        if (isVoice) {
+          bargeInFrames++;
+          if (bargeInFrames >= MIN_VOICE_FRAMES * 2) { // ~320ms sustained
+            console.log(`[${callId}] Barge-in detected — cancelling TTS + flushing Plivo buffer`);
+            bargedIn = true;
+            turnAborted = true;
+            if (currentTtsContext) tts.cancel(currentTtsContext);
+            currentTtsContext = null;
+            if (plivoWs.readyState === WebSocket.OPEN) {
+              plivoWs.send(JSON.stringify({ event: "clearAudio" }));
+            }
+            agentSpeaking = false;
+            bargeInFrames = 0;
+          }
+        } else {
+          bargeInFrames = 0;
+        }
+        return;
+      }
+
+      // End of caller turn → process. Also fires right after a model turn
+      // finishes when the caller spoke during it (voiceFrames survived).
+      if (voiceFrames >= MIN_VOICE_FRAMES && silenceFrames >= END_SILENCE_FRAMES && !processingTurn) {
+        await processTurn();
+      }
+    } catch (e) {
+      console.error(`[${callId}] Cartesia handler error:`, (e as Error).message);
+    }
+  };
+
+  plivoWs.onclose = () => {
+    console.log(`[${callId}] Plivo WS closed (cartesia) — turns: ${history.length}`);
+    stt.close();
+    tts.close();
+  };
+  plivoWs.onerror = (e) => console.error(`[${callId}] Plivo WS error (cartesia):`, e);
+}
 
 function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
   const callCtx = activeCallContexts.get(callId);

@@ -198,6 +198,7 @@ TOOLS:
 - request_human_callback → human at LATER time
 - transfer_to_human_agent → human RIGHT NOW (rare)
 - set_call_disposition → MANDATORY at end. Without this, no followup gets created — call is wasted.
+- flag_knowledge_gap → jab exact jaankari na ho. Kabhi guess mat karo — bolo 'yeh main senior counsellor se confirm karwa ke bhijwa deti hoon' aur yeh tool call karo.
 
 CALLBACK ROUTING:
 - "abhi busy"/"in 2 hours"/clock time → set_call_disposition("call_back", followup_date REQUIRED, ISO +05:30)
@@ -433,6 +434,20 @@ export const VOICE_AGENT_TOOLS = [
         },
       },
       required: ["disposition", "notes"],
+    },
+  },
+  {
+    name: "flag_knowledge_gap",
+    description:
+      "Call this when you CANNOT answer the caller's question confidently or completely — missing facts, specifics not in your knowledge (hospital names, exact dates, specific approvals, anything you'd have to guess). Tell the caller you will forward their query to a senior counsellor who will confirm the exact details. Do NOT guess or make up an answer.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The caller's question, verbatim." },
+        answer_given: { type: "string", description: "What you told them, if anything." },
+        context: { type: "string", description: "Course/topic context for the question." },
+      },
+      required: ["question"],
     },
   },
 ];

@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -457,6 +457,7 @@ const AdminPanel = () => {
         <div className="space-y-3">
           <OverdueFollowupEnforcementCard />
           <VoiceProviderCard />
+          <NavyaKnowledgeCard />
         </div>
       )}
 
@@ -1146,6 +1147,40 @@ const CASCADE_LANGS = [
   { v: "hi-IN", label: "Force Hindi (hi-IN)" },
   { v: "en-IN", label: "Force English (en-IN)" },
 ] as const;
+
+function NavyaKnowledgeCard() {
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<number>(0);
+
+  useEffect(() => {
+    (async () => {
+      const { count } = await (supabase as any)
+        .from("voice_knowledge_gaps")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      setPending(count ?? 0);
+    })();
+  }, []);
+
+  return (
+    <button
+      onClick={() => navigate("/admin/navya-knowledge")}
+      className="w-full flex items-center gap-4 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/40"
+    >
+      <div className="rounded-xl bg-pastel-purple p-2">
+        <Sparkles className="h-5 w-5 text-foreground/70" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground">Navya Knowledge</p>
+        <p className="text-[12px] text-muted-foreground mt-0.5">Review questions Navya couldn't answer and teach her the right replies.</p>
+      </div>
+      {pending > 0 && (
+        <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">{pending} pending</span>
+      )}
+      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+    </button>
+  );
+}
 
 function VoiceProviderCard() {
   const { toast } = useToast();
