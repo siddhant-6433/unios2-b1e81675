@@ -56,24 +56,78 @@ const pageTitles: Record<string, string> = {
   "/ib/idu": "Interdisciplinary Units",
 };
 
-// Counsellor-only greeting prefix shown in the header breadcrumb. Resolves
-// "morning / afternoon / evening" against IST so it doesn't drift when the
-// app is opened from a different timezone (some counsellors travel).
-function counsellorGreeting(displayName: string | null | undefined): string {
-  const hourIst = parseInt(
-    new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }).format(new Date()),
+const GREETINGS: Record<string, string[]> = {
+  lateNight: [
+    "Up late, {{name}}?",
+    "Burning the midnight oil, {{name}}?",
+    "The night shift, {{name}}?",
+    "Can't sleep, {{name}}?",
+    "Night owl mode, {{name}}",
+    "Still going, {{name}}?",
+    "{{name}}, the world is quiet — perfect time to work",
+    "Late nights build empires, {{name}}",
+    "Everyone's asleep but {{name}}",
+    "{{name}}, coffee or willpower?",
+  ],
+  morning: [
+    "Rise and shine, {{name}}",
+    "Good morning, {{name}}",
+    "Morning, {{name}} — let's get after it",
+    "Fresh day, {{name}}",
+    "Top of the morning, {{name}}",
+    "Ready to roll, {{name}}?",
+    "New day, new wins, {{name}}",
+    "{{name}}, the early bird gets the lead",
+    "Morning, {{name}} — what's the plan?",
+    "{{name}}, today's going to be a good one",
+  ],
+  afternoon: [
+    "Good afternoon, {{name}}",
+    "Afternoon, {{name}} — keep the momentum",
+    "Halfway there, {{name}}",
+    "Hope lunch was good, {{name}}",
+    "Afternoon push, {{name}}",
+    "{{name}}, powering through the afternoon",
+    "Still crushing it, {{name}}",
+    "Afternoon, {{name}} — how's the day going?",
+    "{{name}}, the finish line is in sight",
+    "Keep it rolling, {{name}}",
+  ],
+  evening: [
+    "Good evening, {{name}}",
+    "Still at it, {{name}}?",
+    "Evening, {{name}} — wrapping up?",
+    "Burning the evening oil, {{name}}",
+    "{{name}}, almost time to call it a day",
+    "Evening hustle, {{name}}",
+    "Winding down, {{name}}?",
+    "{{name}}, one last push?",
+    "Evening, {{name}} — solid day?",
+    "{{name}}, the sunset shift",
+  ],
+};
+
+// ponytail: IST-pinned hour so greeting doesn't drift across timezones; day-seeded pick so it's stable per day
+function getGreeting(displayName: string | null | undefined): string {
+  const now = new Date();
+  const h = parseInt(
+    new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }).format(now),
     10,
   );
-  const period = hourIst < 12 ? "Morning" : hourIst < 17 ? "Afternoon" : "Evening";
+  const pool = h < 5 ? GREETINGS.lateNight
+    : h < 12 ? GREETINGS.morning
+    : h < 17 ? GREETINGS.afternoon
+    : h < 21 ? GREETINGS.evening
+    : GREETINGS.lateNight;
+  const dayIndex = (now.getFullYear() * 1000 + now.getMonth() * 32 + now.getDate()) % pool.length;
   const firstName = (displayName || "").split(" ")[0] || "there";
-  return `Good ${period}, ${firstName}`;
+  return pool[dayIndex].replace(/\{\{name\}\}/g, firstName);
 }
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || "NIMT UniOs";
   const { profile, role } = useAuth();
-  const isCounsellor = role === "counsellor";
   const [deferredShellReady, setDeferredShellReady] = useState(false);
   usePresenceHeartbeat();
 
@@ -96,7 +150,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
                 <div className="flex min-w-0 items-center gap-1.5 text-sm">
                   <span className="truncate font-semibold text-foreground">
-                    {isCounsellor ? counsellorGreeting(profile?.display_name) : "NIMT"}
+                    {getGreeting(profile?.display_name)}
                   </span>
                   <span className="flex-shrink-0 text-muted-foreground/50">›</span>
                   <span className="truncate font-medium text-muted-foreground">{title}</span>

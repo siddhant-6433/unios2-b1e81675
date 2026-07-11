@@ -105,7 +105,6 @@ export function HeaderFeedbackWidget() {
           aria-label={`${label}: ${summary.avg} out of 5 from ${summary.totalResponses} responses`}
         >
           <Star className={`h-3.5 w-3.5 shrink-0 ${isStrong ? "fill-current" : ""}`} />
-          <span className="hidden xl:inline font-medium">Feedback</span>
           <span className="font-bold tabular-nums">{summary.avg}</span>
           <span className="text-muted-foreground tabular-nums">({summary.totalResponses})</span>
           {summary.lowRatings > 0 && (
