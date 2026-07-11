@@ -134,7 +134,7 @@ export function HeaderSearch() {
       {/* Trigger button */}
       <button
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
-        className="flex items-center gap-2 rounded-xl border border-input bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted transition-colors"
+        className="flex items-center gap-2 rounded-xl border border-input bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted transition-colors sm:min-w-[200px]"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Search...</span>
