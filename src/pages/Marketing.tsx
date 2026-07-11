@@ -280,6 +280,10 @@ export default function Marketing() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
   const [deletingList, setDeletingList] = useState(false);
+  const [resendCampaign, setResendCampaign] = useState<CampaignRow | null>(null);
+  const [resendMode, setResendMode] = useState<"now" | "scheduled">("now");
+  const [resendScheduledAt, setResendScheduledAt] = useState("");
+  const [resending, setResending] = useState(false);
   const requestedListId = searchParams.get("listId") || "";
   const canDeleteLists = role === "super_admin";
   const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
@@ -809,6 +813,112 @@ export default function Marketing() {
     if (error) setQueueError(error.message);
     setQueueingId(null);
     await load();
+  };
+
+  const openResendDialog = (campaign: CampaignRow) => {
+    setResendCampaign(campaign);
+    setResendMode("now");
+    setResendScheduledAt("");
+    setResending(false);
+  };
+
+  const resendScheduledDateValue = scheduledDatePart(resendScheduledAt);
+  const resendScheduledTimeValue = scheduledTimePart(resendScheduledAt);
+  const setResendDate = (date: string) => {
+    if (!date) { setResendScheduledAt(resendScheduledTimeValue ? `T${resendScheduledTimeValue}` : ""); return; }
+    setResendScheduledAt(`${date}T${resendScheduledTimeValue || defaultFutureTime()}`);
+  };
+  const setResendTime = (time: string) => {
+    if (!time) { setResendScheduledAt(resendScheduledDateValue ? `${resendScheduledDateValue}T` : ""); return; }
+    setResendScheduledAt(`${resendScheduledDateValue ? `${resendScheduledDateValue}T` : "T"}${time}`);
+  };
+
+  const handleResendFailed = async () => {
+    if (!resendCampaign) return;
+    setResending(true);
+
+    try {
+      let nextAttemptAt = new Date().toISOString();
+      if (resendMode === "scheduled") {
+        const scheduledDate = new Date(resendScheduledAt);
+        if (!resendScheduledAt || Number.isNaN(scheduledDate.getTime())) throw new Error("Choose a valid scheduled send time.");
+        if (scheduledDate.getTime() <= Date.now()) throw new Error("Scheduled time must be in the future.");
+        nextAttemptAt = scheduledDate.toISOString();
+      }
+
+      const isWhatsApp = resendCampaign.channel === "whatsapp";
+      const campaignTable = isWhatsApp ? "whatsapp_campaigns" : "email_campaigns";
+      const recipientTable = isWhatsApp ? "whatsapp_campaign_recipients" : "email_campaign_recipients";
+      const destinationCol = isWhatsApp ? "phone" : "to_email";
+
+      const { data: originalCampaign, error: origErr } = await supabase
+        .from(campaignTable as any)
+        .select("*")
+        .eq("id", resendCampaign.id)
+        .single();
+      if (origErr || !originalCampaign) throw origErr || new Error("Could not load original campaign.");
+
+      const { data: failedRows, error: failErr } = await supabase
+        .from(recipientTable as any)
+        .select(`lead_id,${destinationCol}`)
+        .eq("campaign_id", resendCampaign.id)
+        .eq("status", "failed");
+      if (failErr) throw failErr;
+      if (!failedRows?.length) throw new Error("No failed recipients to resend.");
+
+      const orig = originalCampaign as any;
+      const campaignInsert: Record<string, any> = {
+        name: `${resendCampaign.name} (resend failed)`,
+        list_id: orig.list_id || null,
+        total_recipients: failedRows.length,
+        created_by: profile?.id || null,
+        next_attempt_at: nextAttemptAt,
+        worker_locked_at: null,
+        status: "pending",
+      };
+      if (isWhatsApp) {
+        campaignInsert.template_key = orig.template_key;
+        campaignInsert.static_params = orig.static_params || {};
+        if (orig.business_phone_number_id) campaignInsert.business_phone_number_id = orig.business_phone_number_id;
+        if (orig.business_phone_number) campaignInsert.business_phone_number = orig.business_phone_number;
+      } else {
+        campaignInsert.template_slug = orig.template_slug || null;
+        campaignInsert.custom_subject = orig.custom_subject || null;
+        campaignInsert.custom_body = orig.custom_body || null;
+      }
+
+      const { data: newCampaign, error: campErr } = await supabase
+        .from(campaignTable as any)
+        .insert(campaignInsert)
+        .select("id")
+        .single();
+      if (campErr || !newCampaign) throw campErr || new Error("Could not create resend campaign.");
+
+      const recipientRows = (failedRows as any[]).map((row) => ({
+        campaign_id: (newCampaign as any).id,
+        lead_id: row.lead_id,
+        [destinationCol]: row[destinationCol],
+      }));
+      for (let i = 0; i < recipientRows.length; i += 500) {
+        const { error } = await supabase.from(recipientTable as any).insert(recipientRows.slice(i, i + 500));
+        if (error) throw error;
+      }
+
+      if (resendMode === "now") {
+        await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+      }
+
+      toast({
+        title: resendMode === "scheduled" ? "Resend scheduled" : "Resend queued",
+        description: `${failedRows.length} failed recipient${failedRows.length === 1 ? "" : "s"} will be retried.`,
+      });
+      setResendCampaign(null);
+      await load();
+    } catch (error: any) {
+      toast({ title: "Could not resend", description: error?.message, variant: "destructive" });
+    } finally {
+      setResending(false);
+    }
   };
 
   const downloadCampaignReport = () => {
@@ -1413,6 +1523,16 @@ export default function Marketing() {
                             Terminate
                           </Button>
                         )}
+                        {campaign.failed > 0 && ["completed", "terminated", "failed"].includes(campaign.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openResendDialog(campaign)}
+                          >
+                            <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                            Resend failed
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -1497,6 +1617,69 @@ export default function Marketing() {
               </table>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!resendCampaign} onOpenChange={(open) => { if (!open) setResendCampaign(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Resend to failed recipients</DialogTitle>
+          </DialogHeader>
+          {resendCampaign && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Create a new campaign targeting the <span className="font-semibold text-destructive">{resendCampaign.failed}</span> failed
+                recipient{resendCampaign.failed === 1 ? "" : "s"} from "{resendCampaign.name}".
+                The same template and parameters will be used.
+              </p>
+              <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+                <SelectField
+                  label="Send time"
+                  value={resendMode}
+                  onValueChange={(value) => {
+                    const next = value as "now" | "scheduled";
+                    setResendMode(next);
+                    if (next === "scheduled" && !resendScheduledAt) setResendScheduledAt(defaultFutureDateTime());
+                  }}
+                  options={[
+                    { value: "now", label: "Send now" },
+                    { value: "scheduled", label: "Schedule for later" },
+                  ]}
+                  allowEmpty={false}
+                  triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                />
+                {resendMode === "scheduled" && (
+                  <div className="grid gap-2 md:grid-cols-[minmax(140px,1fr)_100px]">
+                    <DatePickerField
+                      label="Date"
+                      value={resendScheduledDateValue}
+                      onValueChange={setResendDate}
+                      placeholder="Pick date"
+                      minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                      triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      ariaLabel="Resend scheduled date"
+                    />
+                    <FieldShell label="Time">
+                      <Input
+                        type="time"
+                        value={resendScheduledTimeValue || defaultFutureTime()}
+                        onChange={(event) => setResendTime(event.target.value)}
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        aria-label="Resend scheduled time"
+                      />
+                    </FieldShell>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResendCampaign(null)}>Cancel</Button>
+            <Button onClick={handleResendFailed} disabled={resending} className="gap-2">
+              {resending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {resendMode === "scheduled" ? "Schedule resend" : "Resend now"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
