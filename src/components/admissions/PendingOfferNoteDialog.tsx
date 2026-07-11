@@ -105,20 +105,22 @@ export function PendingOfferNoteDialog({ target, onClose, onSaved }: Props) {
           </div>
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+        <DialogFooter className="flex-col gap-2 sm:flex-col">
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button onClick={saveNote} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <StickyNote className="h-4 w-4 mr-1.5" />}
+              Save Note
+            </Button>
+          </div>
           <Button
             variant="outline"
             onClick={moveToHold}
             disabled={saving}
-            className="border-warning/30 text-warning-foreground hover:bg-warning/5"
+            className="w-full border-warning/30 text-warning-foreground hover:bg-warning/5"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <PauseCircle className="h-4 w-4 mr-1.5" />}
             Move to On Hold — {WAITING_FOR_COUNSELLING}
-          </Button>
-          <Button onClick={saveNote} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <StickyNote className="h-4 w-4 mr-1.5" />}
-            Save Note
           </Button>
         </DialogFooter>
       </DialogContent>
