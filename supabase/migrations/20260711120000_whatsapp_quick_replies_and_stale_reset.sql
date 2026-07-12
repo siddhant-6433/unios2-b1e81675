@@ -23,11 +23,14 @@ CREATE POLICY "Authenticated can read active quick replies"
 CREATE POLICY "Admins can manage quick replies"
   ON public.whatsapp_quick_replies FOR ALL TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.user_id = auth.uid()
-        AND p.role IN ('super_admin', 'admission_head', 'campus_admin')
-    )
+    public.has_role(auth.uid(), 'super_admin'::public.app_role)
+    OR public.has_role(auth.uid(), 'admission_head'::public.app_role)
+    OR public.has_role(auth.uid(), 'campus_admin'::public.app_role)
+  )
+  WITH CHECK (
+    public.has_role(auth.uid(), 'super_admin'::public.app_role)
+    OR public.has_role(auth.uid(), 'admission_head'::public.app_role)
+    OR public.has_role(auth.uid(), 'campus_admin'::public.app_role)
   );
 
 GRANT SELECT ON public.whatsapp_quick_replies TO authenticated;

@@ -119,8 +119,38 @@ Deno.serve(async (req) => {
       for (const r of rows || []) existing.set(`${r.lead_id}:${r.exam_code}`, r as any);
     }
 
+    // Authoritative send count from whatsapp_messages — the exam_registrations
+    // bookkeeping can drift if the unique constraint isn't enforced in prod
+    // (upsert silently inserts duplicates instead of updating). Count actual
+    // sends per lead so we never exceed MAX_ASKS regardless of bookkeeping state.
+    const priorSendCounts = new Map<string, number>();
+    const hasReply = new Set<string>();
+    for (let i = 0; i < leadIds.length; i += 300) {
+      const batch = leadIds.slice(i, i + 300);
+      const { data: msgs } = await admin
+        .from("whatsapp_messages")
+        .select("lead_id, direction, template_key")
+        .in("lead_id", batch)
+        .in("template_key", ["exam_registration_check", "exam_registration_intake_ack"])
+        .in("status", ["sent", "delivered", "read"]);
+      for (const m of msgs || []) {
+        const lid = m.lead_id as string;
+        if (m.direction === "outbound" && m.template_key === "exam_registration_check") {
+          priorSendCounts.set(lid, (priorSendCounts.get(lid) || 0) + 1);
+        }
+        if (m.template_key === "exam_registration_intake_ack") {
+          hasReply.add(lid);
+        }
+      }
+    }
+
     const toAsk = Array.from(targets.entries())
-      .filter(([key]) => {
+      .filter(([key, t]) => {
+        // Hard cap from actual message history — most trustworthy guard.
+        if ((priorSendCounts.get(t.leadId) || 0) >= MAX_ASKS) return false;
+        // Already replied (ack was sent back) — no further asks.
+        if (hasReply.has(t.leadId)) return false;
+
         const row = existing.get(key);
         if (!row) return true; // never asked; will create + ask
         if (row.status !== "unknown") return false; // already answered/registered
