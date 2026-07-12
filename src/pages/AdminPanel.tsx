@@ -60,6 +60,22 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
 
 const PARTNER_PORTAL_ROLES: AppRole[] = ["academic_partner", "academic_partner_offer_letter"];
 
+const PAGE_SIZE = 50;
+
+// Server-side aggregate counts from admin_user_directory_counts — badges/stat
+// cards read from this instead of counting a client-fetched array (which was
+// capped at 1000 rows and structurally wrong past that).
+interface DirectoryCounts {
+  total: number; active: number; inactive: number; online_now: number;
+  employees: number; consultants: number; academic_partners: number; families: number; leads: number;
+  admins: number; counsellors: number;
+  consultants_with_phone: number; consultants_with_email: number;
+  partners_with_phone: number; partners_with_email: number;
+  families_students: number; families_parents: number;
+  leads_with_phone: number; leads_with_email: number;
+  by_role: Record<string, number>;
+}
+
 interface UserWithRole {
   user_id: string;
   profile_id: string;
@@ -108,6 +124,10 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
+  const [counts, setCounts] = useState<DirectoryCounts | null>(null);
+  const [tabTotal, setTabTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [publishers, setPublishers] = useState<any[]>([]);
   const [publishersLoading, setPublishersLoading] = useState(false);
@@ -139,16 +159,30 @@ const AdminPanel = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
+      // Publishers tab renders from the separate `publishers` table; it still
+      // needs a broad user list to populate the "link existing user" picker, so
+      // fetch unfiltered/unpaginated there. Every other tab fetches one page,
+      // filtered + counted server-side.
+      const onPublishers = userSubTab === "publishers";
       const { data, error } = await supabase.rpc("admin_user_directory" as any, {
         _show_archived: showArchivedUsers,
-      }).limit(10000);
+        _category: onPublishers ? null : userSubTab,
+        _role: !onPublishers && userSubTab === "employees" && roleFilter !== "all" && roleFilter !== "none" ? roleFilter : null,
+        _search: onPublishers ? null : (debouncedSearch || null),
+        _status: onPublishers ? null : statusFilter,
+        _limit: onPublishers ? 1000 : PAGE_SIZE,
+        _offset: onPublishers ? 0 : page * PAGE_SIZE,
+      });
 
       if (error) {
         toast({ title: "Error loading users", description: error.message, variant: "destructive" });
         return;
       }
 
-      const merged: UserWithRole[] = ((data || []) as any[]).map((row) => ({
+      const rows = (data || []) as any[];
+      setTabTotal(rows.length > 0 ? Number(rows[0].total_count) : 0);
+
+      const merged: UserWithRole[] = rows.map((row) => ({
         user_id: row.user_id,
         profile_id: row.profile_id,
         display_name: row.display_name,
@@ -173,6 +207,17 @@ const AdminPanel = () => {
     }
   };
 
+  const fetchCounts = async () => {
+    const { data, error } = await supabase.rpc("admin_user_directory_counts" as any, {
+      _show_archived: showArchivedUsers,
+    });
+    if (error) {
+      console.error("fetchCounts failed:", error.message);
+      return;
+    }
+    setCounts(data as unknown as DirectoryCounts);
+  };
+
   const isSuperAdmin = role === "super_admin";
   const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
@@ -186,8 +231,21 @@ const AdminPanel = () => {
     setPublishersLoading(false);
   };
 
+  // Debounce the search box so each keystroke doesn't hit the server; reset to
+  // the first page whenever the query changes.
   useEffect(() => {
-    if (canManageUsers) { fetchUsers(); fetchPublishers(); }
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetch the current page whenever the tab, filters, page, or archived toggle change.
+  useEffect(() => {
+    if (canManageUsers) fetchUsers();
+  }, [canManageUsers, showArchivedUsers, userSubTab, roleFilter, statusFilter, debouncedSearch, page]);
+
+  // Counts only change on mutations or the archived toggle — not on page nav.
+  useEffect(() => {
+    if (canManageUsers) { fetchCounts(); fetchPublishers(); }
   }, [canManageUsers, showArchivedUsers]);
 
   const handleLinkPublisher = async (publisherId: string, userId: string) => {
@@ -217,6 +275,7 @@ const AdminPanel = () => {
       setLinkUserId("");
       await fetchPublishers();
       await fetchUsers();
+      fetchCounts();
     } catch (err: any) {
       toast({ title: "Link failed", description: err.message, variant: "destructive" });
     } finally {
@@ -290,6 +349,7 @@ const AdminPanel = () => {
 
       toast({ title: "Role updated", description: `Role ${newRole === "none" ? "removed" : `set to ${newRole.replace("_", " ")}`} successfully.` });
       await fetchUsers();
+      fetchCounts();
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
@@ -320,6 +380,7 @@ const AdminPanel = () => {
       toast({ title: "User deleted", description: `${deleteTarget.name} has been removed from active user management.` });
       setDeleteTarget(null);
       await fetchUsers();
+      fetchCounts();
     } catch (err: any) {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
     } finally {
@@ -354,6 +415,7 @@ const AdminPanel = () => {
       });
       setDisableTarget(null);
       await fetchUsers();
+      fetchCounts();
     } catch (err: any) {
       toast({ title: "Action failed", description: err.message, variant: "destructive" });
     } finally {
@@ -384,6 +446,7 @@ const AdminPanel = () => {
           : `${target.display_name || "User"} is visible in the main user list again.`,
       });
       await fetchUsers();
+      fetchCounts();
     } catch (err: any) {
       toast({ title: archived ? "Archive failed" : "Restore failed", description: err.message, variant: "destructive" });
     } finally {
@@ -410,26 +473,6 @@ const AdminPanel = () => {
 
   // Allow access if super_admin or has user_management permission
   if (!canManageUsers) return <Navigate to="/" replace />;
-
-  const filtered = users.filter((u) => {
-    const matchesSearch =
-      !search ||
-      (u.display_name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.email || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.phone || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.campus || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.role || "").toLowerCase().includes(search.toLowerCase());
-
-    const matchesRole =
-      roleFilter === "all" ||
-      (roleFilter === "none" ? !u.role : u.role === roleFilter);
-
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" ? !u.login_disabled : u.login_disabled);
-
-    return matchesSearch && matchesRole && matchesStatus;
-  });
 
   const getRoleBadgeClass = (r: AppRole | null) => {
     if (!r) return "bg-muted text-muted-foreground";
@@ -513,7 +556,7 @@ const AdminPanel = () => {
 
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-medium text-muted-foreground mr-1">
-                {users.length} total users
+                {counts?.total ?? 0} total users
               </span>
               {([
                 { key: "employees" as const, label: "Employees" },
@@ -522,19 +565,22 @@ const AdminPanel = () => {
                 { key: "publishers" as const, label: "Publishers" },
                 { key: "families" as const, label: "Students & Families" },
                 { key: "leads" as const, label: "Leads & Applicants" },
-              ]).map((tab) => (
+              ]).map((tab) => {
+                const count = tab.key === "publishers" ? publishers.length : counts?.[tab.key];
+                return (
                 <button
                   key={tab.key}
-                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}
+                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); setStatusFilter("all"); setPage(0); }}
                   className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                     userSubTab === tab.key
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-input bg-background text-muted-foreground hover:bg-muted"
                   }`}
                 >
-                  {tab.label}
+                  {tab.label}{count != null ? ` (${count})` : ""}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
@@ -546,69 +592,57 @@ const AdminPanel = () => {
               </div>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
+                onChange={(e) => { setStatusFilter(e.target.value as "all" | "active" | "inactive"); setPage(0); }}
                 className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
               >
                 <option value="all">All Status</option>
-                <option value="active">Active ({users.filter((u) => !u.login_disabled).length})</option>
-                <option value="inactive">Inactive ({users.filter((u) => u.login_disabled).length})</option>
+                <option value="active">Active ({counts?.active ?? 0})</option>
+                <option value="inactive">Inactive ({counts?.inactive ?? 0})</option>
               </select>
               {userSubTab === "employees" && (
                 <select
                   value={roleFilter}
-                  onChange={(e) => setRoleFilter(e.target.value as AppRole | "all" | "none")}
+                  onChange={(e) => { setRoleFilter(e.target.value as AppRole | "all" | "none"); setPage(0); }}
                   className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
                   <option value="all">All Roles</option>
                   {ALL_ROLES.filter((r) => !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter"].includes(r.value)).map((r) => (
-                    <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
+                    <option key={r.value} value={r.value}>{r.label} ({counts?.by_role?.[r.value] ?? 0})</option>
                   ))}
                 </select>
               )}
               {isSuperAdmin && (
                 <label className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground">
-                  <Switch checked={showArchivedUsers} onCheckedChange={setShowArchivedUsers} />
+                  <Switch checked={showArchivedUsers} onCheckedChange={(v) => { setShowArchivedUsers(v); setPage(0); }} />
                   <span>{showArchivedUsers ? "Showing archived" : "Show archived"}</span>
                 </label>
               )}
             </div>
 
             {(() => {
-              const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
-                if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
-                if (userSubTab === "publishers") return u.role === "publisher";
-                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
-                return !u.role;
-              });
-              const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
-                if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
-                if (userSubTab === "publishers") return u.role === "publisher";
-                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
-                return !u.role;
-              });
+              // Rows come from the server-fetched page; every count comes from
+              // the aggregate `counts`/`tabTotal`, never from filtering an array.
+              const rows = users;
+              const c = counts;
               return (<>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {userSubTab === "employees" && (<>
-                <SummaryCard label="Total Employees" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="Admins" value={allSubUsers.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
-                <SummaryCard label="Counsellors" value={allSubUsers.filter((u) => u.role === "counsellor").length} bg="bg-pastel-green" />
-                <SummaryCard label="Online Now" value={allSubUsers.filter((u) => isOnline(u.last_seen_at)).length} bg="bg-pastel-mint" />
+                <SummaryCard label="Total Employees" value={c?.employees ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Admins" value={c?.admins ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="Counsellors" value={c?.counsellors ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="Online Now" value={c?.online_now ?? 0} bg="bg-pastel-mint" />
               </>)}
               {userSubTab === "consultants" && (<>
-                <SummaryCard label="Total Consultants" value={allSubUsers.length} bg="bg-pastel-purple" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-blue" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Consultants" value={c?.consultants ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="With Phone" value={c?.consultants_with_phone ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={c?.consultants_with_email ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "academic_partners" && (<>
-                <SummaryCard label="Total Partners" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-purple" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Partners" value={c?.academic_partners ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="With Phone" value={c?.partners_with_phone ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={c?.partners_with_email ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "publishers" && (<>
                 <SummaryCard label="Total Publishers" value={publishers.length} bg="bg-pastel-blue" />
@@ -617,16 +651,16 @@ const AdminPanel = () => {
                 <SummaryCard label="Pending Login" value={publishers.filter((p) => !p.user_id).length} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "families" && (<>
-                <SummaryCard label="Total" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="Students" value={allSubUsers.filter((u) => u.role === "student").length} bg="bg-pastel-green" />
-                <SummaryCard label="Parents" value={allSubUsers.filter((u) => u.role === "parent").length} bg="bg-pastel-mint" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total" value={c?.families ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Students" value={c?.families_students ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="Parents" value={c?.families_parents ?? 0} bg="bg-pastel-mint" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "leads" && (<>
-                <SummaryCard label="Total Leads" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-orange" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Leads" value={c?.leads ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="With Email" value={c?.leads_with_email ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Phone" value={c?.leads_with_phone ?? 0} bg="bg-pastel-orange" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
             </div>
 
@@ -761,7 +795,7 @@ const AdminPanel = () => {
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
-              ) : subFiltered.length === 0 ? (
+              ) : rows.length === 0 ? (
                 <div className="py-16 text-center">
                   <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">No users found</p>
@@ -781,7 +815,7 @@ const AdminPanel = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {subFiltered.map((user) => {
+                    {rows.map((user) => {
                       const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
                       const isEditing = editingUser === user.user_id;
                       const isSaving = savingUser === user.user_id;
@@ -960,6 +994,33 @@ const AdminPanel = () => {
                 </table>
               )}
             </div>
+
+            {userSubTab !== "publishers" && tabTotal > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs text-muted-foreground">
+                  Showing {tabTotal === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, tabTotal)} of {tabTotal}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0 || loading}
+                    className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page + 1} of {Math.max(1, Math.ceil(tabTotal / PAGE_SIZE))}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => ((p + 1) * PAGE_SIZE < tabTotal ? p + 1 : p))}
+                    disabled={(page + 1) * PAGE_SIZE >= tabTotal || loading}
+                    className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
               </>);
             })()}
 
@@ -968,20 +1029,20 @@ const AdminPanel = () => {
                 <InviteUserDialog
                   open={inviteOpen}
                   onClose={() => { setInviteOpen(false); setInviteDefaults({}); }}
-                  onSuccess={() => { fetchUsers(); fetchPublishers(); }}
+                  onSuccess={() => { fetchUsers(); fetchCounts(); fetchPublishers(); }}
                   defaultRole={inviteDefaults.role}
                   defaultPublisherSource={inviteDefaults.source}
                   publisherId={inviteDefaults.publisherId}
                 />
               )}
-              {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />}
+              {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => { fetchUsers(); fetchCounts(); }} />}
               {phoneEdit && (
-                <EditPhoneDialog open onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
+                <EditPhoneDialog open onClose={() => setPhoneEdit(null)} onSuccess={() => { fetchUsers(); fetchCounts(); }}
                   userId={phoneEdit.userId} userName={phoneEdit.name} currentPhone={phoneEdit.phone || null} />
               )}
               {employeeProfile && (
                 <EmployeeProfileDialog open onClose={() => setEmployeeProfile(null)}
-                  onSuccess={() => fetchUsers()}
+                  onSuccess={() => { fetchUsers(); fetchCounts(); }}
                   userId={employeeProfile.userId} userName={employeeProfile.name} />
               )}
               {setPasswordTarget && (
@@ -1055,7 +1116,7 @@ const AdminPanel = () => {
                     role: u.role,
                   }))}
                   onClose={() => setTransferTarget(null)}
-                  onDone={() => { setTransferTarget(null); fetchUsers(); }}
+                  onDone={() => { setTransferTarget(null); fetchUsers(); fetchCounts(); }}
                 />
               </Suspense>
             )}
