@@ -600,6 +600,16 @@ function CallCard({ call, onCoached }: { call: CallRecord; onCoached: () => void
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
               {call.leads?.name || "Unknown lead"}
+              {call.lead_id && (
+                <a
+                  href={`/admissions/${call.lead_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] font-normal text-muted-foreground underline hover:text-foreground"
+                >
+                  View lead
+                </a>
+              )}
             </div>
             <div className="flex items-center gap-2 whitespace-nowrap">
               {call.disposition && <Badge variant="secondary">{call.disposition}</Badge>}
