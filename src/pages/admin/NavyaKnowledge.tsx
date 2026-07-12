@@ -11,6 +11,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X } from "lucide-react";
 
 // voice_knowledge_gaps may not have generated TS types yet — cast via `supabase as any`.
+// Lead context shared by gap + mined cards: name, current stage, and the
+// lead's own course (used as fallback when the example/gap course_id is null).
+interface LeadCtx {
+  name: string | null;
+  stage: string | null;
+  courses: { name: string | null } | null;
+}
+
 interface Gap {
   id: string;
   call_id: string | null;
@@ -20,6 +28,7 @@ interface Gap {
   ai_answer_given: string | null;
   transcript_snippet: string | null;
   created_at: string;
+  leads: LeadCtx | null;
 }
 
 interface LearnedExample {
@@ -28,6 +37,8 @@ interface LearnedExample {
   reply_text: string;
   status: string;
   created_at: string;
+  tags: string[] | null;
+  source_channel: string | null;
 }
 
 interface CallRecord {
@@ -50,16 +61,29 @@ interface MinedExample {
   status: string;
   created_at: string;
   lead_id: string | null;
-  leads: { name: string | null } | null;
+  leads: LeadCtx | null;
   courses: { name: string | null } | null;
+  tags: string[] | null;
+  source_channel: string | null;
 }
 
 interface Stats {
   active: number;
   needsReview: number;
+  needsReviewCalls: number;
+  needsReviewWhatsapp: number;
   pendingGaps: number;
   last7: number;
 }
+
+// Label the origin of a reply example. Order matters: coached & counsellor_call
+// are tag-based; whatsapp is channel-based; everything else is a voice gap answer.
+const sourceLabel = (tags: string[] | null, sourceChannel: string | null): string => {
+  if (tags?.includes("coached")) return "Coached";
+  if (tags?.includes("counsellor_call")) return "Counsellor call";
+  if (sourceChannel === "whatsapp") return "WhatsApp";
+  return "Voice";
+};
 
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
@@ -93,12 +117,13 @@ const parseTurns = (transcript: string): Turn[] =>
     })
     .filter((t): t is Turn => t !== null);
 
-export default function NavyaKnowledge() {
+export function NavyaKnowledgeContent() {
   const { toast } = useToast();
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [learned, setLearned] = useState<LearnedExample[]>([]);
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [mined, setMined] = useState<MinedExample[]>([]);
+  const [minedFilter, setMinedFilter] = useState<"all" | "calls" | "whatsapp">("all");
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -107,18 +132,17 @@ export default function NavyaKnowledge() {
   const load = useCallback(async () => {
     setLoading(true);
     const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [gapRes, learnedRes, callsRes, minedRes, activeCnt, needsReviewCnt, pendingCnt, last7Cnt] = await Promise.all([
+    const [gapRes, learnedRes, callsRes, minedRes, activeCnt, needsReviewCnt, needsReviewCallsCnt, needsReviewWaCnt, pendingCnt, last7Cnt] = await Promise.all([
       (supabase as any)
         .from("voice_knowledge_gaps")
-        .select("id, call_id, lead_id, course_id, question_text, ai_answer_given, transcript_snippet, created_at")
+        .select("id, call_id, lead_id, course_id, question_text, ai_answer_given, transcript_snippet, created_at, leads(name, stage, courses:course_id(name))")
         .eq("status", "pending")
         .order("created_at", { ascending: false }),
       (supabase as any)
         .from("admissions_ai_reply_examples")
-        .select("id, query_text, reply_text, status, created_at")
-        .eq("source_channel", "voice")
-        // needs_review rows live in the "Mined from counsellor calls" tab;
+        // Active examples across every channel (voice, whatsapp, coached, mined) —
         // this tab is the audit trail of what Navya actually uses.
+        .select("id, query_text, reply_text, status, created_at, tags, source_channel")
         .eq("status", "active")
         .order("created_at", { ascending: false })
         .limit(50),
@@ -130,14 +154,16 @@ export default function NavyaKnowledge() {
         .order("created_at", { ascending: false })
         .limit(30),
       (supabase as any)
+        // Every needs_review row regardless of source; filtered client-side by chip.
         .from("admissions_ai_reply_examples")
-        .select("id, query_text, reply_text, language, status, created_at, lead_id, leads(name), courses:course_id(name)")
+        .select("id, query_text, reply_text, language, status, created_at, lead_id, tags, source_channel, leads(name, stage, courses:course_id(name)), courses:course_id(name)")
         .eq("status", "needs_review")
-        .contains("tags", ["counsellor_call"])
         .order("created_at", { ascending: false })
-        .limit(50),
+        .limit(100),
       (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "active"),
       (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
+      (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "needs_review").contains("tags", ["counsellor_call"]),
+      (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "needs_review").eq("source_channel", "whatsapp"),
       (supabase as any).from("voice_knowledge_gaps").select("id", { count: "exact", head: true }).eq("status", "pending"),
       (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).gte("created_at", since7),
     ]);
@@ -149,6 +175,8 @@ export default function NavyaKnowledge() {
     setStats({
       active: activeCnt.count ?? 0,
       needsReview: needsReviewCnt.count ?? 0,
+      needsReviewCalls: needsReviewCallsCnt.count ?? 0,
+      needsReviewWhatsapp: needsReviewWaCnt.count ?? 0,
       pendingGaps: pendingCnt.count ?? 0,
       last7: last7Cnt.count ?? 0,
     });
@@ -268,39 +296,34 @@ export default function NavyaKnowledge() {
     toast({ title: status === "active" ? "Approved — Navya will use this answer" : "Rejected" });
   };
 
+  const filteredMined = mined.filter((m) => {
+    if (minedFilter === "calls") return m.tags?.includes("counsellor_call");
+    if (minedFilter === "whatsapp") return m.source_channel === "whatsapp";
+    return true;
+  });
+
   const bulkMined = (status: "active" | "rejected") => {
-    if (mined.length === 0) return;
+    if (filteredMined.length === 0) return;
     const verb = status === "active" ? "Approve" : "Reject";
-    if (!window.confirm(`${verb} all ${mined.length} shown answers?`)) return;
-    setMinedStatus(mined.map((m) => m.id), status);
+    if (!window.confirm(`${verb} all ${filteredMined.length} shown answers?`)) return;
+    setMinedStatus(filteredMined.map((m) => m.id), status);
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <div className="rounded-xl bg-pastel-purple p-2">
-          <Sparkles className="h-5 w-5 text-foreground/70" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Navya Knowledge</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Review questions Navya couldn't answer; your answers teach her.
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Active examples", value: stats.active },
-            { label: "Needs review", value: stats.needsReview },
-            { label: "Pending gaps", value: stats.pendingGaps },
-            { label: "New (7 days)", value: stats.last7 },
+            { label: "Active examples", value: stats.active, sub: null },
+            { label: "Needs review", value: stats.needsReview, sub: `${stats.needsReviewCalls} calls · ${stats.needsReviewWhatsapp} whatsapp` },
+            { label: "Pending gaps", value: stats.pendingGaps, sub: null },
+            { label: "New (7 days)", value: stats.last7, sub: null },
           ].map((s) => (
             <Card key={s.label}>
               <CardContent className="p-4">
                 <p className="text-2xl font-bold text-foreground">{s.value}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+                {s.sub && <p className="text-[10px] text-muted-foreground/80 mt-0.5">{s.sub}</p>}
               </CardContent>
             </Card>
           ))}
@@ -319,7 +342,7 @@ export default function NavyaKnowledge() {
             Call review
           </TabsTrigger>
           <TabsTrigger value="mined" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
-            Mined from counsellor calls{mined.length > 0 && ` (${mined.length})`}
+            Review queue{stats && stats.needsReview > 0 && ` (${stats.needsReview})`}
           </TabsTrigger>
         </TabsList>
 
@@ -342,6 +365,14 @@ export default function NavyaKnowledge() {
                     <p className="text-base font-semibold text-foreground">{gap.question_text}</p>
                     <span className="text-[11px] text-muted-foreground whitespace-nowrap mt-1">{fmtDate(gap.created_at)}</span>
                   </div>
+
+                  {(gap.leads?.courses?.name || gap.leads?.stage || gap.leads?.name) && (
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                      {gap.leads?.courses?.name && <Badge variant="outline">{gap.leads.courses.name}</Badge>}
+                      {gap.leads?.stage && <Badge variant="secondary">{gap.leads.stage}</Badge>}
+                      {gap.leads?.name && <span>Lead: {gap.leads.name}</span>}
+                    </div>
+                  )}
 
                   {gap.ai_answer_given && (
                     <p className="text-sm text-muted-foreground">
@@ -394,7 +425,7 @@ export default function NavyaKnowledge() {
           {learned.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No answers taught from voice calls yet.
+                No active answers yet.
               </CardContent>
             </Card>
           ) : (
@@ -407,6 +438,7 @@ export default function NavyaKnowledge() {
                       {ex.query_text}
                     </div>
                     <div className="flex items-center gap-2 whitespace-nowrap">
+                      <Badge variant="outline">{sourceLabel(ex.tags, ex.source_channel)}</Badge>
                       <Badge variant={ex.status === "active" ? "default" : "secondary"}>{ex.status}</Badge>
                       <span className="text-[11px] text-muted-foreground">{fmtDate(ex.created_at)}</span>
                     </div>
@@ -449,23 +481,38 @@ export default function NavyaKnowledge() {
           ) : mined.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No mined answers yet. The miner runs on counsellor call recordings.
+                Nothing to review. Mined counsellor answers and harvested WhatsApp replies land here.
               </CardContent>
             </Card>
           ) : (
             <>
+              <div className="flex flex-wrap items-center gap-2">
+                {([
+                  { v: "all", label: `All (${mined.length})` },
+                  { v: "calls", label: "Counsellor calls" },
+                  { v: "whatsapp", label: "WhatsApp" },
+                ] as const).map((chip) => (
+                  <button
+                    key={chip.v}
+                    onClick={() => setMinedFilter(chip.v)}
+                    className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${minedFilter === chip.v ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">{mined.length} remaining</span>
+                <span className="text-xs text-muted-foreground">{filteredMined.length} shown</span>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => bulkMined("active")}>
+                  <Button size="sm" variant="outline" onClick={() => bulkMined("active")} disabled={filteredMined.length === 0}>
                     <Check className="h-4 w-4" /> Approve all shown
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => bulkMined("rejected")}>
+                  <Button size="sm" variant="outline" onClick={() => bulkMined("rejected")} disabled={filteredMined.length === 0}>
                     <X className="h-4 w-4" /> Reject all shown
                   </Button>
                 </div>
               </div>
-              {mined.map((ex) => (
+              {filteredMined.map((ex) => (
                 <MinedCard
                   key={ex.id}
                   ex={ex}
@@ -476,6 +523,27 @@ export default function NavyaKnowledge() {
           )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// Thin page wrapper — keeps /admin/navya-knowledge working; the body is
+// reused inside the Navya Voice Agent page's Knowledge tab.
+export default function NavyaKnowledge() {
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="rounded-xl bg-pastel-purple p-2">
+          <Sparkles className="h-5 w-5 text-foreground/70" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Navya Knowledge</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Review questions Navya couldn't answer; your answers teach her.
+          </p>
+        </div>
+      </div>
+      <NavyaKnowledgeContent />
     </div>
   );
 }
@@ -497,14 +565,19 @@ function MinedCard({
         <div className="flex items-start justify-between gap-3">
           <p className="text-sm font-semibold text-foreground">{ex.query_text}</p>
           <div className="flex items-center gap-2 whitespace-nowrap">
+            <Badge variant="outline">{sourceLabel(ex.tags, ex.source_channel)}</Badge>
             {ex.language && <Badge variant="secondary">{ex.language}</Badge>}
             <span className="text-[11px] text-muted-foreground">{fmtDate(ex.created_at)}</span>
           </div>
         </div>
         {/* Context: which course/lead this answer came from — an answer
-            without its context is unreviewable. */}
+            without its context is unreviewable. Falls back to the lead's
+            course + shows the lead's current stage for judgement. */}
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          {ex.courses?.name && <Badge variant="outline">{ex.courses.name}</Badge>}
+          {(ex.courses?.name || ex.leads?.courses?.name) && (
+            <Badge variant="outline">{ex.courses?.name ?? ex.leads?.courses?.name}</Badge>
+          )}
+          {ex.leads?.stage && <Badge variant="secondary">{ex.leads.stage}</Badge>}
           {ex.leads?.name && <span>Lead: {ex.leads.name}</span>}
           {ex.lead_id && (
             <a
