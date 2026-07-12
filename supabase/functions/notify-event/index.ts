@@ -361,14 +361,13 @@ Deno.serve(async (req) => {
       const appDetailUrl = `${CRM_BASE}/applications/${application_id}`;
       const formPdf = app?.form_pdf_url || appDetailUrl;
 
-      // Skip the applicant WA when the fee is already paid — the receipt
-      // message was already sent and this template tells them to pay again.
-      const feeAlreadyPaid = (app as any)?.payment_status === "paid";
-      if (!feeAlreadyPaid) {
-        await sendWhatsApp("application_submitted",
-          [lead.name || app?.full_name || "Student", application_id],
-        );
-      }
+      const formPdfOptions = app?.form_pdf_url
+        ? { header_document_url: app.form_pdf_url, header_document_filename: `Application-${application_id}.pdf` }
+        : undefined;
+      await sendWhatsApp("application_submitted",
+        [lead.name || app?.full_name || "Student", application_id],
+        undefined, undefined, formPdfOptions,
+      );
 
       const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
       const vars = {
