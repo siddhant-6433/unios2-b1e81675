@@ -65,6 +65,11 @@ Help: 7428499849, 9667691872, 9555192192`;
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
+  // Navya (AI voice agent): staff alert when a campus visit is booked mid-call.
+  navya_visit_alert: { name: "navya_visit_alert", params: ["staff_name", "student_name", "course_name", "visit_datetime", "owner_name"] },
+  // Navya: transactional post-call details (UTILITY — replaces marketing-capped
+  // course templates for "send me the apply link" requests).
+  call_requested_details: { name: "call_requested_details", params: ["student_name", "course_context"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
   // Meta-approved template is named `application_submitted` (see
