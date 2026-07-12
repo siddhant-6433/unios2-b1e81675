@@ -20,13 +20,27 @@ const corsHeaders = {
 
 // ── Transcribe + Summarize recording using Google Gemini directly ──
 // Uses generativelanguage.googleapis.com — native audio support, no gateway.
-async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string): Promise<{
+// durationSeconds (when known) gates out blank/too-short recordings: Gemini
+// HALLUCINATES entire plausible conversations when given silent audio (seen
+// in prod: a 9s blank recording produced a full fabricated MBA call with a
+// fake visit booking). Never transcribe what can't contain a conversation.
+const MIN_TRANSCRIBABLE_SECONDS = 15;
+async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string, durationSeconds?: number): Promise<{
   transcript: string | null;
   summary: string | null;
   conversionProb: number | null;
   disposition: string | null;
 } | null> {
   try {
+    if (typeof durationSeconds === "number" && durationSeconds > 0 && durationSeconds < MIN_TRANSCRIBABLE_SECONDS) {
+      console.log(`Skipping transcription: recording ${durationSeconds}s < ${MIN_TRANSCRIBABLE_SECONDS}s minimum`);
+      return {
+        transcript: null,
+        summary: `Call too short to transcribe (${durationSeconds}s) — no meaningful conversation.`,
+        conversionProb: null,
+        disposition: "no_answer",
+      };
+    }
     // Download the recording
     const audioRes = await fetch(recordingUrl);
     if (!audioRes.ok) { console.error("Failed to download recording:", audioRes.status); return null; }
@@ -54,6 +68,15 @@ Provide a JSON response with:
 2. "summary": 2-4 sentence summary of the call outcome in English — what was discussed, interest level, key points.
 3. "conversion_probability": 0-100 integer — how likely this lead is to enroll.
 4. "disposition": One of: interested, callback_requested, not_interested, no_answer, busy, wrong_number, voicemail, partial_conversation
+
+CRITICAL — DO NOT INVENT CONTENT:
+Transcribe ONLY speech that is audibly present in the recording. If the audio is
+silent, blank, only ringing/hold music/noise, or contains no intelligible
+conversation, return exactly:
+{"transcript": "", "summary": "No conversation — audio is blank or unintelligible.", "conversion_probability": null, "disposition": "no_answer"}
+NEVER fabricate dialogue, names, courses, appointments, or outcomes that are not
+explicitly spoken in the audio. An empty transcript is the correct answer for
+empty audio.
 
 Respond ONLY in valid JSON.`
               },
@@ -356,7 +379,7 @@ Deno.serve(async (req) => {
           // Transcribe + summarize via Gemini in background (non-blocking)
           const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
           if (GOOGLE_AI_KEY && recordUrl) {
-            transcribeAndSummarize(recordUrl, GOOGLE_AI_KEY).then(async (result) => {
+            transcribeAndSummarize(recordUrl, GOOGLE_AI_KEY, duration).then(async (result) => {
               if (!result) return;
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -430,16 +453,13 @@ Deno.serve(async (req) => {
       const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
       for (const call of pendingCalls || []) {
-        let uuid = call.plivo_call_uuid || "";
-        if (!uuid) {
-          // No plivo UUID — try to find it from the lead's ai_call_uuid
-          const { data: lead } = await db.from("leads").select("ai_call_uuid").eq("id", call.lead_id).maybeSingle();
-          if (lead?.ai_call_uuid) {
-            uuid = lead.ai_call_uuid;
-            // Update the record with the plivo UUID
-            await db.from("ai_call_records").update({ plivo_call_uuid: uuid }).eq("id", call.id);
-          }
-        }
+        // ONLY match by this record's own Plivo UUID. The old fallback
+        // borrowed leads.ai_call_uuid (the lead's LATEST call), which
+        // attached other calls' recordings to this record — 423 recordings
+        // ended up on wrong call records (counsellor-call audio on AI-call
+        // rows and vice versa). A missing recording is recoverable; a wrong
+        // one silently corrupts transcripts, mining, and reviews.
+        const uuid = call.plivo_call_uuid || "";
 
         if (!uuid) {
           // Still no UUID — check if call is old enough to mark as failed
@@ -507,7 +527,7 @@ Deno.serve(async (req) => {
 
           // Transcribe + summarize via Gemini
           if (GOOGLE_AI_KEY) {
-            const result = await transcribeAndSummarize(recording.url, GOOGLE_AI_KEY);
+            const result = await transcribeAndSummarize(recording.url, GOOGLE_AI_KEY, recording.duration);
             if (result) {
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -539,7 +559,7 @@ Deno.serve(async (req) => {
     if (GOOGLE_AI_KEY) {
       const { data: untranscribed } = await db
         .from("ai_call_records")
-        .select("id, lead_id, recording_url")
+        .select("id, lead_id, recording_url, duration_seconds")
         .not("recording_url", "is", null)
         .is("summary", null)
         .eq("status", "completed")
@@ -549,7 +569,7 @@ Deno.serve(async (req) => {
       for (const call of untranscribed || []) {
         if (!call.recording_url) continue;
         console.log(`Transcribing call ${call.id} for lead ${call.lead_id}...`);
-        const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY);
+        const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY, (call as any).duration_seconds ?? undefined);
         if (result) {
           await db.from("ai_call_records").update({
             transcript: result.transcript,
