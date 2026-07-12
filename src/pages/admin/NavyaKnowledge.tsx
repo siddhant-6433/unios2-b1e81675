@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap } from "lucide-react";
+import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X } from "lucide-react";
 
 // voice_knowledge_gaps may not have generated TS types yet — cast via `supabase as any`.
 interface Gap {
@@ -30,20 +30,73 @@ interface LearnedExample {
   created_at: string;
 }
 
+interface CallRecord {
+  id: string;
+  created_at: string;
+  disposition: string | null;
+  duration_seconds: number | null;
+  summary: string | null;
+  transcript: string | null;
+  recording_url: string | null;
+  lead_id: string | null;
+  leads: { name: string | null; course_id: string | null } | null;
+}
+
+interface MinedExample {
+  id: string;
+  query_text: string;
+  reply_text: string;
+  language: string | null;
+  status: string;
+  created_at: string;
+}
+
+interface Stats {
+  active: number;
+  needsReview: number;
+  pendingGaps: number;
+  last7: number;
+}
+
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+
+const fmtDuration = (s: number | null) => {
+  if (!s && s !== 0) return "—";
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+};
+
+// transcript is plain text, one utterance per line prefixed "Caller: " / "AI: ".
+type Turn = { speaker: "caller" | "ai"; text: string };
+const parseTurns = (transcript: string): Turn[] =>
+  transcript
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l): Turn | null => {
+      if (/^caller:/i.test(l)) return { speaker: "caller", text: l.replace(/^caller:\s*/i, "") };
+      if (/^ai:/i.test(l)) return { speaker: "ai", text: l.replace(/^ai:\s*/i, "") };
+      return null;
+    })
+    .filter((t): t is Turn => t !== null);
 
 export default function NavyaKnowledge() {
   const { toast } = useToast();
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [learned, setLearned] = useState<LearnedExample[]>([]);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [mined, setMined] = useState<MinedExample[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [gapRes, learnedRes] = await Promise.all([
+    const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [gapRes, learnedRes, callsRes, minedRes, activeCnt, needsReviewCnt, pendingCnt, last7Cnt] = await Promise.all([
       (supabase as any)
         .from("voice_knowledge_gaps")
         .select("id, call_id, lead_id, course_id, question_text, ai_answer_given, transcript_snippet, created_at")
@@ -55,10 +108,36 @@ export default function NavyaKnowledge() {
         .eq("source_channel", "voice")
         .order("created_at", { ascending: false })
         .limit(50),
+      (supabase as any)
+        .from("ai_call_records")
+        .select("id, created_at, disposition, duration_seconds, summary, transcript, recording_url, lead_id, leads(name, course_id)")
+        .eq("call_type", "ai")
+        .not("transcript", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(30),
+      (supabase as any)
+        .from("admissions_ai_reply_examples")
+        .select("id, query_text, reply_text, language, status, created_at")
+        .eq("status", "needs_review")
+        .contains("tags", ["counsellor_call"])
+        .order("created_at", { ascending: false })
+        .limit(50),
+      (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "active"),
+      (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
+      (supabase as any).from("voice_knowledge_gaps").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      (supabase as any).from("admissions_ai_reply_examples").select("id", { count: "exact", head: true }).gte("created_at", since7),
     ]);
     if (gapRes.error) toast({ title: "Couldn't load questions", description: gapRes.error.message, variant: "destructive" });
     setGaps(gapRes.data ?? []);
     setLearned(learnedRes.data ?? []);
+    setCalls(callsRes.data ?? []);
+    setMined(minedRes.data ?? []);
+    setStats({
+      active: activeCnt.count ?? 0,
+      needsReview: needsReviewCnt.count ?? 0,
+      pendingGaps: pendingCnt.count ?? 0,
+      last7: last7Cnt.count ?? 0,
+    });
     setLoading(false);
   }, [toast]);
 
@@ -151,6 +230,26 @@ export default function NavyaKnowledge() {
     setLearned((l) => l.map((x) => (x.id === ex.id ? { ...x, status: "rejected" } : x)));
   };
 
+  const setMinedStatus = async (ids: string[], status: "active" | "rejected") => {
+    const { error } = await (supabase as any)
+      .from("admissions_ai_reply_examples")
+      .update({ status })
+      .in("id", ids);
+    if (error) {
+      toast({ title: "Couldn't update", description: error.message, variant: "destructive" });
+      return;
+    }
+    setMined((m) => m.filter((x) => !ids.includes(x.id)));
+    toast({ title: status === "active" ? "Approved" : "Rejected" });
+  };
+
+  const bulkMined = (status: "active" | "rejected") => {
+    if (mined.length === 0) return;
+    const verb = status === "active" ? "Approve" : "Reject";
+    if (!window.confirm(`${verb} all ${mined.length} shown answers?`)) return;
+    setMinedStatus(mined.map((m) => m.id), status);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center gap-3">
@@ -165,6 +264,24 @@ export default function NavyaKnowledge() {
         </div>
       </div>
 
+      {stats && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Active examples", value: stats.active },
+            { label: "Needs review", value: stats.needsReview },
+            { label: "Pending gaps", value: stats.pendingGaps },
+            { label: "New (7 days)", value: stats.last7 },
+          ].map((s) => (
+            <Card key={s.label}>
+              <CardContent className="p-4">
+                <p className="text-2xl font-bold text-foreground">{s.value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <Tabs defaultValue="pending" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
           <TabsTrigger value="pending" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
@@ -172,6 +289,12 @@ export default function NavyaKnowledge() {
           </TabsTrigger>
           <TabsTrigger value="learned" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Learned answers
+          </TabsTrigger>
+          <TabsTrigger value="calls" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Call review
+          </TabsTrigger>
+          <TabsTrigger value="mined" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Mined from counsellor calls{mined.length > 0 && ` (${mined.length})`}
           </TabsTrigger>
         </TabsList>
 
@@ -276,7 +399,192 @@ export default function NavyaKnowledge() {
             ))
           )}
         </TabsContent>
+
+        <TabsContent value="calls" className="mt-4 space-y-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+            </div>
+          ) : calls.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                No AI calls with transcripts yet.
+              </CardContent>
+            </Card>
+          ) : (
+            calls.map((call) => <CallCard key={call.id} call={call} onCoached={load} />)
+          )}
+        </TabsContent>
+
+        <TabsContent value="mined" className="mt-4 space-y-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+            </div>
+          ) : mined.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                No mined answers yet. The miner runs on counsellor call recordings.
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">{mined.length} remaining</span>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => bulkMined("active")}>
+                    <Check className="h-4 w-4" /> Approve all shown
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => bulkMined("rejected")}>
+                    <X className="h-4 w-4" /> Reject all shown
+                  </Button>
+                </div>
+              </div>
+              {mined.map((ex) => (
+                <Card key={ex.id}>
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-semibold text-foreground">{ex.query_text}</p>
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        {ex.language && <Badge variant="secondary">{ex.language}</Badge>}
+                        <span className="text-[11px] text-muted-foreground">{fmtDate(ex.created_at)}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{ex.reply_text}</p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button size="sm" onClick={() => setMinedStatus([ex.id], "active")}>
+                        <Check className="h-4 w-4" /> Approve
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setMinedStatus([ex.id], "rejected")}>
+                        <X className="h-4 w-4" /> Reject
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function CallCard({ call, onCoached }: { call: CallRecord; onCoached: () => void }) {
+  const { toast } = useToast();
+  const turns = call.transcript ? parseTurns(call.transcript) : [];
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [savingIdx, setSavingIdx] = useState<number | null>(null);
+
+  const suggest = async (idx: number) => {
+    const reply = (drafts[idx] ?? "").trim();
+    if (!reply) {
+      toast({ title: "Write a better answer first", variant: "destructive" });
+      return;
+    }
+    // nearest preceding Caller line in file order; fallbacks per spec
+    let query = call.summary || "General enquiry";
+    for (let i = idx - 1; i >= 0; i--) {
+      if (turns[i].speaker === "caller") {
+        query = turns[i].text;
+        break;
+      }
+    }
+    setSavingIdx(idx);
+    const { error } = await (supabase as any).from("admissions_ai_reply_examples").insert({
+      query_text: query,
+      reply_text: reply,
+      source_channel: "voice",
+      target_channels: ["whatsapp", "voice"],
+      language: "hinglish",
+      status: "active",
+      quality_score: 0.9,
+      tags: ["coached"],
+      lead_id: call.lead_id,
+      course_id: call.leads?.course_id ?? null,
+    });
+    setSavingIdx(null);
+    if (error) {
+      toast({ title: "Couldn't save", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Navya will answer this way next time." });
+    setOpenIdx(null);
+    setDrafts((d) => {
+      const next = { ...d };
+      delete next[idx];
+      return next;
+    });
+    onCoached();
+  };
+
+  return (
+    <Card>
+      <Collapsible>
+        <CardContent className="p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+              {call.leads?.name || "Unknown lead"}
+            </div>
+            <div className="flex items-center gap-2 whitespace-nowrap">
+              {call.disposition && <Badge variant="secondary">{call.disposition}</Badge>}
+              <span className="text-[11px] text-muted-foreground">{fmtDate(call.created_at)}</span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Duration {fmtDuration(call.duration_seconds)}</p>
+          {call.summary && <p className="text-sm text-muted-foreground">{call.summary}</p>}
+
+          <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground pt-1">
+            <ChevronDown className="h-3.5 w-3.5" /> Review call
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3 space-y-3">
+            {call.recording_url && (
+              <audio controls src={call.recording_url} className="w-full h-9" />
+            )}
+            <div className="space-y-2">
+              {turns.map((turn, idx) => (
+                <div key={idx} className="space-y-1.5">
+                  <div className="flex items-start gap-2">
+                    <Badge variant={turn.speaker === "ai" ? "default" : "secondary"} className="shrink-0">
+                      {turn.speaker === "ai" ? "Navya" : "Student"}
+                    </Badge>
+                    <p className="text-sm text-foreground/90">{turn.text}</p>
+                  </div>
+                  {turn.speaker === "ai" && (
+                    <div className="pl-2">
+                      {openIdx === idx ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            placeholder="A better answer…"
+                            value={drafts[idx] ?? ""}
+                            onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
+                            rows={3}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" onClick={() => suggest(idx)} disabled={savingIdx === idx}>
+                              {savingIdx === idx ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                              Save
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setOpenIdx(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setOpenIdx(idx)}>
+                          Suggest better answer
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </CardContent>
+      </Collapsible>
+    </Card>
   );
 }

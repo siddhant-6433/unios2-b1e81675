@@ -1243,6 +1243,19 @@ Deno.serve(async (req) => {
           const waMessageId = status.id;
           const newStatus = status.status; // sent, delivered, read, failed
           if (waMessageId && newStatus) {
+            // Look up the prior state BEFORE updating so we can (a) attach a
+            // lead-timeline note on the first "failed" report and (b) skip it
+            // if Meta re-sends the same failed status.
+            let priorMsg: { status?: string; lead_id?: string; template_key?: string } | null = null;
+            if (newStatus === "failed") {
+              const { data } = await admin
+                .from("whatsapp_messages")
+                .select("status, lead_id, template_key")
+                .eq("wa_message_id", waMessageId)
+                .maybeSingle();
+              priorMsg = data as any;
+            }
+
             const updates: Record<string, unknown> = {
               status: newStatus,
               ...(businessPnId ? { business_phone_number_id: businessPnId } : {}),
@@ -1252,6 +1265,25 @@ Deno.serve(async (req) => {
               .from("whatsapp_messages")
               .update(updates)
               .eq("wa_message_id", waMessageId);
+
+            // On the first failed report for a message tied to a lead, drop a
+            // timeline activity + counsellor note. Fire-and-forget; never throw.
+            if (newStatus === "failed" && priorMsg?.lead_id && priorMsg.status !== "failed") {
+              const tmpl = priorMsg.template_key || "message";
+              const errTitle = String(status.errors?.[0]?.title || "").slice(0, 120);
+              const desc = `⚠️ WhatsApp delivery failed — ${tmpl}${errTitle ? ` (${errTitle})` : ""}`;
+              admin
+                .from("lead_activities")
+                .insert({ lead_id: priorMsg.lead_id, type: "system", description: desc })
+                .then(({ error }) => { if (error) console.error("failed-note lead_activities error:", error); });
+              admin
+                .from("lead_notes")
+                .insert({
+                  lead_id: priorMsg.lead_id,
+                  content: `${desc}\nCounsellor follow-up: send the details manually or from a different channel.`,
+                })
+                .then(({ error }) => { if (error) console.error("failed-note lead_notes error:", error); });
+            }
 
             await admin
               .from("whatsapp_otps")
