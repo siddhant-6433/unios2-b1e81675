@@ -49,6 +49,9 @@ interface MinedExample {
   language: string | null;
   status: string;
   created_at: string;
+  lead_id: string | null;
+  leads: { name: string | null } | null;
+  courses: { name: string | null } | null;
 }
 
 interface Stats {
@@ -106,6 +109,9 @@ export default function NavyaKnowledge() {
         .from("admissions_ai_reply_examples")
         .select("id, query_text, reply_text, status, created_at")
         .eq("source_channel", "voice")
+        // needs_review rows live in the "Mined from counsellor calls" tab;
+        // this tab is the audit trail of what Navya actually uses.
+        .eq("status", "active")
         .order("created_at", { ascending: false })
         .limit(50),
       (supabase as any)
@@ -117,7 +123,7 @@ export default function NavyaKnowledge() {
         .limit(30),
       (supabase as any)
         .from("admissions_ai_reply_examples")
-        .select("id, query_text, reply_text, language, status, created_at")
+        .select("id, query_text, reply_text, language, status, created_at, lead_id, leads(name), courses:course_id(name)")
         .eq("status", "needs_review")
         .contains("tags", ["counsellor_call"])
         .order("created_at", { ascending: false })
@@ -230,17 +236,28 @@ export default function NavyaKnowledge() {
     setLearned((l) => l.map((x) => (x.id === ex.id ? { ...x, status: "rejected" } : x)));
   };
 
-  const setMinedStatus = async (ids: string[], status: "active" | "rejected") => {
+  const setMinedStatus = async (
+    ids: string[],
+    status: "active" | "rejected",
+    editedReply?: string,
+  ) => {
+    const patch: Record<string, string> = { status };
+    // Approving with an improved answer: save the edit and bump quality —
+    // a human-reviewed answer outranks a raw mined one at retrieval time.
+    if (editedReply !== undefined && editedReply.trim()) {
+      patch.reply_text = editedReply.trim();
+      (patch as Record<string, unknown>).quality_score = 0.9;
+    }
     const { error } = await (supabase as any)
       .from("admissions_ai_reply_examples")
-      .update({ status })
+      .update(patch)
       .in("id", ids);
     if (error) {
       toast({ title: "Couldn't update", description: error.message, variant: "destructive" });
       return;
     }
     setMined((m) => m.filter((x) => !ids.includes(x.id)));
-    toast({ title: status === "active" ? "Approved" : "Rejected" });
+    toast({ title: status === "active" ? "Approved — Navya will use this answer" : "Rejected" });
   };
 
   const bulkMined = (status: "active" | "rejected") => {
@@ -441,32 +458,80 @@ export default function NavyaKnowledge() {
                 </div>
               </div>
               {mined.map((ex) => (
-                <Card key={ex.id}>
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-semibold text-foreground">{ex.query_text}</p>
-                      <div className="flex items-center gap-2 whitespace-nowrap">
-                        {ex.language && <Badge variant="secondary">{ex.language}</Badge>}
-                        <span className="text-[11px] text-muted-foreground">{fmtDate(ex.created_at)}</span>
-                      </div>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{ex.reply_text}</p>
-                    <div className="flex items-center gap-2 pt-1">
-                      <Button size="sm" onClick={() => setMinedStatus([ex.id], "active")}>
-                        <Check className="h-4 w-4" /> Approve
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setMinedStatus([ex.id], "rejected")}>
-                        <X className="h-4 w-4" /> Reject
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <MinedCard
+                  key={ex.id}
+                  ex={ex}
+                  onDecide={(status, editedReply) => setMinedStatus([ex.id], status, editedReply)}
+                />
               ))}
             </>
           )}
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function MinedCard({
+  ex,
+  onDecide,
+}: {
+  ex: MinedExample;
+  onDecide: (status: "active" | "rejected", editedReply?: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(ex.reply_text);
+  const edited = editing && draft.trim() !== ex.reply_text.trim();
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-semibold text-foreground">{ex.query_text}</p>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {ex.language && <Badge variant="secondary">{ex.language}</Badge>}
+            <span className="text-[11px] text-muted-foreground">{fmtDate(ex.created_at)}</span>
+          </div>
+        </div>
+        {/* Context: which course/lead this answer came from — an answer
+            without its context is unreviewable. */}
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          {ex.courses?.name && <Badge variant="outline">{ex.courses.name}</Badge>}
+          {ex.leads?.name && <span>Lead: {ex.leads.name}</span>}
+          {ex.lead_id && (
+            <a
+              href={`/admissions/${ex.lead_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-foreground"
+            >
+              View lead & call history
+            </a>
+          )}
+        </div>
+        {editing ? (
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={3}
+            className="text-sm"
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">{ex.reply_text}</p>
+        )}
+        <div className="flex items-center gap-2 pt-1">
+          <Button size="sm" onClick={() => onDecide("active", edited ? draft : undefined)}>
+            <Check className="h-4 w-4" /> {edited ? "Approve edited" : "Approve"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)}>
+            {editing ? "Cancel edit" : "Edit & improve"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onDecide("rejected")}>
+            <X className="h-4 w-4" /> Reject
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
