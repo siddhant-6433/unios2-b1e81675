@@ -71,7 +71,11 @@ const fmtDuration = (s: number | null) => {
   return `${m}:${String(sec).padStart(2, "0")}`;
 };
 
-// transcript is plain text, one utterance per line prefixed "Caller: " / "AI: ".
+// Transcripts come in two formats:
+//   - "[Lead]: ..." / "[Agent]: ..." — interleaved dialogue written by the
+//     post-call analysis pipeline (the common case in prod)
+//   - "Caller: ..." / "AI: ..."      — raw voice-agent format (fallback
+//     when the analysis pipeline hasn't run)
 type Turn = { speaker: "caller" | "ai"; text: string };
 const parseTurns = (transcript: string): Turn[] =>
   transcript
@@ -79,8 +83,12 @@ const parseTurns = (transcript: string): Turn[] =>
     .map((l) => l.trim())
     .filter(Boolean)
     .map((l): Turn | null => {
-      if (/^caller:/i.test(l)) return { speaker: "caller", text: l.replace(/^caller:\s*/i, "") };
-      if (/^ai:/i.test(l)) return { speaker: "ai", text: l.replace(/^ai:\s*/i, "") };
+      if (/^\[?(lead|caller)\]?:/i.test(l)) {
+        return { speaker: "caller", text: l.replace(/^\[?(lead|caller)\]?:\s*/i, "") };
+      }
+      if (/^\[?(agent|ai)\]?:/i.test(l)) {
+        return { speaker: "ai", text: l.replace(/^\[?(agent|ai)\]?:\s*/i, "") };
+      }
       return null;
     })
     .filter((t): t is Turn => t !== null);
