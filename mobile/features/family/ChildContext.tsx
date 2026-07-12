@@ -8,6 +8,7 @@ export interface ChildStudent {
   name: string;
   admissionNo: string | null;
   campusName: string | null;
+  batchId: string | null;
   batchName: string | null;
   courseName: string | null;
 }
@@ -25,6 +26,7 @@ interface StudentRow {
   id: string;
   name: string;
   admission_no: string | null;
+  batch_id: string | null;
   campuses: { name: string } | null;
   batches: { name: string } | null;
   courses: { name: string } | null;
@@ -35,7 +37,7 @@ async function fetchChildren(userId: string): Promise<ChildStudent[]> {
   const { data, error } = await supabase
     .from('students')
     .select(
-      'id, name, admission_no, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)',
+      'id, name, admission_no, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)',
     )
     .or(
       `user_id.eq.${userId},father_user_id.eq.${userId},mother_user_id.eq.${userId},guardian_user_id.eq.${userId}`,
@@ -45,6 +47,7 @@ async function fetchChildren(userId: string): Promise<ChildStudent[]> {
     id: row.id,
     name: row.name,
     admissionNo: row.admission_no,
+    batchId: row.batch_id,
     campusName: row.campuses?.name ?? null,
     batchName: row.batches?.name ?? null,
     courseName: row.courses?.name ?? null,
