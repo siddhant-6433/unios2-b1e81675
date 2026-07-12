@@ -93,18 +93,19 @@ const TEMPLATES = [
     ],
   },
   {
-    name: "application_submitted",
+    name: "application_submitted_v2",
     category: "UTILITY",
     language: "en",
     components: [
       {
-        type: "BODY",
-        text: "Hi {{1}}, your application ({{2}}) has been received at NIMT Educational Institutions. Please complete the application fee payment to begin processing. Your form PDF is available in the apply portal.",
-        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
       },
       {
-        type: "BUTTONS",
-        buttons: [{ type: "URL", text: "Open Apply Portal", url: "https://uni.nimt.ac.in/apply" }],
+        type: "BODY",
+        text: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
+        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
       },
     ],
   },
