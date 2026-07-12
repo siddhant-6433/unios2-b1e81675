@@ -93,7 +93,7 @@ const TEMPLATES = [
     ],
   },
   {
-    name: "application_submitted",
+    name: "application_submitted_v2",
     category: "UTILITY",
     language: "en",
     components: [

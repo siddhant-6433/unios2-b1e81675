@@ -67,10 +67,10 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
-  // Meta-approved template is named `application_submitted` (see
+  // Meta-approved template is named `application_submitted_v2` (see
   // submit-wa-templates). Internal key stays `application_received` for
   // backwards compatibility with callers, AutomationRules, and the inbox UI.
-  application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
+  application_received: { name: "application_submitted_v2", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
@@ -133,8 +133,8 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // approved there, sends fail gracefully and the trigger logs the URL
   // for manual delivery via lead_activities.
 
-  // 1. Application submitted — confirms receipt, attaches form PDF as button URL.
-  application_submitted:  { name: "application_submitted",  params: ["student_name", "application_id"] },
+  // 1. Application submitted — confirms receipt, attaches form PDF as document header.
+  application_submitted:  { name: "application_submitted_v2",  params: ["student_name", "application_id"] },
   // 2. Application fee paid — receipt PDF as document-header template.
   app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
   app_fee_receipt_pdf:    { name: "app_fee_receipt_pdf",    params: ["student_name", "amount", "application_id"] },
