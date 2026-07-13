@@ -1640,17 +1640,17 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 below). The card stays visible if the candidate already
                 paid in full, so they always see the receipt state. */}
             {hasFullCourse && (fullCourseWindowOpen || fcCovered) && (
-              <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
+              <div className={`rounded-2xl border-2 p-5 shadow-lg ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
                 "border-success/30 bg-success/5"
               }`}>
                 {!fcCovered && (
-                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-success px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                  <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-success px-3 py-1 text-[10px] font-bold text-white shadow-sm">
                     <Sparkles className="h-3 w-3" /> {fcDisc > 0 ? "BEST VALUE" : "FULL COURSE"}
                   </div>
                 )}
 
-                <div className="relative flex items-start justify-between gap-4 mt-2">
+                <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     {fcCovered ? (
                       <>

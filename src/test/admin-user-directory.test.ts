@@ -2,6 +2,10 @@ import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync("supabase/migrations/20260712000000_admin_user_directory_paginated.sql", "utf8");
+const phoneRecovery = readFileSync(
+  "supabase/migrations/20260713170000_admin_directory_phone_search_recovery.sql",
+  "utf8",
+);
 const adminPanel = readFileSync("src/pages/AdminPanel.tsx", "utf8");
 
 describe("admin user directory", () => {
@@ -44,8 +48,17 @@ describe("admin user directory", () => {
     expect(adminPanel).toContain('{ value: "counsellor", label: "Counsellor" }');
   });
 
+  it("surfaces soft-deleted/archived phone holders via digit-normalized recovery search", () => {
+    expect(phoneRecovery).toContain("phone_lookup");
+    expect(phoneRecovery).toContain("right(regexp_replace(COALESCE(p.phone, ''), '\\D', '', 'g'), 10) = pl.key10");
+    expect(phoneRecovery).toContain("deleted_at timestamptz");
+    expect(phoneRecovery).toContain("Phone recovery");
+    expect(adminPanel).toContain("Soft-deleted · still holds phone");
+  });
+
   it("does not stitch the user list from separate client-side profile and role queries", () => {
     expect(adminPanel).not.toContain('supabase.from("user_roles").select("id, user_id, role")');
     expect(adminPanel).not.toContain('supabase.rpc("get_user_auth_info" as any)');
   });
 });
+

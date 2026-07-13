@@ -266,7 +266,7 @@ const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
 const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?: boolean }[] = [
   { value: "agreement", label: "Agreement", required: true },
   { value: "gst", label: "GST Certificate" },
-  { value: "pan", label: "PAN Card", required: true },
+  { value: "pan", label: "PAN Card" },
   { value: "tan", label: "TAN Certificate" },
   { value: "fee_structure", label: "Fee Structure" },
   { value: "brochure", label: "Brochures" },
@@ -1016,7 +1016,7 @@ export default function AcademicPartners() {
       </div>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open && !saving) resetForm(); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? "Edit Academic Partner" : "Add Academic Partner"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
