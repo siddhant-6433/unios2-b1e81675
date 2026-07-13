@@ -118,8 +118,9 @@ async function settleStudentFeeLedger(
 }
 
 // Receipt PDF + WhatsApp/email go out via notify-event. Required here because
-// the DB trigger fn_notify_payment_received skips gateway rows (the gateway
-// edge fn is expected to notify, mirroring razorpay-payment/easebuzz).
+// the DB trigger fn_notify_payment_received skips gateway='razorpay' (and
+// other app-notified gateways) — the edge fn owns the notification path so
+// we never double-send the receipt WhatsApp.
 function notifyPaymentReceived(
   supabaseUrl: string,
   serviceKey: string,

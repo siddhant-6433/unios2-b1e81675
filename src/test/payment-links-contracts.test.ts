@@ -174,3 +174,28 @@ describe("LeadFeeLedger pre-admission token rows", () => {
     expect(leadFeeLedger).toContain('p.type === "token_fee" || p.type === "pre_admission_token"');
   });
 });
+
+describe("payment notify skip list includes razorpay", () => {
+  // Regression: payment-link settlements (gateway=razorpay) also call
+  // notify-event from pay-link. Without skipping razorpay in the DB trigger,
+  // candidates get the receipt WhatsApp twice for the same receipt_no.
+  const skipMigration = readFileSync(
+    "supabase/migrations/20260713120000_payment_notify_skip_razorpay.sql",
+    "utf8",
+  );
+
+  it("migration skips offline/easebuzz/icici/razorpay/cashfree on both notify triggers", () => {
+    expect(skipMigration).toContain("fn_notify_payment_received");
+    expect(skipMigration).toContain("fn_notify_app_fee_paid");
+    for (const gw of ["offline", "easebuzz", "icici", "razorpay", "cashfree"]) {
+      expect(skipMigration).toMatch(new RegExp(`'${gw}'`));
+    }
+  });
+
+  it("pay-link inserts razorpay and notifies once from the edge function", () => {
+    expect(payLinkFn).toContain("gateway");
+    expect(payLinkFn).toContain('"razorpay"');
+    expect(payLinkFn).toContain('event: "payment_received"');
+    expect(payLinkFn).toContain("notifyPaymentReceived");
+  });
+});
