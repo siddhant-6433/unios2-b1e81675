@@ -1567,6 +1567,18 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     })();
   }, [role, counsellorList]);
 
+  // Honor an inbox channel from the URL (timeline "Go to conversation" deep-link).
+  // Messages store a Meta phone_number_id (e.g. "1075269918995469"); the tabs use
+  // the phone number, so resolve pnid → number before normalizing. Keyed on the
+  // param alone so it applies once and doesn't fight manual tab clicks.
+  const channelParam = searchParams.get("channel");
+  useEffect(() => {
+    if (!channelParam) return;
+    const mapped = KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[channelParam] || channelParam;
+    const resolved = normalizeBusinessChannel(mapped);
+    if (resolved) setBusinessNumber(resolved);
+  }, [channelParam]);
+
   // Auto-select conversation from URL param (notification deep-link)
   const phoneFromUrl = searchParams.get("phone");
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);

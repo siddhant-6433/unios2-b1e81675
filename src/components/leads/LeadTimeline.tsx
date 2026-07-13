@@ -296,6 +296,7 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
   // Fetch AI call records to match recordings to timeline entries
   const [aiRecordings, setAiRecordings] = useState<Record<string, string>>({});
   const [engagementEvents, setEngagementEvents] = useState<any[]>([]);
+  const [waChannel, setWaChannel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!leadId) return;
@@ -321,6 +322,18 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
       .limit(50)
       .then(({ data }) => {
         if (data) setEngagementEvents(data as any[]);
+      });
+
+    // Latest WhatsApp channel this lead was messaged on, so the
+    // "Go to conversation" link opens the right inbox tab.
+    supabase.from("whatsapp_messages" as any)
+      .select("business_phone_number_id")
+      .eq("lead_id", leadId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        const pnid = (data as any[])?.[0]?.business_phone_number_id;
+        if (pnid) setWaChannel(pnid);
       });
   }, [leadId]);
 
@@ -398,7 +411,7 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
                 )}
                 {/* Go to conversation link for WhatsApp entries */}
                 {(a.type === "whatsapp" || a.type === "whatsapp_reply") && leadPhone && (
-                  <a href={`/whatsapp-inbox?phone=${leadPhone.replace(/[^0-9]/g, "")}`}
+                  <a href={`/whatsapp-inbox?phone=${leadPhone.replace(/[^0-9]/g, "")}${waChannel ? `&channel=${waChannel}` : ""}`}
                     className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-[#25D366] hover:underline">
                     <WhatsAppIcon className="h-3 w-3" />
                     Go to conversation

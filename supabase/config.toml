@@ -96,6 +96,12 @@ verify_jwt = false
 [functions.whatsapp-reply-learning]
 verify_jwt = false
 
+[functions.counsellor-call-miner]
+verify_jwt = false
+
+[functions.navya-visit-digest]
+verify_jwt = false
+
 [functions.whatsapp-buffer-worker]
 verify_jwt = false
 

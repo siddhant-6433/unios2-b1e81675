@@ -590,6 +590,44 @@ const TEMPLATES = [
       },
     ],
   },
+  // ── Navya (AI voice agent) notifications ─────────────────────────────────
+  // Staff alert when Navya books a campus visit during a live call. Sent to
+  // the lead owner + leadership phones (config: navya_visit_wa_staff_recipients).
+  {
+    name: "navya_visit_alert",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, Navya (AI counsellor) booked a campus visit during a live call.\n\nStudent: {{2}}\nCourse: {{3}}\nVisit: {{4}}\nLead owner: {{5}}\n\nPlease prepare for the visit and confirm with the student.",
+        example: { body_text: [["Kushal Chauhan", "Rahul Sharma", "MBA", "Sun 13 Jul, 11:00 AM", "Rahul Bhati"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Lead", url: "https://uni.nimt.ac.in/admissions" }],
+      },
+    ],
+  },
+  // Post-call details the caller explicitly requested — transactional wording
+  // keeps this UTILITY (course_info* templates get flipped to MARKETING and
+  // hit Meta's per-user frequency cap; this one must not).
+  {
+    name: "call_requested_details",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, sharing the details you requested during our call today regarding {{2}}. Tap below to open your application. If you need anything else, simply reply to this message and our admissions team will assist you.",
+        example: { body_text: [["Rahul Sharma", "GNM admission at NIMT"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Application", url: "https://uni.nimt.ac.in/apply/nimt" }],
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {
