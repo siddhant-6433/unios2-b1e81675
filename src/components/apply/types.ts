@@ -170,6 +170,7 @@ export function determineProgramCategory(courseCode: string, courseName: string)
   if (lower.includes('mba') || lower.includes('pgdm')) return 'mba_pgdm';
   if (lower.includes('b.ed') || lower.includes('bed')) return 'bed';
   if (lower.includes('d.el.ed') || lower.includes('deled')) return 'deled';
+  if (lower.includes('ballb') || lower.includes('ba llb') || lower.includes('bba llb')) return 'undergraduate';
   if (lower.includes('mpt') || lower.includes('llb') || lower.includes('mmrit')) return 'professional';
   if (lower.startsWith('m') || lower.includes('master') || lower.includes('pg')) return 'postgraduate';
   return 'undergraduate';

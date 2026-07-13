@@ -28,15 +28,6 @@ const AnimatedNumber = memo(({ value }: { value: number }) => {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function getGreeting(name: string): string {
-  const h = new Date().getHours();
-  if (h < 5)  return `Up late, ${name}?`;
-  if (h < 12) return `Good morning, ${name}`;
-  if (h < 17) return `Good afternoon, ${name}`;
-  if (h < 21) return `Good evening, ${name}`;
-  return `Up late, ${name}?`;
-}
-
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "App In Progress", application_submitted: "App Submitted",
   ai_called: "AI Called", counsellor_call: "In Follow Up",
@@ -102,8 +93,6 @@ function AnalyticsFallback() {
 // ── SuperAdminDashboard ─────────────────────────────────────────────────────
 
 const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
-  const { profile } = useAuth();
-  const firstName = profile?.display_name?.split(" ")[0] || "there";
   const { selectedCampusId } = useCampus();
   const [loading, setLoading] = useState(true);
 
@@ -188,8 +177,8 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
 
       {/* ── Hero banner ── */}
       <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 mb-1">
-        <h1 className="text-2xl font-bold text-foreground">{getGreeting(firstName)}</h1>
-        <p className="text-sm text-muted-foreground mt-1">Here's your overview.</p>
+        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>
 
       {/* ── Stat Cards ── */}

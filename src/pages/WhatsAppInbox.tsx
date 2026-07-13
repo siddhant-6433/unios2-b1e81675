@@ -17,7 +17,7 @@ import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
-  ArrowRightLeft, UserPlus,
+  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -240,17 +240,7 @@ const STAGE_LABELS: Record<string, string> = {
   offer_sent: "Offer Sent", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)",
 };
 
-const QUICK_REPLIES = [
-  { label: "Greeting", text: "Hi! 👋 Welcome to NIMT Educational Institutions. How can I help you today?" },
-  { label: "Ask course", text: "Which course are you interested in? We offer Engineering, Management, Law, Pharmacy, Nursing, Education and more." },
-  { label: "Share portal", text: "You can apply online at our application portal:\nhttps://uni.nimt.ac.in/apply/nimt" },
-  { label: "Fee info", text: "You can view NIMT's detailed 2026-27 fee structure here:\nhttps://nimt.ac.in/admissions/fees/\n\nPopular first-year fees include B.Sc Nursing ₹1,53,000, GNM ₹1,18,000, BPT ₹92,000, MBA ₹1,30,000, PGDM ₹2,25,000, BBA/BCA ₹75,000 and LLB ₹44,250. Merit scholarships and education loan support are available.\n\nPlease share your course and campus preference, and I can send the exact year-wise breakdown." },
-  { label: "Schedule visit", text: "We'd love to have you visit our campus! 🏫 Please share your preferred date and the campus you'd like to visit." },
-  { label: "Counsellor connect", text: "Our counsellor will connect with you shortly. Thank you for your patience!" },
-  { label: "Documents needed", text: "For admission, please keep these documents ready:\n📄 10th & 12th marksheets\n📄 Aadhaar card\n📄 Passport-size photo\n📄 Transfer certificate" },
-  { label: "Thank you", text: "Thank you for reaching out! 😊 Feel free to contact us anytime if you have more questions." },
-  { label: "Campus video", text: "🎥 Here's a look at our campus and facilities:\nhttps://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK" },
-];
+type QuickReply = { id: string; label: string; text: string; sort_order: number };
 
 const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
   // ── Admission flow ────────────────────────────────────────────────────────
@@ -795,6 +785,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [templateParamOverrides, setTemplateParamOverrides] = useState<Record<string, string>>({});
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [qrManagerOpen, setQrManagerOpen] = useState(false);
+  const [qrEditId, setQrEditId] = useState<string | null>(null);
+  const [qrEditLabel, setQrEditLabel] = useState("");
+  const [qrEditText, setQrEditText] = useState("");
+  const [qrSaving, setQrSaving] = useState(false);
   const [inboxTab, setInboxTab] = useState<"all" | "leads" | "staff" | "jobs" | "other">("all");
   // Multi-number inbox: which business number's conversations to show.
   // "primary" = the most-used phone_number_id + legacy NULL rows; any other
@@ -864,6 +860,49 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     setLoading(false);
     setSelectedPhone("919876543210");
   }, [demoMode]);
+
+  // ── Load quick replies from DB ──────────────────────────────────────────
+  const fetchQuickReplies = async () => {
+    const { data } = await (supabase as any)
+      .from("whatsapp_quick_replies")
+      .select("id, label, text, sort_order")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+    if (data) setQuickReplies(data as QuickReply[]);
+  };
+  useEffect(() => { fetchQuickReplies(); }, []);
+
+  const saveQuickReply = async () => {
+    if (!qrEditLabel.trim() || !qrEditText.trim()) return;
+    setQrSaving(true);
+    try {
+      if (qrEditId) {
+        await (supabase as any).from("whatsapp_quick_replies").update({
+          label: qrEditLabel.trim(),
+          text: qrEditText.trim(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", qrEditId);
+      } else {
+        const maxOrder = quickReplies.reduce((m, q) => Math.max(m, q.sort_order), 0);
+        await (supabase as any).from("whatsapp_quick_replies").insert({
+          label: qrEditLabel.trim(),
+          text: qrEditText.trim(),
+          sort_order: maxOrder + 1,
+        });
+      }
+      await fetchQuickReplies();
+      setQrEditId(null);
+      setQrEditLabel("");
+      setQrEditText("");
+    } finally {
+      setQrSaving(false);
+    }
+  };
+
+  const deleteQuickReply = async (id: string) => {
+    await (supabase as any).from("whatsapp_quick_replies").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+    await fetchQuickReplies();
+  };
 
   const matchesActiveBusinessNumber = (c: Conversation) => {
     if (demoMode) return true;
@@ -3491,20 +3530,30 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                   <div className="border-t border-border bg-muted/20 px-4 py-2">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Quick Replies</p>
-                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowQuickReplies(false)}>
-                        <X className="h-3 w-3" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {isAdminRole(role) && (
+                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setQrManagerOpen(true)} title="Manage quick replies">
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowQuickReplies(false)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {QUICK_REPLIES.map((qr) => (
+                      {quickReplies.map((qr) => (
                         <button
-                          key={qr.label}
+                          key={qr.id}
                           onClick={() => { setReply(qr.text); setShowQuickReplies(false); }}
                           className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                         >
                           {qr.label}
                         </button>
                       ))}
+                      {quickReplies.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No quick replies yet. {isAdminRole(role) ? "Click the pencil icon to add some." : ""}</p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3719,6 +3768,71 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
           void fetchConversationPage(true, null);
         }}
       />
+
+      {/* Quick Reply Manager dialog — admin only */}
+      <Dialog open={qrManagerOpen} onOpenChange={(open) => { setQrManagerOpen(open); if (!open) { setQrEditId(null); setQrEditLabel(""); setQrEditText(""); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-4 w-4" /> Manage Quick Replies
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            {quickReplies.map((qr) => (
+              <div key={qr.id} className="flex items-start gap-2 rounded-lg border p-2 group">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{qr.label}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{qr.text}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setQrEditId(qr.id); setQrEditLabel(qr.label); setQrEditText(qr.text); }}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteQuickReply(qr.id)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {quickReplies.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No quick replies yet. Add one below.</p>
+            )}
+          </div>
+          <div className="border-t pt-3 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {qrEditId ? "Edit Quick Reply" : "Add Quick Reply"}
+            </p>
+            <Input
+              placeholder="Label (e.g. Hostel info)"
+              value={qrEditLabel}
+              onChange={(e) => setQrEditLabel(e.target.value)}
+              className="text-sm"
+            />
+            <textarea
+              placeholder="Message text..."
+              value={qrEditText}
+              onChange={(e) => setQrEditText(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!qrEditLabel.trim() || !qrEditText.trim() || qrSaving}
+                onClick={saveQuickReply}
+              >
+                {qrSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
+                {qrEditId ? "Save" : "Add"}
+              </Button>
+              {qrEditId && (
+                <Button variant="ghost" size="sm" onClick={() => { setQrEditId(null); setQrEditLabel(""); setQrEditText(""); }}>
+                  Cancel
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

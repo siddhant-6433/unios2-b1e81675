@@ -854,18 +854,22 @@ Deno.serve(async (req) => {
       goldenAnswersContext,
       lead_stage,
     );
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${googleApiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: contextParts,
-          generationConfig: { temperature: 0.55, maxOutputTokens: 700, topP: 0.9 },
-        }),
-      }
-    );
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`;
+    const geminiBody = JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: contextParts,
+      generationConfig: { temperature: 0.55, maxOutputTokens: 1000, topP: 0.9 },
+    });
+    const geminiHeaders = { "Content-Type": "application/json" };
+
+    let geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
+
+    // Retry once on transient errors (503 capacity, 429 rate limit)
+    if (!geminiRes.ok && (geminiRes.status === 503 || geminiRes.status === 429)) {
+      console.warn(`Gemini ${geminiRes.status}, retrying in 2s...`);
+      await new Promise((r) => setTimeout(r, 2000));
+      geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
+    }
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();

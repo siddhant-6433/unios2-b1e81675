@@ -106,10 +106,17 @@ const LeadDetail = () => {
   const followupQueue = (location.state as { followupQueue?: FollowupQueueState } | null)?.followupQueue;
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { user, role, profile } = useAuth();
+  const { user, role, profile, hasPermission } = useAuth();
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
+  // External owner (consultant / academic partner). Mirrors can_assign_lead_external_owner:
+  // super_admin, principal, leads:assign_external_owner, or counsellor with consultants:view.
+  const canAssignExternalOwner =
+    isSuperAdmin
+    || role === "principal"
+    || hasPermission("leads:assign_external_owner")
+    || (role === "counsellor" && hasPermission("consultants:view"));
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -1159,7 +1166,7 @@ const LeadDetail = () => {
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
             </Button>
           )}
-          {isSuperAdmin && (
+          {canAssignExternalOwner && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowExternalOwner(true)}>
               <Handshake className="h-3.5 w-3.5" /> Assign Owner
             </Button>
