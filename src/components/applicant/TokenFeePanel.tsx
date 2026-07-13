@@ -1486,181 +1486,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         </div>
       )}
 
-      {/* ── Payment CTAs ──────────────────────────────── */}
-      {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (() => {
-        // Installment presets for the token fee alternative
-        const presets: number[] = [];
-        let p = minInstalment;
-        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
-        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
-
-        const selectedAmt = instalmentPreset !== null
-          ? instalmentPreset
-          : (customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null);
-
-        return (
-          <div className="space-y-3">
-            {/* ── Primary: confirm admission ── */}
-            <div className="rounded-2xl border border-success/20 bg-gradient-to-br from-emerald-50 to-green-50 p-4 shadow-sm space-y-3">
-              <div>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-success">Recommended</span>
-                </div>
-                <p className="text-base font-bold text-success-foreground">Confirm Your Admission</p>
-                <p className="text-xs text-success mt-0.5 leading-relaxed">
-                  Pay the admission threshold and receive your Admission Number — your seat is fully secured.
-                </p>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
-                <div>
-                  <p className="text-[10px] text-gray-400 font-medium">Amount due</p>
-                  <p className="text-lg font-bold text-gray-900">₹{towardsAdmission.toLocaleString("en-IN")}</p>
-                </div>
-                {coursePaid > 0 && (
-                  <p className="text-[10px] text-gray-400 text-right">
-                    Already paid ₹{coursePaid.toLocaleString("en-IN")}<br />
-                    of ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")} target
-                  </p>
-                )}
-              </div>
-              <button
-                disabled={paying || !applicantPhone}
-                onClick={() => startPayment(towardsAdmission, {
-                  paymentType: "token_fee",
-                  productinfo: "Admission Confirmation Fee",
-                })}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
-              >
-                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
-              </button>
-            </div>
-
-            {/* ── Alternative: pay token fee ── */}
-            {!feeStatus.token_complete && tokenOutstanding > 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                {/* Collapsed header */}
-                <button
-                  onClick={() => { setShowInstalment(v => !v); setInstalmentPreset(tokenOutstanding); setCustomAmt(""); }}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-gray-700">Can't pay full amount right now?</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Pay token fee to hold your seat first
-                    </p>
-                  </div>
-                  <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${showInstalment ? "rotate-90" : ""}`} />
-                </button>
-
-                {showInstalment && (
-                  <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
-                    {/* Default: full token amount */}
-                    <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 border border-gray-200 px-3.5 py-2.5">
-                      <div>
-                        <p className="text-[10px] text-gray-400 font-medium">Token fee (holds your seat)</p>
-                        <p className="text-base font-bold text-gray-900">₹{tokenOutstanding.toLocaleString("en-IN")}</p>
-                      </div>
-                      <button
-                        disabled={paying || !applicantPhone}
-                        onClick={() => startPayment(tokenOutstanding)}
-                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
-                      >
-                        {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                        Pay Now
-                      </button>
-                    </div>
-
-                    {/* Pay in parts toggle */}
-                    <button
-                      onClick={() => {
-                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
-                        setCustomAmt("");
-                      }}
-                      className="text-xs text-info-foreground hover:text-info-foreground font-medium underline underline-offset-2"
-                    >
-                      {instalmentPreset !== tokenOutstanding
-                        ? "Hide instalment options"
-                        : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
-                    </button>
-
-                    {/* Instalment chips — revealed on toggle */}
-                    {instalmentPreset !== tokenOutstanding && (
-                      <div className="space-y-3 pt-1">
-                        <div className="flex flex-wrap gap-2">
-                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
-                            <button
-                              key={amt}
-                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
-                              className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                                instalmentPreset === amt
-                                  ? "bg-info border-info/40 text-white shadow-sm"
-                                  : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
-                              }`}
-                            >
-                              ₹{amt.toLocaleString("en-IN")}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
-                            className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                              instalmentPreset === null
-                                ? "bg-info border-info/40 text-white shadow-sm"
-                                : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
-                            }`}
-                          >
-                            Custom
-                          </button>
-                        </div>
-
-                        {instalmentPreset === null && (
-                          <div className="relative">
-                            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                              ref={customAmountInputRef}
-                              type="number" step="500" min={minInstalment} max={tokenOutstanding}
-                              value={customAmt}
-                              onChange={e => setCustomAmt(e.target.value)}
-                              placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-info/30"
-                            />
-                          </div>
-                        )}
-
-                        <p className="text-[11px] text-gray-400">
-                          Min ₹{minInstalment.toLocaleString("en-IN")} per payment · pay multiple times to reach the token fee target
-                        </p>
-
-                        <button
-                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
-                          onClick={() => selectedAmt && startPayment(selectedAmt)}
-                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
-                        >
-                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                          {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
-                        </button>
-                      </div>
-                    )}
-
-                    {!applicantPhone && (
-                      <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
-                        Phone number missing — please contact admissions
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Lump-sum payment options ───────────────────────────────────
-           Hero "Best Value" full-course card with the marketing
-           headline ("Save ₹X on Full Course") plus a collapsible
-           breakdown for transparency. Year-1 sits below as a
-           smaller alternative — visible but visually secondary so the
-           full-course pitch lands first.
+      {/* ── Lump-sum payment options (above token-fee fallback) ─────────
+           Full-course + Year-1 CTAs. Placed above the token-fee
+           "Can't pay full amount" accordion so candidates clear year-1
+           / full course before falling back to a seat-hold token.
       */}
       {(() => {
         const rows = buildApplicantFeeBreakdownRows({
@@ -1700,14 +1529,111 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         return (
           <div className="space-y-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">One-time payment options</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Clear course fees</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
                 {hasDiscount
-                  ? "Calculated on fee after approved waiver."
-                  : "Pay remaining fee in one transaction."}
+                  ? "Prefer Year 1 or full course first — calculated after approved waiver."
+                  : "Prefer Year 1 or full course first; token fee is only a seat-hold fallback."}
               </p>
             </div>
 
+            {/* ── Year 1 (preferred path to clear first-year fee) ─────── */}
+            {(y1Fee > 0) && (
+              <div className={`rounded-2xl border-2 p-4 shadow-md space-y-3 ${
+                y1Covered ? "border-gray-200 bg-gray-50" : "border-success/30 bg-gradient-to-br from-emerald-50 to-green-50"
+              }`}>
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-success">Recommended</span>
+                  </div>
+                  {y1Covered ? (
+                    <p className="text-sm font-bold text-success-foreground flex items-center gap-1.5">
+                      <Check className="h-4 w-4" /> Year 1 covered
+                      {surplusPaidVsY1 > 0 && (
+                        <span className="text-xs font-normal text-gray-500 italic">
+                          · {fmtRupee(surplusPaidVsY1)} surplus carries forward
+                        </span>
+                      )}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-base font-bold text-success-foreground">Pay year 1 fee now</p>
+                      <p className="text-xs text-success mt-0.5 leading-relaxed">
+                        {y1Disc > 0
+                          ? `Clear first-year fee in one go — save ${fmtRupee(y1Disc)}. Best path to complete Year 1.`
+                          : "Clear the full first-year fee and stay on track for admission milestones."}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!y1Covered && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-medium">Year 1 amount due</p>
+                      <p className="text-lg font-bold text-gray-900">{fmtRupee(y1Due)}</p>
+                    </div>
+                    {y1Disc > 0 && (
+                      <p className="text-[10px] text-success text-right font-semibold">
+                        Save {fmtRupee(y1Disc)}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {y1Covered ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2.5 py-1 text-[10px] font-bold">
+                    <Check className="h-3 w-3" /> Covered
+                  </span>
+                ) : (
+                  <button
+                    disabled={paying || !applicantPhone || y1Due <= 0}
+                    onClick={() => startPayment(y1Due, {
+                      paymentType: "other",
+                      productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
+                      concession: y1Disc,
+                      reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
+                      concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
+                    })}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
+                  >
+                    {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                    Pay {fmtRupee(y1Due)} · Year 1 fee
+                  </button>
+                )}
+
+
+                {/* Compact breakdown — only show when there's something to pay */}
+                {!y1Covered && (
+                  <details className="mt-2 group">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-warning-foreground hover:text-warning-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
+                      View breakdown
+                    </summary>
+                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Year 1 fee after waiver</span>
+                        <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
+                      </div>
+                      {paid > 0 && (
+                        <div className="flex justify-between text-info-foreground">
+                          <span>Already paid</span>
+                          <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
+                        </div>
+                      )}
+                      {y1Disc > 0 && (
+                        <div className="flex justify-between text-success">
+                          <span>{lumpSumPct}% one-time off</span>
+                          <span>− {fmtRupee(y1Disc)}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
+                        <span className="text-gray-700">Pay now</span>
+                        <span className="text-warning-foreground">{fmtRupee(y1Due)}</span>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
             {/* ── HERO: Full course (Best Value) ──────────────────────────
                 Gated on full_course_payment_deadline — after that date the
                 lump-sum CTA disappears (only year-1 lump-sum remains
@@ -1847,92 +1773,177 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </div>
             )}
 
-            {/* ── Year 1 only — secondary alternative ─────────────────── */}
-            {(y1Fee > 0) && (
-              <div className={`rounded-xl border p-3 ${
-                y1Covered ? "border-gray-200 bg-gray-50" : "border-warning/20 bg-warning/5/60"
-              }`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">
-                      {hasFullCourse ? "Or pay year 1 only" : "Pay year 1"}
+          </div>
+        );
+      })()}
+
+      {/* ── Payment CTAs: Confirm admission ───────────────── */}
+      {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (
+        <div className="space-y-3">
+            {/* ── Confirm admission threshold (below year-1 full pay) ── */}
+            <div className="rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm space-y-3">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-info-foreground">Admission threshold</span>
+                </div>
+                <p className="text-base font-bold text-gray-900">Confirm Your Admission</p>
+                <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">
+                  Pay the admission threshold and receive your Admission Number — your seat is fully secured.
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
+                <div>
+                  <p className="text-[10px] text-gray-400 font-medium">Amount due</p>
+                  <p className="text-lg font-bold text-gray-900">₹{towardsAdmission.toLocaleString("en-IN")}</p>
+                </div>
+                {coursePaid > 0 && (
+                  <p className="text-[10px] text-gray-400 text-right">
+                    Already paid ₹{coursePaid.toLocaleString("en-IN")}<br />
+                    of ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")} target
+                  </p>
+                )}
+              </div>
+              <button
+                disabled={paying || !applicantPhone}
+                onClick={() => startPayment(towardsAdmission, {
+                  paymentType: "token_fee",
+                  productinfo: "Admission Confirmation Fee",
+                })}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3.5 text-sm font-bold text-white hover:bg-info/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
+              >
+                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
+              </button>
+            </div>
+
+        </div>
+      )}
+
+      {/* ── Token fee (last resort after year-1 / full course options) ── */}
+      {!feeStatus.token_complete && tokenOutstanding > 0 && !feeStatus.twenty_five_complete && (() => {
+        const presets: number[] = [];
+        let p = minInstalment;
+        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
+        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
+
+        const selectedAmt = instalmentPreset !== null
+          ? instalmentPreset
+          : (customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null);
+
+        return (
+          <div className="space-y-3">
+            {/* ── Alternative: pay token fee ── */}
+            {!feeStatus.token_complete && tokenOutstanding > 0 && (
+              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                {/* Collapsed header */}
+                <button
+                  onClick={() => { setShowInstalment(v => !v); setInstalmentPreset(tokenOutstanding); setCustomAmt(""); }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Can't pay full amount right now?</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Pay token fee to hold your seat first
                     </p>
-                    {y1Covered ? (
-                      <p className="text-xs text-gray-600 inline-flex items-center gap-1">
-                        <Check className="h-3 w-3 text-success" />
-                        Year 1 covered.
-                        {surplusPaidVsY1 > 0 && (
-                          <span className="text-gray-500 italic">
-                            {fmtRupee(surplusPaidVsY1)} surplus carries forward.
-                          </span>
+                  </div>
+                  <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${showInstalment ? "rotate-90" : ""}`} />
+                </button>
+
+                {showInstalment && (
+                  <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
+                    {/* Default: full token amount */}
+                    <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 border border-gray-200 px-3.5 py-2.5">
+                      <div>
+                        <p className="text-[10px] text-gray-400 font-medium">Token fee (holds your seat)</p>
+                        <p className="text-base font-bold text-gray-900">₹{tokenOutstanding.toLocaleString("en-IN")}</p>
+                      </div>
+                      <button
+                        disabled={paying || !applicantPhone}
+                        onClick={() => startPayment(tokenOutstanding)}
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                        Pay Now
+                      </button>
+                    </div>
+
+                    {/* Pay in parts toggle */}
+                    <button
+                      onClick={() => {
+                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
+                        setCustomAmt("");
+                      }}
+                      className="text-xs text-info-foreground hover:text-info-foreground font-medium underline underline-offset-2"
+                    >
+                      {instalmentPreset !== tokenOutstanding
+                        ? "Hide instalment options"
+                        : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
+                    </button>
+
+                    {/* Instalment chips — revealed on toggle */}
+                    {instalmentPreset !== tokenOutstanding && (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex flex-wrap gap-2">
+                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
+                            <button
+                              key={amt}
+                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
+                              className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
+                                instalmentPreset === amt
+                                  ? "bg-info border-info/40 text-white shadow-sm"
+                                  : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
+                              }`}
+                            >
+                              ₹{amt.toLocaleString("en-IN")}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
+                            className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
+                              instalmentPreset === null
+                                ? "bg-info border-info/40 text-white shadow-sm"
+                                : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
+                            }`}
+                          >
+                            Custom
+                          </button>
+                        </div>
+
+                        {instalmentPreset === null && (
+                          <div className="relative">
+                            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              ref={customAmountInputRef}
+                              type="number" step="500" min={minInstalment} max={tokenOutstanding}
+                              value={customAmt}
+                              onChange={e => setCustomAmt(e.target.value)}
+                              placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-info/30"
+                            />
+                          </div>
                         )}
+
+                        <p className="text-[11px] text-gray-400">
+                          Min ₹{minInstalment.toLocaleString("en-IN")} per payment · pay multiple times to reach the token fee target
+                        </p>
+
+                        <button
+                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
+                          onClick={() => selectedAmt && startPayment(selectedAmt)}
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                          {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
+                        </button>
+                      </div>
+                    )}
+
+                    {!applicantPhone && (
+                      <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
+                        Phone number missing — please contact admissions
                       </p>
-                    ) : (
-                      <>
-                        <p className="text-sm font-semibold text-warning-foreground">
-                          Pay year 1 now
-                        </p>
-                        <p className="text-[11px] text-warning-foreground mt-0.5">
-                          {y1Disc > 0
-                            ? `One-time waiver: save ${fmtRupee(y1Disc)} · pay ${fmtRupee(y1Due)}`
-                            : `Pay remaining first-year fee: ${fmtRupee(y1Due)}`}
-                        </p>
-                      </>
                     )}
                   </div>
-
-                  {y1Covered ? (
-                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2.5 py-1 text-[10px] font-bold">
-                      <Check className="h-3 w-3" /> Covered
-                    </span>
-                  ) : (
-                    <button
-                      disabled={paying || !applicantPhone || y1Due <= 0}
-                      onClick={() => startPayment(y1Due, {
-                        paymentType: "other",
-                        productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
-                        concession: y1Disc,
-                        reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
-                        concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
-                      })}
-                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-warning px-3.5 py-2 text-xs font-bold text-white hover:bg-warning/60 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
-                    >
-                      {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                      Pay {fmtRupee(y1Due)}
-                    </button>
-                  )}
-                </div>
-
-                {/* Compact breakdown — only show when there's something to pay */}
-                {!y1Covered && (
-                  <details className="mt-2 group">
-                    <summary className="cursor-pointer text-[10px] font-semibold text-warning-foreground hover:text-warning-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
-                      <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
-                      View breakdown
-                    </summary>
-                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Year 1 fee after waiver</span>
-                        <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
-                      </div>
-                      {paid > 0 && (
-                        <div className="flex justify-between text-info-foreground">
-                          <span>Already paid</span>
-                          <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
-                        </div>
-                      )}
-                      {y1Disc > 0 && (
-                        <div className="flex justify-between text-success">
-                          <span>{lumpSumPct}% one-time off</span>
-                          <span>− {fmtRupee(y1Disc)}</span>
-                        </div>
-                      )}
-                      <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
-                        <span className="text-gray-700">Pay now</span>
-                        <span className="text-warning-foreground">{fmtRupee(y1Due)}</span>
-                      </div>
-                    </div>
-                  </details>
                 )}
               </div>
             )}
