@@ -90,6 +90,8 @@ interface UserWithRole {
   login_disabled: boolean;
   last_seen_at: string | null;
   archived_at: string | null;
+  /** Soft-deleted profiles can still hold phone uniqueness; surfaced on phone search recovery. */
+  deleted_at: string | null;
 }
 
 function isOnline(lastSeenAt: string | null): boolean {
@@ -139,7 +141,7 @@ const AdminPanel = () => {
   const [savingUser, setSavingUser] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [phoneEdit, setPhoneEdit] = useState<{ userId: string; name: string; phone: string | null } | null>(null);
+  const [phoneEdit, setPhoneEdit] = useState<{ userId: string; name: string; phone: string | null; role: string | null } | null>(null);
   const [employeeProfile, setEmployeeProfile] = useState<{ userId: string; name: string } | null>(null);
   const [setPasswordTarget, setSetPasswordTarget] = useState<{ userId: string; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ userId: string; name: string } | null>(null);
@@ -196,6 +198,7 @@ const AdminPanel = () => {
         login_disabled: !!row.login_disabled,
         last_seen_at: row.last_seen_at || null,
         archived_at: row.archived_at || null,
+        deleted_at: row.deleted_at || null,
       }));
 
       setUsers(merged);
@@ -230,6 +233,39 @@ const AdminPanel = () => {
     setPublishers(data ?? []);
     setPublishersLoading(false);
   };
+
+  // Deep link: /admin?tab=users&user=<user_id>&category=&q= opens directory focus + profile.
+  useEffect(() => {
+    const deepUserId = searchParams.get("user");
+    if (!deepUserId || !canManageUsers) return;
+    const category = searchParams.get("category") as
+      | "employees" | "consultants" | "academic_partners" | "publishers" | "families" | "leads" | null;
+    const q = searchParams.get("q");
+    if (category) setUserSubTab(category);
+    if (q) {
+      setSearch(q);
+      setDebouncedSearch(q);
+    }
+    setRoleFilter("all");
+    setStatusFilter("all");
+    setPage(0);
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("user_id, display_name")
+        .eq("user_id", deepUserId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (data?.user_id) {
+        setEmployeeProfile({
+          userId: data.user_id,
+          name: data.display_name || "User",
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [searchParams, canManageUsers]);
 
   // Debounce the search box so each keystroke doesn't hit the server; reset to
   // the first page whenever the query changes.
@@ -842,6 +878,11 @@ const AdminPanel = () => {
                                     <Archive className="h-2.5 w-2.5" /> Archived
                                   </span>
                                 )}
+                                {user.deleted_at && (
+                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                                    Soft-deleted · still holds phone
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -851,7 +892,7 @@ const AdminPanel = () => {
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <span className={`text-sm ${user.phone ? "text-foreground" : "text-muted-foreground italic"}`}>{user.phone || "Not set"}</span>
-                              <button onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
+                              <button onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone, role: user.role })}
                                 className="rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Edit phone number">
                                 <Phone className="h-3.5 w-3.5" />
                               </button>
@@ -1037,8 +1078,34 @@ const AdminPanel = () => {
               )}
               {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => { fetchUsers(); fetchCounts(); }} />}
               {phoneEdit && (
-                <EditPhoneDialog open onClose={() => setPhoneEdit(null)} onSuccess={() => { fetchUsers(); fetchCounts(); }}
-                  userId={phoneEdit.userId} userName={phoneEdit.name} currentPhone={phoneEdit.phone || null} />
+                <EditPhoneDialog
+                  open
+                  onClose={() => setPhoneEdit(null)}
+                  onSuccess={() => { fetchUsers(); fetchCounts(); }}
+                  userId={phoneEdit.userId}
+                  userName={phoneEdit.name}
+                  userRole={phoneEdit.role}
+                  currentPhone={phoneEdit.phone || null}
+                  onOpenProfile={({ userId, name, role, phone, category }) => {
+                    setPhoneEdit(null);
+                    // Land on the correct Users sub-tab + search so the row is findable.
+                    // Profiles with no role live under "Leads & Applicants", not Employees.
+                    setUserSubTab(category);
+                    setRoleFilter("all");
+                    setStatusFilter("all");
+                    setPage(0);
+                    setSearch(phone || name);
+                    setDebouncedSearch(phone || name);
+                    setShowArchivedUsers(false);
+                    setEmployeeProfile({ userId, name });
+                    toast({
+                      title: "Opened conflicting user",
+                      description: role
+                        ? `${name} · ${role.replace(/_/g, " ")} · tab: ${category}`
+                        : `${name} has no UniOs role — switched to Leads & Applicants. Reassign the phone or assign a role.`,
+                    });
+                  }}
+                />
               )}
               {employeeProfile && (
                 <EmployeeProfileDialog open onClose={() => setEmployeeProfile(null)}
