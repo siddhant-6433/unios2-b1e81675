@@ -31,11 +31,17 @@ describe("applicant portal phone/lead match", () => {
     expect(applyPortal).toContain("Offer linked");
   });
 
-  it("places year-1 / one-time options above the token-fee fallback", () => {
-    const y1 = tokenPanel.indexOf("Pay year 1 now");
+  it("places year-1 fee CTA above confirm-admission and token-fee fallback", () => {
+    const y1 = tokenPanel.indexOf("Pay year 1 fee now");
+    const confirm = tokenPanel.indexOf("Confirm Your Admission");
     const token = tokenPanel.indexOf("Can't pay full amount right now?");
     expect(y1).toBeGreaterThan(-1);
+    expect(confirm).toBeGreaterThan(-1);
     expect(token).toBeGreaterThan(-1);
+    // Promote full year-1 clearance above threshold / token hold
+    expect(y1).toBeLessThan(confirm);
     expect(y1).toBeLessThan(token);
+    expect(confirm).toBeLessThan(token);
   });
 });
+
