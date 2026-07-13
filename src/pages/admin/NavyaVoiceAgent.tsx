@@ -2,6 +2,17 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { Sparkles } from "lucide-react";
 import { NavyaKnowledgeContent } from "./NavyaKnowledge";
 
@@ -93,8 +104,19 @@ function VoiceProviderCard() {
     });
   }, []);
 
-  const flip = async (next: Provider) => {
+  // Switching the provider affects EVERY live admissions call within ~30s —
+  // a stray click once flipped production off cartesia. Require typing the
+  // provider name to confirm.
+  const [pendingProvider, setPendingProvider] = useState<Provider | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+
+  const requestFlip = (next: Provider) => {
     if (next === provider) return;
+    setConfirmText("");
+    setPendingProvider(next);
+  };
+
+  const flip = async (next: Provider) => {
     setSaving(true);
     const { error } = await supabase.rpc("set_voice_agent_provider" as any, { _provider: next });
     setSaving(false);
@@ -144,21 +166,21 @@ function VoiceProviderCard() {
         <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1 flex-wrap">
           <button
             disabled={saving}
-            onClick={() => flip("gemini")}
+            onClick={() => requestFlip("gemini")}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "gemini" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Gemini Live
           </button>
           <button
             disabled={saving}
-            onClick={() => flip("sarvam")}
+            onClick={() => requestFlip("sarvam")}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "sarvam" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Sarvam Cascade
           </button>
           <button
             disabled={saving}
-            onClick={() => flip("cartesia")}
+            onClick={() => requestFlip("cartesia")}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "cartesia" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Cartesia Streaming
@@ -465,6 +487,47 @@ function VoiceProviderCard() {
           )}
         </div>
       )}
+
+      {/* Confirm-typing dialog — a provider switch redirects EVERY new call
+          within ~30s, so an accidental click must not be enough. */}
+      <AlertDialog open={pendingProvider !== null} onOpenChange={(open) => { if (!open) setPendingProvider(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch live voice provider?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  You are switching Navya's live call engine from{" "}
+                  <span className="font-semibold text-foreground">{provider}</span> to{" "}
+                  <span className="font-semibold text-foreground">{pendingProvider}</span>.
+                  Every new admissions call will use the new engine within ~30 seconds.
+                </p>
+                <p>
+                  Type <span className="font-mono font-semibold text-foreground">{pendingProvider}</span> to confirm:
+                </p>
+                <Input
+                  autoFocus
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={pendingProvider ?? ""}
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving || confirmText.trim().toLowerCase() !== (pendingProvider ?? "")}
+              onClick={() => {
+                if (pendingProvider) flip(pendingProvider);
+                setPendingProvider(null);
+              }}
+            >
+              Switch provider
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
