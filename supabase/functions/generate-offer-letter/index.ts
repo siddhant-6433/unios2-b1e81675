@@ -191,9 +191,22 @@ interface ApplicationEntranceExam {
 interface ApplicationCahetSource {
   application_id?: string | null;
   full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
   academic_details?: {
     entrance_exams?: ApplicationEntranceExam[] | null;
   } | null;
+}
+
+/** Prefer non-empty applicant form contact over CRM lead contact. */
+function preferApplicantContact(
+  appValue: string | null | undefined,
+  leadValue: string | null | undefined,
+): string | null {
+  const fromApp = String(appValue || "").trim();
+  if (fromApp) return fromApp;
+  const fromLead = String(leadValue || "").trim();
+  return fromLead || null;
 }
 
 function cahetRegistrationFromApplication(app: ApplicationCahetSource | null): { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null {
@@ -1070,10 +1083,14 @@ Deno.serve(async (req) => {
     let applicationId: string | null = null;
     applicationId = publicApplicationRef(requestedApplicationValue) || publicApplicationRef(leadApplicationValue);
     let applicationRow: ApplicationCahetSource | null = null;
+    // Always select phone/email from applications so the offer PDF can prefer
+    // the form contact over stale marketing-ingest values on the CRM lead.
+    const appContactSelect =
+      "application_id, full_name, phone, email, academic_details";
     if (applicationId) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, full_name, academic_details")
+        .select(appContactSelect)
         .eq("application_id", applicationId)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1081,7 +1098,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && offer.lead_id) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("id, application_id, full_name, academic_details")
+        .select(`id, ${appContactSelect}`)
         .eq("lead_id", offer.lead_id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -1092,7 +1109,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && isUuidLike(leadApplicationValue)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("id, application_id, full_name, academic_details")
+        .select(`id, ${appContactSelect}`)
         .eq("id", leadApplicationValue)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1101,7 +1118,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && lead?.application_id && isUuidLike(lead.application_id)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, full_name, academic_details")
+        .select(appContactSelect)
         .eq("id", lead.application_id)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1110,14 +1127,22 @@ Deno.serve(async (req) => {
     if (!applicationRow && lead?.application_id && !isUuidLike(lead.application_id)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, full_name, academic_details")
+        .select(appContactSelect)
         .eq("application_id", lead.application_id)
         .maybeSingle();
       applicationRow = appRow || null;
       applicationId = appRow?.application_id || lead.application_id || null;
     }
     const applicantName = String(applicationRow?.full_name || "").trim() || lead?.name || "Applicant";
-    const pdfLead = { ...lead, name: applicantName };
+    // Prefer applicant form phone/email over CRM lead identity. Marketing
+    // ingest can leave another person's contact on the lead while the
+    // application form (and application PDF) already has the correct pair.
+    const pdfLead = {
+      ...lead,
+      name: applicantName,
+      phone: preferApplicantContact(applicationRow?.phone, lead?.phone),
+      email: preferApplicantContact(applicationRow?.email, lead?.email),
+    };
 
     // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
     // then 'all', then default).
