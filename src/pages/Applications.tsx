@@ -1454,7 +1454,7 @@ export default function Applications() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-baseline gap-2">
               <h2 className="text-sm font-semibold text-foreground">Application Pipeline</h2>
-              <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · hold/active splits when any are blocked</span>
+              <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · hold/active on every stage</span>
             </div>
             <div className="flex items-center gap-2">
               {paidNoOffer > 0 && (
@@ -1538,12 +1538,10 @@ export default function Applications() {
               const isActive = stageFilter === stage;
               const holdSplitActive = isActive && stageHoldSplit === "on_hold";
               const activeSplitActive = isActive && stageHoldSplit === "active";
-              // Proportional width gives the true funnel-narrowing shape;
-              // floor at min-width so single-digit stages stay legible.
-              // Extra room when a hold split is shown under the main count.
+              // Proportional width + min room for hold/active chips on every card.
               const widthBasis = totalApps > 0
-                ? Math.max(stuckOnHold > 0 ? 148 : 124, (reached / totalApps) * 220)
-                : 124;
+                ? Math.max(148, (reached / totalApps) * 220)
+                : 148;
               const reachPct = totalApps > 0 ? (reached / totalApps) * 100 : 0;
 
               const selectStageCohort = (hold: "all" | "on_hold" | "active") => {
@@ -1578,7 +1576,7 @@ export default function Applications() {
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
                     style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis, animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
-                    title={`${stuck} currently at ${meta.label}${stuckOnHold > 0 ? ` (${stuckOnHold} on hold · ${stuckActive} active)` : ""} · ${reached} reached this stage or beyond`}
+                    title={`${stuck} currently at ${meta.label} (${stuckOnHold} on hold · ${stuckActive} active) · ${reached} reached this stage or beyond`}
                   >
                     <button
                       type="button"
@@ -1606,51 +1604,52 @@ export default function Applications() {
                         <span className="font-semibold text-foreground/70">{reached}</span> reached
                       </p>
                     </button>
-                    {stuckOnHold > 0 && (
-                      <div className="mt-1.5 flex items-center gap-1 min-w-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const turningOff = holdSplitActive;
-                            setStageFilter(stage);
-                            setStageHoldSplit(turningOff ? "all" : "on_hold");
-                            setPaymentFilter("all");
-                            setStatusFilter("all");
-                            selectStageCohort(turningOff ? "all" : "on_hold");
-                          }}
-                          className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors ${
-                            holdSplitActive
-                              ? "bg-amber-200/80 text-amber-900 ring-1 ring-amber-400"
-                              : "bg-amber-50 text-amber-700 hover:bg-amber-100"
-                          }`}
-                          title={`${stuckOnHold} on hold at ${meta.label}`}
-                        >
-                          {stuckOnHold} hold
-                        </button>
-                        <span className="text-[10px] text-muted-foreground/50">·</span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const turningOff = activeSplitActive;
-                            setStageFilter(stage);
-                            setStageHoldSplit(turningOff ? "all" : "active");
-                            setPaymentFilter("all");
-                            setStatusFilter("all");
-                            selectStageCohort(turningOff ? "all" : "active");
-                          }}
-                          className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors truncate ${
-                            activeSplitActive
-                              ? "bg-muted text-foreground ring-1 ring-border"
-                              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                          }`}
-                          title={`${stuckActive} not on hold at ${meta.label}`}
-                        >
-                          {stuckActive} active
-                        </button>
-                      </div>
-                    )}
+                    {/* Always show hold/active so every stage card has the same control surface. */}
+                    <div className="mt-1.5 flex items-center gap-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const turningOff = holdSplitActive;
+                          setStageFilter(stage);
+                          setStageHoldSplit(turningOff ? "all" : "on_hold");
+                          setPaymentFilter("all");
+                          setStatusFilter("all");
+                          selectStageCohort(turningOff ? "all" : "on_hold");
+                        }}
+                        className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors ${
+                          holdSplitActive
+                            ? "bg-amber-200/80 text-amber-900 ring-1 ring-amber-400"
+                            : stuckOnHold > 0
+                              ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              : "bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                        }`}
+                        title={`${stuckOnHold} on hold at ${meta.label}`}
+                      >
+                        {stuckOnHold} hold
+                      </button>
+                      <span className="text-[10px] text-muted-foreground/50">·</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const turningOff = activeSplitActive;
+                          setStageFilter(stage);
+                          setStageHoldSplit(turningOff ? "all" : "active");
+                          setPaymentFilter("all");
+                          setStatusFilter("all");
+                          selectStageCohort(turningOff ? "all" : "active");
+                        }}
+                        className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors truncate ${
+                          activeSplitActive
+                            ? "bg-muted text-foreground ring-1 ring-border"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        }`}
+                        title={`${stuckActive} not on hold at ${meta.label}`}
+                      >
+                        {stuckActive} active
+                      </button>
+                    </div>
                   </div>
                 </Fragment>
               );
