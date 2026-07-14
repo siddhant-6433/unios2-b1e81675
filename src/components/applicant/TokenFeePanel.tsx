@@ -163,8 +163,21 @@ const loadImageForPdf = async (url: string) => {
   return { dataUrl, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
 };
 
+/** Prefer a real phone for gateway checkout — login profile is often empty. */
+function pickPhone(...candidates: Array<string | null | undefined>): string | null {
+  for (const raw of candidates) {
+    const value = (raw || "").trim();
+    if (!value) continue;
+    const digits = value.replace(/\D/g, "");
+    if (digits.length >= 10) return value;
+  }
+  return null;
+}
+
 export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment, onBehalfContext }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
+  const [leadPhone, setLeadPhone] = useState<string | null>(null);
+  const [leadEmail, setLeadEmail] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
   const [yearFees, setYearFees] = useState<Record<string, number>>({});
@@ -387,13 +400,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     const offerRows = offerRes.data as any[] | null;
     const yearMap  = yearRes.data;
 
-    // Merge the applicant-facing fields (name/phone/email come from the parent props)
-    // with the RPC-fetched fields.
+    // Prefer prop phone, then lead phone from RPC (login profile is often blank).
+    const resolvedPhone = pickPhone(applicantPhone, leadRow.phone);
+    const resolvedEmail = (applicantEmail || leadRow.email || null) as string | null;
+    setLeadPhone(resolvedPhone);
+    setLeadEmail(resolvedEmail);
+
+    // Merge the applicant-facing fields with the RPC-fetched fields.
     setLead({
       id: leadRow.id,
       name: applicantName,
-      phone: applicantPhone || "",
-      email: applicantEmail,
+      phone: resolvedPhone || "",
+      email: resolvedEmail,
       stage: leadRow.stage,
       session_id: leadRow.session_id,
       token_amount: null,
@@ -447,11 +465,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const paymentPhone = pickPhone(applicantPhone, leadPhone, lead?.phone);
+  const paymentEmail = (applicantEmail || leadEmail || lead?.email || null) as string | null;
+
   const startPayment = async (
     amount: number,
     opts: { paymentType?: string; productinfo?: string; concession?: number; reason?: string; concessionBreakdown?: Record<string, number> } = {},
   ) => {
-    if (!lead || !applicantPhone) return;
+    if (!lead) {
+      setError("Lead details are still loading. Please wait a moment and try again.");
+      return;
+    }
+    if (!paymentPhone) {
+      setError("Phone number missing on your profile — contact admissions or re-login with WhatsApp OTP so payment can be started.");
+      return;
+    }
     if (amount <= 0) { setError("Enter a valid amount"); return; }
     if (onBehalfContext?.token && !offerConsentVerified) {
       setError("Student WhatsApp OTP consent is required before accepting the offer or paying token/admission fees on behalf of the student.");
@@ -471,8 +499,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           leadId: lead.id,
           paymentType: opts.paymentType || "token_fee",
           customerName: applicantName,
-          customerEmail: applicantEmail || undefined,
-          customerPhone: applicantPhone,
+          customerEmail: paymentEmail || undefined,
+          customerPhone: paymentPhone,
           productInfo: opts.productinfo || "Token Fee",
           concessionAmount: opts.concession || 0,
           waiverReason: opts.reason || null,
@@ -490,9 +518,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       return;
     }
 
-    // Open blank window synchronously — browsers block window.open() called
-    // after an await because the user-gesture chain is broken in async context.
-    const payWin = window.open("about:blank", "_blank");
+    // Open blank window synchronously — browsers (esp. Edge) block window.open()
+    // after await because the user-gesture chain is broken in async context.
+    let payWin: Window | null = null;
+    try {
+      payWin = window.open("about:blank", "_blank");
+    } catch {
+      payWin = null;
+    }
 
     setPaying(true);
     setError(null);
@@ -505,8 +538,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           payment_type: opts.paymentType || "token_fee",
           amount,
           firstname: applicantName.split(" ")[0] || applicantName,
-          email: applicantEmail || undefined,
-          phone: applicantPhone,
+          email: paymentEmail || undefined,
+          phone: paymentPhone,
           productinfo: opts.productinfo || "Token Fee",
           concession_amount: opts.concession || 0,
           waiver_reason: opts.reason || null,
@@ -533,14 +566,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         amount,
         payment_type: opts.paymentType || "token_fee",
       });
-      if (payWin) {
+      if (payWin && !payWin.closed) {
         payWin.location.href = data.pay_url;
       } else {
-        // Popup was blocked — fall back to same-tab redirect
-        window.location.href = data.pay_url;
+        // Popup blocked (common on Edge with strict tracking prevention) — same-tab redirect
+        window.location.assign(data.pay_url);
       }
     } catch (e: any) {
-      payWin?.close();
+      try { payWin?.close(); } catch { /* ignore */ }
       setError(e?.message || "Failed to start payment");
     } finally {
       setPaying(false);
@@ -1652,7 +1685,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 Student OTP consent required
               </p>
               <p className={`text-xs mt-0.5 leading-relaxed ${offerConsentVerified ? "text-success" : "text-warning-foreground"}`}>
-                Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {applicantPhone || "the candidate phone"}.
+                Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {paymentPhone || "the candidate phone"}.
               </p>
             </div>
           </div>
@@ -1685,6 +1718,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {!paymentPhone && (
+        <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs text-destructive font-medium">
+          Phone number missing — payment buttons stay disabled until we have a valid mobile for the gateway.
+          Re-login with WhatsApp OTP, or contact admissions.
         </div>
       )}
 
@@ -1808,7 +1848,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   </span>
                 ) : (
                   <button
-                    disabled={paying || !applicantPhone || y1Due <= 0}
+                    type="button"
+                    disabled={paying || !paymentPhone || y1Due <= 0}
                     onClick={() => startPayment(y1Due, {
                       paymentType: "other",
                       productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
@@ -1922,7 +1963,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </button>
                   ) : (
                     <button
-                      disabled={paying || !applicantPhone || fcDue <= 0}
+                      type="button"
+                      disabled={paying || !paymentPhone || fcDue <= 0}
                       onClick={() => {
                         const lump  = lumpSumPct / 100;
                         const multi = multiYearPct / 100;
@@ -2027,7 +2069,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 )}
               </div>
               <button
-                disabled={paying || !applicantPhone}
+                type="button"
+                disabled={paying || !paymentPhone}
                 onClick={() => startPayment(towardsAdmission, {
                   paymentType: "token_fee",
                   productinfo: "Admission Confirmation Fee",
@@ -2081,7 +2124,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         <p className="text-base font-bold text-gray-900">₹{tokenOutstanding.toLocaleString("en-IN")}</p>
                       </div>
                       <button
-                        disabled={paying || !applicantPhone}
+                        type="button"
+                        disabled={paying || !paymentPhone}
                         onClick={() => startPayment(tokenOutstanding)}
                         className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
                       >
@@ -2151,7 +2195,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         </p>
 
                         <button
-                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
+                          type="button"
+                          disabled={paying || !paymentPhone || selectedAmt === null || selectedAmt < minInstalment}
                           onClick={() => selectedAmt && startPayment(selectedAmt)}
                           className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
                         >
@@ -2161,9 +2206,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       </div>
                     )}
 
-                    {!applicantPhone && (
+                    {!paymentPhone && (
                       <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
-                        Phone number missing — please contact admissions
+                        Phone number missing on your login profile — re-login with WhatsApp OTP or contact admissions.
                       </p>
                     )}
                   </div>
