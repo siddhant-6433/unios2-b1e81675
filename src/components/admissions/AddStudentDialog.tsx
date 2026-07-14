@@ -1,13 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TextField, SelectField, DatePickerField } from "@/components/ui/state-fields";
 import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
+import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 
-interface Campus      { id: string; name: string; }
+interface Campus      { id: string; name: string; code: string; }
 interface Institution { id: string; name: string; code: string; type: string; }
 interface Course      { id: string; name: string; code: string; }
 interface Session     { id: string; name: string; }
@@ -24,7 +27,29 @@ interface AddStudentDialogProps {
   onDraftChange?: () => void;
 }
 
-type FeeVersion = "new_admission" | "existing_parent" | "standard";
+type FeeVersion = "new_admission" | "existing_parent" | "standard" | "stetho_batch";
+type StudentInsert = Database["public"]["Tables"]["students"]["Insert"];
+type StudentForm = {
+  name: string;
+  dob: string;
+  gender: string;
+  campus_id: string;
+  institution_id: string;
+  course_id: string;
+  session_id: string;
+  joining_academic_year: string;
+  semester: string;
+  section: string;
+  class_roll_no: string;
+  student_type: string;
+  school_admission_no: string;
+  father_name: string;
+  father_phone: string;
+  mother_name: string;
+  mother_phone: string;
+  admission_date: string;
+  fee_version: FeeVersion;
+};
 
 // School grade suffix → readable label
 const GRADE_LABELS: Record<string, string> = {
@@ -46,15 +71,24 @@ function courseLabel(c: Course) {
   return GRADE_LABELS[suffix] ? `${GRADE_LABELS[suffix]} (${c.code})` : c.name;
 }
 
+function isDaottCourse(course: Course | null) {
+  return course ? ["DAOTT-GN", "OTT-GN"].includes(course.code) : false;
+}
+
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
+const HIGHER_ED_TERMS = [
+  "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
+  "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
+];
 
 export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId, resumeDraftId, onDraftChange }: AddStudentDialogProps) {
-  const { user } = useAuth();
+  const { user, role, profile } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const [allCampuses,   setAllCampuses]   = useState<Campus[]>([]);
+  const [campusesLoaded, setCampusesLoaded] = useState(false);
   const [institutions,  setInstitutions]  = useState<Institution[]>([]);
   const [courses,       setCourses]       = useState<Course[]>([]);
   const [sessions,      setSessions]      = useState<Session[]>([]);
@@ -66,9 +100,10 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   const draftIdRef = useRef<string | null>(null);
   const skipNextAutosave = useRef(false);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<StudentForm>({
     name: "", dob: "", gender: "", campus_id: defaultCampusId || "",
     institution_id: "", course_id: "", session_id: "",
+    joining_academic_year: "", semester: "",
     section: "", class_roll_no: "", student_type: "day_scholar",
     school_admission_no: "",                // existing no from previous system
     father_name: "", father_phone: "",
@@ -79,6 +114,27 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  // Office assistants and principals may add students only for their OWN assigned
+  // campus (the students INSERT RLS policy enforces user_can_access_assigned_campus).
+  // Restrict the picker so a scoped user can't pick a campus the DB would reject
+  // with a 42501. Other roles (admin / admission_head / counsellor / ...) keep the
+  // full list.
+  const isCampusScoped = role === "office_assistant" || role === "principal";
+  const assignedCampus = (profile?.campus || "").trim().toLowerCase();
+  const allowedCampuses = useMemo(
+    () =>
+      isCampusScoped
+        ? allCampuses.filter(
+            (c) =>
+              c.name.toLowerCase() === assignedCampus ||
+              (c.code || "").toLowerCase() === assignedCampus,
+          )
+        : allCampuses,
+    [allCampuses, assignedCampus, isCampusScoped],
+  );
+  const noCampusAssigned = isCampusScoped && campusesLoaded && allowedCampuses.length === 0;
+  const campusLocked = isCampusScoped && allowedCampuses.length === 1;
+
   // On open: reset + load campuses & sessions, OR load a draft if resuming.
   useEffect(() => {
     if (!open) return;
@@ -86,13 +142,19 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     // Reset transient state regardless of mode.
     setStep(0);
     setDraftStatus("idle");
+    setCampusesLoaded(false);
 
     Promise.all([
-      supabase.from("campuses").select("id, name").order("name"),
-      supabase.from("admission_sessions").select("id, name").eq("is_active", true),
+      supabase.from("campuses").select("id, name, code").order("name"),
+      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date"),
     ]).then(([cam, ses]) => {
       if (cam.data) setAllCampuses(cam.data);
-      if (ses.data) { setSessions(ses.data); if (ses.data.length === 1 && !resumeDraftId) set("session_id", ses.data[0].id); }
+      setCampusesLoaded(true);
+      if (ses.data) {
+        const schoolSessions = ses.data.filter((session) => isSchoolSessionYear(session.name));
+        setSessions(schoolSessions);
+        if (schoolSessions.length === 1 && !resumeDraftId) set("session_id", schoolSessions[0].id);
+      }
     });
 
     if (resumeDraftId) {
@@ -105,7 +167,10 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
         .eq("id", resumeDraftId)
         .maybeSingle()
         .then(({ data }) => {
-          if (data?.data) setForm(prev => ({ ...prev, ...(data.data as any) }));
+          const draftData = data?.data;
+          if (draftData && typeof draftData === "object" && !Array.isArray(draftData)) {
+            setForm(prev => ({ ...prev, ...(draftData as Partial<StudentForm>) }));
+          }
           if (typeof data?.step === "number") setStep(data.step);
         });
     } else {
@@ -114,7 +179,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       setDraftId(null);
       setForm(f => ({
         ...f, name: "", dob: "", gender: "", institution_id: "", course_id: "",
-        section: "", class_roll_no: "", school_admission_no: "",
+        joining_academic_year: "", semester: "", section: "", class_roll_no: "", school_admission_no: "",
         father_name: "", father_phone: "", mother_name: "", mother_phone: "",
         fee_version: "standard",
         campus_id: defaultCampusId || f.campus_id,
@@ -186,21 +251,53 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       .select("id, name, code, departments!inner(institution_id)")
       .eq("departments.institution_id", form.institution_id)
       .order("code")
-      .then(({ data }) => setCourses((data as any) || []));
+      .then(({ data }) => setCourses((data || []).map(c => ({ id: c.id, name: c.name, code: c.code }))));
   }, [form.institution_id, institutions]);
+
+  const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
+  const selectedCourse = courses.find(c => c.id === form.course_id) || null;
+  const isSchool = isSchoolInstitution(selectedInstitution);
+  const selectedSession = sessions.find(s => s.id === form.session_id) || null;
 
   // Auto-switch to existing_parent when admission no entered (school only)
   useEffect(() => {
     if (form.school_admission_no.trim() && selectedInstitution && isSchoolInstitution(selectedInstitution)) {
       setForm(f => ({ ...f, fee_version: "existing_parent" }));
     }
-  }, [form.school_admission_no]);
+  }, [form.school_admission_no, selectedInstitution]);
 
-  const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
-  const isSchool = isSchoolInstitution(selectedInstitution);
+  useEffect(() => {
+    if (isDaottCourse(selectedCourse)) {
+      setForm(f => ({ ...f, fee_version: "stetho_batch" }));
+    }
+  }, [selectedCourse]);
+
+  useEffect(() => {
+    if (isSchool) {
+      setForm(f => ({
+        ...f,
+        joining_academic_year: sessionYearLabel(selectedSession?.name),
+        semester: "",
+      }));
+    } else {
+      setForm(f => ({ ...f, joining_academic_year: "" }));
+    }
+  }, [isSchool, selectedSession?.name]);
+
+  // Keep a scoped user's campus selection within what the INSERT policy allows:
+  // pin to their one allowed campus, or clear it entirely if none is assigned
+  // (e.g. a draft carried a campus the user can't write to).
+  useEffect(() => {
+    if (!open || !isCampusScoped) return;
+    if (campusLocked && form.campus_id !== allowedCampuses[0].id) {
+      set("campus_id", allowedCampuses[0].id);
+    } else if (noCampusAssigned && form.campus_id) {
+      set("campus_id", "");
+    }
+  }, [open, isCampusScoped, campusLocked, noCampusAssigned, allowedCampuses, form.campus_id]);
 
   const step0Valid = !!form.name && !!form.dob && !!form.gender && !!form.campus_id && !!form.institution_id && !!form.course_id;
-  const canSubmit  = step0Valid && !!form.session_id;
+  const canSubmit  = step0Valid && !!form.session_id && (isSchool ? !!form.admission_date && !!form.joining_academic_year : !!form.semester);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -210,13 +307,15 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       ? null
       : `PAN-${Date.now().toString(36).toUpperCase()}`;
 
-    const { error } = await supabase.from("students").insert({
+    const student: StudentInsert = {
       name: form.name.trim(),
       dob:  form.dob  || null,
       gender: form.gender ? form.gender.toLowerCase() : null,
       course_id:  form.course_id,
       campus_id:  form.campus_id,
       session_id: form.session_id || null,
+      joining_academic_year: isSchool ? form.joining_academic_year || selectedSession?.name || null : null,
+      semester: !isSchool ? form.semester || null : null,
       admission_date: form.admission_date || null,
       admission_no: form.school_admission_no.trim() || null,
       pre_admission_no: pan,
@@ -231,9 +330,11 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       guardian_name:  form.father_name.trim()  || null,
       guardian_phone: form.father_phone.trim() || null,
       fee_structure_version: form.fee_version,
-      status: "active" as any,
+      status: "active",
       created_by: user?.id || null,
-    } as any);
+    };
+
+    const { error } = await supabase.from("students").insert(student);
 
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
@@ -252,9 +353,6 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     onSuccess();
   };
 
-  const inp = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50";
-  const sel = `${inp} cursor-pointer`;
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -268,7 +366,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               </span>
             )}
             {draftStatus === "saved" && (
-              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-emerald-600">
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-success">
                 <Save className="h-3 w-3" /> Draft saved
               </span>
             )}
@@ -299,83 +397,99 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <School className="h-3.5 w-3.5" /> Student Details
             </div>
 
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Full Name <span className="text-destructive">*</span></label>
-              <input className={inp} placeholder="Student's full name" value={form.name} onChange={e => set("name", e.target.value)} />
-            </div>
+            <TextField
+              value={form.name}
+              onValueChange={value => set("name", value)}
+              label="Full Name"
+              required
+              placeholder="Student's full name"
+            />
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date of Birth <span className="text-destructive">*</span></label>
-                <input type="date" className={inp} value={form.dob} onChange={e => set("dob", e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Gender <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.gender} onChange={e => set("gender", e.target.value)}>
-                  <option value="">Select</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
+              <DatePickerField
+                value={form.dob}
+                onValueChange={value => set("dob", value)}
+                label="Date of Birth"
+                required
+              />
+              <SelectField
+                value={form.gender}
+                onValueChange={value => set("gender", value)}
+                options={[
+                  { value: "", label: "Select" },
+                  { value: "male", label: "Male" },
+                  { value: "female", label: "Female" },
+                  { value: "other", label: "Other" },
+                ]}
+                label="Gender"
+                required
+                allowEmpty={false}
+              />
             </div>
 
             {/* Campus → Institution → Course cascade */}
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus <span className="text-destructive">*</span></label>
-              <select className={sel} value={form.campus_id} onChange={e => set("campus_id", e.target.value)}>
-                <option value="">Select campus</option>
-                {allCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
+            <SelectField
+              value={form.campus_id}
+              onValueChange={value => set("campus_id", value)}
+              options={allowedCampuses.map(c => ({ value: c.id, label: c.name }))}
+              label="Campus"
+              required
+              disabled={!campusesLoaded || campusLocked}
+              placeholder={campusesLoaded ? "Select campus" : "Loading campuses..."}
+            />
+            {noCampusAssigned && (
+              <p className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+                No campus is assigned to your account, so a student can't be added. Contact an administrator.
+              </p>
+            )}
 
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Institution <span className="text-destructive">*</span></label>
-              <select className={sel} value={form.institution_id} onChange={e => set("institution_id", e.target.value)}
-                disabled={!form.campus_id}>
-                <option value="">{form.campus_id ? "Select institution" : "Select campus first"}</option>
-                {institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
+            <SelectField
+              value={form.institution_id}
+              onValueChange={value => set("institution_id", value)}
+              options={institutions.map(i => ({ value: i.id, label: i.name }))}
+              label="Institution"
+              required
+              disabled={!form.campus_id}
+              placeholder={form.campus_id ? "Select institution" : "Select campus first"}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <SelectField
+                value={form.course_id}
+                onValueChange={value => set("course_id", value)}
+                options={courses.map(c => ({ value: c.id, label: courseLabel(c) }))}
+                label={isSchool ? "Class / Grade" : "Programme"}
+                required
+                disabled={!form.institution_id}
+                placeholder={form.institution_id ? "Select" : "Select institution first"}
+              />
+              <TextField
+                value={form.section}
+                onValueChange={value => set("section", value)}
+                label={isSchool ? "Section" : "Batch / Section"}
+                placeholder="e.g. A, B"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Class / Grade" : "Programme"} <span className="text-destructive">*</span>
-                </label>
-                <select className={sel} value={form.course_id} onChange={e => set("course_id", e.target.value)}
-                  disabled={!form.institution_id}>
-                  <option value="">{form.institution_id ? "Select" : "Select institution first"}</option>
-                  {courses.map(c => <option key={c.id} value={c.id}>{courseLabel(c)}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Section" : "Batch / Section"}
-                </label>
-                <input className={inp} placeholder="e.g. A, B" value={form.section} onChange={e => set("section", e.target.value)} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  {isSchool ? "Existing Admission No." : "Previous Institution Admission No."}
-                  <span className="ml-1 text-muted-foreground/50 text-[10px]">(if migrating)</span>
-                </label>
-                <input className={inp}
-                  placeholder={isSchool ? "e.g. 1803188" : "Optional"}
+                <TextField
                   value={form.school_admission_no}
-                  onChange={e => set("school_admission_no", e.target.value)} />
+                  onValueChange={value => set("school_admission_no", value)}
+                  label={isSchool ? "Existing Admission No." : "Previous Institution Admission No."}
+                  placeholder={isSchool ? "e.g. 1803188" : "Optional"}
+                />
                 {form.school_admission_no.trim() && isSchool && (
                   <p className="text-[10px] text-primary mt-1">✓ Existing student — existing parent fee rates will apply</p>
                 )}
               </div>
               {isSchool && (
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Class Roll No.</label>
-                  <input className={inp} placeholder="Optional" value={form.class_roll_no} onChange={e => set("class_roll_no", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.class_roll_no}
+                  onValueChange={value => set("class_roll_no", value)}
+                  label="Class Roll No."
+                  placeholder="Optional"
+                />
               )}
             </div>
 
@@ -412,28 +526,36 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             <div>
               <p className="text-[11px] font-semibold text-foreground mb-2">Father</p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name</label>
-                  <input className={inp} placeholder="Full name" value={form.father_name} onChange={e => set("father_name", e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Mobile</label>
-                  <input className={inp} placeholder="10-digit" value={form.father_phone} onChange={e => set("father_phone", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.father_name}
+                  onValueChange={value => set("father_name", value)}
+                  label="Name"
+                  placeholder="Full name"
+                />
+                <TextField
+                  value={form.father_phone}
+                  onValueChange={value => set("father_phone", value)}
+                  label="Mobile"
+                  placeholder="10-digit"
+                />
               </div>
             </div>
 
             <div>
               <p className="text-[11px] font-semibold text-foreground mb-2">Mother</p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name</label>
-                  <input className={inp} placeholder="Full name" value={form.mother_name} onChange={e => set("mother_name", e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Mobile</label>
-                  <input className={inp} placeholder="10-digit" value={form.mother_phone} onChange={e => set("mother_phone", e.target.value)} />
-                </div>
+                <TextField
+                  value={form.mother_name}
+                  onValueChange={value => set("mother_name", value)}
+                  label="Name"
+                  placeholder="Full name"
+                />
+                <TextField
+                  value={form.mother_phone}
+                  onValueChange={value => set("mother_phone", value)}
+                  label="Mobile"
+                  placeholder="10-digit"
+                />
               </div>
             </div>
 
@@ -452,25 +574,48 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Session <span className="text-destructive">*</span></label>
-                <select className={sel} value={form.session_id} onChange={e => set("session_id", e.target.value)}>
-                  <option value="">Select session</option>
-                  {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date</label>
-                <input type="date" className={inp} value={form.admission_date} onChange={e => set("admission_date", e.target.value)} />
-              </div>
+              <SelectField
+                value={form.session_id}
+                onValueChange={value => set("session_id", value)}
+                options={sessions.map(s => ({ value: s.id, label: sessionYearLabel(s.name) }))}
+                label="Session"
+                required
+                placeholder="Select session"
+              />
+              <DatePickerField
+                value={form.admission_date}
+                onValueChange={value => set("admission_date", value)}
+                label="Admission Date"
+                required={isSchool}
+              />
             </div>
 
-            {/* Fee structure — school gets 2-option toggle, others get standard */}
+            {isSchool ? (
+              <SelectField
+                value={form.joining_academic_year}
+                onValueChange={value => set("joining_academic_year", value)}
+                options={SCHOOL_SESSION_YEARS.map(year => ({ value: year, label: year }))}
+                label="Admission Year"
+                required
+                placeholder="Select admission year"
+              />
+            ) : (
+              <SelectField
+                value={form.semester}
+                onValueChange={value => set("semester", value)}
+                options={HIGHER_ED_TERMS.map(term => ({ value: term, label: term }))}
+                label="Current Semester / Year"
+                required
+                placeholder="Select current semester/year"
+              />
+            )}
+
+            {/* Fee structure — school gets 2-option toggle, DAOTT gets Stetho Batch */}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-2">
                 Fee Structure
                 {form.school_admission_no.trim() && isSchool && (
-                  <Badge className="ml-2 text-[10px] bg-amber-100 text-amber-700 border-amber-200">Auto: Existing Parent</Badge>
+                  <Badge className="ml-2 text-[10px] bg-warning/10 text-warning-foreground border-warning/20">Auto: Existing Parent</Badge>
                 )}
               </label>
               {isSchool ? (
@@ -481,9 +626,17 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                     <p className="text-[10px] text-muted-foreground mt-0.5">Standard rates for new families</p>
                   </button>
                   <button onClick={() => set("fee_version", "existing_parent")}
-                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "existing_parent" ? "border-warning/35 bg-warning/5" : "border-border"}`}>
                     <p className="text-xs font-semibold text-foreground">Existing Parent</p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">CPI-revised rates for continuing families</p>
+                  </button>
+                </div>
+              ) : isDaottCourse(selectedCourse) ? (
+                <div className="grid grid-cols-1 gap-2">
+                  <button onClick={() => set("fee_version", "stetho_batch")}
+                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "stetho_batch" ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <p className="text-xs font-semibold text-foreground">Stetho Batch</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">₹1,85,000 across 5 semesters</p>
                   </button>
                 </div>
               ) : (
@@ -504,7 +657,10 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <p className="text-muted-foreground">
                 {allCampuses.find(c => c.id === form.campus_id)?.name || "—"}
                 {" › "}{selectedInstitution?.name || "—"}
-                {" › "}{courses.find(c => c.id === form.course_id) ? courseLabel(courses.find(c => c.id === form.course_id)!) : "—"}
+                {" › "}{selectedCourse ? courseLabel(selectedCourse) : "—"}
+              </p>
+              <p className="text-muted-foreground">
+                {isSchool ? `Session: ${sessionYearLabel(selectedSession?.name) || "—"} · Admission year: ${form.joining_academic_year || "—"}` : `Current: ${form.semester || "—"}`}
               </p>
               {form.school_admission_no && <p className="text-muted-foreground font-mono">Admission No: {form.school_admission_no}</p>}
             </div>

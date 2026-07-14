@@ -4,11 +4,12 @@
  * Counsellor-invoked. Creates a time-bound token that lets a student log into the
  * application portal without OTP. Multi-use within the validity window.
  *
- * Input:  { lead_id: string, expires_in_hours?: number }   (default 168 = 7 days)
+ * Input:  { lead_id: string, expires_in_hours?: number, mode?: string }   (default 168 = 7 days)
  * Output: { url, token, expires_at }
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildApplyPortalUrl, resolveApplyPortal } from "./portal.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,21 +42,52 @@ Deno.serve(async (req) => {
     const { data: roles } = await db.from("user_roles").select("role").eq("user_id", user.id);
     const isStaff = (roles || []).some((r: any) => !["student", "parent"].includes(r.role));
     if (!isStaff) return json({ error: "Forbidden" }, 403);
+    const callerRole = (roles || []).find((r: any) => ["academic_partner", "academic_partner_offer_letter"].includes(r.role))?.role
+      || (roles || [])[0]?.role
+      || null;
 
-    const { lead_id, expires_in_hours = 168 } = await req.json();
+    const { lead_id, expires_in_hours = 168, mode = "student" } = await req.json();
     if (!lead_id) return json({ error: "lead_id required" }, 400);
+    if (!["student", "academic_partner_on_behalf"].includes(mode)) {
+      return json({ error: "Unsupported apply link mode" }, 400);
+    }
 
     const hours = Math.max(1, Math.min(720, Number(expires_in_hours) || 168)); // 1h–30d
     const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
 
     const { data: lead, error: leadErr } = await db.from("leads")
-      .select("id, name, phone, email")
+      .select("id, name, phone, email, academic_partner_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
       .eq("id", lead_id)
       .single();
     if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
     if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
 
+    const { data: applications, error: appErr } = await db.from("applications")
+      .select("flags, program_category, course_selections")
+      .eq("lead_id", lead_id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (appErr) return json({ error: appErr.message }, 500);
+
     const { data: profile } = await db.from("profiles").select("id").eq("user_id", user.id).maybeSingle();
+    const { data: partner } = await db
+      .from("academic_partners")
+      .select("id, name")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (mode === "academic_partner_on_behalf") {
+      if (!["academic_partner", "academic_partner_offer_letter"].includes(String(callerRole)) || !partner?.id) {
+        return json({ error: "Only academic partners can generate on-behalf application links" }, 403);
+      }
+      const { data: canOpen, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+        _user_id: user.id,
+        _lead_id: lead_id,
+      });
+      if (scopeErr || !canOpen || lead.academic_partner_id !== partner.id) {
+        return json({ error: "You can create on-behalf links only for assigned academic partner leads" }, 403);
+      }
+    }
 
     const { data: tokenRow, error: insErr } = await db.from("apply_magic_tokens").insert({
       lead_id,
@@ -63,17 +95,35 @@ Deno.serve(async (req) => {
       email: lead.email,
       expires_at: expiresAt,
       created_by: profile?.id || null,
+      mode,
+      actor_user_id: mode === "academic_partner_on_behalf" ? user.id : null,
+      actor_role: mode === "academic_partner_on_behalf" ? callerRole : null,
+      academic_partner_id: mode === "academic_partner_on_behalf" ? partner?.id : null,
     }).select("token, expires_at").single();
     if (insErr) return json({ error: insErr.message }, 500);
 
     await db.from("lead_activities").insert({
       lead_id,
       type: "system",
-      description: `Magic login link generated (valid ${hours}h)`,
+      description: mode === "academic_partner_on_behalf"
+        ? `Academic partner on-behalf apply link generated (valid ${hours}h)`
+        : `Magic login link generated (valid ${hours}h)`,
     });
 
-    const url = `${PORTAL_BASE}?token=${tokenRow.token}`;
-    return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at });
+    if (mode === "academic_partner_on_behalf") {
+      await db.from("application_on_behalf_audit").insert({
+        action: "application_on_behalf_link_created",
+        lead_id,
+        actor_user_id: user.id,
+        academic_partner_id: partner?.id || null,
+        candidate_phone: lead.phone,
+        metadata: { expires_in_hours: hours },
+      });
+    }
+
+    const portal = resolveApplyPortal(lead, applications || []);
+    const url = buildApplyPortalUrl(PORTAL_BASE, portal, tokenRow.token);
+    return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at, portal });
   } catch (err: any) {
     console.error("[generate-apply-link]", err);
     return json({ error: err.message }, 500);

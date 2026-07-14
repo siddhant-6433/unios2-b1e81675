@@ -6,6 +6,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { IndianRupee, Loader2, Upload, FileImage, X } from "lucide-react";
 
 const PAYMENT_TYPES = [
@@ -32,11 +34,12 @@ interface RecordPaymentDialogProps {
   defaultType?: string;
   requireScreenshot?: boolean;
   title?: string;
+  applicationId?: string | null;
 }
 
 export function RecordPaymentDialog({
   open, onOpenChange, leadId, leadName, onSuccess,
-  defaultType, requireScreenshot, title,
+  defaultType, requireScreenshot, title, applicationId,
 }: RecordPaymentDialogProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -52,6 +55,7 @@ export function RecordPaymentDialog({
     first_year_fee: number;
     token_required: number;
     token_paid: number;
+    paid_toward_course?: number;
     application_paid: number;
     total_paid: number;
     twenty_five_pct: number;
@@ -69,7 +73,10 @@ export function RecordPaymentDialog({
     });
   }, [open, leadId]);
 
-  const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - feeStatus.token_paid) : 0;
+  const tokenPaidForProgress = feeStatus
+    ? Number(feeStatus.paid_toward_course ?? feeStatus.token_paid ?? 0)
+    : 0;
+  const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - tokenPaidForProgress) : 0;
   const minInstalment = feeStatus?.min_token_instalment ?? 5000;
   const isTokenInstalmentBelowMin =
     type === "token_fee" &&
@@ -84,7 +91,7 @@ export function RecordPaymentDialog({
   // commit the receipt.
   const tokenShortfallAfterThis =
     type === "token_fee" && feeStatus && !feeStatus.token_complete && amount !== ""
-      ? Math.max(0, feeStatus.token_required - feeStatus.token_paid - parseFloat(amount || "0"))
+      ? Math.max(0, feeStatus.token_required - tokenPaidForProgress - parseFloat(amount || "0"))
       : 0;
   const willCrossTokenThreshold =
     type === "token_fee" && feeStatus && !feeStatus.token_complete &&
@@ -152,10 +159,11 @@ export function RecordPaymentDialog({
       transaction_ref: transactionRef || null,
       receipt_no: receiptNo || null,
       receipt_url: receiptUrl,
-      notes: notes || null,
+      notes: [type === "application_fee" && applicationId ? `Application: ${applicationId}` : "", notes || ""].filter(Boolean).join(" · ") || null,
       recorded_by: profileId,
       gateway: "offline",
       status: "confirmed",
+      application_id: type === "application_fee" ? applicationId || null : null,
     } as any).select("id").single();
 
     if (error) {
@@ -169,7 +177,7 @@ export function RecordPaymentDialog({
     if (inserted?.id) {
       const evt = type === "application_fee" ? "app_fee_paid" : "payment_received";
       supabase.functions.invoke("notify-event", {
-        body: { event: evt, lead_id: leadId, context: { payment_id: inserted.id } },
+        body: { event: evt, lead_id: leadId, context: { payment_id: inserted.id, application_id: applicationId || undefined } },
       }).catch((e) => console.error("[RecordPaymentDialog] notify-event failed:", e));
     }
 
@@ -182,16 +190,14 @@ export function RecordPaymentDialog({
     });
 
     // Stage advancement is handled by the lead_payments AFTER trigger
-    // (handle_lead_payment_change). It checks the 10% / 25% thresholds and
-    // auto-issues PAN / AN. We don't flip stage from here anymore.
+    // (handle_lead_payment_change). It checks the PAN / AN thresholds and
+    // auto-issues numbers. We don't flip stage from here anymore.
 
     toast({ title: "Payment recorded", description: `₹${parseFloat(amount).toLocaleString("en-IN")} ${PAYMENT_TYPES.find((t) => t.value === type)?.label} recorded.` });
     setSaving(false);
     onOpenChange(false);
     onSuccess?.();
   };
-
-  const inputClass = "w-full rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -213,15 +219,15 @@ export function RecordPaymentDialog({
             <div className="flex justify-between">
               <span className="text-muted-foreground">Token (10%)</span>
               <span className="text-foreground">
-                ₹{feeStatus.token_paid.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
-                {feeStatus.token_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+                ₹{tokenPaidForProgress.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
+                {feeStatus.token_complete && <span className="ml-1 text-success">✓ complete</span>}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Towards 25% (admission)</span>
+              <span className="text-muted-foreground">Towards AN threshold</span>
               <span className="text-foreground">
                 ₹{feeStatus.total_paid.toLocaleString("en-IN")} / ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}
-                {feeStatus.twenty_five_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+                {feeStatus.twenty_five_complete && <span className="ml-1 text-success">✓ complete</span>}
               </span>
             </div>
             {type === "token_fee" && tokenOutstanding > 0 && !feeStatus.token_complete && (
@@ -230,12 +236,12 @@ export function RecordPaymentDialog({
               </p>
             )}
             {tokenShortfallAfterThis > 0 && parseFloat(amount || "0") >= minInstalment && (
-              <p className="pt-1 text-[11px] text-amber-700 font-medium">
+              <p className="pt-1 text-[11px] text-warning-foreground font-medium">
                 ⚠ ₹{tokenShortfallAfterThis.toLocaleString("en-IN")} more needed after this to cross the 10% line and advance to Pre-Admitted.
               </p>
             )}
             {willCrossTokenThreshold && (
-              <p className="pt-1 text-[11px] text-emerald-700 font-medium">
+              <p className="pt-1 text-[11px] text-success font-medium">
                 ✓ This payment crosses the 10% line — candidate will be Pre-Admitted (PAN issued).
               </p>
             )}
@@ -244,32 +250,28 @@ export function RecordPaymentDialog({
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Payment Type</label>
-              <select value={type} onChange={(e) => setType(e.target.value)} className={inputClass}>
-                {PAYMENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Amount <span className="text-destructive">*</span>
-              </label>
+            <SelectField
+              value={type}
+              onValueChange={setType}
+              options={PAYMENT_TYPES.map(t => ({ value: t.value, label: t.label }))}
+              label="Payment Type"
+              allowEmpty={false}
+            />
+            <FieldShell label="Amount" required>
               <div className="relative">
                 <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <input
+                <Input
                   type="number"
                   step="0.01"
                   min="0"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
-                  className={`${inputClass} pl-8`}
+                  className="pl-8"
                   required
                 />
               </div>
-            </div>
+            </FieldShell>
           </div>
 
           <div>
@@ -292,26 +294,18 @@ export function RecordPaymentDialog({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Transaction Ref / UTR</label>
-              <input
-                type="text"
-                value={transactionRef}
-                onChange={(e) => setTransactionRef(e.target.value)}
-                placeholder="UPI / Cheque No"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Receipt No</label>
-              <input
-                type="text"
-                value={receiptNo}
-                onChange={(e) => setReceiptNo(e.target.value)}
-                placeholder="Optional"
-                className={inputClass}
-              />
-            </div>
+            <TextField
+              value={transactionRef}
+              onValueChange={setTransactionRef}
+              label="Transaction Ref / UTR"
+              placeholder="UPI / Cheque No"
+            />
+            <TextField
+              value={receiptNo}
+              onValueChange={setReceiptNo}
+              label="Receipt No"
+              placeholder="Optional"
+            />
           </div>
 
           <div>
@@ -341,16 +335,13 @@ export function RecordPaymentDialog({
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes..."
-              rows={2}
-              className={`${inputClass} resize-none`}
-            />
-          </div>
+          <TextAreaField
+            value={notes}
+            onValueChange={setNotes}
+            label="Notes"
+            placeholder="Optional notes..."
+            rows={2}
+          />
         </div>
 
         <DialogFooter>

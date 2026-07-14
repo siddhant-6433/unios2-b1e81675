@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, ChevronDown, Plus, Trash2, BookOpen, GraduationCap, BookText, ClipboardCheck } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, Plus, Trash2, BookOpen, GraduationCap, BookText, ClipboardCheck } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import {
   validateAcademicEligibility,
@@ -44,9 +45,63 @@ interface Props {
   readOnly?: boolean;
 }
 
-const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
 const SESSION_YEAR = 2026; // TODO: derive from active session
+
+const resultStatusOptions = [
+  { value: "declared", label: "Declared" },
+  { value: "not_declared", label: "Not Declared (Result Pending)" },
+];
+
+const entranceStatusOptions = [
+  { value: "yet_to_appear", label: "Yet to Appear" },
+  { value: "not_declared", label: "Result Not Declared" },
+  { value: "declared", label: "Result Declared" },
+];
+
+const cahetStatusOptions = [
+  { value: "registered", label: "Registered on ABVMU CAHET 2026" },
+  { value: "yet_to_appear", label: "Not registered yet" },
+];
+
+const updeledStatusOptions = [
+  { value: "registered", label: "Registered for UPDELED 2026" },
+  { value: "yet_to_appear", label: "Not registered yet" },
+];
+
+const previousBoardOptions = [
+  { value: "CBSE", label: "CBSE" },
+  { value: "ICSE", label: "ICSE / ISC" },
+  { value: "State Board", label: "State Board" },
+  { value: "IB", label: "IB" },
+  { value: "Cambridge", label: "Cambridge (IGCSE)" },
+  { value: "Other", label: "Other" },
+];
+
+const tcAvailableOptions = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No, will submit later" },
+];
+
+interface EntranceExam {
+  exam_name: string;
+  status: 'yet_to_appear' | 'not_declared' | 'declared' | 'registered';
+  score?: string;
+  expected_date?: string;
+  registration_no?: string;
+  registered_name?: string;
+  is_custom?: boolean;
+}
+
+type AcademicEntryValue = string | string[] | Record<string, string> | undefined;
+type AcademicEntry = Record<string, AcademicEntryValue>;
+type AcademicFormData = Record<string, AcademicEntry | AcademicEntry[] | EntranceExam[] | undefined> & {
+  previous_school?: AcademicEntry;
+  class_10?: AcademicEntry;
+  class_12?: AcademicEntry;
+  graduation?: AcademicEntry;
+  additional_qualifications?: AcademicEntry[];
+  entrance_exams?: EntranceExam[];
+};
 
 /** Generate year options descending from maxYear (or current year) down to max(dobYear, minYear) */
 function getYearOptions(dobYear?: number, maxYear?: number, minYear?: number): number[] {
@@ -154,24 +209,26 @@ function StatusBadge({ type, label }: { type: 'error' | 'warning' | 'info' | 'pa
 }
 
 /* ── Year Select Dropdown ─────────────────────────── */
-function YearSelect({ value, onChange, dobYear, maxYear, minYear, yearError }: {
+function YearSelect({ value, onChange, dobYear, maxYear, minYear, yearError, invalid }: {
   value: string;
   onChange: (v: string) => void;
   dobYear?: number;
   maxYear?: number;
   minYear?: number;
   yearError?: string;
+  invalid?: boolean;
 }) {
   const years = useMemo(() => getYearOptions(dobYear, maxYear, minYear), [dobYear, maxYear, minYear]);
   return (
-    <div>
-      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
-      <select value={value || ''} onChange={e => onChange(e.target.value)} className={inputCls}>
-        <option value="">Select year</option>
-        {years.map(y => (
-          <option key={y} value={y.toString()}>{y}</option>
-        ))}
-      </select>
+    <div className="space-y-1.5">
+      <SelectField
+        label="Year"
+        value={value || ''}
+        onValueChange={onChange}
+        placeholder="Select year"
+        options={years.map(y => ({ value: y.toString(), label: y.toString() }))}
+        error={invalid && !yearError ? 'Year is required' : undefined}
+      />
       {yearError && (
         <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -198,11 +255,13 @@ function AcademicBlock({
   removable,
   onRemove,
   dobYear,
+  showErrors,
+  invalidFields,
 }: {
   title: string;
   prefix: string;
-  academic: Record<string, any>;
-  onChange: (v: Record<string, any>) => void;
+  academic: AcademicFormData;
+  onChange: (v: AcademicFormData) => void;
   showResultPending?: boolean;
   showSubjects?: boolean;
   showDegreeSelector?: boolean;
@@ -213,8 +272,10 @@ function AcademicBlock({
   removable?: boolean;
   onRemove?: () => void;
   dobYear?: number;
+  showErrors?: boolean;
+  invalidFields?: Set<string>;
 }) {
-  const data = academic[prefix] || {};
+  const data = (academic[prefix] || {}) as AcademicEntry;
   const update = (field: string, val: string) => {
     const newData = { ...academic, [prefix]: { ...data, [field]: val } };
     onChange(newData);
@@ -223,6 +284,8 @@ function AcademicBlock({
   const isGradBlock = prefix.startsWith('graduation') || prefix.startsWith('additional_');
 
   const fieldError = validationErrors?.find(e => e.field === prefix || e.field === 'class_12');
+  const invalid = (field: string) => !!showErrors && !!invalidFields?.has(field);
+  const requiredError = (field: string, label: string) => invalid(field) ? `${label} is required` : undefined;
 
   // Board change — handles explicit "Other (not in list)" selection
   const handleBoardChange = (vals: string[]) => {
@@ -248,11 +311,11 @@ function AcademicBlock({
   const isClass10 = prefix === 'class_10';
   const isClass12 = prefix === 'class_12';
   const variant = isGradBlock
-    ? { Icon: GraduationCap, accent: 'border-violet-500',  iconColor: 'text-violet-600',  bg: 'bg-violet-50/60'  }
+    ? { Icon: GraduationCap, accent: 'border-primary/35',  iconColor: 'text-primary',  bg: 'bg-primary/5/60'  }
     : isClass12
-    ? { Icon: BookText,      accent: 'border-emerald-500', iconColor: 'text-emerald-600', bg: 'bg-emerald-50/60' }
+    ? { Icon: BookText,      accent: 'border-success/35', iconColor: 'text-success', bg: 'bg-success/5/60' }
     : isClass10
-    ? { Icon: BookOpen,      accent: 'border-blue-500',    iconColor: 'text-blue-600',    bg: 'bg-blue-50/60'    }
+    ? { Icon: BookOpen,      accent: 'border-info/35',    iconColor: 'text-info-foreground',    bg: 'bg-info/5/60'    }
     : { Icon: BookOpen,      accent: 'border-border',      iconColor: 'text-muted-foreground', bg: 'bg-muted/30' };
   const { Icon, accent, iconColor, bg } = variant;
 
@@ -270,7 +333,7 @@ function AcademicBlock({
         )}
       </header>
       <div className="p-4 space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         {isGradBlock ? (
           <>
             {showDegreeSelector ? (
@@ -282,13 +345,16 @@ function AcademicBlock({
                   onChange={(vals) => update('degree', vals[vals.length - 1] || '')}
                   placeholder="Select or type degree…"
                   allowCustom
+                  invalid={invalid('degree')}
                 />
               </div>
             ) : (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
-                <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
-              </div>
+              <TextField
+                label="Degree"
+                value={data.degree || ''}
+                onValueChange={v => update('degree', v)}
+                error={requiredError('degree', 'Degree')}
+              />
             )}
             <div>
               <SubjectTagInput
@@ -298,25 +364,26 @@ function AcademicBlock({
                 onChange={handleUniversityChange}
                 placeholder="Search university…"
                 allowCustom={false}
+                invalid={invalid('university')}
               />
               {data.university === 'Other' && (
                 <div className="mt-2">
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Specify university name <span className="text-destructive">*</span>
-                  </label>
-                  <input
+                  <TextField
+                    label="Specify university name"
+                    required
                     value={data.university_other || ''}
-                    onChange={e => onChange({ ...academic, [prefix]: { ...data, university_other: e.target.value } })}
+                    onValueChange={v => onChange({ ...academic, [prefix]: { ...data, university_other: v } })}
                     placeholder="Enter full university name"
-                    className={inputCls}
+                    error={requiredError('university_other', 'University name')}
                   />
                 </div>
               )}
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">College</label>
-              <input value={data.college || ''} onChange={e => update('college', e.target.value)} className={inputCls} />
-            </div>
+            <TextField
+              label="College"
+              value={data.college || ''}
+              onValueChange={v => update('college', v)}
+            />
           </>
         ) : (
           <>
@@ -328,25 +395,26 @@ function AcademicBlock({
                 onChange={handleBoardChange}
                 placeholder="Search board…"
                 allowCustom={false}
+                invalid={invalid('board')}
               />
               {data.board === 'Other' && (
                 <div className="mt-2">
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Specify board name <span className="text-destructive">*</span>
-                  </label>
-                  <input
+                  <TextField
+                    label="Specify board name"
+                    required
                     value={data.board_other || ''}
-                    onChange={e => onChange({ ...academic, [prefix]: { ...data, board_other: e.target.value } })}
+                    onValueChange={v => onChange({ ...academic, [prefix]: { ...data, board_other: v } })}
                     placeholder="Enter full board name"
-                    className={inputCls}
+                    error={requiredError('board_other', 'Board name')}
                   />
                 </div>
               )}
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">School</label>
-              <input value={data.school || ''} onChange={e => update('school', e.target.value)} className={inputCls} />
-            </div>
+            <TextField
+              label="School"
+              value={data.school || ''}
+              onValueChange={v => update('school', v)}
+            />
           </>
         )}
         <YearSelect
@@ -356,17 +424,18 @@ function AcademicBlock({
           maxYear={maxYear}
           minYear={minYear}
           yearError={yearError}
+          invalid={invalid('year')}
         />
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage / CGPA</label>
-          <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={inputCls} />
-          {fieldError && fieldError.type === 'error' && fieldError.field !== 'class_12' && (
-            <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span className="text-xs">{fieldError.message}</span>
-            </div>
-          )}
-        </div>
+        <TextField
+          label="Marks / Percentage / CGPA"
+          value={data.marks || ''}
+          onValueChange={v => update('marks', v)}
+          placeholder="e.g. 85% or 8.5"
+          error={
+            requiredError('marks', 'Marks') ||
+            (showErrors && fieldError?.type === 'error' && fieldError.field !== 'class_12' ? fieldError.message : undefined)
+          }
+        />
         {showSubjects && (prefix === 'class_12' || prefix.startsWith('class_12')) && (
           <div className="sm:col-span-2">
             <SubjectTagInput
@@ -382,6 +451,7 @@ function AcademicBlock({
               onChange={(vals) => update('subjects', vals.join(', '))}
               placeholder="Select your 12th subjects…"
               allowCustom
+              invalid={invalid('subjects') || !!(showErrors && validationErrors?.some(e => e.field === 'class_12' && e.type === 'error'))}
             />
             {validationErrors?.filter(e => e.field === 'class_12' && e.type === 'error').map((e, i) => (
               <div key={i} className="mt-1.5 flex items-start gap-1.5 text-destructive">
@@ -395,13 +465,13 @@ function AcademicBlock({
 
       {showResultPending && (
         <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Result Status</label>
-            <select value={data.result_status || 'declared'} onChange={e => update('result_status', e.target.value)} className={inputCls}>
-              <option value="declared">Declared</option>
-              <option value="not_declared">Not Declared (Result Pending)</option>
-            </select>
-          </div>
+          <SelectField
+            label="Result Status"
+            value={data.result_status || 'declared'}
+            onValueChange={v => update('result_status', v)}
+            options={resultStatusOptions}
+            allowEmpty={false}
+          />
 
           {isPending && (
             <div className="p-3 rounded-xl bg-warning/10 border border-warning/20 flex items-start gap-2">
@@ -426,22 +496,26 @@ function AcademicBlock({
                         allowCustom
                       />
                     )}
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Expected Result Month</label>
-                      <input value={data.expected_month || ''} onChange={e => update('expected_month', e.target.value)} placeholder="e.g. June 2026" className={inputCls} />
-                    </div>
+                    <TextField
+                      label="Expected Result Month"
+                      value={data.expected_month || ''}
+                      onValueChange={v => update('expected_month', v)}
+                      placeholder="e.g. June 2026"
+                    />
                   </>
                 )}
                 {(prefix === 'graduation' || prefix.startsWith('additional_')) && (
                   <>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">CGPA till last declared semester</label>
-                      <input value={data.cgpa_till_sem || ''} onChange={e => update('cgpa_till_sem', e.target.value)} className={inputCls} />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Semesters completed</label>
-                      <input value={data.semesters_completed || ''} onChange={e => update('semesters_completed', e.target.value)} className={inputCls} />
-                    </div>
+                    <TextField
+                      label="CGPA till last declared semester"
+                      value={data.cgpa_till_sem || ''}
+                      onValueChange={v => update('cgpa_till_sem', v)}
+                    />
+                    <TextField
+                      label="Semesters completed"
+                      value={data.semesters_completed || ''}
+                      onValueChange={v => update('semesters_completed', v)}
+                    />
                   </>
                 )}
               </div>
@@ -455,18 +529,12 @@ function AcademicBlock({
 }
 
 /* ── Entrance Exam Section ─────────────────────────── */
-interface EntranceExam {
-  exam_name: string;
-  status: 'yet_to_appear' | 'not_declared' | 'declared' | 'registered';
-  score?: string;
-  expected_date?: string;
-  registration_no?: string;
-  registered_name?: string;
-  is_custom?: boolean;
-}
-
 function isCahetExamName(name: string): boolean {
   return /cahet/i.test(name);
+}
+
+function isUpdeledExamName(name: string): boolean {
+  return /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(name);
 }
 
 function EntranceExamSection({
@@ -530,17 +598,17 @@ function EntranceExamSection({
   };
 
   return (
-    <section className="rounded-2xl border border-border bg-card overflow-hidden border-l-4 border-amber-500">
-      <header className="px-4 py-3 bg-amber-50/60 flex items-center justify-between">
+    <section className="rounded-2xl border border-border bg-card overflow-hidden border-l-4 border-warning/35">
+      <header className="px-4 py-3 bg-warning/5/60 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <ClipboardCheck className="h-5 w-5 text-amber-600" />
+          <ClipboardCheck className="h-5 w-5 text-warning-foreground" />
           <h3 className="text-base font-semibold text-foreground">Entrance Exams</h3>
         </div>
       </header>
       <div className="p-4 space-y-3">
       {recommendedAvailable.length > 0 && (
-        <div className="rounded-xl bg-amber-50/40 border border-amber-200/60 p-3">
-          <p className="text-xs font-medium text-amber-900 mb-2">
+        <div className="rounded-xl bg-warning/5/40 border border-warning/20/60 p-3">
+          <p className="text-xs font-medium text-warning-foreground mb-2">
             Recommended for your selected courses (optional — add if you've taken any):
           </p>
           <div className="flex flex-wrap gap-2">
@@ -549,7 +617,7 @@ function EntranceExamSection({
                 key={name}
                 type="button"
                 onClick={() => addRecommended(name)}
-                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 transition-colors"
+                className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-white px-3 py-1 text-[11px] font-medium text-warning-foreground hover:bg-warning/10 transition-colors"
               >
                 <Plus className="h-3 w-3" /> {name}
               </button>
@@ -567,17 +635,25 @@ function EntranceExamSection({
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center justify-between">
               {ex.is_custom ? (
-                <input
+                <TextField
                   value={ex.exam_name}
-                  onChange={e => updateExam(idx, 'exam_name', e.target.value)}
+                  onValueChange={v => updateExam(idx, 'exam_name', v)}
                   placeholder="Exam name"
-                  className={`${inputCls} max-w-xs`}
+                  containerClassName="max-w-xs flex-1"
+                  aria-label="Exam name"
                 />
               ) : isCahetExamName(ex.exam_name) ? (
                 <div>
                   <h4 className="text-sm font-semibold text-foreground">CAHET Registration Details</h4>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     Required for BPT/BMRIT admission through ABVMU Lucknow counselling.
+                  </p>
+                </div>
+              ) : isUpdeledExamName(ex.exam_name) ? (
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">UPDELED Registration Details</h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Required for D.El.Ed admission through UP D.El.Ed counselling.
                   </p>
                 </div>
               ) : (
@@ -591,71 +667,72 @@ function EntranceExamSection({
             </div>
             {isCahetExamName(ex.exam_name) ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CAHET Registration Status</label>
-                  <select
-                    value={ex.status === 'registered' ? 'registered' : 'yet_to_appear'}
-                    onChange={e => updateExam(idx, 'status', e.target.value)}
-                    className={inputCls}
-                  >
-                    <option value="registered">Registered on ABVMU CAHET 2026</option>
-                    <option value="yet_to_appear">Not registered yet</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CAHET Registration No.</label>
-                  <input
-                    value={ex.registration_no || ''}
-                    onChange={e => updateExam(idx, 'registration_no', e.target.value)}
-                    placeholder="e.g. CAHET-2026-12345"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name on CAHET Form</label>
-                  <input
-                    value={ex.registered_name || ''}
-                    onChange={e => updateExam(idx, 'registered_name', e.target.value)}
-                    placeholder="As entered on ABVMU CAHET"
-                    className={inputCls}
-                  />
-                </div>
+                <SelectField
+                  label="CAHET Registration Status"
+                  value={ex.status === 'registered' ? 'registered' : 'yet_to_appear'}
+                  onValueChange={v => updateExam(idx, 'status', v)}
+                  options={cahetStatusOptions}
+                  allowEmpty={false}
+                />
+                <TextField
+                  label="CAHET Registration No."
+                  value={ex.registration_no || ''}
+                  onValueChange={v => updateExam(idx, 'registration_no', v)}
+                  placeholder="e.g. CAHET-2026-12345"
+                />
+                <TextField
+                  label="Name on CAHET Form"
+                  value={ex.registered_name || ''}
+                  onValueChange={v => updateExam(idx, 'registered_name', v)}
+                  placeholder="As entered on ABVMU CAHET"
+                />
+              </div>
+            ) : isUpdeledExamName(ex.exam_name) ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SelectField
+                  label="UPDELED Registration Status"
+                  value={ex.status === 'registered' ? 'registered' : 'yet_to_appear'}
+                  onValueChange={v => updateExam(idx, 'status', v)}
+                  options={updeledStatusOptions}
+                  allowEmpty={false}
+                />
+                <TextField
+                  label="UPDELED Registration No."
+                  value={ex.registration_no || ''}
+                  onValueChange={v => updateExam(idx, 'registration_no', v)}
+                  placeholder="e.g. UPDELED-2026-12345"
+                />
+                <TextField
+                  label="Name on UPDELED Form"
+                  value={ex.registered_name || ''}
+                  onValueChange={v => updateExam(idx, 'registered_name', v)}
+                  placeholder="As entered on UPDELED registration"
+                />
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status</label>
-                <select
-                  value={ex.status}
-                  onChange={e => updateExam(idx, 'status', e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="yet_to_appear">Yet to Appear</option>
-                  <option value="not_declared">Result Not Declared</option>
-                  <option value="declared">Result Declared</option>
-                </select>
-              </div>
+              <SelectField
+                label="Status"
+                value={ex.status}
+                onValueChange={v => updateExam(idx, 'status', v)}
+                options={entranceStatusOptions}
+                allowEmpty={false}
+              />
               {ex.status === 'declared' && (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Score / Rank</label>
-                  <input
-                    value={ex.score || ''}
-                    onChange={e => updateExam(idx, 'score', e.target.value)}
-                    placeholder="e.g. 120 marks or Rank 5000"
-                    className={inputCls}
-                  />
-                </div>
+                <TextField
+                  label="Score / Rank"
+                  value={ex.score || ''}
+                  onValueChange={v => updateExam(idx, 'score', v)}
+                  placeholder="e.g. 120 marks or Rank 5000"
+                />
               )}
               {ex.status === 'not_declared' && (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Expected Result Date</label>
-                  <input
-                    value={ex.expected_date || ''}
-                    onChange={e => updateExam(idx, 'expected_date', e.target.value)}
-                    placeholder="e.g. July 2026"
-                    className={inputCls}
-                  />
-                </div>
+                <TextField
+                  label="Expected Result Date"
+                  value={ex.expected_date || ''}
+                  onValueChange={v => updateExam(idx, 'expected_date', v)}
+                  placeholder="e.g. July 2026"
+                />
               )}
               </div>
             )}
@@ -676,8 +753,8 @@ function SchoolAcademicBlock({
   updateAcademic,
   courseSelections,
 }: {
-  academic: Record<string, any>;
-  updateAcademic: (v: Record<string, any>) => void;
+  academic: AcademicFormData;
+  updateAcademic: (v: AcademicFormData) => void;
   courseSelections: { course_name: string }[];
 }) {
   const courseNames = courseSelections.map(s => s.course_name.toLowerCase()).join(' ');
@@ -713,61 +790,47 @@ function SchoolAcademicBlock({
       <p className="text-sm text-muted-foreground">
         Previous school details {isOptional ? '(Optional for KG applicants)' : ''}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Previous Class / Grade {!isOptional && <span className="text-destructive">*</span>}
-          </label>
-          <input required={!isOptional} value={prevSchool.last_class || ''} onChange={e => updatePrevSchool('last_class', e.target.value)} placeholder="e.g. UKG, Class 1" className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Previous School Name {!isOptional && <span className="text-destructive">*</span>}
-          </label>
-          <input required={!isOptional} value={prevSchool.prev_school_name || ''} onChange={e => updatePrevSchool('prev_school_name', e.target.value)} placeholder="School name" className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board / Curriculum</label>
-          <div className="relative">
-            <select
-              value={prevSchool.board || ''}
-              onChange={e => updatePrevSchool('board', e.target.value)}
-              className={`${inputCls} appearance-none`}
-            >
-              <option value="">Select board...</option>
-              <option value="CBSE">CBSE</option>
-              <option value="ICSE">ICSE / ISC</option>
-              <option value="State Board">State Board</option>
-              <option value="IB">IB</option>
-              <option value="Cambridge">Cambridge (IGCSE)</option>
-              <option value="Other">Other</option>
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Grade</label>
-          <input value={prevSchool.percentage || ''} onChange={e => updatePrevSchool('percentage', e.target.value)} placeholder="e.g. 85% or A+" className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Academic Year</label>
-          <input value={prevSchool.academic_year || ''} onChange={e => updatePrevSchool('academic_year', e.target.value)} placeholder="e.g. 2025" className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Transfer Certificate Available?</label>
-          <div className="relative">
-            <select
-              value={prevSchool.tc_available || ''}
-              onChange={e => updatePrevSchool('tc_available', e.target.value)}
-              className={`${inputCls} appearance-none`}
-            >
-              <option value="">Select...</option>
-              <option value="yes">Yes</option>
-              <option value="no">No, will submit later</option>
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          </div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+        <TextField
+          label="Previous Class / Grade"
+          required={!isOptional}
+          value={prevSchool.last_class || ''}
+          onValueChange={v => updatePrevSchool('last_class', v)}
+          placeholder="e.g. UKG, Class 1"
+        />
+        <TextField
+          label="Previous School Name"
+          required={!isOptional}
+          value={prevSchool.prev_school_name || ''}
+          onValueChange={v => updatePrevSchool('prev_school_name', v)}
+          placeholder="School name"
+        />
+        <SelectField
+          label="Board / Curriculum"
+          value={prevSchool.board || ''}
+          onValueChange={v => updatePrevSchool('board', v)}
+          placeholder="Select board..."
+          options={previousBoardOptions}
+        />
+        <TextField
+          label="Marks / Grade"
+          value={prevSchool.percentage || ''}
+          onValueChange={v => updatePrevSchool('percentage', v)}
+          placeholder="e.g. 85% or A+"
+        />
+        <TextField
+          label="Academic Year"
+          value={prevSchool.academic_year || ''}
+          onValueChange={v => updatePrevSchool('academic_year', v)}
+          placeholder="e.g. 2025"
+        />
+        <SelectField
+          label="Transfer Certificate Available?"
+          value={prevSchool.tc_available || ''}
+          onValueChange={v => updatePrevSchool('tc_available', v)}
+          placeholder="Select..."
+          options={tcAvailableOptions}
+        />
       </div>
     </div>
   );
@@ -778,9 +841,9 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const cat = data.program_category;
   const isSchool = cat === 'school';
   const needsGraduation = ['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(cat);
-  const academic = data.academic_details || {};
-  const additionalQualifications: Record<string, any>[] = (academic as any).additional_qualifications || [];
-  const entranceExams: EntranceExam[] = (academic as any).entrance_exams || [];
+  const academic = (data.academic_details || {}) as AcademicFormData;
+  const additionalQualifications: AcademicEntry[] = academic.additional_qualifications || [];
+  const entranceExams: EntranceExam[] = academic.entrance_exams || [];
 
   // DOB year for filtering year dropdowns
   const dobYear = data.dob ? new Date(data.dob).getFullYear() : undefined;
@@ -789,6 +852,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const [courseRules, setCourseRules] = useState<Record<string, EligibilityRule>>({});
   const [rulesLoaded, setRulesLoaded] = useState(false);
   const [showOptionalGrad, setShowOptionalGrad] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
     const courseIds = (data.course_selections || []).map(s => s.course_id);
@@ -861,6 +925,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
         courseRules,
         SESSION_YEAR,
         additionalQualifications,
+        data.category,
       )
     : [];
 
@@ -876,9 +941,9 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const hasYearErrors = yearErrors.length > 0;
 
   // Prerequisite validation: class 12 → class 10; graduation → class 12
-  const class10 = (academic as any)?.class_10 || {};
-  const class12 = (academic as any)?.class_12 || {};
-  const graduation = (academic as any)?.graduation || {};
+  const class10 = academic.class_10 || {};
+  const class12 = academic.class_12 || {};
+  const graduation = academic.graduation || {};
   const isClass10Filled = !!(class10.board || class10.year || class10.marks);
   const isClass12Filled = !!(class12.board || class12.year || class12.marks);
   const isGradFilled = !!(graduation.degree || graduation.university || graduation.year || graduation.marks);
@@ -892,19 +957,53 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const showGraduation = needsGraduation || Object.values(courseRules).some(r => r.requiresGraduation);
 
   const firstCourseResults = perCourseResults[0]?.results || [];
+  const class10InvalidFields = new Set<string>();
+  const class12InvalidFields = new Set<string>();
+  const graduationInvalidFields = new Set<string>();
 
-  const updateAcademic = (v: Record<string, any>) => {
+  const addRequiredAcademicFields = (set: Set<string>, block: AcademicEntry, fields: string[]) => {
+    fields.forEach((field) => {
+      if (!String(block[field] || '').trim()) set.add(field);
+    });
+  };
+
+  if (missingClass10) addRequiredAcademicFields(class10InvalidFields, class10, ['board', 'year', 'marks']);
+  if (missingClass12) addRequiredAcademicFields(class12InvalidFields, class12, ['board', 'year', 'marks']);
+  if (missingGraduation) addRequiredAcademicFields(graduationInvalidFields, graduation, ['degree', 'university', 'year', 'marks']);
+  if (class10.board === 'Other' && !class10.board_other?.trim()) class10InvalidFields.add('board_other');
+  if (class12.board === 'Other' && !class12.board_other?.trim()) class12InvalidFields.add('board_other');
+  if (graduation.university === 'Other' && !graduation.university_other?.trim()) graduationInvalidFields.add('university_other');
+  if (yearErrorMap['class_10_year']) class10InvalidFields.add('year');
+  if (yearErrorMap['class_12_year']) class12InvalidFields.add('year');
+  if (yearErrorMap['graduation_year']) graduationInvalidFields.add('year');
+  firstCourseResults.forEach((result) => {
+    if (result.type !== 'error') return;
+    if (result.field === 'class_12') class12InvalidFields.add('subjects');
+    if (result.field === 'subject_marks') class12InvalidFields.add('subject_marks');
+    if (result.field === 'graduation') graduationInvalidFields.add('marks');
+  });
+
+  const handleContinue = () => {
+    if (hasBlockingErrors) {
+      setShowErrors(true);
+      return;
+    }
+    onNext();
+  };
+
+  const updateAcademic = (v: AcademicFormData) => {
     // Check for custom boards/universities and flag
     const flags = [...(data.flags || [])];
-    const checkCustom = (obj: any, key: string, checker: (v: string) => boolean, flagName: string) => {
-      if (obj && obj[key] && !checker(obj[key])) {
+    const checkCustom = (obj: AcademicEntry | undefined, key: string, checker: (v: string) => boolean, flagName: string) => {
+      const value = obj?.[key];
+      if (typeof value === 'string' && value && !checker(value)) {
         if (!flags.includes(flagName)) flags.push(flagName);
       }
     };
     checkCustom(v.class_10, 'board', isPredefinedBoard, 'custom_board');
     checkCustom(v.class_12, 'board', isPredefinedBoard, 'custom_board');
     checkCustom(v.graduation, 'university', isPredefinedUniversity, 'custom_university');
-    (v.additional_qualifications || []).forEach((q: any) => {
+    (v.additional_qualifications || []).forEach((q) => {
       checkCustom(q, 'university', isPredefinedUniversity, 'custom_university');
     });
 
@@ -922,7 +1021,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
     updateAcademic(updated);
   };
 
-  const updateQualification = (idx: number, val: Record<string, any>) => {
+  const updateQualification = (idx: number, val: AcademicEntry) => {
     const newQ = [...additionalQualifications];
     newQ[idx] = val;
     const updated = { ...academic, additional_qualifications: newQ };
@@ -972,6 +1071,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                 ? parseInt(academic.class_12.year, 10) - 2
                 : undefined
             }
+            showErrors={showErrors}
+            invalidFields={class10InvalidFields}
           />
           {missingClass12 && (
             <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
@@ -995,6 +1096,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                 ? parseInt(academic.class_10.year, 10) + 2
                 : undefined
             }
+            showErrors={showErrors}
+            invalidFields={class12InvalidFields}
           />
 
           {/* Subject-wise marks inputs (e.g., English for GNM) */}
@@ -1002,32 +1105,27 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">Subject-wise Marks (Class 12)</h3>
               <p className="text-xs text-muted-foreground">Some of your selected courses require minimum marks in specific subjects.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
                 {Array.from(requiredSubjectMarks.entries()).map(([subject, minPct]) => {
-                  const subjectMarks = (academic as any)?.class_12?.subject_marks || {};
+                  const subjectMarks = (academic.class_12?.subject_marks || {}) as Record<string, string>;
                   const val = subjectMarks[subject] || '';
                   const subjectError = perCourseResults.flatMap(cr => cr.results).find(r => r.field === 'subject_marks' && r.message.includes(subject));
                   return (
-                    <div key={subject}>
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                        {subject} Marks / % <span className="text-muted-foreground/70">(min {minPct}%)</span>
-                      </label>
-                      <input
-                        value={val}
-                        onChange={e => {
-                          const newMarks = { ...((academic as any)?.class_12?.subject_marks || {}), [subject]: e.target.value };
-                          updateAcademic({ ...academic, class_12: { ...(academic as any)?.class_12, subject_marks: newMarks } });
-                        }}
-                        placeholder={`e.g. 45 or 4.5 CGPA`}
-                        className={inputCls}
-                      />
-                      {subjectError && subjectError.type === 'error' && (
-                        <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
-                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                          <span className="text-xs">{subjectError.message}</span>
-                        </div>
-                      )}
-                    </div>
+                    <TextField
+                      key={subject}
+                      label={
+                        <>
+                          {subject} Marks / % <span className="text-muted-foreground/70">(min {minPct}%)</span>
+                        </>
+                      }
+                      value={val}
+                      onValueChange={v => {
+                        const newMarks = { ...((academic.class_12?.subject_marks || {}) as Record<string, string>), [subject]: v };
+                        updateAcademic({ ...academic, class_12: { ...academic.class_12, subject_marks: newMarks } });
+                      }}
+                      placeholder="e.g. 45 or 4.5 CGPA"
+                      error={showErrors && subjectError?.type === 'error' ? subjectError.message : undefined}
+                    />
                   );
                 })}
               </div>
@@ -1054,9 +1152,11 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
               yearError={yearErrorMap['graduation_year']}
               maxYear={SESSION_YEAR + 1}
               dobYear={dobYear}
+              showErrors={showErrors}
+              invalidFields={graduationInvalidFields}
             />
             {parseInt(graduation.year) === SESSION_YEAR + 1 && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 text-blue-700 text-xs">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-info/5 dark:bg-info/90/20 border border-info/20 text-info-foreground text-xs">
                 <Info className="h-3.5 w-3.5 shrink-0" />
                 Graduation in {SESSION_YEAR + 1}: your application will be considered for the {SESSION_YEAR + 1}-{(SESSION_YEAR + 2).toString().slice(-2)} session.
               </div>
@@ -1069,7 +1169,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <div className="space-y-3">
               <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <GraduationCap className="h-5 w-5 text-violet-600" />
+                  <GraduationCap className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-sm font-semibold text-foreground">Add Graduation Details</p>
                     <p className="text-[11px] text-muted-foreground">Optional — useful to explain gap years or showcase prior degrees.</p>
@@ -1146,7 +1246,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={saving || hasBlockingErrors} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>

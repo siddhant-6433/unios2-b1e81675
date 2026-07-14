@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
-  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft,
+  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,10 +28,41 @@ import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
+import { PORTAL_CONFIGS, type PortalId } from "@/components/apply/portalConfig";
+import { displayValue } from "@/lib/displayValue";
+
+type OnBehalfContext = {
+  mode: "academic_partner_on_behalf";
+  token: string;
+  actor_role: string;
+  actor_user_id: string;
+  academic_partner_id: string;
+  academic_partner_name: string;
+  lead_id: string;
+  candidate_phone: string;
+};
+
+function OnBehalfBanner({ context, candidateName }: { context: OnBehalfContext | null; candidateName: string }) {
+  if (!context) return null;
+  return (
+    <div className="mb-4 rounded-xl border border-warning/20 bg-warning/5 px-4 py-3 text-sm text-warning-foreground">
+      <div className="font-semibold">Academic partner on-behalf mode</div>
+      <div className="mt-0.5 text-xs leading-relaxed text-warning-foreground">
+        You are completing this application for {candidateName || "the candidate"} as {context.academic_partner_name}.
+        Application changes and payments are internally audited under the academic partner account. Offer acceptance requires OTP confirmation from the student phone.
+      </div>
+    </div>
+  );
+}
 
 // ─── OTP Login Screen ───
-function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
+function OtpLogin({
+  onAuthenticated,
+}: {
+  onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null, portalId?: PortalId | null) => void;
+}) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
 
@@ -51,9 +82,11 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [applicationId, setApplicationId] = useState("");
-  const [loginMode, setLoginMode] = useState<"phone" | "appid" | "google_phone">("phone");
+  const [loginMode, setLoginMode] = useState<"phone" | "appid" | "google_phone" | "password">("phone");
   const [googleName, setGoogleName] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   // Check for ?token= magic link first; if present, redeem it and sign the user in.
   // Falls through to the normal session/OTP flow on any failure.
@@ -99,10 +132,14 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         url.searchParams.delete("token");
         window.history.replaceState({}, "", url.toString());
 
+        const portalId = typeof data.portal === "string" && data.portal in PORTAL_CONFIGS
+          ? data.portal as PortalId
+          : null;
+
         // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
         // The apply portal is session-less for applicants — RLS on `applications`
         // already permits anon writes scoped by phone.
-        onAuthenticated(data.phone, data.name || "Applicant");
+        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null, portalId);
       } catch (err: any) {
         toast({
           title: "Login link expired or invalid",
@@ -258,6 +295,84 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
+  const portal = usePortal();
+  const passwordLoginEnabled = portal.id === "nimt";
+  const renderLoginLogo = (placement: "desktop" | "mobile") => {
+    const compact = placement === "mobile";
+
+    if (portal.id === "beacon") {
+      return (
+        <div className={`inline-flex items-center rounded-2xl bg-white/10 shadow-sm ring-1 ring-white/20 ${compact ? "p-2.5" : "p-4 xl:p-5"}`}>
+          <img
+            src={portal.logo}
+            alt={portal.name}
+            className={`${compact ? "h-16 max-w-[180px]" : "h-28 xl:h-32 max-w-[340px]"} w-auto object-contain brightness-0 invert`}
+          />
+        </div>
+      );
+    }
+
+    if (portal.id === "mirai") {
+      return (
+        <div className={`overflow-hidden rounded-2xl bg-[#77966d] shadow-sm ring-1 ring-white/15 ${compact ? "h-16 w-16" : "h-28 w-28 xl:h-32 xl:w-32"}`}>
+          <img
+            src={portal.logo}
+            alt={portal.name}
+            className="h-full w-full scale-[1.2] object-cover object-center"
+          />
+        </div>
+      );
+    }
+
+    const src = placement === "desktop" && portal.logoWhite ? portal.logoWhite : portal.logo;
+    const shouldInvert = placement === "desktop" && !portal.logoWhite;
+    return (
+      <img
+        src={src}
+        alt={portal.name}
+        className={`${compact ? "h-9" : "h-12 max-w-[200px]"} w-auto object-contain ${shouldInvert ? "brightness-0 invert" : ""}`}
+      />
+    );
+  };
+
+  const handlePasswordLogin = async () => {
+    if (!passwordLoginEnabled) return;
+    if (!username.trim() || !password) {
+      toast({ title: "Enter username and password", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("apply-portal-password-login", {
+        body: {
+          portal: portal.id,
+          username: username.trim(),
+          password,
+        },
+      });
+      if (error) {
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try {
+            const body = await ctx.json();
+            throw new Error(body?.error || error.message);
+          } catch (e: any) {
+            if (e.message) throw e;
+          }
+        }
+        throw error;
+      }
+      if (data?.error) throw new Error(data.error);
+      if (!data?.phone) throw new Error("Invalid login response");
+
+      onAuthenticated(data.phone, data.name || "Applicant");
+    } catch (err: any) {
+      toast({ title: "Login failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -275,12 +390,10 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
-  const portal = usePortal();
-
   if (checkingSession) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -313,11 +426,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 
         {/* Logo */}
         <div className="relative z-10">
-          {portal.logoWhite ? (
-            <img src={portal.logoWhite} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px]" />
-          ) : (
-            <img src={portal.logo} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px] brightness-0 invert" />
-          )}
+          {renderLoginLogo("desktop")}
         </div>
 
         {/* Headline */}
@@ -367,19 +476,25 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
           <div className="mb-8 lg:hidden">
-            <img src={portal.logo} alt={portal.name} className="h-9 w-auto object-contain" />
+            {renderLoginLogo("mobile")}
             <p className="text-xs text-muted-foreground mt-1">{portal.tagline}</p>
           </div>
 
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-foreground">
-              {loginMode === "appid" ? "Find your application" : "Start your application"}
+              {loginMode === "appid"
+                ? "Find your application"
+                : loginMode === "password"
+                ? "Sign in to application"
+                : "Start your application"}
             </h2>
             <p className="text-sm text-muted-foreground mt-1.5">
               {loginMode === "google_phone"
                 ? "Verify your WhatsApp number to continue"
                 : loginMode === "appid"
                 ? "Enter your application ID to resume"
+                : loginMode === "password"
+                ? "Enter the temporary username and password"
                 : otpSent
                 ? `OTP sent to ${phone}`
                 : "Enter your WhatsApp number to get started"}
@@ -454,16 +569,27 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
                 {otpSent ? "Verify & Continue" : "Get OTP on WhatsApp"}
               </Button>
               {!otpSent && (
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
-                  onClick={() => setLoginMode("appid")}
-                >
-                  Have an Application ID? Login instead
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                    onClick={() => setLoginMode("appid")}
+                  >
+                    Have an Application ID? Login instead
+                  </button>
+                  {passwordLoginEnabled && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                      onClick={() => setLoginMode("password")}
+                    >
+                      Use username and password
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          ) : (
+          ) : loginMode === "appid" ? (
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Application ID</label>
@@ -486,9 +612,48 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
                 ← Back to phone login
               </button>
             </div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handlePasswordLogin();
+              }}
+            >
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Username</label>
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                />
+              </div>
+              <Button type="submit" className="w-full gap-2 h-11" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Sign in
+              </Button>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                onClick={() => setLoginMode("phone")}
+              >
+                ← Back to phone login
+              </button>
+            </form>
           )}
 
-          {loginMode !== "google_phone" && !otpSent && (
+          {loginMode !== "google_phone" && loginMode !== "password" && !otpSent && (
             <>
               <div className="flex items-center gap-3 my-5">
                 <div className="flex-1 h-px bg-border" />
@@ -632,7 +797,7 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
   return (
     <div className="mb-6 space-y-3">
       <div>
-        <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+        <h1 className="text-xl font-bold text-foreground">Welcome, {displayValue(app.full_name) || leadName}</h1>
         <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
         <p className="text-xs text-muted-foreground mt-1">
           Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
@@ -675,12 +840,12 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
               <div key={s.course_id} className="flex items-center gap-3 py-2">
                 <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">P{s.preference_order}</Badge>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{displayValue(s.course_name) || "Course"}</p>
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {s.campus_name}
+                    <MapPin className="h-3 w-3" /> {displayValue(s.campus_name) || "Campus"}
                   </p>
                 </div>
-                <Badge variant="outline" className="text-[10px] shrink-0">{s.program_category}</Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0">{displayValue(s.program_category) || "Program"}</Badge>
               </div>
             ))}
             {ageValidation && (
@@ -710,6 +875,10 @@ function captureUtmSource(): string {
   try {
     const existing = sessionStorage.getItem("unios_utm_source");
     const params = new URLSearchParams(window.location.search);
+    if (params.get("gclid")) {
+      sessionStorage.setItem("unios_utm_source", "google_ads");
+      return "google_ads";
+    }
     const utmSource = (params.get("utm_source") || "").toLowerCase().trim();
     if (utmSource && VALID_LEAD_SOURCES.has(utmSource)) {
       sessionStorage.setItem("unios_utm_source", utmSource);
@@ -745,17 +914,26 @@ type DashboardApp = {
   course_selections: any[];
   form_pdf_url: string | null;
   fee_receipt_url: string | null;
+  payment_ref: string | null;
   phone: string;
   email: string | null;
+  submitted_at?: string | null;
+  updated_at?: string | null;
   created_at: string;
 };
 
+type DashboardDocState = {
+  rejected: number;
+};
+
+const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
+
 function statusBadge(status: string, paymentStatus: string | null) {
-  if (status === "approved") return { label: "Approved", className: "bg-green-100 text-green-700", Icon: CheckCircle };
-  if (status === "submitted" || status === "under_review") return { label: status === "submitted" ? "Submitted" : "Under Review", className: "bg-emerald-100 text-emerald-700", Icon: CheckCircle };
-  if (status === "rejected") return { label: "Rejected", className: "bg-red-100 text-red-700", Icon: Clock };
-  if (paymentStatus === "paid") return { label: "Fee Paid · Continue", className: "bg-blue-100 text-blue-700", Icon: Clock };
-  return { label: "Draft · In Progress", className: "bg-amber-100 text-amber-700", Icon: Clock };
+  if (status === "approved") return { label: "Approved", className: "bg-success/10 text-success", Icon: CheckCircle };
+  if (status === "submitted" || status === "under_review") return { label: status === "submitted" ? "Submitted" : "Under Review", className: "bg-success/10 text-success", Icon: CheckCircle };
+  if (status === "rejected") return { label: "Rejected", className: "bg-destructive/10 text-destructive", Icon: Clock };
+  if (paymentStatus === "paid") return { label: "Fee Paid · Continue", className: "bg-info/10 text-info-foreground", Icon: Clock };
+  return { label: "Draft · In Progress", className: "bg-warning/10 text-warning-foreground", Icon: Clock };
 }
 
 // Lists every confirmed payment receipt for an application's lead — used by
@@ -828,7 +1006,7 @@ function AllReceiptsDialog({
           )}
 
           {errorMsg && (
-            <div className="px-5 py-4 text-xs text-red-600 bg-red-50 border-b border-red-100">{errorMsg}</div>
+            <div className="px-5 py-4 text-xs text-destructive bg-destructive/5 border-b border-destructive/10">{errorMsg}</div>
           )}
 
           {showEmpty && (
@@ -863,7 +1041,7 @@ function AllReceiptsDialog({
                     {p.receipt_url ? (
                       <a
                         href={p.receipt_url} target="_blank" rel="noopener"
-                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                        className="text-[11px] text-info-foreground hover:underline font-semibold"
                       >
                         Download ↗
                       </a>
@@ -873,7 +1051,7 @@ function AllReceiptsDialog({
                       // from the application row so the user isn't blocked.
                       <button
                         onClick={() => setShowFallback(true)}
-                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                        className="text-[11px] text-info-foreground hover:underline font-semibold"
                       >
                         View
                       </button>
@@ -891,23 +1069,96 @@ function AllReceiptsDialog({
   );
 }
 
+/** Offer payload returned by get_applicant_offers_by_phone. */
+type ApplicantOfferInfo = {
+  letter_url: string | null;
+  approval_status: string;
+  course_id?: string | null;
+};
+
+/**
+ * Offers are stored per lead, not per application. When a candidate has a
+ * draft + an approved app on the same lead, only the "owner" app should show
+ * the offer letter / pay CTAs. Prefer approved+paid, course match, then oldest.
+ */
+function pickOfferOwnerAppId(
+  apps: any[],
+  leadId: string,
+  offer: ApplicantOfferInfo | undefined,
+): string | null {
+  if (!offer || offer.approval_status !== "approved") return null;
+  const eligible = apps.filter(
+    (a) => a.lead_id === leadId && a.status !== "draft" && a.status !== "rejected",
+  );
+  if (eligible.length === 0) return null;
+
+  const score = (a: any) => {
+    let s = 0;
+    if (a.status === "approved") s += 100;
+    else if (a.status === "under_review" || a.status === "submitted") s += 50;
+    if (a.payment_status === "paid") s += 20;
+    const courseIds = ((a.course_selections as any[]) || [])
+      .map((c) => c?.course_id)
+      .filter(Boolean);
+    if (offer.course_id && courseIds.includes(offer.course_id)) s += 50;
+    // Prefer earlier applications when scores tie (the one the offer was issued for).
+    const created = a.created_at ? new Date(a.created_at).getTime() : 0;
+    return s * 1e13 - created;
+  };
+
+  return [...eligible].sort((a, b) => score(b) - score(a))[0]?.id ?? null;
+}
+
 function ApplicationDashboardView({
-  apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
+  apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout, onBehalfContext,
 }: {
   apps: any[];
   leadName: string;
-  offerLetters: Record<string, { letter_url: string | null; approval_status: string }>;
+  offerLetters: Record<string, ApplicantOfferInfo>;
   leadAdmissions: Record<string, { pre_admission_no: string | null; admission_no: string | null }>;
   openAppId: string | null;
   setOpenAppId: (id: string | null) => void;
   onContinue: (app: any) => void;
   onStartNew: () => void;
   onLogout: () => void;
+  onBehalfContext: OnBehalfContext | null;
 }) {
   const portal = usePortal();
   // Which app's fee-receipt dialog is open. Builds the same modern receipt
   // the student gets via email — single canonical format.
   const [receiptApp, setReceiptApp] = useState<any | null>(null);
+  const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({});
+  const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
+  const [docStates, setDocStates] = useState<Record<string, DashboardDocState>>({});
+
+  // lead_id → application id that owns the approved offer for that lead
+  const offerOwnerByLead = useMemo(() => {
+    const map: Record<string, string> = {};
+    const leadIds = new Set(
+      apps.map((a) => a.lead_id).filter(Boolean) as string[],
+    );
+    for (const lid of leadIds) {
+      const owner = pickOfferOwnerAppId(apps, lid, offerLetters[lid]);
+      if (owner) map[lid] = owner;
+    }
+    return map;
+  }, [apps, offerLetters]);
+
+  // Offer-owning applications first, then other non-drafts, drafts last
+  const sortedApps = useMemo(() => {
+    const rank = (a: any) => {
+      if (a.lead_id && offerOwnerByLead[a.lead_id] === a.id) return 0;
+      if (a.status === "draft") return 3;
+      if (a.status === "approved") return 1;
+      return 2;
+    };
+    return [...apps].sort((a, b) => {
+      const d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }, [apps, offerOwnerByLead]);
+
   const buildReceiptData = (a: any): ReceiptData => {
     const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
     const courses = (a.course_selections as any[]) || [];
@@ -929,16 +1180,68 @@ function ApplicationDashboardView({
     };
   };
 
+  const generateApplicationPdf = async (a: DashboardApp) => {
+    if (generatingPdfFor || !a.application_id) return;
+    setGeneratingPdfFor(a.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: a.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setGeneratedPdfUrls(prev => ({ ...prev, [a.id]: url }));
+      window.open(url, "_blank");
+    } catch (e: any) {
+      console.error("generate-application-form failed:", e);
+    } finally {
+      setGeneratingPdfFor(null);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const reviewableApps = apps.filter((a: DashboardApp) =>
+      a.application_id && APPLICATION_FORM_PDF_STATUSES.has(a.status)
+    );
+
+    if (reviewableApps.length === 0) {
+      setDocStates({});
+      return;
+    }
+
+    Promise.all(reviewableApps.map(async (a: DashboardApp) => {
+      const { data } = await supabase.functions.invoke("list-app-docs", {
+        body: { application_id: a.application_id },
+      });
+      const docs = ((data as any)?.docs || []) as PreviewDoc[];
+      return [
+        a.application_id,
+        { rejected: docs.filter(d => d.review_status === "rejected").length },
+      ] as const;
+    }))
+      .then(entries => {
+        if (!cancelled) setDocStates(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setDocStates({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apps]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           {portal.logo ? (
-            <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
+            <ApplicationHeaderLogo />
           ) : (
             <div className="flex items-center gap-2">
-              <GraduationCap className="h-5 w-5 text-blue-600" />
+              <GraduationCap className="h-5 w-5 text-info-foreground" />
               <span className="text-sm font-bold text-gray-900">{portal.name}</span>
             </div>
           )}
@@ -949,16 +1252,31 @@ function ApplicationDashboardView({
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName} />
 
         {/* Welcome strip — state-aware nudge */}
         {(() => {
           // Priority-ordered state detection across all apps.
-          const admittedApp  = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
-          const preAdmitted  = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
-          const offerApp     = !admittedApp && !preAdmitted && apps.find((a: any) =>
-            (a.lead_id ? offerLetters[a.lead_id] : undefined)?.approval_status === "approved"
+          // PAN/AN live on the lead — only show them on the offer-owning app.
+          const admittedApp  = apps.find((a: any) =>
+            a.lead_id
+            && leadAdmissions[a.lead_id]?.admission_no
+            && (!offerOwnerByLead[a.lead_id] || offerOwnerByLead[a.lead_id] === a.id)
           );
-          const reviewApp    = !admittedApp && !preAdmitted && !offerApp &&
+          const preAdmitted  = !admittedApp && apps.find((a: any) =>
+            a.lead_id
+            && leadAdmissions[a.lead_id]?.pre_admission_no
+            && (!offerOwnerByLead[a.lead_id] || offerOwnerByLead[a.lead_id] === a.id)
+          );
+          const docActionApp = !admittedApp && !preAdmitted && apps.find((a: DashboardApp) =>
+            (docStates[a.application_id]?.rejected || 0) > 0
+          );
+          const offerApp     = !admittedApp && !preAdmitted && apps.find((a: any) =>
+            a.lead_id
+            && offerLetters[a.lead_id]?.approval_status === "approved"
+            && offerOwnerByLead[a.lead_id] === a.id
+          );
+          const reviewApp    = !admittedApp && !preAdmitted && !docActionApp && !offerApp &&
             apps.find((a: any) => a.status === "submitted" || a.status === "under_review");
           const feeApp       = !admittedApp && !preAdmitted && !offerApp && !reviewApp &&
             apps.find((a: any) => a.status === "draft" && Number(a.fee_amount) > 0 && a.payment_status !== "paid");
@@ -970,17 +1288,17 @@ function ApplicationDashboardView({
 
           // Gradient + content derived from state.
           let gradient     = "bg-gradient-to-br from-blue-600 to-indigo-700";
-          let eyebrowColor = "text-blue-200";
+          let eyebrowColor = "text-white/60";
           let subtitle: React.ReactNode = `Your admission journey at ${portal.name}`;
-          let subtitleColor = "text-blue-100";
+          let subtitleColor = "text-white/60";
           let cardIcon: React.ReactNode = <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           let cta: React.ReactNode = null;
 
           if (admittedApp) {
             gradient      = "bg-gradient-to-br from-green-600 to-emerald-700";
-            eyebrowColor  = "text-green-200";
+            eyebrowColor  = "text-white/60";
             subtitle      = <span className="font-mono font-semibold">Admission No: {an}</span>;
-            subtitleColor = "text-green-100";
+            subtitleColor = "text-white/70";
             cta = (
               <a href="https://uni.nimt.ac.in" target="_blank" rel="noopener"
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
@@ -989,33 +1307,46 @@ function ApplicationDashboardView({
             );
           } else if (preAdmitted) {
             subtitle      = <span className="font-mono font-semibold">Pre-Admission No: {pan}</span>;
-            subtitleColor = "text-blue-100";
+            subtitleColor = "text-white/60";
             cta = (
-              <button onClick={() => onContinue(preAdmitted)}
+              <button onClick={() => setOpenAppId(openAppId === preAdmitted.id ? null : preAdmitted.id)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 Pay token fee to complete admission →
               </button>
             );
+          } else if (docActionApp) {
+            const rejectedCount = docStates[docActionApp.application_id]?.rejected || 0;
+            gradient      = "bg-gradient-to-br from-rose-600 to-red-700";
+            eyebrowColor  = "text-white/60";
+            subtitleColor = "text-white/60";
+            subtitle      = `${rejectedCount} document${rejectedCount === 1 ? "" : "s"} need re-upload`;
+            cardIcon      = <AlertCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
+            cta = (
+              <button onClick={() => onContinue(docActionApp)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Re-upload rejected documents →
+              </button>
+            );
           } else if (offerApp) {
             const courseLabel = (offerApp.course_selections as any[])
-              ?.map((c: any) => c.course_name).filter(Boolean).join(", ") || "your course";
+              ?.map((c: any) => displayValue(c.course_name)).filter(Boolean).join(", ") || "your course";
             subtitle = <>🎉 Offer approved for <span className="font-semibold">{courseLabel}</span></>;
             cta = (
-              <button onClick={() => onContinue(offerApp)}
+              <button onClick={() => setOpenAppId(openAppId === offerApp.id ? null : offerApp.id)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 Pay token fee to secure your seat →
               </button>
             );
           } else if (reviewApp) {
             gradient      = "bg-gradient-to-br from-emerald-600 to-teal-700";
-            eyebrowColor  = "text-emerald-200";
+            eyebrowColor  = "text-white/60";
             subtitle      = "Application submitted · We'll be in touch soon";
-            subtitleColor = "text-emerald-100";
+            subtitleColor = "text-white/70";
             cardIcon      = <CheckCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
           } else if (feeApp) {
             gradient      = "bg-gradient-to-br from-amber-500 to-orange-600";
-            eyebrowColor  = "text-amber-200";
-            subtitleColor = "text-amber-100";
+            eyebrowColor  = "text-white/60";
+            subtitleColor = "text-white/60";
             subtitle      = `Pay ₹${Number(feeApp.fee_amount).toLocaleString("en-IN")} application fee to submit`;
             cardIcon      = <Wallet className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
             cta = (
@@ -1052,27 +1383,35 @@ function ApplicationDashboardView({
           );
         })()}
 
-        {/* Application cards */}
-        {apps.map((app) => {
+        {/* Application cards — each app separate; offer only on owner app */}
+        {sortedApps.map((app) => {
           const a = app as DashboardApp;
-          const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
-          const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          const courses = (a.course_selections || []).map((c: any) => displayValue(c.course_name)).filter(Boolean);
+          const leadOffer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          // Only the application that owns the offer (not sibling drafts) shows it.
+          const isOfferOwner = !!(a.lead_id && offerOwnerByLead[a.lead_id] === a.id);
+          const offer = isOfferOwner ? leadOffer : undefined;
           const admInfo = a.lead_id ? leadAdmissions[a.lead_id] : undefined;
-          const preAdmNo = admInfo?.pre_admission_no ?? null;
-          const admNo = admInfo?.admission_no ?? null;
+          const preAdmNo = isOfferOwner ? (admInfo?.pre_admission_no ?? null) : null;
+          const admNo = isOfferOwner ? (admInfo?.admission_no ?? null) : null;
           const isAdmitted = !!admNo;
           const hasApprovedOffer = offer?.approval_status === "approved";
           const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
           const isDraft = a.status === "draft";
           const isPaid = a.payment_status === "paid";
           const isUnderReview = a.status === "submitted" || a.status === "under_review";
+          const formPdfUrl = generatedPdfUrls[a.id] || a.form_pdf_url;
           const isOpen = openAppId === a.id;
+          const rejectedDocCount = docStates[a.application_id]?.rejected || 0;
+          const needsDocReupload = rejectedDocCount > 0 && !isAdmitted;
 
           // Card accent colour by state
-          const accentClass = hasApprovedOffer
-            ? "border-blue-200 bg-white"
+          const accentClass = needsDocReupload
+            ? "border-destructive/20 bg-white"
+            : hasApprovedOffer
+            ? "border-info/30 ring-2 ring-info/20 bg-white"
             : isUnderReview
-            ? "border-emerald-200 bg-white"
+            ? "border-success/20 bg-white"
             : "border-gray-200 bg-white";
 
           return (
@@ -1095,15 +1434,30 @@ function ApplicationDashboardView({
                   </a>
                 </div>
               )}
-              {!isAdmitted && hasApprovedOffer && (
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center gap-2">
-                  <Award className="h-4 w-4 text-yellow-300 shrink-0" />
+              {needsDocReupload && (
+                <div className="bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2.5 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-white shrink-0" />
                   <span className="text-xs font-bold text-white tracking-wide">
-                    {preAdmNo ? `Pre-Admitted · ${preAdmNo} · Complete Payment` : "Offer Approved · Action Required"}
+                    {rejectedDocCount} document{rejectedDocCount === 1 ? "" : "s"} need re-upload
                   </span>
                 </div>
               )}
-              {isUnderReview && !hasApprovedOffer && (
+              {!needsDocReupload && !isAdmitted && hasApprovedOffer && (
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Award className="h-4 w-4 text-yellow-300 shrink-0" />
+                    <span className="text-xs font-bold text-white tracking-wide truncate">
+                      {preAdmNo
+                        ? `Pre-Admitted · ${preAdmNo} · Complete Payment`
+                        : `Offer issued for ${a.application_id} · Action Required`}
+                    </span>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {a.application_id}
+                  </span>
+                </div>
+              )}
+              {!needsDocReupload && isUnderReview && !hasApprovedOffer && (
                 <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2.5 flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-white shrink-0" />
                   <span className="text-xs font-bold text-white tracking-wide">Application Submitted · Under Review</span>
@@ -1112,7 +1466,9 @@ function ApplicationDashboardView({
               {isDraft && (
                 <div className="bg-gradient-to-r from-amber-400 to-orange-400 px-4 py-2.5 flex items-center gap-2">
                   <Pencil className="h-4 w-4 text-white shrink-0" />
-                  <span className="text-xs font-bold text-white tracking-wide">Draft · Complete your application</span>
+                  <span className="text-xs font-bold text-white tracking-wide">
+                    Draft · Separate from your offer application
+                  </span>
                 </div>
               )}
 
@@ -1120,37 +1476,61 @@ function ApplicationDashboardView({
                 {/* App ID + course */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="font-mono text-xs font-bold text-gray-400">{a.application_id}</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-xs font-bold text-gray-500">{a.application_id}</span>
+                      {hasApprovedOffer && (
+                        <span className="inline-flex items-center rounded-full bg-info/10 px-2 py-0.5 text-[10px] font-bold text-info-foreground">
+                          Offer linked
+                        </span>
+                      )}
+                      {isDraft && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                          Draft
+                        </span>
+                      )}
+                    </div>
                     <p className="text-base font-bold text-gray-900 mt-0.5 leading-tight">
                       {courses.length > 0 ? courses.join(", ") : <span className="text-gray-400 italic font-normal text-sm">No course selected yet</span>}
                     </p>
                     {a.fee_amount != null && a.fee_amount > 0 && (
                       <p className="text-xs text-gray-400 mt-0.5">
                         Application fee ₹{Number(a.fee_amount).toLocaleString("en-IN")}
-                        {isPaid && <span className="ml-1.5 text-green-600 font-medium">· Paid</span>}
+                        {isPaid && <span className="ml-1.5 text-success font-medium">· Paid</span>}
                       </p>
                     )}
                   </div>
                 </div>
 
                 {/* What happens next hint */}
-                {isUnderReview && !hasApprovedOffer && (
-                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-xs text-emerald-700">
+                {needsDocReupload && (
+                  <div className="rounded-xl bg-destructive/5 border border-destructive/10 px-3 py-2.5 text-xs text-destructive">
+                    One or more documents were rejected by admissions. Re-upload the corrected file so review can continue.
+                  </div>
+                )}
+                {!needsDocReupload && isUnderReview && !hasApprovedOffer && (
+                  <div className="rounded-xl bg-success/5 border border-success/10 px-3 py-2.5 text-xs text-success">
                     Our admissions team is reviewing your application. You'll be notified once an offer is issued.
                   </div>
                 )}
                 {isDraft && (
-                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-800">
+                  <div className="rounded-xl bg-warning/5 border border-warning/10 px-3 py-2.5 text-xs text-warning-foreground">
                     Your application is incomplete. Continue editing to submit it for review.
                   </div>
                 )}
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
-                  {isDraft ? (
+                  {needsDocReupload ? (
                     <button
                       onClick={() => onContinue(a)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 active:scale-95 transition-all"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-destructive px-4 py-2 text-xs font-bold text-white hover:bg-destructive active:scale-95 transition-all"
+                    >
+                      <AlertCircle className="h-3.5 w-3.5" /> Re-upload Documents
+                    </button>
+                  ) : isDraft ? (
+                    <button
+                      onClick={() => onContinue(a)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2 text-xs font-bold text-white hover:bg-info/60 active:scale-95 transition-all"
                     >
                       <Pencil className="h-3.5 w-3.5" /> Continue Editing
                     </button>
@@ -1162,13 +1542,22 @@ function ApplicationDashboardView({
                       <FileText className="h-3.5 w-3.5" /> View Application
                     </button>
                   )}
-                  {a.form_pdf_url && (
+                  {formPdfUrl ? (
                     <a
-                      href={a.form_pdf_url} target="_blank" rel="noreferrer"
+                      href={formPdfUrl} target="_blank" rel="noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
                     >
                       <FileText className="h-3.5 w-3.5" /> PDF
                     </a>
+                  ) : APPLICATION_FORM_PDF_STATUSES.has(a.status) && (
+                    <button
+                      onClick={() => generateApplicationPdf(a)}
+                      disabled={generatingPdfFor === a.id}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all disabled:opacity-60"
+                    >
+                      {generatingPdfFor === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                      Generate PDF
+                    </button>
                   )}
                   {isPaid && (
                     <button
@@ -1181,7 +1570,7 @@ function ApplicationDashboardView({
                   {hasLetterPdf && (
                     <a
                       href={offer!.letter_url!} target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 active:scale-95 transition-all"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-info/20 bg-info/5 px-3.5 py-2 text-xs font-semibold text-info-foreground hover:bg-info/10 active:scale-95 transition-all"
                     >
                       <Award className="h-3.5 w-3.5" /> Offer Letter
                     </a>
@@ -1197,7 +1586,7 @@ function ApplicationDashboardView({
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all active:scale-95 ${
                         isOpen
                           ? "border border-gray-200 bg-gray-100 text-gray-700"
-                          : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-200"
+                          : "bg-info text-white hover:bg-info/60 shadow-sm shadow-blue-200"
                       }`}
                     >
                       <Wallet className="h-3.5 w-3.5" />
@@ -1214,6 +1603,11 @@ function ApplicationDashboardView({
                     applicantName={a.full_name || ""}
                     applicantPhone={a.phone}
                     applicantEmail={a.email}
+                    courseName={(a.course_selections || [])
+                      ?.map((c: any) => displayValue(c.course_name))
+                      .filter(Boolean)
+                      .join(", ") || null}
+                    onBehalfContext={onBehalfContext}
                   />
                 )}
               </div>
@@ -1224,7 +1618,7 @@ function ApplicationDashboardView({
         {/* Start new */}
         <button
           onClick={onStartNew}
-          className="w-full rounded-2xl border-2 border-dashed border-gray-200 py-4 text-sm font-semibold text-gray-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2"
+          className="w-full rounded-2xl border-2 border-dashed border-gray-200 py-4 text-sm font-semibold text-gray-400 hover:border-info/30 hover:text-info hover:bg-info/5/30 transition-all flex items-center justify-center gap-2"
         >
           <Plus className="h-4 w-4" /> Start a new application
         </button>
@@ -1241,7 +1635,7 @@ function ApplicationDashboardView({
   );
 }
 
-const ApplyPortal = () => {
+const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: PortalId) => void }) => {
   const { toast } = useToast();
   const portal = usePortal();
   const isSchool = portal.programCategories.includes("school");
@@ -1253,6 +1647,7 @@ const ApplyPortal = () => {
   const [phone, setPhone] = useState("");
   const [leadName, setLeadName] = useState("");
   const [childDob, setChildDob] = useState("");
+  const [onBehalfContext, setOnBehalfContext] = useState<OnBehalfContext | null>(null);
   const [leadSource] = useState<string>(() => captureUtmSource());
   // True while we're checking localStorage for a saved session — prevents
   // flashing the OTP login screen before we know if the user is already in.
@@ -1269,9 +1664,9 @@ const ApplyPortal = () => {
     try {
       const raw = localStorage.getItem(PORTAL_AUTH_KEY);
       if (raw) {
-        const { phone: p, name: n, expiresAt } = JSON.parse(raw);
+        const { phone: p, name: n, expiresAt, onBehalf } = JSON.parse(raw);
         if (p && expiresAt && expiresAt > Date.now()) {
-          handleAuthenticated(p, n || "Applicant").finally(() => setRestoringSession(false));
+          handleAuthenticated(p, n || "Applicant", onBehalf || null).finally(() => setRestoringSession(false));
           return;
         }
       }
@@ -1293,11 +1688,13 @@ const ApplyPortal = () => {
     setLeadAdmissions({});
     setPreviewDocs([]);
     setHasDashboard(false);
+    setOnBehalfContext(null);
   };
 
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCourseSelector, setShowCourseSelector] = useState(true);
   // Dashboard listing all applications for the authenticated phone in this portal.
@@ -1306,16 +1703,24 @@ const ApplyPortal = () => {
   // the token fee — i.e. everything the student would normally need post-submit.
   const [appsList, setAppsList] = useState<any[] | null>(null);
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
-  const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
+  const [offerLetters, setOfferLetters] = useState<Record<string, ApplicantOfferInfo>>({});
   const [leadAdmissions, setLeadAdmissions] = useState<Record<string, { pre_admission_no: string | null; admission_no: string | null }>>({});
 
-  // Auto-open the token fee panel for whichever app has an approved offer,
-  // but only if the user hasn't manually toggled something already.
+  // Auto-open the token fee panel only on the app that owns the offer
+  // (not a sibling draft on the same lead).
   useEffect(() => {
     if (!appsList || dashboardOpenAppId) return;
-    const approvedApp = appsList.find(a => a.lead_id && offerLetters[a.lead_id]?.approval_status === "approved");
-    if (approvedApp) setDashboardOpenAppId(approvedApp.id);
-  }, [appsList, offerLetters]);
+    for (const a of appsList) {
+      if (!a.lead_id) continue;
+      const offer = offerLetters[a.lead_id];
+      if (offer?.approval_status !== "approved") continue;
+      const ownerId = pickOfferOwnerAppId(appsList, a.lead_id, offer);
+      if (ownerId) {
+        setDashboardOpenAppId(ownerId);
+        break;
+      }
+    }
+  }, [appsList, offerLetters, dashboardOpenAppId]);
   // Uploaded docs for the currently-previewed submission (loaded on demand).
   const [previewDocs, setPreviewDocs] = useState<PreviewDoc[]>([]);
   // Whether the dashboard exists to go back to (i.e. multiple apps OR any non-draft).
@@ -1324,15 +1729,26 @@ const ApplyPortal = () => {
   const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
 
-  const handleAuthenticated = async (phoneVal: string, name: string) => {
+  const handleAuthenticated = async (
+    phoneVal: string,
+    name: string,
+    onBehalf: OnBehalfContext | null = null,
+    resolvedPortalId: PortalId | null = null,
+  ) => {
+    const activePortal = resolvedPortalId ? PORTAL_CONFIGS[resolvedPortalId] : portal;
+    if (resolvedPortalId && resolvedPortalId !== portal.id) {
+      onPortalResolved?.(resolvedPortalId);
+    }
     setPhone(phoneVal);
     setLeadName(name);
+    setOnBehalfContext(onBehalf);
     setAuthed(true);
     // Persist so refreshes don't log the user out (TTL: 7 days)
     try {
-      localStorage.setItem(PORTAL_AUTH_KEY, JSON.stringify({
+      localStorage.setItem(`portal_auth_${activePortal.id}`, JSON.stringify({
         phone: phoneVal,
         name,
+        onBehalf,
         expiresAt: Date.now() + SESSION_TTL_MS,
       }));
     } catch { /* storage quota exceeded or private mode — non-fatal */ }
@@ -1362,7 +1778,8 @@ const ApplyPortal = () => {
     //   3) flags has a `portal:*` for a DIFFERENT portal → don't match.
     const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
-      if (flags.includes(`portal:${portal.id}`)) return true;
+      if (onBehalf && app.lead_id !== onBehalf.lead_id) return false;
+      if (flags.includes(`portal:${activePortal.id}`)) return true;
       const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
       return !hasAnyPortalFlag;
     });
@@ -1373,13 +1790,27 @@ const ApplyPortal = () => {
     // this completing. RLS on applications permits anon writes scoped by phone.
     const needsTag = portalApps.filter(a => {
       const f = (a.flags as string[]) || [];
-      return !f.includes(`portal:${portal.id}`);
+      return !f.includes(`portal:${activePortal.id}`);
     });
     if (needsTag.length > 0) {
       void Promise.all(needsTag.map(a => {
-        const merged = [...((a.flags as string[]) || []), `portal:${portal.id}`];
+        const merged = [...((a.flags as string[]) || []), `portal:${activePortal.id}`];
         return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
       })).catch(e => console.error("portal-flag self-heal failed:", e));
+    }
+
+    const forceStartNew = Boolean(onBehalf) && new URLSearchParams(window.location.search).get("start_new") === "1";
+    if (forceStartNew) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("start_new");
+      window.history.replaceState({}, "", url.toString());
+      setAppsList(null);
+      setHasDashboard(portalApps.length > 0);
+      setApp(null);
+      setSubmitted(false);
+      setShowCourseSelector(true);
+      setStep(0);
+      return;
     }
 
     // When ≥1 non-draft application exists, OR multiple apps exist, show the
@@ -1394,9 +1825,15 @@ const ApplyPortal = () => {
       // (offer_letters table is staff-only via RLS).
       if (phoneVal) {
         const { data: letters } = await (supabase as any).rpc("get_applicant_offers_by_phone", { _phone: phoneVal });
-        const byLead: Record<string, { letter_url: string | null; approval_status: string }> = {};
+        const byLead: Record<string, ApplicantOfferInfo> = {};
         (letters || []).forEach((l: any) => {
-          if (!byLead[l.lead_id]) byLead[l.lead_id] = { letter_url: l.letter_url, approval_status: l.approval_status };
+          if (!byLead[l.lead_id]) {
+            byLead[l.lead_id] = {
+              letter_url: l.letter_url,
+              approval_status: l.approval_status,
+              course_id: l.course_id ?? null,
+            };
+          }
         });
         setOfferLetters(byLead);
 
@@ -1425,12 +1862,13 @@ const ApplyPortal = () => {
     // editing, current behaviour).
     const existingApp = portalApps[0];
     if (existingApp) {
-      loadAppIntoEditor(existingApp);
+      const activeSteps = activePortal.programCategories.includes("school") ? SCHOOL_STEPS : DEFAULT_STEPS;
+      loadAppIntoEditor(existingApp, activeSteps);
     }
   };
 
   // Load a row from the dashboard into the step-by-step editor.
-  const loadAppIntoEditor = (existingApp: any) => {
+  const loadAppIntoEditor = (existingApp: any, stepList = steps) => {
     const appData: ApplicationData = {
       ...DEFAULT_APPLICATION,
       ...existingApp,
@@ -1450,7 +1888,18 @@ const ApplyPortal = () => {
     if (appData.dob) setChildDob(appData.dob);
     setShowCourseSelector(false);
     setAppsList(null); // leave the dashboard
+    const editUnlockedUntil = existingApp.edit_unlocked_until as string | undefined;
+    const unlockedSections = existingApp.edit_unlocked_sections as string[] | null | undefined;
+    const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
     if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
+      if (editUnlocked) {
+        setSubmitted(false);
+        const stepKeys = stepList.map(s => s.key);
+        const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
+        const preferredIdx = stepKeys.indexOf(preferredKey);
+        setStep(preferredIdx >= 0 ? preferredIdx : stepList.length - 2);
+        return;
+      }
       setSubmitted(true);
       // Fetch uploaded documents for the preview view
       setPreviewDocs([]);
@@ -1460,11 +1909,38 @@ const ApplyPortal = () => {
         .catch(() => setPreviewDocs([]));
       return;
     }
-    const stepKeys = steps.map(s => s.key);
+    const stepKeys = stepList.map(s => s.key);
     const cs = appData.completed_sections as Record<string, boolean>;
     const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
-    setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
+    setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
   };
+
+  const ensureApplicationPdf = async (applicationId: string) => {
+    if (!applicationId || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: applicationId },
+      });
+      if (error) throw error;
+      const formPdfUrl = (data as any)?.form_pdf_url as string | undefined;
+      if (formPdfUrl) {
+        setApp(prev => prev?.application_id === applicationId ? { ...prev, form_pdf_url: formPdfUrl } : prev);
+        setAppsList(prev => prev?.map(item => item.application_id === applicationId ? { ...item, form_pdf_url: formPdfUrl } : item) ?? prev);
+      }
+    } catch (err) {
+      console.error("[ApplyPortal] application PDF generation failed:", err);
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!submitted || !app || app.form_pdf_url) return;
+    if (!["submitted", "under_review", "approved"].includes(String(app.status))) return;
+    void ensureApplicationPdf(app.application_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, app?.application_id, app?.form_pdf_url, app?.status]);
 
   // Return to the dashboard from a submitted/preview view (only available
   // when the dashboard was previously shown — i.e. multiple apps).
@@ -1485,8 +1961,28 @@ const ApplyPortal = () => {
     setStep(0);
   };
 
+  const runOnBehalfApplicationAction = async (
+    action: "create" | "update" | "submit",
+    body: Record<string, any>,
+  ) => {
+    if (!onBehalfContext) throw new Error("Missing academic partner on-behalf context");
+    const { data, error } = await supabase.functions.invoke("academic-partner-application-action", {
+      body: {
+        token: onBehalfContext.token,
+        action,
+        ...body,
+      },
+    });
+    if (error || data?.error) {
+      const message = data?.error || error?.message || "On-behalf application action failed";
+      throw new Error(message);
+    }
+    return data?.application;
+  };
+
   const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
     setSaving(true);
+    const scopedLeadId = onBehalfContext?.lead_id || leadId;
 
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
     const feeAmount = calculateFee(selections);
@@ -1505,16 +2001,31 @@ const ApplyPortal = () => {
         ? Object.fromEntries(Object.keys(app.completed_sections || {}).map(k => [k, false]))
         : undefined;
 
-      const { error } = await supabase
-        .from("applications")
-        .update({
-          course_selections: selections as any,
-          fee_amount: feeAmount,
-          program_category: primaryCategory,
-          session_id: sessionId,
-          ...(resetSections ? { completed_sections: resetSections } : {}),
-        })
-        .eq("id", app.id);
+      const updatePayload = {
+        course_selections: selections as any,
+        fee_amount: feeAmount,
+        program_category: primaryCategory,
+        session_id: sessionId,
+        ...(resetSections ? { completed_sections: resetSections } : {}),
+      };
+
+      let error: { message: string } | null = null;
+      try {
+        if (onBehalfContext) {
+          await runOnBehalfApplicationAction("update", {
+            application_uuid: app.id,
+            payload: updatePayload,
+          });
+        } else {
+          const res = await supabase
+            .from("applications")
+            .update(updatePayload)
+            .eq("id", app.id);
+          error = res.error;
+        }
+      } catch (err: any) {
+        error = { message: err.message || "Failed to update courses" };
+      }
 
       if (error) {
         toast({ title: "Failed to update courses", description: error.message, variant: "destructive" });
@@ -1549,7 +2060,7 @@ const ApplyPortal = () => {
     const newApp: any = {
       id: appDbId,
       application_id: appId,
-      lead_id: leadId,
+      lead_id: scopedLeadId,
       session_id: sessionId,
       status: 'draft',
       course_selections: selections,
@@ -1563,17 +2074,26 @@ const ApplyPortal = () => {
       ...(childDob ? { dob: childDob } : {}),
     };
 
-    const { error } = await supabase
-      .from("applications")
-      .insert(newApp);
+    let createError: { message: string } | null = null;
+    let inserted = newApp;
+    try {
+      if (onBehalfContext) {
+        inserted = await runOnBehalfApplicationAction("create", { payload: newApp });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .insert(newApp);
+        createError = res.error;
+      }
+    } catch (err: any) {
+      createError = { message: err.message || "Failed to create application" };
+    }
 
-    if (error) {
-      toast({ title: "Failed to create application", description: error.message, variant: "destructive" });
+    if (createError) {
+      toast({ title: "Failed to create application", description: createError.message, variant: "destructive" });
       setSaving(false);
       return;
     }
-
-    const inserted = newApp;
 
     // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
     // the authenticated applicant, who has no staff role).
@@ -1583,30 +2103,32 @@ const ApplyPortal = () => {
     // originating GA4 property via Measurement Protocol. Server-side is the
     // single source of truth — we don't fire these events browser-side because
     // GA has no transaction_id on generate_lead, so dual fires would double-count.
-    let resolvedLeadId = leadId;
+    let resolvedLeadId = scopedLeadId;
     const attribution = captureAttribution(portal.id);
-    const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
-      "upsert_application_lead" as any,
-      {
-        _name: leadName,
-        _phone: phone,
-        _email: null,
-        _course_id: selections[0]?.course_id ?? null,
-        _campus_id: selections[0]?.campus_id ?? null,
-        _application_id: appId,
-        _source: leadSource,
-        ...attribution,
+    if (!onBehalfContext) {
+      const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
+        "upsert_application_lead" as any,
+        {
+          _name: leadName,
+          _phone: phone,
+          _email: null,
+          _course_id: selections[0]?.course_id ?? null,
+          _campus_id: selections[0]?.campus_id ?? null,
+          _application_id: appId,
+          _source: leadSource,
+          ...attribution,
+        }
+      );
+      if (leadErr) {
+        console.error("Failed to upsert lead for application:", leadErr);
+      } else if (upsertedLeadId) {
+        resolvedLeadId = upsertedLeadId as unknown as string;
+        // Link the application to the lead (anon UPDATE is allowed by policy)
+        await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
       }
-    );
-    if (leadErr) {
-      console.error("Failed to upsert lead for application:", leadErr);
-    } else if (upsertedLeadId) {
-      resolvedLeadId = upsertedLeadId as unknown as string;
-      // Link the application to the lead (anon UPDATE is allowed by policy)
-      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
     }
 
-    if (resolvedLeadId) {
+    if (resolvedLeadId && !onBehalfContext) {
       await supabase.from("lead_activities").insert({
         lead_id: resolvedLeadId,
         type: "application_started",
@@ -1672,10 +2194,23 @@ const ApplyPortal = () => {
       flags,
     };
 
-    const { error } = await supabase
-      .from("applications")
-      .update(saveData)
-      .eq("id", app.id);
+    let error: { message: string } | null = null;
+    try {
+      if (onBehalfContext) {
+        await runOnBehalfApplicationAction("update", {
+          application_uuid: app.id,
+          payload: saveData,
+        });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .update(saveData)
+          .eq("id", app.id);
+        error = res.error;
+      }
+    } catch (err: any) {
+      error = { message: err.message || "Save failed" };
+    }
 
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
@@ -1685,7 +2220,7 @@ const ApplyPortal = () => {
 
     // Sync the linked lead's name when the candidate's full_name changes
     // so the CRM shows the real name instead of "Applicant"
-    if (app.lead_id && updates.full_name && updates.full_name.trim() && updates.full_name !== leadName) {
+    if (!onBehalfContext && app.lead_id && updates.full_name && updates.full_name.trim() && updates.full_name !== leadName) {
       await supabase
         .from("leads")
         .update({ name: updates.full_name.trim(), person_role: "applicant" as any })
@@ -1701,14 +2236,27 @@ const ApplyPortal = () => {
     if (!app) return;
     setSaving(true);
 
-    const { error } = await supabase
-      .from("applications")
-      .update({
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
-        completed_sections: { ...app.completed_sections, review: true } as any,
-      })
-      .eq("id", app.id);
+    let error: { message: string } | null = null;
+    try {
+      if (onBehalfContext) {
+        await runOnBehalfApplicationAction("submit", {
+          application_uuid: app.id,
+          payload: { completed_sections: app.completed_sections },
+        });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .update({
+            status: 'submitted',
+            submitted_at: new Date().toISOString(),
+            completed_sections: { ...app.completed_sections, review: true } as any,
+          })
+          .eq("id", app.id);
+        error = res.error;
+      }
+    } catch (err: any) {
+      error = { message: err.message || "Submit failed" };
+    }
 
     if (error) {
       toast({ title: "Submit failed", description: error.message, variant: "destructive" });
@@ -1716,16 +2264,19 @@ const ApplyPortal = () => {
       return;
     }
 
-    if (app.lead_id) {
+    if (app.lead_id && !onBehalfContext) {
       // Only advance stage if lead is in a stage where submission makes sense
       // DNC/rejected/ineligible leads keep their stage (but application is still saved)
       const { data: currentLead } = await supabase.from("leads").select("stage").eq("id", app.lead_id).single();
       const advanceableStages = ["new_lead", "ai_called", "counsellor_call", "application_in_progress", "application_fee_paid", "not_interested", "deferred"];
       if (currentLead && advanceableStages.includes(currentLead.stage)) {
-        await supabase.from("leads").update({
-          stage: "application_submitted" as any,
-          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
-        }).eq("id", app.lead_id);
+        const transition = resolveLeadTransitionCommand({
+          currentStage: currentLead.stage,
+          command: "submitApplication",
+        });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, {
+          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true },
+        }) as any).eq("id", app.lead_id);
 
         await supabase.from("lead_activities").insert({
           lead_id: app.lead_id,
@@ -1742,6 +2293,13 @@ const ApplyPortal = () => {
       }
     }
 
+    const submittedAt = new Date().toISOString();
+    setApp(prev => prev ? {
+      ...prev,
+      status: "submitted",
+      submitted_at: submittedAt,
+      completed_sections: { ...prev.completed_sections, review: true },
+    } : prev);
     setSubmitted(true);
     setSaving(false);
     toast({ title: "Application submitted!" });
@@ -1756,9 +2314,7 @@ const ApplyPortal = () => {
     // get the internal email. Brief delay so the form-PDF generator has a
     // chance to populate applications.form_pdf_url before notify-event
     // looks it up — keeps the WA button URL non-empty for most cases.
-    supabase.functions.invoke("generate-application-form", {
-      body: { application_id: app.application_id },
-    }).catch(() => {});
+    void ensureApplicationPdf(app.application_id);
     if (app.payment_status === "paid") {
       supabase.functions.invoke("generate-application-fee-receipt", {
         body: { application_id: app.application_id },
@@ -1768,6 +2324,32 @@ const ApplyPortal = () => {
     // (see 20260612120000_app_submitted_trigger.sql). The client used to invoke
     // notify-event directly but the function requires service-role auth and
     // the call always silently 401'd from anonymous applicants.
+  };
+
+  const generateSubmittedApplicationPdf = async () => {
+    if (!app?.application_id || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setApp(prev => prev ? { ...prev, form_pdf_url: url } : prev);
+      setAppsList(prev => prev
+        ? prev.map(a => a.id === app.id ? { ...a, form_pdf_url: url } : a)
+        : prev);
+      window.open(url, "_blank");
+    } catch (e: any) {
+      toast({
+        title: "Couldn't generate application PDF",
+        description: e?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
   };
 
   const onChange = (updates: Partial<ApplicationData>) => {
@@ -1790,7 +2372,7 @@ const ApplyPortal = () => {
   if (restoringSession) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -1834,17 +2416,24 @@ const ApplyPortal = () => {
         onContinue={loadAppIntoEditor}
         onStartNew={startNewApplication}
         onLogout={handleLogout}
+        onBehalfContext={onBehalfContext}
       />
     );
   }
 
+  const editUnlockedUntil = app ? (app as any).edit_unlocked_until as string | undefined : undefined;
+  const unlockedSections = app ? (app as any).edit_unlocked_sections as string[] | null | undefined : undefined;
+  const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
+
   // ── Submitted (full preview) ──
-  if (submitted && app) {
+  if (submitted && app && !editUnlocked) {
     const submittedBadge = app.status === "approved"
-      ? { label: "Approved", className: "bg-green-100 text-green-700" }
+      ? { label: "Approved", className: "bg-success/10 text-success" }
       : app.status === "under_review"
-      ? { label: "Under Review", className: "bg-blue-100 text-blue-700" }
-      : { label: "Submitted", className: "bg-emerald-100 text-emerald-700" };
+      ? { label: "Under Review", className: "bg-info/10 text-info-foreground" }
+      : { label: "Submitted", className: "bg-success/10 text-success" };
+
+    const rejectedDocs = previewDocs.filter(d => d.review_status === "rejected");
 
     return (
       <div className="min-h-screen bg-background">
@@ -1866,15 +2455,31 @@ const ApplyPortal = () => {
                 <CheckCircle className="h-3 w-3" />{submittedBadge.label}
               </span>
               {app.payment_status === "paid" && (
-                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-emerald-100 text-emerald-700">
+                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-success/10 text-success">
                   Paid
                 </span>
               )}
-              {app.form_pdf_url && (
+              {app.form_pdf_url ? (
                 <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
                   <FileText className="h-3.5 w-3.5" />Application PDF
                 </a>
+              ) : APPLICATION_FORM_PDF_STATUSES.has(app.status) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={generateSubmittedApplicationPdf}
+                  disabled={generatingApplicationPdf}
+                  className="gap-1.5"
+                >
+                  {generatingApplicationPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  Generate PDF
+                </Button>
+              )}
+              {!app.form_pdf_url && generatingApplicationPdf && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-muted bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />Preparing PDF
+                </span>
               )}
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">
                 <LogOut className="h-4 w-4" /> Logout
@@ -1894,11 +2499,11 @@ const ApplyPortal = () => {
 
             if (status === "rejected") {
               return (
-                <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4 flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="rounded-2xl bg-destructive/5 border border-destructive/20 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-semibold text-rose-900">Application not accepted.</p>
-                    <p className="text-xs text-rose-700 mt-0.5">
+                    <p className="text-sm font-semibold text-destructive">Application not accepted.</p>
+                    <p className="text-xs text-destructive mt-0.5">
                       {rejectionReason || "The admissions team has declined this application. Please contact us for next steps."}
                     </p>
                   </div>
@@ -1908,13 +2513,13 @@ const ApplyPortal = () => {
 
             if (status === "approved") {
               return (
-                <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="rounded-2xl bg-success/5 border border-success/20 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-success shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-semibold text-emerald-900">
+                    <p className="text-sm font-semibold text-success-foreground">
                       {paid ? "Application approved and fee paid." : "Application approved."}
                     </p>
-                    <p className="text-xs text-emerald-700 mt-0.5">
+                    <p className="text-xs text-success mt-0.5">
                       {paid
                         ? "An offer letter and next-step instructions will follow shortly. Below is a summary of your application."
                         : "Please complete your application fee payment to proceed. Below is a summary of your application."}
@@ -1926,13 +2531,13 @@ const ApplyPortal = () => {
 
             // status === 'submitted' (or anything else past draft)
             return (
-              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
-                <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="rounded-2xl bg-success/5 border border-success/20 p-4 flex items-start gap-3">
+                <CheckCircle className="h-5 w-5 text-success shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-emerald-900">
+                  <p className="text-sm font-semibold text-success-foreground">
                     {paid ? "Application submitted and fee paid." : "Your application has been received."}
                   </p>
-                  <p className="text-xs text-emerald-700 mt-0.5">
+                  <p className="text-xs text-success mt-0.5">
                     {paid
                       ? "Our admissions team is reviewing your application. Below is a summary of what you submitted."
                       : "Our admissions team will review and contact you shortly. Below is a summary of what you submitted."}
@@ -1943,6 +2548,38 @@ const ApplyPortal = () => {
           })()}
 
           <ApplicationPreview app={app} docs={previewDocs} />
+          {rejectedDocs.length > 0 && (
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4">
+              <div className="mb-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive">
+                    {rejectedDocs.length} document{rejectedDocs.length === 1 ? "" : "s"} need re-upload
+                  </p>
+                  <p className="text-xs text-destructive mt-0.5">
+                    Re-upload the rejected document below. The admissions team will review the replacement.
+                  </p>
+                </div>
+              </div>
+              <Card className="border-destructive/20 shadow-none">
+                <CardContent className="p-5">
+                  <DocumentUpload
+                    data={app}
+                    onChange={(partial) => setApp(prev => prev ? ({ ...prev, ...partial }) : prev)}
+                    onNext={() => {
+                      setPreviewDocs([]);
+                      supabase.functions
+                        .invoke("list-app-docs", { body: { application_id: app.application_id } })
+                        .then(({ data }) => setPreviewDocs(((data as any)?.docs || []) as PreviewDoc[]))
+                        .catch(() => setPreviewDocs([]));
+                    }}
+                    saving={saving}
+                    nextLabel="Submit replacement"
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </main>
       </div>
     );
@@ -1954,10 +2591,6 @@ const ApplyPortal = () => {
   const isPaid = app.payment_status === "paid";
   const paymentStepIdx = steps.findIndex(s => s.key === "payment");
   const cs = app.completed_sections as Record<string, boolean>;
-  // Staff-granted edit access window
-  const editUnlockedUntil = (app as any).edit_unlocked_until as string | undefined;
-  const unlockedSections = (app as any).edit_unlocked_sections as string[] | null | undefined;
-  const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
 
   // Determine if user can navigate back from current step.
   // Users CAN freely go back to edit previously completed steps.
@@ -2061,6 +2694,7 @@ const ApplyPortal = () => {
           }}
           onBack={backHandler}
           saving={saving}
+          onBehalfContext={onBehalfContext}
         />
       );
     }
@@ -2096,6 +2730,7 @@ const ApplyPortal = () => {
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || displayValue(app.full_name) || "the candidate"} />
         <CourseSummaryBanner
           app={app}
           leadName={leadName}
@@ -2103,14 +2738,14 @@ const ApplyPortal = () => {
         />
 
         {editUnlocked && editUnlockedUntil && (
-          <div className="mb-6 rounded-xl border border-green-300 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 p-4">
+          <div className="mb-6 rounded-xl border border-success/25 dark:border-success/60/40 bg-success/5 dark:bg-success/90/20 p-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/40 shrink-0">
-                <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10 dark:bg-success/80/40 shrink-0">
+                <CheckCircle className="h-4 w-4 text-success dark:text-success" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-green-900 dark:text-green-200">Edit access granted</p>
-                <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">
+                <p className="text-sm font-semibold text-success-foreground dark:text-success/40">Edit access granted</p>
+                <p className="text-xs text-success dark:text-success mt-0.5">
                   A counsellor has unlocked your application for editing.
                   {unlockedSections && unlockedSections.length > 0 && (
                     <> You can edit: <span className="font-medium">{unlockedSections.join(", ")}</span>.</>
@@ -2134,7 +2769,9 @@ const ApplyPortal = () => {
 
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-6">
-            {renderStep()}
+            <div key={step} className="animate-rs-slide-up">
+              {renderStep()}
+            </div>
           </CardContent>
         </Card>
 
@@ -2150,13 +2787,27 @@ const ApplyPortal = () => {
 };
 
 // ─── Header ───
-function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string | null; completedCount: number; totalSteps: number; onLogout: () => void }) {
+function ApplicationHeaderLogo() {
   const portal = usePortal();
+  const sizeClass = portal.id === "nimt"
+    ? "h-12 sm:h-14 max-w-[260px]"
+    : "h-16 sm:h-[72px] max-w-[180px]";
+
+  return (
+    <img
+      src={portal.logo}
+      alt={portal.name}
+      className={`${sizeClass} w-auto object-contain`}
+    />
+  );
+}
+
+function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string | null; completedCount: number; totalSteps: number; onLogout: () => void }) {
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
       <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center">
-          <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
+          <ApplicationHeaderLogo />
         </div>
         <div className="flex items-center gap-3">
           {appId && (
@@ -2175,10 +2826,12 @@ function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string
 
 // ─── Wrapped with PortalProvider ───
 function ApplyPortalWrapper() {
+  const [resolvedPortalId, setResolvedPortalId] = useState<PortalId | null>(null);
+
   return (
-    <PortalProvider>
+    <PortalProvider overridePortalId={resolvedPortalId}>
       <ApplicantDeadlineTicker audience="public" />
-      <ApplyPortal />
+      <ApplyPortal onPortalResolved={setResolvedPortalId} />
     </PortalProvider>
   );
 }

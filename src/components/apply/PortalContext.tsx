@@ -15,12 +15,18 @@ export function usePortal() {
   return useContext(PortalContext);
 }
 
-export function PortalProvider({ children }: { children: React.ReactNode }) {
+export function PortalProvider({
+  children,
+  overridePortalId,
+}: {
+  children: React.ReactNode;
+  overridePortalId?: PortalId | null;
+}) {
   const location = useLocation();
 
   const portalId = useMemo<PortalId>(
-    () => detectPortal(location.search, location.pathname),
-    [location.search, location.pathname]
+    () => overridePortalId || detectPortal(location.search, location.pathname),
+    [location.search, location.pathname, overridePortalId]
   );
 
   const config = PORTAL_CONFIGS[portalId];

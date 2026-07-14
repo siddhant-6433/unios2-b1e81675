@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TextField, SelectField, FieldShell } from "@/components/ui/state-fields";
 import { Clock, Plus, Check, X, Calendar, MapPin } from "lucide-react";
 
 interface NextFollowupProps {
@@ -19,8 +21,6 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
   const [followupNotes, setFollowupNotes] = useState("");
   const [visitDate, setVisitDate] = useState("");
   const [visitCampus, setVisitCampus] = useState("");
-
-  const inputCls = "w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   const handleAddFollowup = () => {
     if (!followupDate) return;
@@ -48,8 +48,8 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
             )}
           </div>
           {pending ? (
-            <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/10 rounded-xl p-3">
-              <Clock className="h-4 w-4 text-amber-500 shrink-0" />
+            <div className="flex items-center gap-3 bg-warning/5 dark:bg-warning/80/10 rounded-xl p-3">
+              <Clock className="h-4 w-4 text-warning shrink-0" />
               <div>
                 <p className="text-sm font-medium text-foreground">
                   {new Date(pending.scheduled_at).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
@@ -59,14 +59,27 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
             </div>
           ) : showFollowupForm ? (
             <div className="space-y-2">
-              <input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)} className={inputCls} />
-              <select value={followupType} onChange={e => setFollowupType(e.target.value)} className={inputCls}>
-                <option value="call">Call</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="email">Email</option>
-                <option value="visit">Visit</option>
-              </select>
-              <input placeholder="Notes (optional)" value={followupNotes} onChange={e => setFollowupNotes(e.target.value)} className={inputCls} />
+              <FieldShell label="Date & Time" hideLabel>
+                <Input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)} />
+              </FieldShell>
+              <SelectField
+                value={followupType}
+                onValueChange={setFollowupType}
+                options={[
+                  { value: "call", label: "Call" },
+                  { value: "whatsapp", label: "WhatsApp" },
+                  { value: "email", label: "Email" },
+                  { value: "visit", label: "Visit" },
+                ]}
+                label="Type"
+                hideLabel
+              />
+              <TextField
+                value={followupNotes}
+                onValueChange={setFollowupNotes}
+                placeholder="Notes (optional)"
+                hideLabel
+              />
               <div className="flex gap-2">
                 <Button onClick={handleAddFollowup} size="sm" disabled={!followupDate} className="gap-1 h-8 rounded-lg">
                   <Check className="h-3.5 w-3.5" /> Save
@@ -95,14 +108,18 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
             {showVisitForm ? (
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <input type="date" value={visitDate.split("T")[0] || ""} onChange={e => {
-                    const time = visitDate.split("T")[1] || "10:00";
-                    setVisitDate(e.target.value ? `${e.target.value}T${time}` : "");
-                  }} className={inputCls} />
-                  <input type="time" value={visitDate.split("T")[1] || ""} onChange={e => {
-                    const date = visitDate.split("T")[0] || "";
-                    if (date) setVisitDate(`${date}T${e.target.value}`);
-                  }} className={`${inputCls} w-32 shrink-0`} />
+                  <FieldShell hideLabel>
+                    <Input type="date" value={visitDate.split("T")[0] || ""} onChange={e => {
+                      const time = visitDate.split("T")[1] || "10:00";
+                      setVisitDate(e.target.value ? `${e.target.value}T${time}` : "");
+                    }} />
+                  </FieldShell>
+                  <FieldShell hideLabel>
+                    <Input type="time" value={visitDate.split("T")[1] || ""} onChange={e => {
+                      const date = visitDate.split("T")[0] || "";
+                      if (date) setVisitDate(`${date}T${e.target.value}`);
+                    }} className="w-32 shrink-0" />
+                  </FieldShell>
                 </div>
                 {visitDate && (
                   <p className="text-[11px] text-muted-foreground">
@@ -111,10 +128,16 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
                   </p>
                 )}
                 {campuses && campuses.length > 0 && (
-                  <select value={visitCampus} onChange={e => setVisitCampus(e.target.value)} className={inputCls}>
-                    <option value="">Select campus</option>
-                    {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SelectField
+                    value={visitCampus}
+                    onValueChange={setVisitCampus}
+                    options={[
+                      { value: "", label: "Select campus" },
+                      ...campuses.map(c => ({ value: c.id, label: c.name })),
+                    ]}
+                    hideLabel
+                    placeholder="Select campus"
+                  />
                 )}
                 <div className="flex gap-2">
                   <Button onClick={handleAddVisit} size="sm" disabled={!visitDate} className="gap-1 h-8 rounded-lg">

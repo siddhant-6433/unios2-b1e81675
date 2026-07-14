@@ -38,16 +38,16 @@ const META: Record<VisitFunnelStage, {
   scheduled:      { label: VISIT_FUNNEL_LABEL.scheduled,      icon: CalendarClock, iconBg: "bg-teal-50",  iconColor: "text-teal-600", tint: "bg-teal-50/70",  ring: "ring-teal-300",  bar: "bg-teal-300" },
   confirmed:      { label: VISIT_FUNNEL_LABEL.confirmed,      icon: CalendarCheck, iconBg: "bg-teal-100", iconColor: "text-teal-700", tint: "bg-teal-100/70", ring: "ring-teal-400",  bar: "bg-teal-400" },
   completed:      { label: VISIT_FUNNEL_LABEL.completed,      icon: MapPin,        iconBg: "bg-teal-100", iconColor: "text-teal-700", tint: "bg-teal-100/80", ring: "ring-teal-500",  bar: "bg-teal-500" },
-  visit_followup: { label: VISIT_FUNNEL_LABEL.visit_followup, icon: PhoneCall,     iconBg: "bg-emerald-100", iconColor: "text-emerald-700", tint: "bg-emerald-100/70", ring: "ring-emerald-500", bar: "bg-emerald-500" },
-  applied:        { label: VISIT_FUNNEL_LABEL.applied,        icon: FileText,      iconBg: "bg-emerald-100", iconColor: "text-emerald-700", tint: "bg-emerald-100/80", ring: "ring-emerald-600", bar: "bg-emerald-600" },
-  admitted:       { label: VISIT_FUNNEL_LABEL.admitted,       icon: GraduationCap, iconBg: "bg-emerald-200", iconColor: "text-emerald-800", tint: "bg-emerald-200/80", ring: "ring-emerald-700", bar: "bg-emerald-700" },
+  visit_followup: { label: VISIT_FUNNEL_LABEL.visit_followup, icon: PhoneCall,     iconBg: "bg-success/10", iconColor: "text-success", tint: "bg-success/10/70", ring: "ring-emerald-500", bar: "bg-success/50" },
+  applied:        { label: VISIT_FUNNEL_LABEL.applied,        icon: FileText,      iconBg: "bg-success/10", iconColor: "text-success", tint: "bg-success/10/80", ring: "ring-emerald-600", bar: "bg-success" },
+  admitted:       { label: VISIT_FUNNEL_LABEL.admitted,       icon: GraduationCap, iconBg: "bg-success/15", iconColor: "text-success-foreground", tint: "bg-success/15/80", ring: "ring-emerald-700", bar: "bg-success/90" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 interface Props {
@@ -121,8 +121,8 @@ export function VisitPipeline({ counts, leakageCount, activeBox, onBoxClick, onS
               onClick={() => onBoxClick(activeBox === "leakage" ? null : "leakage")}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                 activeBox === "leakage"
-                  ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                  : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                  ? "border-destructive/30 bg-destructive/10 text-destructive ring-2 ring-rose-300"
+                  : "border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10"
               }`}
               title="Leads whose latest visit was a no-show or cancellation"
             >
@@ -144,7 +144,7 @@ export function VisitPipeline({ counts, leakageCount, activeBox, onBoxClick, onS
               ? Math.round((r / prev) * 100)
               : null;
             const isActive = activeBox === box;
-            const widthBasis = total > 0 ? Math.max(96, (r / total) * 220) : 96;
+            const widthBasis = total > 0 ? Math.max(124, (r / total) * 220) : 124;
             const reachPct = total > 0 ? (r / total) * 100 : 0;
 
             return (
@@ -159,25 +159,25 @@ export function VisitPipeline({ counts, leakageCount, activeBox, onBoxClick, onS
                 )}
                 <button
                   onClick={() => onBoxClick(isActive ? null : box)}
-                  className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
+                  className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
                     isActive
                       ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                       : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                   }`}
-                  style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
+                  style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
                   title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
                 >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                      <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                  <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                    <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                      <Icon className={`h-3 w-3 ${meta.iconColor}`} />
                     </div>
-                    <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck.toLocaleString("en-IN")}</p>
+                    <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck.toLocaleString("en-IN")}</p>
                   </div>
                   <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
                   <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
                     <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
                   </div>
-                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                  <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
                     <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
                   </p>
                 </button>

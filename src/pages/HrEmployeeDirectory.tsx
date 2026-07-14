@@ -1,5 +1,7 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Search, Loader2, Phone, Mail, Building2, ChevronRight,
   Users, Filter, UserCheck,
@@ -24,7 +26,7 @@ const roleLabels: Record<string, string> = {
   accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Admin",
   office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
-  ib_coordinator: "IB Coordinator",
+  ib_coordinator: "IB Coordinator", librarian: "Librarian",
 };
 
 const HrEmployeeDirectory = () => {
@@ -108,15 +110,20 @@ const HrEmployeeDirectory = () => {
             value={search} onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
         </div>
-        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Roles</option>
-          {roles.map(r => <option key={r} value={r}>{roleLabels[r] || r}</option>)}
-        </select>
+        <SelectField
+          value={roleFilter}
+          onValueChange={setRoleFilter}
+          options={[
+            { value: "all", label: "All Roles" },
+            ...roles.map(r => ({ value: r, label: roleLabels[r] || r })),
+          ]}
+          hideLabel
+          placeholder="All Roles"
+        />
       </div>
 
       {loading ? (
-        <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <PageLoader />
       ) : (
         <div className="rounded-xl bg-card card-shadow overflow-hidden">
           <div className="divide-y divide-border">

@@ -85,10 +85,10 @@ const PYP_LEVELS = ["Exceeding", "Meeting", "Approaching", "Beginning"] as const
 type PypLevel = typeof PYP_LEVELS[number];
 
 const PYP_LEVEL_COLORS: Record<PypLevel, string> = {
-  Exceeding: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  Meeting: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  Approaching: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  Beginning: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+  Exceeding: "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60",
+  Meeting: "bg-info/10 text-info-foreground dark:bg-info/80/40 dark:text-info/60",
+  Approaching: "bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/70",
+  Beginning: "bg-destructive/10 text-destructive dark:bg-destructive/80/40 dark:text-destructive/60",
 };
 
 const INPUT_CLASS =
@@ -372,7 +372,7 @@ function PypGradebook() {
   if (loadingBatches) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -415,7 +415,7 @@ function PypGradebook() {
       {/* Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-auto">
@@ -778,7 +778,7 @@ function MypGradebook() {
   if (loadingBatches) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -847,7 +847,7 @@ function MypGradebook() {
       {/* Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-auto">
@@ -899,10 +899,10 @@ function MypGradebook() {
                       <Badge
                         className={
                           grade >= 5
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-0"
+                            ? "bg-success/10 text-success-foreground dark:bg-success/80/40 dark:text-success/60 border-0"
                             : grade >= 3
-                            ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-0"
-                            : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0"
+                            ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/40 dark:text-warning/70 border-0"
+                            : "bg-destructive/10 text-destructive dark:bg-destructive/80/40 dark:text-destructive/60 border-0"
                         }
                       >
                         {grade}

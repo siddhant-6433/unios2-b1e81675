@@ -30,6 +30,7 @@ const GATEWAY_LABELS: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici:    "ICICI",
   cashfree: "Cashfree",
+  razorpay: "Razorpay",
   // Manually-recorded payments where the accountant entered an UTR / cheque
   // ref through the admin UI rather than going through a gateway. Render
   // as "Marked Offline" instead of the raw value.
@@ -45,6 +46,26 @@ const MODE_LABELS: Record<string, string> = {
   online:        "Online",
   gateway:       "Online",
 };
+
+function inferGatewayFromPaymentRef(paymentRef?: string | null) {
+  const ref = (paymentRef || "").trim().toLowerCase();
+  if (!ref) return null;
+  if (ref.startsWith("pay_") || ref.startsWith("order_")) return "razorpay";
+  if (ref.startsWith("manual_")) return "manual";
+  if (ref.startsWith("cf_") || ref.includes("cashfree")) return "cashfree";
+  if (ref.startsWith("icici") || ref.startsWith("ic_") || ref.startsWith("lp-")) return "icici";
+  if (ref.startsWith("eb") || ref.includes("easepay")) return "easebuzz";
+  return null;
+}
+
+function gatewayLabel(gateway?: string | null, paymentMode?: string | null, paymentRef?: string | null) {
+  if (gateway) return GATEWAY_LABELS[gateway] || gateway;
+  const inferred = inferGatewayFromPaymentRef(paymentRef);
+  if (inferred) return GATEWAY_LABELS[inferred] || inferred;
+  if (paymentMode === "gateway" || paymentMode === "online") return "Online Gateway";
+  if (paymentMode) return GATEWAY_LABELS.manual;
+  return "Not Recorded";
+}
 
 async function fetchLogoPng(pdf: PDFDocument, url: string | null) {
   if (!url) return null;
@@ -86,10 +107,28 @@ const fmtDateShort = (d?: string | null) => {
   if (!d) return "—";
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return d;
-  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return dt.toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
 };
 
 const RUP = "Rs. ";
+
+const appIdFromNotes = (notes?: unknown): string | null => {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+};
+
+function fitText(text: string, font: any, size: number, maxWidth: number): string {
+  if (!text) return "—";
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}...`;
+}
 
 interface Branding {
   slug?: string | null;
@@ -106,6 +145,7 @@ interface BuildOpts {
   rows: [string, string][];
   amount: number;
   paymentMode: string;
+  paymentGateway?: string | null;
   paymentRef: string;
   paymentDate: string;
   campusName: string | null;
@@ -230,23 +270,22 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   y -= bandH + 16;
 
-  const halfW = (width - margin * 2 - 12) / 2;
+  const paymentCards: [string, string][] = [["PAYMENT METHOD", opts.paymentMode.toUpperCase()]];
+  if (opts.paymentGateway) paymentCards.push(["PAYMENT GATEWAY", opts.paymentGateway]);
+  paymentCards.push(["TRANSACTION REF", opts.paymentRef || "—"]);
+  const gap = 12;
+  const boxW = (width - margin * 2 - gap * (paymentCards.length - 1)) / paymentCards.length;
   const boxH = 52;
-  page.drawRectangle({
-    x: margin, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("PAYMENT METHOD", { x: margin + 12, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentMode.toUpperCase(), {
-    x: margin + 12, y: y - 36, size: 11, font: bold, color: text,
-  });
-  page.drawRectangle({
-    x: margin + halfW + 12, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("TRANSACTION REF", { x: margin + halfW + 24, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentRef || "—", {
-    x: margin + halfW + 24, y: y - 36, size: 11, font: bold, color: text,
+  paymentCards.forEach(([label, value], index) => {
+    const x = margin + index * (boxW + gap);
+    page.drawRectangle({
+      x, y: y - boxH, width: boxW, height: boxH,
+      color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+    });
+    page.drawText(label, { x: x + 12, y: y - 16, size: 8, font: bold, color: muted });
+    page.drawText(fitText(value, bold, 11, boxW - 24), {
+      x: x + 12, y: y - 36, size: 11, font: bold, color: text,
+    });
   });
   y -= boxH + 26;
 
@@ -309,14 +348,46 @@ Deno.serve(async (req) => {
     if (app.lead_id) {
       const { data: lp } = await admin
         .from("lead_payments")
-        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
         .eq("lead_id", app.lead_id)
         .eq("type", "application_fee")
         .eq("status", "confirmed")
+        .eq("application_id", app.application_id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       payment = lp || null;
+    }
+    if (!payment && app.lead_id) {
+      const { data: rows } = await admin
+        .from("lead_payments")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
+        .eq("lead_id", app.lead_id)
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(10);
+      payment = (rows || []).find((row: any) => appIdFromNotes(row.notes) === app.application_id) || null;
+    }
+    if (!payment && app.lead_id) {
+      const { data: rows } = await admin
+        .from("lead_payments")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
+        .eq("lead_id", app.lead_id)
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .eq("amount", app.fee_amount)
+        .is("application_id", null)
+        .order("created_at", { ascending: false })
+        .limit(2);
+      if ((rows || []).length === 1 && !appIdFromNotes(rows[0].notes)) {
+        payment = rows[0];
+        await admin
+          .from("lead_payments")
+          .update({ application_id: app.application_id } as any)
+          .eq("id", payment.id)
+          .is("application_id", null);
+      }
     }
     if (!payment && app.payment_status === "paid") {
       payment = {
@@ -351,11 +422,13 @@ Deno.serve(async (req) => {
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 
     let paymentMode: string;
+    let paymentGateway: string | null = null;
     if (payment.payment_mode === "gateway" || payment.payment_mode === "online") {
-      const gw = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : "";
-      paymentMode = gw ? `Online · ${gw}` : "Online";
+      paymentMode = "Online";
+      paymentGateway = gatewayLabel(payment.gateway, payment.payment_mode, payment.transaction_ref);
     } else {
       paymentMode = MODE_LABELS[payment.payment_mode] || payment.payment_mode || "—";
+      paymentGateway = gatewayLabel(payment.gateway, payment.payment_mode, payment.transaction_ref);
     }
 
     const firstChoice = (app.course_selections || [])[0] || {};
@@ -381,6 +454,7 @@ Deno.serve(async (req) => {
       rows,
       amount:        Number(payment.amount || app.fee_amount || 0),
       paymentMode,
+      paymentGateway,
       paymentRef:    payment.transaction_ref || "—",
       paymentDate:   payment.payment_date || payment.created_at || app.submitted_at || app.updated_at,
       campusName,

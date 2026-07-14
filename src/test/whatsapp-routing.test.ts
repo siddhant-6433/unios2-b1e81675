@@ -10,11 +10,18 @@ const templateSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "
 const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const channelAdapter = readFileSync("supabase/functions/_shared/whatsapp-channel.ts", "utf8");
 const conversationStateHelper = readFileSync("supabase/functions/_shared/whatsapp-conversation-state.ts", "utf8");
+const conversationActionHelper = readFileSync("supabase/functions/_shared/whatsapp-conversation-action.ts", "utf8");
 const automationEventsHelper = readFileSync("supabase/functions/_shared/whatsapp-automation-events.ts", "utf8");
 const outboundContextHelper = readFileSync("supabase/functions/_shared/whatsapp-outbound-context.ts", "utf8");
 const inboundEventsHelper = readFileSync("supabase/functions/_shared/whatsapp-inbound-events.ts", "utf8");
 const orchestrator = readFileSync("supabase/functions/whatsapp-conversation-orchestrator/index.ts", "utf8");
 const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index.ts", "utf8");
+const copilotAssist = readFileSync("supabase/functions/whatsapp-copilot-assist/index.ts", "utf8");
+const copilotEvents = readFileSync("supabase/functions/whatsapp-copilot-events/index.ts", "utf8");
+const copilotAgui = readFileSync("supabase/functions/_shared/copilotkit-agui.ts", "utf8");
+const replyLearning = readFileSync("supabase/functions/whatsapp-reply-learning/index.ts", "utf8");
+const voiceCall = readFileSync("supabase/functions/voice-call/index.ts", "utf8");
+const voiceScripts = readFileSync("voice-agent/scripts.ts", "utf8");
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
 const providerMigration = readFileSync("supabase/migrations/20260618212500_wa_conversations_provider.sql", "utf8");
 const channelsMigration = readFileSync("supabase/migrations/20260618212600_whatsapp_channels.sql", "utf8");
@@ -23,6 +30,10 @@ const eventsMigration = readFileSync("supabase/migrations/20260618212100_whatsap
 const courseBriefMigration = readFileSync("supabase/migrations/20260618212200_course_admission_briefs.sql", "utf8");
 const outboundContextMigration = readFileSync("supabase/migrations/20260618212300_whatsapp_outbound_context.sql", "utf8");
 const inboundEventsMigration = readFileSync("supabase/migrations/20260618212400_whatsapp_inbound_events.sql", "utf8");
+const replyLearningMigration = readFileSync("supabase/migrations/20260619120500_whatsapp_reply_learning.sql", "utf8");
+const campaignSenderMigration = readFileSync("supabase/migrations/20260614203000_whatsapp_campaign_sender_selection.sql", "utf8");
+const healthPhoneMigration = readFileSync("supabase/migrations/20260614205000_whatsapp_health_phone_numbers.sql", "utf8");
+const bulkSenderNumbersMigration = readFileSync("supabase/migrations/20260619133000_bulk_whatsapp_sender_numbers.sql", "utf8");
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 describe("WhatsApp inbound auto-reply and qualification routing", () => {
@@ -48,6 +59,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(orchestrator).toContain("dispatchClassifier(supabaseUrl, serviceRoleKey, queueId)");
     expect(orchestrator).toContain('decision: "classifier_deferred"');
     expect(orchestrator).toContain("auto_categorize_lead_from_message");
+    expect(orchestrator).toContain('select("direction, content")');
+    expect(orchestrator).toContain("recent_messages: (recentMsgs || []).reverse()");
   });
 
   it("does not drop Plivo inbound messages when Type is a message kind", () => {
@@ -77,6 +90,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain("ADMISSION_COURSE_OPTIONS");
     expect(aiReply).toContain("detectCourseOption(message)");
     expect(aiReply).toContain("resolveCourseId(admin, selectedCourseOption)");
+    expect(aiReply).toContain("loadCourseName(admin, existingCourseId)");
+    expect(aiReply).toContain("course_interest || existingCourseName || null");
     expect(aiReply).toContain("update({ course_id: courseId })");
     expect(aiReply).toContain("Course interest (from WhatsApp)");
   });
@@ -100,8 +115,12 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain("provider === \"plivo\"");
     expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(manualReply).toContain("provider: sendResult.provider");
+    expect(manualReply).toContain("rawRequestedPhoneNumberId");
+    expect(manualReply).toContain("!isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)");
     expect(channelAdapter).toContain("routeForMetaPhoneNumberId");
     expect(channelAdapter).toContain("envMetaChannel(route, requestedMetaPhoneNumberId)");
+    expect(channelAdapter).toContain("export function isLikelyBusinessPhoneNumber");
+    expect(channelAdapter).toContain("!isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId)");
     expect(channelAdapter).toContain("!candidates.some((item) => item.score >= 5)");
   });
 
@@ -110,8 +129,9 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(providerMigration).toContain("latest.provider");
     expect(inbox).toContain('provider: "meta" | "plivo" | null');
     expect(inbox).toContain("provider, business_phone_number_id, business_phone_number");
-    expect(inbox).toContain("provider: conv?.provider || null");
-    expect(inbox).toContain("business_number: conv?.business_phone_number || null");
+    expect(inbox).toContain("replyChannelPayload");
+    expect(inbox).toContain("phoneNumberIdLooksLikeBusinessNumber");
+    expect(inbox).toContain("business_phone_number_id: phoneNumberIdLooksLikeBusinessNumber ? null");
   });
 
   it("centralizes WhatsApp channels in a DB registry and shared adapter", () => {
@@ -128,7 +148,21 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(aiReply).toContain("sendWhatsAppText(admin");
     expect(templateSend).toContain("sendWhatsAppTemplate(admin");
-    expect(campaignSend).toContain("sendWhatsAppTemplate(adminClient");
+    expect(campaignSend).toMatch(/sendWhatsAppTemplate(?: as any)?\)\(adminClient|sendWhatsAppTemplate\(adminClient/);
+  });
+
+  it("lets bulk campaigns persist and use an operator-selected WhatsApp sender", () => {
+    expect(campaignSenderMigration).toContain("business_phone_number_id text");
+    expect(campaignSenderMigration).toContain("business_phone_number text");
+    expect(healthPhoneMigration).toContain("business_phone_number");
+    expect(bulkSenderNumbersMigration).toContain("919667691872");
+    expect(bulkSenderNumbersMigration).toContain("917428499849");
+    expect(bulkSenderNumbersMigration).toContain("919555192192");
+    expect(bulkSenderNumbersMigration).toContain("allow_bulk = true");
+    expect(campaignSend).toContain('route: "bulk"');
+    expect(campaignSend).toContain("requireBulk: true");
+    expect(campaignSend).toContain("sendResult,");
+    expect(campaignSend).toContain('kind: "campaignSend"');
   });
 
   it("tracks rich conversation state for AI/human handoff", () => {
@@ -149,7 +183,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('from("whatsapp_conversation_state")');
     expect(aiReply).toContain('reason: `conversation_${stateRow.mode}`');
     expect(aiReply).toContain('state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai"');
-    expect(manualReply).toContain('state: "human_active"');
+    expect(manualReply).toContain("recordManualReplyConversationAction");
+    expect(conversationActionHelper).toContain('state: "human_active"');
     expect(inbox).toContain("conversation_mode, conversation_state");
     expect(inbox).toContain("lastError = null");
     expect(inbox).toContain('from("whatsapp_conversation_state")');
@@ -184,7 +219,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(automationEventsHelper).toContain("whatsapp_automation_events");
     expect(orchestrator).toContain('eventType: "inbound_received"');
     expect(orchestrator).toContain('eventType: "handoff_created"');
-    expect(orchestrator).toContain('template_key: "dnc_ack"');
+    expect(orchestrator).toContain('kind: "dncAcknowledgement"');
+    expect(orchestrator).toContain('templateKey: "dnc_ack"');
     expect(orchestrator).toContain('title: `DNC: ${leadForNotification.name || phone} opted out`');
     expect(orchestrator).toContain("/functions/v1/whatsapp-ai-reply");
     expect(orchestrator).toContain("isLikelyFeedbackReply");
@@ -209,12 +245,25 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('eventType: "ai_reply_sent"');
     expect(aiReply).toContain('eventType: "send_failed"');
     expect(aiReply).toContain('eventType: "human_mode_skip"');
-    expect(manualReply).toContain('decision: "manual_reply_sent"');
+    expect(conversationActionHelper).toContain('decision: "manual_reply_sent"');
     expect(routeHealth).toContain("token_present");
     expect(routeHealth).toContain("last_failure");
     expect(routeHealth).toContain("whatsapp_channels");
     expect(supabaseConfig).toMatch(/\[functions\.whatsapp-conversation-orchestrator\]\s+verify_jwt = false/);
     expect(supabaseConfig).toMatch(/\[functions\.whatsapp-route-health\]\s+verify_jwt = false/);
+  });
+
+  it("adds a counsellor Copilot bridge without sending WhatsApp messages", () => {
+    expect(aiReply).toContain("createWhatsAppAgUiTrace");
+    expect(aiReply).toContain("copilotkit: agUiTrace");
+    expect(copilotAgui).toContain('protocol: "ag-ui"');
+    expect(copilotEvents).toContain("text/event-stream");
+    expect(copilotAssist).toContain("draft_reply");
+    expect(copilotAssist).toContain("should_pause_ai");
+    expect(copilotAssist).not.toContain("sendWhatsAppText");
+    expect(inbox).toContain('invokeEdge<CopilotAssistResult>("whatsapp-copilot-assist"');
+    expect(inbox).toContain("Draft added to composer");
+    expect(supabaseConfig).toMatch(/\[functions\.whatsapp-copilot-assist\]\s+verify_jwt = false/);
   });
 
   it("adds the course-brief knowledge base bridge without seeding USP copy", () => {
@@ -224,6 +273,34 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain("loadCourseAdmissionBrief");
     expect(aiReply).toContain("COURSE-SPECIFIC VERIFIED BRIEF");
     expect(aiReply).toContain("courseBriefContext");
+  });
+
+  it("adds retrieval-based admissions reply learning without fine-tuning", () => {
+    expect(replyLearningMigration).toContain("create table if not exists public.admissions_ai_reply_examples");
+    expect(replyLearningMigration).toContain("source_channel text");
+    expect(replyLearningMigration).toContain("target_channels text[]");
+    expect(replyLearningMigration).toContain("match_admissions_ai_reply_examples");
+    expect(replyLearningMigration).toContain("pg_trgm");
+    expect(replyLearning).toContain('"ingest_recent", "ingest_message"');
+    expect(replyLearning).toContain('action === "ingest_message"');
+    expect(replyLearning).toContain("ingestReplyExample");
+    expect(replyLearning).toContain('template_key", "manual_reply"');
+    expect(replyLearning).toContain('source_channel: "whatsapp"');
+    expect(replyLearning).toContain('target_channels: ["whatsapp", "voice"]');
+    expect(replyLearning).toContain('"corrected_reply"');
+    expect(replyLearning).toContain("redactForLearning");
+    expect(aiReply).toContain("loadReplyExamplesContext");
+    expect(aiReply).toContain('p_target_channel: "whatsapp"');
+    expect(aiReply).toContain("ORGANISATION REPLY EXAMPLES");
+    expect(aiReply).toContain("Verified course brief and knowledge base override examples");
+    expect(voiceCall).toContain("loadAdmissionsMemoryExamples");
+    expect(voiceCall).toContain('p_target_channel: "voice"');
+    expect(voiceCall).toContain("admissionsMemoryExamples");
+    expect(voiceScripts).toContain("admissionsMemoryExamples?");
+    expect(voiceScripts).toContain("formatAdmissionsMemoryExamples");
+    expect(voiceScripts).toContain("ADMISSIONS MEMORY EXAMPLES");
+    expect(voiceScripts).toContain("Verified course knowledge, get_course_info, and live caller answers override these examples");
+    expect(supabaseConfig).toMatch(/\[functions\.whatsapp-reply-learning\]\s+verify_jwt = false/);
   });
 
   it("adds admin operations queue filters to the WhatsApp inbox", () => {
@@ -240,13 +317,16 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(outboundContextMigration).toContain("response_policy text not null default 'engine'");
     expect(outboundContextHelper).toContain("recordWhatsAppOutboundContext");
     expect(outboundContextHelper).toContain("expectedReplyTypeForTemplate");
-    expect(templateSend).toContain("recordWhatsAppOutboundContext(adminClient");
+    expect(templateSend).toContain("recordOutboundConversationAction(adminClient");
+    expect(templateSend).toContain('kind: "templateSend"');
     expect(templateSend).toContain('outboundKind: "template"');
-    expect(campaignSend).toContain("recordWhatsAppOutboundContext(adminClient");
+    expect(campaignSend).toContain("recordOutboundConversationAction(adminClient");
+    expect(campaignSend).toContain('kind: "campaignSend"');
     expect(campaignSend).toContain('outboundKind: "bulk_campaign"');
     expect(campaignSend).toContain("campaignRecipientId: recipient.id");
-    expect(manualReply).toContain('outboundKind: "manual_reply"');
-    expect(manualReply).toContain('responsePolicy: "human"');
+    expect(manualReply).toContain("recordManualReplyConversationAction");
+    expect(conversationActionHelper).toContain('outboundKind: "manual_reply"');
+    expect(conversationActionHelper).toContain('responsePolicy: "human"');
   });
 
   it("uses outbound context when routing inbound replies", () => {

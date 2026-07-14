@@ -1,6 +1,7 @@
 export interface CourseSelection {
   course_id: string;
   campus_id: string;
+  institution_id?: string | null;
   course_name: string;
   campus_name: string;
   preference_order: number;
@@ -35,7 +36,7 @@ export interface ApplicationData {
     name?: string; first_name?: string; last_name?: string; dob?: string;
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
-    current_position?: string; marital_status?: string;
+    employment_status?: string; current_position?: string; position?: string; marital_status?: string;
     phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
     occupation?: string; occupation_other?: string;
   };
@@ -43,7 +44,7 @@ export interface ApplicationData {
     name?: string; first_name?: string; last_name?: string; dob?: string;
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
-    current_position?: string; marital_status?: string;
+    employment_status?: string; current_position?: string; position?: string; marital_status?: string;
     phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
     occupation?: string; occupation_other?: string;
   };
@@ -104,6 +105,7 @@ export interface ApplicationData {
   fee_amount: number;
   payment_status: string;
   payment_ref: string | null;
+  form_pdf_url?: string | null;
   flags: string[];
   institution_id: string | null;
   program_category: string;
@@ -168,11 +170,12 @@ export function determineProgramCategory(courseCode: string, courseName: string)
   if (lower.includes('mba') || lower.includes('pgdm')) return 'mba_pgdm';
   if (lower.includes('b.ed') || lower.includes('bed')) return 'bed';
   if (lower.includes('d.el.ed') || lower.includes('deled')) return 'deled';
+  if (lower.includes('ballb') || lower.includes('ba llb') || lower.includes('bba llb')) return 'undergraduate';
   if (lower.includes('mpt') || lower.includes('llb') || lower.includes('mmrit')) return 'professional';
   if (lower.startsWith('m') || lower.includes('master') || lower.includes('pg')) return 'postgraduate';
   return 'undergraduate';
 }
 
 export function calculateFee(selections: CourseSelection[]): number {
-  return selections.reduce((total, s) => total + (FEE_MAP[s.program_category] || 1000), 0);
+  return selections.reduce((total, s) => total + (FEE_MAP[s.program_category] ?? 1000), 0);
 }

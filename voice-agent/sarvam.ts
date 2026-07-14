@@ -170,7 +170,7 @@ export async function sarvamSTT(opts: {
 }): Promise<{ transcript: string; languageCode: string } | null> {
   const wav = pcmToWav(opts.pcm, 8000);
   const fd = new FormData();
-  fd.append("file", new Blob([wav], { type: "audio/wav" }), "utterance.wav");
+  fd.append("file", new Blob([wav as BlobPart], { type: "audio/wav" }), "utterance.wav");
   fd.append("model", "saarika:v2.5");
   fd.append("language_code", opts.languageCode || "unknown"); // unknown → auto-detect
   fd.append("with_timestamps", "false");

@@ -13,6 +13,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 /** Returns the next ISO timestamp within the 9AM–8PM IST calling window. */
 function nextPermittedCallTime(delayMs = 0): string {
@@ -221,20 +222,33 @@ Deno.serve(async (req) => {
                 buttonUrls = [campusQuery, "nimt"];
               }
 
-              await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${serviceRoleKey}`,
-                },
-                body: JSON.stringify({
-                  template_key: action.template_key,
-                  phone: recipientPhone,
-                  params,
+              // Delay support: queue instead of sending immediately.
+              if (action.delay_hours && action.delay_hours > 0) {
+                const sendAt = new Date(Date.now() + action.delay_hours * 60 * 60 * 1000).toISOString();
+                await admin.from("whatsapp_scheduled_sends").insert({
                   lead_id: lead.id,
-                  ...(buttonUrls ? { button_urls: buttonUrls } : {}),
-                }),
-              });
+                  phone: recipientPhone,
+                  template_key: action.template_key,
+                  params: params.length > 0 ? params : [],
+                  button_urls: buttonUrls || null,
+                  send_at: sendAt,
+                });
+              } else {
+                await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${serviceRoleKey}`,
+                  },
+                  body: JSON.stringify({
+                    template_key: action.template_key,
+                    phone: recipientPhone,
+                    params,
+                    lead_id: lead.id,
+                    ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+                  }),
+                });
+              }
 
               // Auto follow-up with course video for the course-info templates
               if ((action.template_key === "course_info_video" || isCourseInfoVideoV2) && !sendToCounsellor && lead.phone) {
@@ -296,13 +310,12 @@ Deno.serve(async (req) => {
 
             case "advance_stage": {
               if (!action.to_stage) break;
-              await admin.from("leads").update({ stage: action.to_stage }).eq("id", lead.id);
-              await admin.from("lead_activities").insert({
-                lead_id: lead.id,
-                type: "stage_change",
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage,
+                command: "automationAdvanceStage",
+                targetStage: action.to_stage,
                 description: `Stage auto-advanced to ${action.to_stage} by automation: ${rule.name}`,
-                old_stage: lead.stage,
-                new_stage: action.to_stage,
               });
               executedActions.push({ type: "advance_stage", to: action.to_stage });
               break;

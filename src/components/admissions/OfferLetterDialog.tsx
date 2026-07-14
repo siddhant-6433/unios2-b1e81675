@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -6,20 +6,57 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2 } from "lucide-react";
+import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { UpdeledRegistrationDetails } from "@/components/leads/UpdeledRegistrationDetails";
+import {
+  cahetRegistrationFromApplication,
+  fetchCahetRegistration,
+  isBptOrBmritCourseName,
+  type ApplicationCahetSource,
+  type CahetRegistrationDetails as CahetRegistrationDetailsType,
+} from "@/lib/cahet";
+import {
+  fetchUpdeledRegistration,
+  isDeledCourseName,
+  isUpdeledExamName,
+  updeledRegistrationFromApplication,
+  type ApplicationUpdeledSource,
+  type SupabaseUpdeledClient,
+  type UpdeledRegistrationDetails as UpdeledRegistrationDetailsType,
+} from "@/lib/updeled";
+import { chooseOfferSessionId, feeBackedSessionIds, pickOfferFeeStructure, type OfferSessionOption } from "@/lib/offerSessions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { feeTermLabel } from "@/lib/feeTermLabels";
+import {
+  buildOfferWaiversFromFeeProposalChild,
+  feeProposalChildKey,
+  feeProposalChildLabel,
+  proposalFeeSnapshotDiff,
+  type FeeProposalChildLike,
+} from "@/lib/feeProposalOfferMapping";
+import { collectOfferFeeTermTotals, firstOfferFeeTerm } from "@/lib/offerFeeTerms";
 
 interface OfferLetterDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   leadId: string;
   leadName: string;
+  applicationId?: string | null;
+  academicPartnerId?: string | null;
   courseId: string | null;
+  courseName?: string | null;
   campusId: string | null;
+  cahetRegistration?: CahetRegistrationDetailsType | null;
+  updeledRegistration?: UpdeledRegistrationDetailsType | null;
   onSuccess: () => void;
 }
 
 interface OfferLetter {
   id: string;
+  course_id?: string | null;
+  campus_id?: string | null;
   total_fee: number;
   scholarship_amount: number | null;
   net_fee: number;
@@ -34,11 +71,33 @@ interface OfferLetter {
   session_id?: string | null;
   letter_url?: string | null;
   loan_letter_url?: string | null;
+  token_fee_amount?: number | null;
+  token_fee_user_edited?: boolean | null;
   admission_mode?: "direct" | "entrance" | null;
   entrance_exam_name?: string | null;
+  source_fee_proposal_id?: string | null;
+  source_fee_proposal_child_key?: string | null;
 }
 
-interface SessionOption { id: string; name: string; is_active: boolean }
+type SessionOption = OfferSessionOption;
+
+interface CourseOption {
+  id: string;
+  name: string;
+  code: string | null;
+}
+
+type FeeStructurePolicy = {
+  token_required_amount?: number | string | null;
+};
+
+type OfferFeeStructureRow = {
+  version?: string | null;
+  created_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+  policy?: FeeStructurePolicy | null;
+  fee_structure_items?: { term: string; amount: number | string | null }[] | null;
+};
 
 interface OfferWaiver {
   id: string;
@@ -52,6 +111,28 @@ interface OfferWaiver {
   approved_by_name: string | null;
   rejection_reason: string | null;
   created_at: string;
+  source_type?: "manual" | "fee_proposal" | null;
+  source_fee_proposal_id?: string | null;
+  source_fee_proposal_child_key?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface ApprovedFeeProposal {
+  id: string;
+  lead_id: string | null;
+  linked_lead_ids?: string[] | null;
+  status: string;
+  proposal: {
+    children?: FeeProposalChildLike[];
+    full_year_payment?: {
+      extra_waiver_amount?: number | string | null;
+    } | null;
+  } | null;
+  annual_total?: number | string | null;
+  payable_at_admission?: number | string | null;
+  revision_number?: number | null;
+  is_current?: boolean | null;
+  created_at?: string | null;
 }
 
 interface OfferLetterEditRequest {
@@ -59,7 +140,7 @@ interface OfferLetterEditRequest {
   offer_letter_id: string;
   requested_by_name: string | null;
   requested_by_role: string | null;
-  proposed_changes: { acceptance_deadline?: string };
+  proposed_changes: { acceptance_deadline?: string; course_id?: string; token_fee_amount?: number };
   reason: string | null;
   status: "pending" | "approved" | "rejected";
   reviewed_at: string | null;
@@ -68,6 +149,7 @@ interface OfferLetterEditRequest {
 }
 
 const ENTRANCE_OPTIONS = [
+  "CAHET",
   "CAT",
   "MAT",
   "XAT",
@@ -84,13 +166,22 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
-  const { user, role } = useAuth();
+function parseTokenFeeFromEditReason(reason: string | null | undefined): number | null {
+  if (!reason || !/\btoken\b/i.test(reason)) return null;
+  const match = reason.match(/(?:rs\.?|₹|inr)?\s*([0-9][0-9,\s]{2,})/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/[,\s]/g, ""));
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applicationId, academicPartnerId, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+  const { user, role, realRole, isImpersonating } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
   const isApprover = role === "super_admin" || role === "principal";
   const isPrincipalOrAbove = isApprover;
   const isSuperAdmin = role === "super_admin";
+  const isAcademicPartnerOfferIssuer = role === "academic_partner_offer_letter";
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,14 +199,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   });
   const [tokenFeeEdited, setTokenFeeEdited] = useState(false);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
-  // First-year fee for the picked session — used to default the token fee.
+  // First payable programme-fee period for the picked session, used to default the token fee.
   const [firstYearFee, setFirstYearFee] = useState<number>(0);
-  // Term keys present in the active fee structure (e.g. ['year_1', 'year_2']) —
+  // Term keys present in the active fee structure (e.g. ['year_1'] or ['admission', 'q1']) —
   // drives the year picker in the Add-Waiver inline form.
   const [availableTerms, setAvailableTerms] = useState<string[]>([]);
-  // Per-year totals from the active fee structure, used for the summary card
+  // Per-period totals from the active fee structure, used for the summary card
   // at offer-creation time and for stamping offer.total_fee.
-  const [yearTotals, setYearTotals] = useState<{ term: string; total: number }[]>([]);
+  const [yearTotals, setYearTotals] = useState<{ term: string; total: number; label: string }[]>([]);
+  const [feePolicy, setFeePolicy] = useState<Record<string, unknown> | null>(null);
   // offer_id → waivers list, fetched alongside offers.
   const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
   // Which offer's add-waiver inline form is currently visible.
@@ -130,11 +222,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [preWaivers, setPreWaivers] = useState<{ term: string; amount: number; reason: string }[]>([]);
   const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
   const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
+  const [approvedFeeProposals, setApprovedFeeProposals] = useState<ApprovedFeeProposal[]>([]);
+  const [selectedFeeProposalId, setSelectedFeeProposalId] = useState("");
+  const [selectedProposalChildKey, setSelectedProposalChildKey] = useState("");
   const [deletingOfferId, setDeletingOfferId] = useState<string | null>(null);
+  const [courseOptions, setCourseOptions] = useState<CourseOption[]>([]);
   // Edit requests
   const [editRequestsByOffer, setEditRequestsByOffer] = useState<Record<string, OfferLetterEditRequest[]>>({});
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ acceptance_deadline: "", reason: "" });
+  const [editForm, setEditForm] = useState({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
   const [editSaving, setEditSaving] = useState(false);
   const [editDecidingId, setEditDecidingId] = useState<string | null>(null);
   // Which offer's PDF is showing in the right-hand preview pane.
@@ -146,6 +242,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // browser actually fetches the new bytes — the storage path is reused on
   // upsert, so without this the cached PDF stays on screen.
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
+  const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
+  const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
+  const [fetchedUpdeledRegistration, setFetchedUpdeledRegistration] = useState<UpdeledRegistrationDetailsType | null>(null);
+  const updeledRegistration = updeledRegistrationProp ?? fetchedUpdeledRegistration;
+  const requiresCahetRegistration = isBptOrBmritCourseName(courseName);
+  const requiresUpdeledRegistration = isDeledCourseName(courseName);
+  const cahetOfferBlocked = requiresCahetRegistration && !cahetRegistration;
+  const updeledOfferBlocked = requiresUpdeledRegistration && !updeledRegistration;
+  const registrationOfferBlocked = cahetOfferBlocked || updeledOfferBlocked;
+  const cahetOfferBlockMessage = "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.";
+  const updeledOfferBlockMessage = "UPDELED registration details are required before issuing an offer letter for D.El.Ed.";
+  const registrationOfferBlockMessage = cahetOfferBlocked ? cahetOfferBlockMessage : updeledOfferBlockMessage;
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -165,7 +273,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       if (offerIds.length > 0) {
         const { data: waiverRows } = await supabase
           .from("offer_waivers")
-          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at")
+          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at, source_type, source_fee_proposal_id, source_fee_proposal_child_key, metadata")
           .in("offer_letter_id", offerIds)
           .order("created_at", { ascending: true });
         const grouped: Record<string, OfferWaiver[]> = {};
@@ -204,7 +312,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     setRegeneratingId(offerId);
     try {
       const { error } = await supabase.functions.invoke("generate-offer-letter", {
-        body: { offer_letter_id: offerId },
+        body: { offer_letter_id: offerId, application_id: applicationId || undefined },
       });
       if (error) {
         toast({ title: "Couldn't generate PDF", description: error.message, variant: "destructive" });
@@ -222,55 +330,168 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
 
-  // Pull sessions whenever the form opens so the select has data + the active
-  // session is preselected as default for the offer.
+  useEffect(() => {
+    if (!open || !leadId) return;
+    let cancelled = false;
+    (async () => {
+      const selectCols = "id, lead_id, linked_lead_ids, status, proposal, annual_total, payable_at_admission, revision_number, is_current, created_at";
+      const [primary, linked] = await Promise.all([
+        supabase
+          .from("fee_proposals" as any)
+          .select(selectCols)
+          .eq("lead_id", leadId)
+          .eq("status", "approved")
+          .eq("is_current", true)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("fee_proposals" as any)
+          .select(selectCols)
+          .contains("linked_lead_ids", [leadId])
+          .eq("status", "approved")
+          .eq("is_current", true)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (cancelled) return;
+      const byId = new Map<string, ApprovedFeeProposal>();
+      for (const row of ([...(primary.data || []), ...(linked.data || [])] as ApprovedFeeProposal[])) {
+        if (!row?.id) continue;
+        byId.set(row.id, row);
+      }
+      setApprovedFeeProposals(Array.from(byId.values()).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))));
+    })().catch(() => {
+      if (!cancelled) setApprovedFeeProposals([]);
+    });
+    return () => { cancelled = true; };
+  }, [open, leadId]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("courses")
+        .select("id, name, code")
+        .order("name", { ascending: true });
+      if (cancelled) return;
+      setCourseOptions(((data || []) as any[]).map((course) => ({
+        id: course.id,
+        name: course.name,
+        code: course.code ?? null,
+      })));
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || cahetRegistrationProp !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      const row = await fetchCahetRegistration(supabase, leadId);
+      if (row) {
+        if (!cancelled) setFetchedCahetRegistration(row);
+        return;
+      }
+
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("id, application_id, lead_id, academic_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setFetchedCahetRegistration(cahetRegistrationFromApplication(appRow as ApplicationCahetSource | null, leadId));
+    })();
+    return () => { cancelled = true; };
+  }, [open, leadId, cahetRegistrationProp]);
+
+  useEffect(() => {
+    if (!open || updeledRegistrationProp !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      const row = await fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, leadId);
+      if (row) {
+        if (!cancelled) setFetchedUpdeledRegistration(row);
+        return;
+      }
+
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("id, application_id, lead_id, academic_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setFetchedUpdeledRegistration(updeledRegistrationFromApplication(appRow as ApplicationUpdeledSource | null, leadId));
+    })();
+    return () => { cancelled = true; };
+  }, [open, leadId, updeledRegistrationProp]);
+
+  // Pull sessions whenever the form opens so the select has data. Prefer a
+  // session that actually has active year-wise fees for this course; multiple
+  // sessions can be active, and principals cannot change this dropdown.
   useEffect(() => {
     if (!showForm) return;
-    supabase.from("admission_sessions").select("id, name, is_active").order("name", { ascending: false })
-      .then(({ data }) => {
-        const list = (data ?? []) as SessionOption[];
-        setSessions(list);
-        const active = list.find(s => s.is_active);
-        setForm(p => ({ ...p, session_id: p.session_id || active?.id || (list[0]?.id ?? "") }));
-      });
-  }, [showForm]);
+    let cancelled = false;
+    (async () => {
+      const [{ data: sessionRows }, { data: feeRows }] = await Promise.all([
+        supabase.from("admission_sessions").select("id, name, is_active").order("name", { ascending: false }),
+        courseId
+          ? supabase
+              .from("fee_structures")
+              .select("session_id, fee_structure_items ( term, amount )")
+              .eq("course_id", courseId)
+              .eq("is_active", true)
+          : Promise.resolve({ data: [] }),
+      ]);
+      if (cancelled) return;
 
-  // Resolve the first-year fee + the list of available year terms for the
+      const feeSessionIds = new Set(feeBackedSessionIds((feeRows || []) as any[]));
+      const list = ((sessionRows ?? []) as SessionOption[]).map((session) => ({
+        ...session,
+        has_fee_structure: !courseId || feeSessionIds.has(session.id),
+      }));
+
+      setSessions(list);
+      setForm((previous) => ({
+        ...previous,
+        session_id: chooseOfferSessionId(list, previous.session_id),
+      }));
+    })();
+    return () => { cancelled = true; };
+  }, [showForm, courseId]);
+
+  // Resolve the first offer-fee period + the list of available waiver terms for the
   // picked course+session pair. firstYearFee drives token-fee defaults;
   // availableTerms drives the year picker in the Add-Waiver form.
   useEffect(() => {
-    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
     // For waiver picker, use the offer's session if any are loaded; otherwise
     // fall back to form.session_id (when the new-offer form is open).
     const sessionId = form.session_id || (offers.find(o => !!o.session_id)?.session_id || "");
-    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("fee_structures")
-        .select("id, fee_structure_items ( term, amount )")
+        .select("id, version, created_at, metadata, policy, fee_structure_items ( term, amount )")
         .eq("course_id", courseId)
         .eq("session_id", sessionId)
-        .eq("is_active", true)
-        .maybeSingle();
+        .eq("is_active", true);
       if (cancelled) return;
-      const items: any[] = (data as any)?.fee_structure_items ?? [];
-      // Sum per year_N term so we have both Year-1 (for token math) and the
-      // full per-year breakdown (for the summary card + offer.total_fee).
-      const byTerm = new Map<string, number>();
-      for (const it of items) {
-        const t = String(it?.term || "");
-        if (!/^year_\d+$/.test(t)) continue;
-        byTerm.set(t, (byTerm.get(t) || 0) + Number(it?.amount || 0));
-      }
-      const sorted = Array.from(byTerm.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([term, total]) => ({ term, total }));
-      const y1 = byTerm.get("year_1") || 0;
-      setFirstYearFee(y1);
+      const feeStructure = pickOfferFeeStructure((data || []) as OfferFeeStructureRow[]);
+      const items = feeStructure?.fee_structure_items ?? [];
+      const metadata = feeStructure?.metadata ?? null;
+      const policy = feeStructure?.policy ?? null;
+      const totals = collectOfferFeeTermTotals(items);
+      const sorted = totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, metadata) }));
+      const firstTerm = firstOfferFeeTerm(totals);
+      const firstPeriodFee = totals.find((item) => item.term === firstTerm)?.total || 0;
+      setFirstYearFee(firstPeriodFee);
       setYearTotals(sorted);
+      setFeePolicy(policy || null);
       setAvailableTerms(sorted.length ? sorted.map(s => s.term) : ["year_1"]);
-    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); });
+    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); });
     return () => { cancelled = true; };
   }, [courseId, form.session_id, offers]);
 
@@ -278,14 +499,63 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // This is the canonical source of truth for the offer's "total fee" — the
   // form no longer asks the user to type it.
   const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
+  const preWaiverTotal = preWaivers.reduce((sum, waiver) => sum + Number(waiver.amount || 0), 0);
+  const selectedSessionName = sessions.find(s => s.id === form.session_id)?.name || null;
+  const selectedFeeProposal = approvedFeeProposals.find(p => p.id === selectedFeeProposalId) || null;
+  const proposalChildOptions = useMemo(() => {
+    if (!selectedFeeProposal) return [];
+    return (selectedFeeProposal.proposal?.children || [])
+      .map((child, index) => ({
+        child,
+        index,
+        key: feeProposalChildKey(child, index),
+        label: feeProposalChildLabel(child, `Student ${index + 1}`),
+      }))
+      .filter(({ child }) => {
+        const leadMatches = !child.lead_id || child.lead_id === leadId;
+        const courseMatches = !courseId || !child.course_id || child.course_id === courseId;
+        return leadMatches && courseMatches;
+      });
+  }, [selectedFeeProposal, leadId, courseId]);
+  const selectedProposalChildOption =
+    proposalChildOptions.find(option => option.key === selectedProposalChildKey) ||
+    (proposalChildOptions.length === 1 ? proposalChildOptions[0] : null);
+  const importedProposalWaivers = selectedFeeProposal && selectedProposalChildOption
+    ? buildOfferWaiversFromFeeProposalChild({
+        proposalId: selectedFeeProposal.id,
+        revisionNumber: selectedFeeProposal.revision_number,
+        childKey: selectedProposalChildOption.key,
+        child: selectedProposalChildOption.child,
+      })
+    : [];
+  const importedProposalWaiverTotal = importedProposalWaivers.reduce((sum, waiver) => sum + waiver.amount, 0);
+  const proposalMismatch = selectedProposalChildOption
+    ? proposalFeeSnapshotDiff(selectedProposalChildOption.child, programmeTotal)
+    : null;
+  const proposalLevelFullYearWaiver = Number(selectedFeeProposal?.proposal?.full_year_payment?.extra_waiver_amount || 0);
+  const previewWaiverTotal = preWaiverTotal + importedProposalWaiverTotal;
+  const previewNetFee = Math.max(0, programmeTotal - previewWaiverTotal);
+  const selectedEntranceName = form.entrance_exam_name === "Other"
+    ? form.entrance_exam_other.trim()
+    : form.entrance_exam_name.trim();
+  const isCahetOffer = form.admission_mode === "entrance" && selectedEntranceName.toLowerCase().includes("cahet");
+  const isUpdeledOffer = form.admission_mode === "entrance" && isUpdeledExamName(selectedEntranceName);
 
   /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
   const feeForTerm = (term: string): number =>
     yearTotals.find(y => y.term === term)?.total ?? 0;
 
+  const labelForTerm = (term: string): string =>
+    yearTotals.find(y => y.term === term)?.label ?? feeTermLabel(term);
+  const firstOfferTerm = firstOfferFeeTerm(yearTotals);
+  const firstTermLabel = labelForTerm(firstOfferTerm);
+
   /** Sum of pre-issuance waivers already queued for the same term in the new-offer form. */
   const preWaiverTotalForTerm = (term: string): number =>
     preWaivers.filter(w => w.term === term).reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  const importedProposalWaiverTotalForTerm = (term: string): number =>
+    importedProposalWaivers.filter(w => w.term === term).reduce((s, w) => s + Number(w.amount || 0), 0);
 
   /** Sum of post-issuance waivers (approved + pending) on an offer for the same term. */
   const offerWaiverTotalForTerm = (offerId: string, term: string): number =>
@@ -293,16 +563,48 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       .filter(w => w.term === term && (w.status === "approved" || w.status === "pending"))
       .reduce((s, w) => s + Number(w.amount || 0), 0);
 
-  // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
-  // staged in the pre-issuance waiver list. The loan-letter token fee
-  // defaults to 10% of this net figure.
-  const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
+  const courseNameForId = (id: string | null | undefined) =>
+    id ? (courseOptions.find(c => c.id === id)?.name || (id === courseId ? courseName : null) || "Selected course") : (courseName || "Course not set");
 
-  // Token fee defaults to 10% of net Year-1. Admissions can lower it while
-  // issuing the offer, but never below ₹5,000.
-  const tokenFloor = 5000;
-  const tokenDefault = netFirstYearFee > 0
-    ? Math.max(Math.round(netFirstYearFee * 0.10), tokenFloor)
+  const courseCodeForId = (id: string | null | undefined) =>
+    id ? courseOptions.find(c => c.id === id)?.code || null : null;
+
+  const fetchCourseFeeSnapshot = async (nextCourseId: string, sessionId: string) => {
+    const { data, error } = await supabase
+      .from("fee_structures")
+      .select("id, version, created_at, policy, fee_structure_items ( term, amount )")
+      .eq("course_id", nextCourseId)
+      .eq("session_id", sessionId)
+      .eq("is_active", true);
+    if (error) throw error;
+
+    const feeStructure = pickOfferFeeStructure((data || []) as OfferFeeStructureRow[]);
+    const yearTotalsForCourse = collectOfferFeeTermTotals(feeStructure?.fee_structure_items || []);
+    const firstTerm = firstOfferFeeTerm(yearTotalsForCourse);
+
+    return {
+      firstYearFee: yearTotalsForCourse.find((item) => item.term === firstTerm)?.total || 0,
+      totalFee: yearTotalsForCourse.reduce((sum, year) => sum + year.total, 0),
+      tokenRequiredAmount: Number(feeStructure?.policy?.token_required_amount || 0),
+    };
+  };
+
+  // Net first-period fee = gross first-period fee minus any matching waivers
+  // already staged in the pre-issuance waiver list. The loan-letter token fee
+  // defaults to 25% of this net figure.
+  const netFirstYearFee = Math.max(
+    0,
+    firstYearFee - preWaiverTotalForTerm(firstOfferTerm) - importedProposalWaiverTotalForTerm(firstOfferTerm),
+  );
+
+  // Token fee defaults to 25% of net Year-1. Admissions can lower it while
+  // issuing the offer, but never below the course-specific seat-block floor.
+  const policyTokenRequiredAmount = Number(feePolicy?.token_required_amount || 0);
+  const tokenFloor = policyTokenRequiredAmount || 5000;
+  const tokenDefault = policyTokenRequiredAmount > 0
+    ? policyTokenRequiredAmount
+    : netFirstYearFee > 0
+    ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
 
   // Whenever the net Year-1 fee changes (waiver added/removed), always
@@ -315,13 +617,26 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     setForm(p => ({ ...p, token_fee_amount: String(tokenDefault) }));
   }, [showForm, netFirstYearFee, tokenDefault]);
 
+  useEffect(() => {
+    if (!selectedFeeProposalId) {
+      if (selectedProposalChildKey) setSelectedProposalChildKey("");
+      return;
+    }
+    if (proposalChildOptions.length === 1 && selectedProposalChildKey !== proposalChildOptions[0].key) {
+      setSelectedProposalChildKey(proposalChildOptions[0].key);
+    }
+    if (proposalChildOptions.length > 1 && selectedProposalChildKey && !proposalChildOptions.some(option => option.key === selectedProposalChildKey)) {
+      setSelectedProposalChildKey("");
+    }
+  }, [selectedFeeProposalId, selectedProposalChildKey, proposalChildOptions]);
+
   const handleCreate = async () => {
     // Total fee is auto-derived from the published fee structure — no user input.
     const totalFee = programmeTotal;
     if (!totalFee || totalFee <= 0) {
       toast({
         title: "No fee structure published",
-        description: "The selected course + session doesn't have an active fee structure with year-wise items. Publish one in Course & Campus master before issuing offers.",
+        description: "The selected course + session doesn't have an active fee structure with programme fee items. Publish one in Course & Campus master before issuing offers.",
         variant: "destructive",
       });
       return;
@@ -334,8 +649,24 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const entranceName = form.entrance_exam_name === "Other"
       ? form.entrance_exam_other.trim()
       : form.entrance_exam_name.trim();
+    if (registrationOfferBlocked) {
+      toast({
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
+        variant: "destructive",
+      });
+      return;
+    }
     if (form.admission_mode === "entrance" && !entranceName) {
       toast({ title: "Entrance details required", description: "Select the entrance/counselling route or type it under Other.", variant: "destructive" });
+      return;
+    }
+    if (selectedFeeProposal && !selectedProposalChildOption) {
+      toast({
+        title: "Select proposal student",
+        description: "This approved proposal has multiple or no matching students for the selected course. Choose the student to map before issuing.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -356,40 +687,74 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     }
 
     setSaving(true);
-    // If super_admin or principal issues directly, it's auto-approved.
-    // Otherwise (counsellor, admission_head, campus_admin) it needs principal approval.
-    const autoApproved = isPrincipalOrAbove;
+    // If super_admin, principal, or the scoped academic partner offer role issues
+    // directly, the offer is auto-approved. Other staff still need principal approval.
+    const autoApproved = isPrincipalOrAbove || isAcademicPartnerOfferIssuer;
     const approvalStatus = autoApproved ? "approved" : "pending_principal";
 
     if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
 
-    const { data: insertedOffer, error } = await supabase.from("offer_letters").insert({
-      lead_id: leadId,
-      total_fee: totalFee,
-      // Scholarship is no longer collected at offer creation — apply
-      // discounts via year-wise waivers (with super-admin approval). We
-      // persist 0 so legacy code paths reading scholarship_amount get a
-      // sensible value.
-      scholarship_amount: 0,
-      net_fee: totalFee,
-      token_fee_amount: tokenFeeNum,
-      token_fee_user_edited: tokenFeeEdited,
-      admission_mode: form.admission_mode,
-      entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
-      acceptance_deadline: form.acceptance_deadline || null,
-      course_id: courseId,
-      campus_id: campusId,
-      session_id: form.session_id,
-      issued_by: user?.id || null,
-      approval_status: approvalStatus,
-      approved_by: autoApproved ? user?.id || null : null,
-      approved_at: autoApproved ? new Date().toISOString() : null,
-    } as any).select("id").single();
+    let insertedOffer: { id: string } | null = null;
+    let error: { message: string } | null = null;
+
+    if (isAcademicPartnerOfferIssuer) {
+      if (preWaivers.length > 0 || importedProposalWaivers.length > 0) {
+        toast({
+          title: "Waivers unavailable",
+          description: "Academic partners can issue the base approved offer. Internal staff must apply waivers.",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+      const result = await supabase.rpc("academic_partner_issue_offer", {
+        _application_id: applicationId || "",
+        _acceptance_deadline: form.acceptance_deadline,
+        _session_id: form.session_id,
+        _total_fee: totalFee,
+        _net_fee: totalFee,
+        _token_fee_amount: tokenFeeNum,
+        _token_fee_user_edited: tokenFeeEdited,
+        _admission_mode: form.admission_mode,
+        _entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
+        _partner_id: isImpersonating && realRole === "super_admin" ? academicPartnerId || null : null,
+      } as any);
+      error = result.error;
+      const resultData = result.data as { offer_letter_id?: string } | null;
+      insertedOffer = resultData?.offer_letter_id ? { id: resultData.offer_letter_id } : null;
+    } else {
+      const result = await supabase.from("offer_letters").insert({
+        lead_id: leadId,
+        total_fee: totalFee,
+        // Scholarship is no longer collected at offer creation — apply
+        // discounts via year-wise waivers (with super-admin approval). We
+        // persist 0 so legacy code paths reading scholarship_amount get a
+        // sensible value.
+        scholarship_amount: 0,
+        net_fee: totalFee,
+        token_fee_amount: tokenFeeNum,
+        token_fee_user_edited: tokenFeeEdited,
+        admission_mode: form.admission_mode,
+        entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
+        acceptance_deadline: form.acceptance_deadline || null,
+        course_id: courseId,
+        campus_id: campusId,
+        session_id: form.session_id,
+        issued_by: user?.id || null,
+        approval_status: approvalStatus,
+        approved_by: autoApproved ? user?.id || null : null,
+        approved_at: autoApproved ? new Date().toISOString() : null,
+        source_fee_proposal_id: selectedFeeProposal && selectedProposalChildOption ? selectedFeeProposal.id : null,
+        source_fee_proposal_child_key: selectedFeeProposal && selectedProposalChildOption ? selectedProposalChildOption.key : null,
+      } as any).select("id").single();
+      insertedOffer = result.data;
+      error = result.error;
+    }
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
       // Bulk-insert any pre-issuance waivers the user staged in the form.
-      if (insertedOffer?.id && preWaivers.length > 0) {
+      if (!isAcademicPartnerOfferIssuer && insertedOffer?.id && preWaivers.length > 0) {
         await supabase.from("offer_waivers").insert(
           preWaivers.map(w => ({
             offer_letter_id: insertedOffer.id,
@@ -399,16 +764,49 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           })) as any
         );
       }
-      // Only advance lead stage if the offer is approved (not pending)
-      if (autoApproved) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee }).eq("id", leadId);
+      if (!isAcademicPartnerOfferIssuer && insertedOffer?.id && importedProposalWaivers.length > 0) {
+        const { error: proposalWaiverError } = await supabase.from("offer_waivers").insert(
+          importedProposalWaivers.map(w => ({
+            offer_letter_id: insertedOffer.id,
+            term: w.term,
+            amount: w.amount,
+            reason: w.reason,
+            status: "approved",
+            source_type: w.source_type,
+            source_fee_proposal_id: w.source_fee_proposal_id,
+            source_fee_proposal_child_key: w.source_fee_proposal_child_key,
+            metadata: w.metadata,
+          })) as any
+        );
+        if (proposalWaiverError) {
+          toast({
+            title: "Offer created, proposal waivers not copied",
+            description: proposalWaiverError.message,
+            variant: "destructive",
+          });
+        }
       }
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: user?.id || null, type: "offer",
-        description: autoApproved
-          ? `Offer letter issued: ₹${totalFee.toLocaleString("en-IN")}`
-          : `Offer letter submitted for principal approval: ₹${totalFee.toLocaleString("en-IN")}`,
-      });
+      // Only advance lead stage if the offer is approved (not pending)
+      if (autoApproved && !isAcademicPartnerOfferIssuer) {
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        try {
+          await applyResolvedLeadTransition(supabase as any, {
+            leadId,
+            transition,
+            extraPatch: { offer_amount: totalFee },
+          });
+        } catch (e: any) {
+          console.warn("[OfferLetterDialog] lead stage transition failed after offer create:", e);
+        }
+      }
+      if (!isAcademicPartnerOfferIssuer) {
+        await supabase.from("lead_activities").insert({
+          lead_id: leadId, user_id: user?.id || null, type: "offer",
+          description: autoApproved
+            ? `Offer letter issued: ₹${totalFee.toLocaleString("en-IN")}`
+            : `Offer letter submitted for principal approval: ₹${totalFee.toLocaleString("en-IN")}`,
+        });
+      }
       // If approved on create, generate the PDF immediately and poll for it
       // so the preview pane lights up without needing a manual refresh.
       if (autoApproved && insertedOffer?.id) {
@@ -441,6 +839,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       setPreWaivers([]);
       setShowPreWaiverForm(false);
       setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+      setSelectedFeeProposalId("");
+      setSelectedProposalChildKey("");
       fetchOffers();
       onSuccess();
     }
@@ -449,6 +849,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
     if (!isApprover) return;
+    if (decision === "approved" && registrationOfferBlocked) {
+      toast({
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
+        variant: "destructive",
+      });
+      return;
+    }
     const updates: any = {
       approval_status: decision,
       approved_by: user?.id || null,
@@ -466,7 +874,16 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (decision === "approved") {
       const offer = offers.find(o => o.id === offerId);
       if (offer) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: offer.net_fee }).eq("id", leadId);
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        try {
+          await applyResolvedLeadTransition(supabase as any, {
+            leadId,
+            transition,
+            extraPatch: { offer_amount: offer.net_fee },
+          });
+        } catch (e: any) {
+          console.warn("[OfferLetterDialog] lead stage transition failed after offer approval:", e);
+        }
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -497,7 +914,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       return;
     }
     if (!waiverForm.term) {
-      toast({ title: "Pick a year for this waiver", variant: "destructive" });
+      toast({ title: "Pick a period for this waiver", variant: "destructive" });
       return;
     }
     // Cap: a single year's waivers (approved + pending + this one) cannot
@@ -508,8 +925,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const available = Math.max(0, yearFee - existing);
     if (yearFee <= 0) {
       toast({
-        title: "No fee published for this year",
-        description: `The active fee structure has no "${waiverForm.term.replace(/_/g, " ")}" line — can't apply a waiver against it.`,
+        title: "No fee published for this period",
+        description: `The active fee structure has no "${labelForTerm(waiverForm.term)}" line — can't apply a waiver against it.`,
         variant: "destructive",
       });
       return;
@@ -518,8 +935,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       toast({
         title: "Waiver exceeds available fee",
         description: existing > 0
-          ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-          : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+          ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+          : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
         variant: "destructive",
       });
       return;
@@ -614,31 +1031,119 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   };
 
   const handleSubmitEditRequest = async (offerId: string) => {
-    if (!editForm.acceptance_deadline) {
-      toast({ title: "Enter a new acceptance deadline", variant: "destructive" });
+    const offer = offers.find(o => o.id === offerId);
+    if (!offer) {
+      toast({ title: "Offer not found", variant: "destructive" });
       return;
     }
+
+    const nextDeadline = editForm.acceptance_deadline || "";
+    const currentDeadline = offer.acceptance_deadline?.slice(0, 10) || "";
+    const nextCourseId = editForm.course_id || offer.course_id || courseId || "";
+    const currentCourseId = offer.course_id || courseId || "";
+    const deadlineChanged = nextDeadline !== currentDeadline;
+    const courseChanged = isSuperAdmin && !!nextCourseId && nextCourseId !== currentCourseId;
+    const nextTokenFeeRaw = editForm.token_fee_amount.trim();
+    let nextTokenFeeAmount: number | null = null;
+    if (nextTokenFeeRaw) {
+      const parsed = Number(nextTokenFeeRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast({ title: "Enter a valid token fee", variant: "destructive" });
+        return;
+      }
+      nextTokenFeeAmount = parsed;
+    }
+    const tokenFeeChanged = nextTokenFeeAmount != null && nextTokenFeeAmount !== Number(offer.token_fee_amount || 0);
+    const proposedChanges: { acceptance_deadline?: string; course_id?: string; token_fee_amount?: number } = {};
+    if (deadlineChanged && nextDeadline) proposedChanges.acceptance_deadline = nextDeadline;
+    if (courseChanged) proposedChanges.course_id = nextCourseId;
+    if (tokenFeeChanged && nextTokenFeeAmount != null) proposedChanges.token_fee_amount = nextTokenFeeAmount;
+
+    if (!nextDeadline && !currentDeadline) {
+      toast({ title: "Enter an acceptance deadline", variant: "destructive" });
+      return;
+    }
+    if (!deadlineChanged && !courseChanged && !tokenFeeChanged) {
+      toast({ title: "No changes to update", variant: "destructive" });
+      return;
+    }
+
     setEditSaving(true);
     try {
       if (isSuperAdmin) {
+        let feeUpdate: Record<string, unknown> = {};
+        if (courseChanged) {
+          if (!offer.session_id) {
+            throw new Error("This offer has no academic session. Set a session before changing course.");
+          }
+          const feeSnapshot = await fetchCourseFeeSnapshot(nextCourseId, offer.session_id);
+          if (!feeSnapshot.totalFee || feeSnapshot.totalFee <= 0) {
+            throw new Error("The selected course has no active year-wise fee structure for this offer's session.");
+          }
+
+          const nextCourseName = courseNameForId(nextCourseId);
+          if (isBptOrBmritCourseName(nextCourseName) && !cahetRegistration) {
+            throw new Error(cahetOfferBlockMessage);
+          }
+          const nextCourseCode = courseCodeForId(nextCourseId);
+          const nextTokenFloor = feeSnapshot.tokenRequiredAmount || 5000;
+          const nextTokenDefault = feeSnapshot.tokenRequiredAmount > 0
+            ? feeSnapshot.tokenRequiredAmount
+            : feeSnapshot.firstYearFee > 0
+            ? Math.max(Math.round(feeSnapshot.firstYearFee * 0.25), nextTokenFloor)
+            : nextTokenFloor;
+          const currentToken = Number(offer.token_fee_amount || 0);
+
+          feeUpdate = {
+            course_id: nextCourseId,
+            total_fee: feeSnapshot.totalFee,
+            net_fee: feeSnapshot.totalFee,
+            token_fee_amount: offer.token_fee_user_edited && currentToken >= nextTokenFloor
+              ? currentToken
+              : nextTokenDefault,
+            token_fee_user_edited: offer.token_fee_user_edited && currentToken >= nextTokenFloor ? offer.token_fee_user_edited : false,
+            letter_url: null,
+            loan_letter_url: null,
+          };
+        }
+
         // Super admin edits directly — no approval needed
         const { error } = await supabase
           .from("offer_letters")
-          .update({ acceptance_deadline: editForm.acceptance_deadline })
+          .update({
+            ...feeUpdate,
+            ...proposedChanges,
+            ...(proposedChanges.token_fee_amount != null ? { token_fee_user_edited: true } : {}),
+          } as any)
           .eq("id", offerId);
         if (error) throw error;
+
+        if (courseChanged) {
+          await supabase.rpc("recalculate_offer_letter_net_fee" as any, { _offer_letter_id: offerId });
+          await supabase.from("lead_activities").insert({
+            lead_id: leadId,
+            user_id: user?.id || null,
+            type: "offer",
+            description: `Offer letter course changed to ${courseNameForId(nextCourseId)}`,
+          });
+        }
+
         toast({ title: "Offer letter updated" });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
         await regeneratePdf(offerId);
       } else {
+        if (!deadlineChanged && !tokenFeeChanged) {
+          toast({ title: "No changes to request", variant: "destructive" });
+          return;
+        }
         // Non-super-admin: create edit request for approval
         const { error } = await supabase
           .from("offer_letter_edit_requests" as any)
           .insert({
             offer_letter_id: offerId,
-            proposed_changes: { acceptance_deadline: editForm.acceptance_deadline },
+            proposed_changes: proposedChanges,
             reason: editForm.reason || null,
           });
         if (error) throw error;
@@ -647,7 +1152,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           description: "Super admin will be notified to review and approve.",
         });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
       }
     } catch (e: any) {
@@ -671,6 +1176,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         reviewed_by: user?.id,
         reviewed_at: new Date().toISOString(),
       };
+      if (decision === "approved" && req.proposed_changes.token_fee_amount == null) {
+        const tokenFeeAmount = parseTokenFeeFromEditReason(req.reason);
+        if (tokenFeeAmount != null) {
+          updates.proposed_changes = {
+            ...req.proposed_changes,
+            token_fee_amount: tokenFeeAmount,
+          };
+        }
+      }
       if (rejectionReason) updates.rejection_reason = rejectionReason;
       const { error } = await supabase
         .from("offer_letter_edit_requests" as any)
@@ -709,9 +1223,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     issued: "bg-pastel-blue", accepted: "bg-pastel-green", rejected: "bg-pastel-red", expired: "bg-muted",
   };
   const approvalColors: Record<string, string> = {
-    pending_principal: "bg-amber-100 text-amber-700 border-amber-200",
-    approved: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    rejected: "bg-red-100 text-red-700 border-red-200",
+    pending_principal: "bg-warning/10 text-warning-foreground border-warning/20",
+    approved: "bg-success/10 text-success border-success/20",
+    rejected: "bg-destructive/10 text-destructive border-destructive/20",
   };
 
   const selectedOffer = offers.find(o => o.id === selectedOfferId) || null;
@@ -726,6 +1240,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(360px,420px)_1fr]">
           {/* ─── Left: list + new-offer form ─── */}
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
+          <CahetRegistrationDetails registration={cahetRegistration} />
+          <UpdeledRegistrationDetails registration={updeledRegistration} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -733,6 +1249,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {showForm && (
             <Card className="border-border/60">
               <CardContent className="p-4 space-y-3">
+                {registrationOfferBlocked && (
+                  <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <p>{registrationOfferBlockMessage}</p>
+                  </div>
+                )}
                 {/* Programme fee summary — read-only, sourced directly from the
                     published fee_structure for the selected course + session.
                     The offer's total_fee is stamped from this on submit; the
@@ -743,7 +1265,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
                       {yearTotals.map(y => (
                         <div key={y.term} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{y.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                          <span className="text-muted-foreground">{y.label}</span>
                           <span className="text-foreground tabular-nums">₹{y.total.toLocaleString("en-IN")}</span>
                         </div>
                       ))}
@@ -753,14 +1275,111 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      No active fee structure published for this course + session. Publish one in Course & Campus master before issuing.
+                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 text-xs text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
+                      No active programme fee structure published for this course + session. Publish one in Course & Campus master before issuing.
                     </div>
                   )}
                   <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">
-                    Sourced from the published fee structure for the selected session. Add year-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
+                    Sourced from the published fee structure for the selected session. Add period-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
                   </p>
                 </div>
+
+                {approvedFeeProposals.length > 0 && (
+                  <div className="rounded-xl border border-success/20 bg-success/5/70 p-3 text-xs space-y-2 dark:border-success/60/40 dark:bg-success/90/20">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-success-foreground dark:text-success/30">
+                          Apply approved fee proposal
+                        </label>
+                        <p className="mt-0.5 text-[10px] text-success-foreground/80 dark:text-success/40/80">
+                          Optional. Selected proposal waivers are copied as approved offer waivers.
+                        </p>
+                      </div>
+                      {importedProposalWaiverTotal > 0 && (
+                        <Badge className="border-success/20 bg-white text-success dark:bg-success/90">
+                          −₹{importedProposalWaiverTotal.toLocaleString("en-IN")}
+                        </Badge>
+                      )}
+                    </div>
+                    <select
+                      value={selectedFeeProposalId}
+                      onChange={(e) => {
+                        setSelectedFeeProposalId(e.target.value);
+                        setSelectedProposalChildKey("");
+                      }}
+                      className="w-full rounded-md border border-success/20 bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Do not apply proposal</option>
+                      {approvedFeeProposals.map((proposal) => {
+                        const children = proposal.proposal?.children || [];
+                        const childNames = children.slice(0, 2).map((child, index) => feeProposalChildLabel(child, `Student ${index + 1}`).split(" - ")[0]).join(", ");
+                        const more = children.length > 2 ? ` +${children.length - 2}` : "";
+                        return (
+                          <option key={proposal.id} value={proposal.id}>
+                            Revision {proposal.revision_number || 1}{childNames ? ` - ${childNames}${more}` : ""} · payable ₹{Number(proposal.payable_at_admission || proposal.annual_total || 0).toLocaleString("en-IN")}
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {selectedFeeProposal && proposalChildOptions.length !== 1 && (
+                      <div>
+                        <label className="block text-[10px] font-medium text-success-foreground dark:text-success/30 mb-0.5">
+                          Proposal student <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          value={selectedProposalChildKey}
+                          onChange={(e) => setSelectedProposalChildKey(e.target.value)}
+                          className="w-full rounded-md border border-success/20 bg-background px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Select student from proposal</option>
+                          {proposalChildOptions.map(option => (
+                            <option key={option.key} value={option.key}>{option.label}</option>
+                          ))}
+                        </select>
+                        {proposalChildOptions.length === 0 && (
+                          <p className="mt-1 text-[10px] text-warning-foreground">
+                            No child in this proposal matches this lead and course. Issue without proposal or choose a matching proposal.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedFeeProposal && selectedProposalChildOption && (
+                      <div className="space-y-1">
+                        <div className="rounded-md border border-success/20/80 bg-white/70 p-2 dark:bg-background/40">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-success-foreground dark:text-success/30">
+                              {selectedProposalChildOption.label}
+                            </span>
+                            <span className="tabular-nums font-semibold text-success">
+                              {importedProposalWaiverTotal > 0 ? `−₹${importedProposalWaiverTotal.toLocaleString("en-IN")}` : "No waiver"}
+                            </span>
+                          </div>
+                          {importedProposalWaivers.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {importedProposalWaivers.map((waiver, index) => (
+                                <span key={`${waiver.term}-${index}`} className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] text-success-foreground dark:bg-success/80/50 dark:text-success/30">
+                                  {labelForTerm(waiver.term)}: ₹{waiver.amount.toLocaleString("en-IN")}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {proposalMismatch?.hasMismatch && (
+                          <p className="rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
+                            Fee structure changed since proposal: proposal gross ₹{proposalMismatch.proposalGross.toLocaleString("en-IN")}, current gross ₹{proposalMismatch.currentGross.toLocaleString("en-IN")}. You can still issue; the offer gross fee uses the current active structure.
+                          </p>
+                        )}
+                        {proposalLevelFullYearWaiver > 0 && (selectedFeeProposal.proposal?.children?.length || 0) > 1 && (
+                          <p className="rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
+                            This proposal also has a proposal-level yearly-payment waiver of ₹{proposalLevelFullYearWaiver.toLocaleString("en-IN")}. It is not auto-split across children; add it manually if applicable.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Pre-issuance waivers — staged locally, inserted after offer creation */}
                 {yearTotals.length > 0 && (
@@ -772,7 +1391,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           type="button"
                           onClick={() => {
                             setShowPreWaiverForm(true);
-                            setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                            const usedTerms = new Set(preWaivers.map(w => w.term));
+                            const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                            setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
                           }}
                           className="text-[11px] text-primary hover:underline"
                         >
@@ -785,7 +1406,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="space-y-1 mb-2">
                         {preWaivers.map((w, i) => (
                           <div key={i} className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-2 py-1.5 text-xs">
-                            <span className="text-muted-foreground">{w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                            <span className="text-muted-foreground">{labelForTerm(w.term)}</span>
                             <span className="font-medium">−₹{w.amount.toLocaleString("en-IN")}</span>
                             {w.reason && <span className="text-muted-foreground truncate max-w-[80px]">{w.reason}</span>}
                             <button
@@ -798,12 +1419,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           </div>
                         ))}
                         {(() => {
-                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0);
+                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0) + importedProposalWaiverTotal;
                           const netFee = programmeTotal - totalWaiver;
                           return (
                             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold border-t border-border/40 pt-1.5 mt-1">
                               <span>Net Programme Fee</span>
-                              <span className="tabular-nums text-emerald-700">₹{netFee.toLocaleString("en-IN")}</span>
+                              <span className="tabular-nums text-success">₹{netFee.toLocaleString("en-IN")}</span>
                             </div>
                           );
                         })()}
@@ -814,14 +1435,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
                             <select
                               value={preWaiverForm.term}
                               onChange={e => setPreWaiverForm(p => ({ ...p, term: e.target.value }))}
                               className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                             >
                               {availableTerms.map(t => (
-                                <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                <option key={t} value={t}>{labelForTerm(t)}</option>
                               ))}
                             </select>
                           </div>
@@ -857,7 +1478,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           />
                         </div>
                         {!isSuperAdmin && (
-                          <p className="text-[10px] text-amber-700">
+                          <p className="text-[10px] text-warning-foreground">
                             This waiver will need super admin approval before it reflects on the offer letter.
                           </p>
                         )}
@@ -879,8 +1500,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               const available = Math.max(0, yearFee - existing);
                               if (yearFee <= 0) {
                                 toast({
-                                  title: "No fee published for this year",
-                                  description: `The active fee structure has no "${preWaiverForm.term.replace(/_/g, " ")}" line.`,
+                                  title: "No fee published for this period",
+                                  description: `The active fee structure has no "${labelForTerm(preWaiverForm.term)}" line.`,
                                   variant: "destructive",
                                 });
                                 return;
@@ -889,15 +1510,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                 toast({
                                   title: "Waiver exceeds available fee",
                                   description: existing > 0
-                                    ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-                                    : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+                                    ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+                                    : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
                                   variant: "destructive",
                                 });
                                 return;
                               }
-                              setPreWaivers(prev => [...prev, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }]);
+                              const newPreWaivers = [...preWaivers, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }];
+                              setPreWaivers(newPreWaivers);
                               setShowPreWaiverForm(false);
-                              setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                              const usedTerms = new Set(newPreWaivers.map(w => w.term));
+                              const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                              setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
                             }}
                           >
                             Add
@@ -961,8 +1585,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </div>
                 )}
 
-                {/* Token fee — defaults to 10% of Year-1, editable but floored at
-                    ₹5,000. The pencil icon flips edit mode;
+                {/* Token fee — defaults to 25% of the first fee period, editable but floored at
+                    the course-specific seat-block amount. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
                   <label className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1">
@@ -994,14 +1618,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                         <>
                           Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span>. This is the amount the applicant must pay before downloading the education loan letter.
                           {firstYearFee !== netFirstYearFee && (
-                            <> Gross Year-1 is ₹{firstYearFee.toLocaleString("en-IN")}; Year-1 waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
+                            <> Gross {firstTermLabel} is ₹{firstYearFee.toLocaleString("en-IN")}; {firstTermLabel} waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
                           )}
                         </>
                       ) : (
                         <>
-                          Default = 10% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          Default = 25% of net {firstTermLabel} fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
                           {firstYearFee !== netFirstYearFee && (
-                            <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
+                            <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} {firstTermLabel} waiver.</>
                           )}
                           {" "}Click Edit to override.
                         </>
@@ -1026,7 +1650,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Locks the fee structure for this offer. Token amount defaults to 10% of first-year fee from this session's structure.
+                    Locks the fee structure for this offer. Token amount defaults to 25% of the first fee period from this session's structure.
                     {!isSuperAdmin && " Only super admin can pick a non-active session."}
                   </p>
                 </div>
@@ -1044,8 +1668,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0} size="sm" className="gap-1.5"
-                    title={programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
+                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || registrationOfferBlocked} size="sm" className="gap-1.5"
+                    title={registrationOfferBlocked ? registrationOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1061,6 +1685,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     setPreWaivers([]);
                     setShowPreWaiverForm(false);
                     setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+                    setSelectedFeeProposalId("");
+                    setSelectedProposalChildKey("");
                   }}>Cancel</Button>
                 </div>
               </CardContent>
@@ -1068,7 +1694,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           )}
 
           {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
           ) : offers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">No offer letters yet</p>
           ) : (
@@ -1090,6 +1716,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
+                          <p className="text-xs font-medium text-foreground/80">{courseNameForId(offer.course_id || courseId)}</p>
                           <p className="text-xs text-muted-foreground">
                             Total: ₹{offer.total_fee.toLocaleString("en-IN")}
                             {(waiversByOffer[offer.id]?.filter(w => w.status === "approved").length || 0) > 0 && (
@@ -1106,6 +1733,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           )}
                           {isApprovedOffer && (
                             <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
+                          )}
+                          {offer.source_fee_proposal_id && (
+                            <Badge className="text-[10px] border border-success/20 bg-success/5 text-success">
+                              Fee proposal
+                            </Badge>
                           )}
                           {isSuperAdmin && (
                             <button
@@ -1145,7 +1777,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                 <button
                                   onClick={() => {
                                     setAddingWaiverFor(offer.id);
-                                    setWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                                    const existingTerms = new Set((waiversByOffer[offer.id] || []).map(w => w.term));
+                                    const nextTerm = availableTerms.find(t => !existingTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                                    setWaiverForm({ term: nextTerm, amount: "", reason: "" });
                                   }}
                                   className="text-[11px] text-primary hover:underline"
                                 >
@@ -1159,11 +1793,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             )}
 
                             {offerWaivers.map(w => {
-                              const yearLabel = w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                              const yearLabel = labelForTerm(w.term);
                               const statusCls =
-                                w.status === "approved"  ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                                w.status === "rejected"  ? "bg-red-100 text-red-700 border-red-200" :
-                                                           "bg-amber-100 text-amber-700 border-amber-200";
+                                w.status === "approved"  ? "bg-success/10 text-success border-success/20" :
+                                w.status === "rejected"  ? "bg-destructive/10 text-destructive border-destructive/20" :
+                                                           "bg-warning/10 text-warning-foreground border-warning/20";
                               return (
                                 <div key={w.id} className="rounded-md border border-border/50 bg-background/50 p-2 text-xs space-y-1">
                                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1171,13 +1805,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                       <span className="font-semibold">{yearLabel}</span>
                                       <span className="text-foreground/70">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
                                       <Badge className={`text-[9px] border ${statusCls}`}>{w.status}</Badge>
+                                      {w.source_type === "fee_proposal" && (
+                                        <Badge className="text-[9px] border border-success/20 bg-success/5 text-success">
+                                          Fee proposal
+                                        </Badge>
+                                      )}
                                     </div>
                                     {w.status === "pending" && isSuperAdmin && (
                                       <div className="flex gap-1">
                                         <button
                                           disabled={waiverDecidingId === w.id}
                                           onClick={() => handleDecideWaiver(w, "approved")}
-                                          className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                          className="rounded bg-success hover:bg-success/90 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
                                         >
                                           Approve
                                         </button>
@@ -1194,11 +1833,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   {(w.reason || w.requested_by_name || w.approved_by_name || w.rejection_reason) && (
                                     <div className="text-[10px] text-muted-foreground space-y-0.5">
                                       {w.reason && <div>Reason: {w.reason}</div>}
+                                      {w.source_type === "fee_proposal" && <div>Source: approved fee proposal</div>}
                                       {w.requested_by_name && (
                                         <div>Requested by {w.requested_by_name}{w.requested_by_role ? ` (${w.requested_by_role})` : ""}</div>
                                       )}
                                       {w.status === "approved" && w.approved_by_name && (
-                                        <div className="text-emerald-700">Approved by {w.approved_by_name}</div>
+                                        <div className="text-success">Approved by {w.approved_by_name}</div>
                                       )}
                                       {w.status === "rejected" && w.rejection_reason && (
                                         <div className="text-destructive">Rejection: {w.rejection_reason}</div>
@@ -1213,14 +1853,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
                                 <div className="grid grid-cols-2 gap-2">
                                   <div>
-                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
                                     <select
                                       value={waiverForm.term}
                                       onChange={e => setWaiverForm(p => ({ ...p, term: e.target.value }))}
                                       className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                                     >
                                       {availableTerms.map(t => (
-                                        <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                        <option key={t} value={t}>{labelForTerm(t)}</option>
                                       ))}
                                     </select>
                                   </div>
@@ -1256,7 +1896,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   />
                                 </div>
                                 {!isSuperAdmin && (
-                                  <p className="text-[10px] text-amber-700">
+                                  <p className="text-[10px] text-warning-foreground">
                                     This waiver will need super admin approval before it appears on the offer letter.
                                   </p>
                                 )}
@@ -1278,7 +1918,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       {/* Principal / Super admin approve/reject buttons */}
                       {isPending && isApprover && (
                         <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => decideOffer(offer.id, "approved")}>
+                          <Button
+                            size="sm"
+                            className="text-xs gap-1.5 bg-success hover:bg-success/90"
+                            onClick={() => decideOffer(offer.id, "approved")}
+                            disabled={registrationOfferBlocked}
+                            title={registrationOfferBlocked ? registrationOfferBlockMessage : undefined}
+                          >
                             <CheckCircle className="h-3 w-3" /> Approve Offer
                           </Button>
                           <Button size="sm" variant="outline" className="text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => {
@@ -1305,6 +1951,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     setEditingOfferId(offer.id);
                                     setEditForm({
                                       acceptance_deadline: offer.acceptance_deadline?.slice(0, 10) || "",
+                                      token_fee_amount: offer.token_fee_amount ? String(Number(offer.token_fee_amount)) : "",
+                                      course_id: offer.course_id || courseId || "",
                                       reason: "",
                                     });
                                   }}
@@ -1317,26 +1965,36 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
                             {/* Pending edit requests — super admin sees approve/reject */}
                             {editReqs.map((req) => (
-                              <div key={req.id} className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 p-2 text-xs space-y-1.5">
+                              <div key={req.id} className="rounded-md border border-warning/20 bg-warning/5 dark:border-warning/60/40 dark:bg-warning/90/20 p-2 text-xs space-y-1.5">
                                 <div className="flex items-start justify-between gap-2 flex-wrap">
                                   <div className="space-y-0.5">
-                                    <p className="font-semibold text-amber-800 dark:text-amber-200">
+                                    <p className="font-semibold text-warning-foreground dark:text-warning/40">
                                       Edit requested by {req.requested_by_name || "staff"}
                                       {req.requested_by_role && <span className="font-normal"> ({req.requested_by_role})</span>}
                                     </p>
                                     {req.proposed_changes.acceptance_deadline && (
-                                      <p className="text-amber-700 dark:text-amber-300">
+                                      <p className="text-warning-foreground dark:text-warning/70">
                                         New deadline: {new Date(req.proposed_changes.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                                       </p>
                                     )}
-                                    {req.reason && <p className="text-amber-600 dark:text-amber-400">Reason: {req.reason}</p>}
+                                    {(req.proposed_changes.token_fee_amount != null || parseTokenFeeFromEditReason(req.reason) != null) && (
+                                      <p className="text-warning-foreground dark:text-warning/70">
+                                        New token fee: ₹{Number(req.proposed_changes.token_fee_amount ?? parseTokenFeeFromEditReason(req.reason)).toLocaleString("en-IN")}
+                                      </p>
+                                    )}
+                                    {req.proposed_changes.course_id && (
+                                      <p className="text-warning-foreground dark:text-warning/70">
+                                        New course: {courseNameForId(req.proposed_changes.course_id)}
+                                      </p>
+                                    )}
+                                    {req.reason && <p className="text-warning-foreground dark:text-warning">Reason: {req.reason}</p>}
                                   </div>
                                   {isSuperAdmin && (
                                     <div className="flex gap-1 shrink-0">
                                       <button
                                         disabled={editDecidingId === req.id}
                                         onClick={() => handleDecideEditRequest(req, "approved")}
-                                        className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                        className="rounded bg-success hover:bg-success/90 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
                                       >
                                         {editDecidingId === req.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
                                       </button>
@@ -1350,7 +2008,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     </div>
                                   )}
                                   {!isSuperAdmin && (
-                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 italic">Awaiting super admin</span>
+                                    <span className="text-[10px] text-warning-foreground dark:text-warning italic">Awaiting super admin</span>
                                   )}
                                 </div>
                               </div>
@@ -1359,6 +2017,28 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             {/* Inline edit form */}
                             {isEditing && (
                               <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+                                {isSuperAdmin && (
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                      Course
+                                    </label>
+                                    <select
+                                      value={editForm.course_id}
+                                      onChange={(e) => setEditForm((p) => ({ ...p, course_id: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    >
+                                      <option value="">Select course</option>
+                                      {courseOptions.map((course) => (
+                                        <option key={course.id} value={course.id}>
+                                          {course.name}{course.code ? ` (${course.code})` : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <p className="mt-1 text-[10px] text-muted-foreground/70">
+                                      Changing course updates this issued offer letter's fee snapshot and regenerates the PDF.
+                                    </p>
+                                  </div>
+                                )}
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
                                     New Acceptance Deadline
@@ -1369,6 +2049,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     min={new Date().toISOString().slice(0, 10)}
                                     onChange={(e) => setEditForm((p) => ({ ...p, acceptance_deadline: e.target.value }))}
                                     className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                    Token Fee Payable
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={editForm.token_fee_amount}
+                                    onChange={(e) => setEditForm((p) => ({ ...p, token_fee_amount: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    placeholder="Amount shown on the offer PDF"
                                   />
                                 </div>
                                 {!isSuperAdmin && (
@@ -1385,7 +2078,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   </div>
                                 )}
                                 {!isSuperAdmin && (
-                                  <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                                  <p className="text-[10px] text-warning-foreground dark:text-warning">
                                     This change requires super admin approval before it takes effect.
                                   </p>
                                 )}
@@ -1399,7 +2092,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   </Button>
                                   <Button
                                     size="sm" variant="outline" className="text-xs h-7"
-                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", reason: "" }); }}
+                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" }); }}
                                   >
                                     Cancel
                                   </Button>
@@ -1433,11 +2126,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           )}
           </div>
 
-          {/* ─── Right: PDF preview pane ─── */}
+          {/* ─── Right: PDF / pre-issue preview pane ─── */}
           <div className="flex flex-col bg-muted/20 min-h-[400px]">
             <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-card shrink-0">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                {selectedOffer ? `Preview · ₹${selectedOffer.net_fee.toLocaleString("en-IN")}` : "Preview"}
+                {showForm
+                  ? `Draft Preview · ₹${previewNetFee.toLocaleString("en-IN")}`
+                  : selectedOffer ? `Preview · ₹${selectedOffer.net_fee.toLocaleString("en-IN")}` : "Preview"}
               </p>
               {selectedOffer && (
                 <div className="flex items-center gap-1.5">
@@ -1464,7 +2159,93 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
               )}
             </div>
             <div className="flex-1 min-h-0 relative">
-              {!selectedOffer ? (
+              {showForm ? (
+                <div className="absolute inset-0 overflow-auto bg-white">
+                  <div className="mx-auto my-6 max-w-[720px] rounded-sm border border-border bg-white p-8 shadow-sm">
+                    <div className="border-b border-border pb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Offer Letter Preview</p>
+                      <h3 className="mt-1 text-xl font-bold text-foreground">Provisional Admission Offer</h3>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        This preview is based on the form values on the left. The final PDF is generated after issuing and approval.
+                      </p>
+                    </div>
+
+                    <div className="mt-5 space-y-4 text-sm">
+                      <p>Dear <span className="font-semibold">{leadName || "Applicant"}</span>,</p>
+                      <p className="leading-relaxed text-muted-foreground">
+                        Congratulations. We are pleased to offer you provisional admission to the selected programme. Pay the token fee before the acceptance deadline to confirm your seat.
+                      </p>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {[
+                          ["Admission Route", form.admission_mode === "entrance" ? `Entrance / Counselling${selectedEntranceName ? ` - ${selectedEntranceName}` : ""}` : "Direct Admission"],
+                          ["Academic Session", selectedSessionName || "-"],
+                          ["Programme Fee", programmeTotal > 0 ? `₹${programmeTotal.toLocaleString("en-IN")}` : "-"],
+                          ["Waivers / Discounts", previewWaiverTotal > 0 ? `₹${previewWaiverTotal.toLocaleString("en-IN")}` : "None"],
+                          ["Net Programme Fee", previewNetFee > 0 ? `₹${previewNetFee.toLocaleString("en-IN")}` : "-"],
+                          ["Token Fee Payable", Number(form.token_fee_amount || tokenDefault || 0) > 0 ? `₹${Number(form.token_fee_amount || tokenDefault || 0).toLocaleString("en-IN")}` : "-"],
+                          ["Acceptance Deadline", form.acceptance_deadline ? new Date(form.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-"],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-md border border-border/70 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                            <p className="mt-1 font-medium text-foreground">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {isCahetOffer && cahetRegistration && (
+                        <div className="rounded-md border border-success/20 bg-success/5 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-success">CAHET Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-success-foreground">
+                            Registration No. {cahetRegistration.registration_no}
+                          </p>
+                          {cahetRegistration.notes && (
+                            <p className="mt-1 text-xs text-success-foreground/80">{cahetRegistration.notes}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isCahetOffer && !cahetRegistration && (
+                        <div className="rounded-md border border-warning/20 bg-warning/5 p-3 text-sm text-warning-foreground">
+                          CAHET is selected, but this candidate is not marked CAHET registered yet. The registration number will appear on the final offer only after registration is recorded.
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && updeledRegistration && (
+                        <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">UPDELED Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-primary">
+                            Registration No. {updeledRegistration.registration_no}
+                          </p>
+                          {updeledRegistration.notes && (
+                            <p className="mt-1 text-xs text-primary/80">{updeledRegistration.notes}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && !updeledRegistration && (
+                        <div className="rounded-md border border-warning/20 bg-warning/5 p-3 text-sm text-warning-foreground">
+                          UPDELED is selected, but this candidate is not marked UPDELED registered yet. The registration number will appear on the final offer only after registration is recorded.
+                        </div>
+                      )}
+
+                      {yearTotals.length > 0 && (
+                        <div className="rounded-md border border-border/70">
+                          <div className="border-b border-border/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fee Structure</div>
+                          <div className="divide-y divide-border/60">
+                            {yearTotals.map((year) => (
+                              <div key={year.term} className="flex items-center justify-between px-3 py-2">
+                                <span>{year.label}</span>
+                                <span className="font-medium">₹{year.total.toLocaleString("en-IN")}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : !selectedOffer ? (
                 <div className="absolute inset-0 flex items-center justify-center text-center px-6">
                   <div className="text-muted-foreground">
                     <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />

@@ -1,0 +1,107 @@
+name: Supabase Functions deploy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - "scripts/detect-supabase-functions.mjs"
+      - ".github/workflows/supabase-functions-deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - "scripts/detect-supabase-functions.mjs"
+      - ".github/workflows/supabase-functions-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-functions-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Detect changed functions
+    runs-on: ubuntu-latest
+    outputs:
+      functions: ${{ steps.detect.outputs.functions }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect functions to deploy
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/detect-supabase-functions.mjs
+
+      - name: Summarize deploy plan
+        env:
+          FUNCTIONS: ${{ steps.detect.outputs.functions }}
+        run: |
+          if [ "${{ steps.detect.outputs.count }}" = "0" ]; then
+            echo "No Supabase functions changed."
+          else
+            echo "Supabase functions to deploy after merge:"
+            for fn in $FUNCTIONS; do
+              echo "- $fn"
+            done
+          fi
+
+  deploy:
+    name: Deploy changed functions
+    needs: plan
+    if: github.event_name == 'push' && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    environment: production-db
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      FUNCTIONS: ${{ needs.plan.outputs.functions }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify secrets
+        run: |
+          missing=()
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
+          [ -z "$SUPABASE_PROJECT_REF" ] && missing+=(SUPABASE_PROJECT_REF)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Supabase secrets missing::Cannot deploy functions: ${missing[*]} are not set. Add them under Settings → Environments → production-db → Environment secrets."
+            exit 1
+          fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy changed functions
+        run: |
+          deploy_function() {
+            local fn="$1"
+            local attempt
+
+            for attempt in 1 2 3; do
+              echo "Deploying Supabase function: $fn (attempt $attempt/3)"
+              if supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF"; then
+                return 0
+              fi
+
+              if [ "$attempt" = "3" ]; then
+                echo "::error title=Supabase function deploy failed::$fn failed after 3 attempts. Re-running with --debug for the final log."
+                supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --debug
+                return 1
+              fi
+
+              sleep $((attempt * 10))
+            done
+          }
+
+          for fn in $FUNCTIONS; do
+            deploy_function "$fn"
+          done

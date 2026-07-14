@@ -31,7 +31,7 @@ export interface WhatsAppAutomationEvent {
 
 interface SupabaseLike {
   from: (table: string) => {
-    insert: (values: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>;
+    insert: (values: Record<string, unknown>) => PromiseLike<{ error: { message?: string } | null }>;
   };
 }
 

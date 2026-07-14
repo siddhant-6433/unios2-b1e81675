@@ -7,7 +7,7 @@ export const COUNTRY_CODES = COUNTRIES;
 
 export const parsePhone = (phone: string | null) => {
   if (!phone) return { countryCode: "+91", number: "" };
-  const trimmed = phone.replace(/[\s\-]/g, "");
+  const trimmed = phone.replace(/[\s-]/g, "");
   // Try longest codes first (e.g. +971 before +97)
   const sorted = [...COUNTRIES].sort((a, b) => b.code.length - a.code.length);
   const match = sorted.find((c) => trimmed.startsWith(c.code));
@@ -22,15 +22,18 @@ export const formatFullPhone = (countryCode: string, number: string) => {
 };
 
 interface PhoneInputProps {
+  id?: string;
   value: string;
   onChange: (fullPhone: string) => void;
   placeholder?: string;
   required?: boolean;
   className?: string;
   disabled?: boolean;
+  invalid?: boolean;
+  "aria-label"?: string;
 }
 
-export function PhoneInput({ value, onChange, placeholder, required, className, disabled }: PhoneInputProps) {
+export function PhoneInput({ id, value, onChange, placeholder, required, className, disabled, invalid, "aria-label": ariaLabel }: PhoneInputProps) {
   const parsed = parsePhone(value);
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
@@ -132,7 +135,9 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
           type="button"
           onClick={() => !disabled && setDropdownOpen(!dropdownOpen)}
           disabled={disabled}
-          className="flex items-center gap-1 rounded-xl border border-input bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full"
+          className={`flex items-center gap-1 rounded-xl border bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full ${
+            invalid ? "border-destructive ring-1 ring-destructive/30" : "border-input"
+          }`}
         >
           <span className="text-base leading-none">{selectedCountry.flag}</span>
           <span className="font-medium text-xs">{selectedCountry.code}</span>
@@ -181,16 +186,20 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
 
       {/* Number input */}
       <input
+        id={id}
         type="tel"
         required={required}
         disabled={disabled}
+        aria-label={ariaLabel}
         value={number}
         onChange={(e) => handleNumberChange(e.target.value)}
         placeholder={placeholder || "0".repeat(selectedCountry.digits)}
         maxLength={selectedCountry.digits}
         inputMode="numeric"
         pattern={`\\d{${selectedCountry.digits}}`}
-        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed"
+        className={`flex-1 min-w-0 rounded-xl border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:cursor-not-allowed ${
+          invalid ? "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30" : "border-input focus:ring-ring/20"
+        }`}
       />
     </div>
   );

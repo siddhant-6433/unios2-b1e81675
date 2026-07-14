@@ -7,7 +7,7 @@ const corsHeaders = {
 
 /**
  * AI Call Failed Handler — runs every 30 minutes
- * Phase 1: Assign leads with 3+ failed calls via round-robin (SQL)
+ * Phase 1: Return leads with 3+ failed calls to the low-priority bucket
  * Phase 2: Queue retries for leads with < 3 attempts
  */
 Deno.serve(async (req) => {
@@ -23,38 +23,7 @@ Deno.serve(async (req) => {
     let assigned = 0;
     let retries = 0;
 
-    // ── Phase 1: Round-robin assign leads with 3+ failed calls ──
-    // Each lead is routed via fn_round_robin_assign_counsellor, which picks
-    // the right team (Mirai / NSAE II / BEd / Law / Mgmt / Grn Counselling)
-    // from the lead's campus + course department. Hardcoding Grn Counselling
-    // here previously dumped Law/Mgmt/School leads onto the wrong counsellors.
-    const { data: remaining } = await db.rpc("get_leads_for_counsellor_assignment" as any);
-    const candidates = ((remaining || []) as any[]).slice(0, 50);
-
-    for (const c of candidates) {
-      const lid = c.lead_id;
-      const { data: pickedId, error: rrErr } = await db.rpc(
-        "fn_round_robin_assign_counsellor" as any,
-        { _lead_id: lid },
-      );
-      if (rrErr || !pickedId) continue;
-
-      // After 3 failed AI calls, flip the lead to `cold` alongside the
-      // round-robin assignment. Cold is non-terminal — the counsellor still
-      // owns the lead and can re-engage on their own schedule — but it
-      // suppresses the lead from the active follow-up queue so the team
-      // isn't chased to chase phones that don't pick up.
-      await db.from("leads")
-        .update({ stage: "cold", assigned_at: new Date().toISOString() } as any)
-        .eq("id", lid);
-      await db.from("lead_activities").insert({
-        lead_id: lid, type: "assignment",
-        description: "Lead auto-marked cold + assigned after 3 failed AI calls",
-      });
-      assigned++;
-    }
-
-    // ── Phase 2: Queue retries for leads with < 3 attempts ──
+    // ── Build per-lead AI-call attempt stats ───────────────────────────────
     const { data: pendingQ } = await db.from("ai_call_queue").select("lead_id").eq("status", "pending");
     const pendingSet = new Set((pendingQ || []).map((q: any) => q.lead_id));
 
@@ -76,6 +45,42 @@ Deno.serve(async (req) => {
       if (r.status === "completed") stats[r.lead_id].completed++;
     }
 
+    // ── Phase 1: move 3-failed-attempt leads to low-priority bucket ────────
+    // These should not be force-assigned into a counsellor's active queue.
+    // They remain visible in Lead Buckets as `cold` so counsellors can pick
+    // them only after their current work is exhausted.
+    const coldCandidateIds = Object.entries(stats)
+      .filter(([, s]) => s.total >= 3 && s.completed === 0)
+      .map(([lid]) => lid)
+      .slice(0, 50);
+
+    if (coldCandidateIds.length > 0) {
+      const TERMINAL_FOR_COLD = ["not_interested", "dnc", "rejected", "ineligible", "admitted"];
+      const { data: activeLeads } = await db
+        .from("leads")
+        .select("id")
+        .in("id", coldCandidateIds)
+        .not("stage", "in", `(${TERMINAL_FOR_COLD.join(",")})`);
+      const activeIds = (activeLeads || []).map((l: any) => l.id);
+      for (const lid of activeIds) {
+        await db.from("leads")
+          .update({
+            stage: "cold",
+            counsellor_id: null,
+            assigned_at: null,
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq("id", lid);
+        await db.from("lead_activities").insert({
+          lead_id: lid,
+          type: "assignment",
+          description: "Lead auto-marked cold and returned to bucket after 3 failed AI calls",
+        });
+        assigned++;
+      }
+    }
+
+    // ── Phase 2: Queue retries for leads with < 3 attempts ──
     // Filter out leads in terminal stages before retrying
     const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible", "admitted", "cold"];
     const candidateIds = Object.entries(stats)

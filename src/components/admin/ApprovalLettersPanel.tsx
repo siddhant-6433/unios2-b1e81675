@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -7,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import { Loader2, Plus, FileText, ExternalLink, Trash2, Search, Upload, CloudUpload } from "lucide-react";
 
 const R2_HOST = "r2.dev";
@@ -264,7 +266,7 @@ export default function ApprovalLettersPanel() {
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-  if (loading) return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">
@@ -287,21 +289,36 @@ export default function ApprovalLettersPanel() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <select value={filterBody} onChange={e => setFilterBody(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Bodies ({bodies.length})</option>
-          {bodies.map(b => <option key={b.id} value={b.short_name}>{b.short_name} — {b.name}</option>)}
-        </select>
-        <select value={filterCourse} onChange={e => setFilterCourse(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Courses</option>
-          {allCourseNames.map(cn => <option key={cn} value={cn}>{cn}</option>)}
-        </select>
-        <select value={filterInstitution} onChange={e => setFilterInstitution(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Institutions</option>
-          {institutions.map(inst => <option key={inst} value={inst}>{(inst || "").replace(/-/g, " ")}</option>)}
-        </select>
+        <SelectField
+          value={filterBody}
+          onValueChange={setFilterBody}
+          options={[
+            { value: "all", label: `All Bodies (${bodies.length})` },
+            ...bodies.map(b => ({ value: b.short_name, label: `${b.short_name} — ${b.name}` })),
+          ]}
+          hideLabel
+          placeholder={`All Bodies (${bodies.length})`}
+        />
+        <SelectField
+          value={filterCourse}
+          onValueChange={setFilterCourse}
+          options={[
+            { value: "all", label: "All Courses" },
+            ...allCourseNames.map(cn => ({ value: cn, label: cn })),
+          ]}
+          hideLabel
+          placeholder="All Courses"
+        />
+        <SelectField
+          value={filterInstitution}
+          onValueChange={setFilterInstitution}
+          options={[
+            { value: "all", label: "All Institutions" },
+            ...institutions.map(inst => ({ value: inst, label: (inst || "").replace(/-/g, " ") })),
+          ]}
+          hideLabel
+          placeholder="All Institutions"
+        />
         {(filterBody !== "all" || filterCourse !== "all" || filterInstitution !== "all") && (
           <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setFilterBody("all"); setFilterCourse("all"); setFilterInstitution("all"); }}>
             Clear Filters
@@ -329,7 +346,7 @@ export default function ApprovalLettersPanel() {
                     <div className="text-[10px] text-muted-foreground">{l.institution_name?.replace(/-/g, " ")}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge className="text-[10px] border-0 bg-blue-100 text-blue-700">{l.approval_body_name}</Badge>
+                    <Badge className="text-[10px] border-0 bg-info/10 text-info-foreground">{l.approval_body_name}</Badge>
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{l.academic_session || "—"}</td>
                   <td className="px-4 py-3">
@@ -351,7 +368,7 @@ export default function ApprovalLettersPanel() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-blue-600"
+                          className="h-7 w-7 text-muted-foreground hover:text-info-foreground"
                           title="Migrate to R2"
                           disabled={migratingId === l.id || bulkMigrating}
                           onClick={() => handleMigrate(l)}
@@ -359,7 +376,7 @@ export default function ApprovalLettersPanel() {
                           {migratingId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudUpload className="h-3.5 w-3.5" />}
                         </Button>
                       )}
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-600" onClick={() => handleDelete(l.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(l.id)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -417,7 +434,7 @@ export default function ApprovalLettersPanel() {
                     <button
                       type="button"
                       onClick={() => setForm(p => ({ ...p, sessions: p.sessions.filter(x => x !== s) }))}
-                      className="hover:text-red-600"
+                      className="hover:text-destructive"
                       aria-label={`Remove ${s}`}
                     >×</button>
                   </Badge>

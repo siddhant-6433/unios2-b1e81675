@@ -148,7 +148,7 @@ export const STAGE_LABELS: Record<string, string> = {
 
 /** Linear progression order for forward-only auto-advance. */
 export const STAGE_ORDER = [
-  "new_lead", "application_in_progress", "application_submitted",
+  "new_lead", "application_in_progress", "application_submitted", "application_fee_paid",
   "ai_called", "counsellor_call", "visit_scheduled", "interview",
   "offer_sent", "token_paid", "pre_admitted", "admitted",
 ];

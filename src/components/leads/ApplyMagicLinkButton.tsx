@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link as LinkIcon, Copy, Check, MessageCircle, Loader2, LogIn } from "lucide-react";
+import { Link as LinkIcon, Copy, Check, MessageCircle, Loader2, LogIn, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +10,9 @@ interface Props {
   leadName: string | null;
   leadPhone: string | null;
   compact?: boolean;
+  mode?: "student" | "academic_partner_on_behalf";
+  label?: string;
+  startNew?: boolean;
   /** Skip the share dialog: generate a short-lived link and open it in a new
    *  tab immediately (lets staff preview the portal as the student). */
   directOpen?: boolean;
@@ -23,7 +26,25 @@ const EXPIRY_OPTIONS: { label: string; hours: number }[] = [
   { label: "30 days", hours: 720 },
 ];
 
-export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = false, directOpen = false }: Props) {
+const getErrorMessage = (err: unknown, fallback = "Unknown error") => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err && "message" in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return fallback;
+};
+
+export function ApplyMagicLinkButton({
+  leadId,
+  leadName,
+  leadPhone,
+  compact = false,
+  mode = "student",
+  label,
+  startNew = false,
+  directOpen = false,
+}: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [hours, setHours] = useState(168);
@@ -35,17 +56,18 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
   // supabase-js puts the function's response body on error.context for non-2xx
   // responses — extract the real server-side message instead of the generic
   // "Edge Function returned a non-2xx status code".
-  const extractFnError = async (err: any): Promise<string> => {
-    let detail = err?.message || "Unknown error";
+  const extractFnError = async (err: unknown): Promise<string> => {
+    let detail = getErrorMessage(err);
     try {
-      const ctx = err?.context;
+      const ctx = (err as { context?: { json?: () => Promise<unknown>; body?: string } })?.context;
       const body = typeof ctx?.json === "function"
         ? await ctx.json().catch(() => null)
         : ctx?.body
           ? JSON.parse(ctx.body)
           : null;
-      if (body?.error) detail = body.error;
-      else if (body?.message) detail = body.message;
+      const fnBody = body as { error?: unknown; message?: unknown } | null;
+      if (typeof fnBody?.error === "string") detail = fnBody.error;
+      else if (typeof fnBody?.message === "string") detail = fnBody.message;
     } catch { /* keep generic msg */ }
     return detail;
   };
@@ -58,7 +80,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     setGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke("generate-apply-link", {
-        body: { lead_id: leadId, expires_in_hours: hours },
+        body: { lead_id: leadId, expires_in_hours: hours, mode },
       });
       if (error) {
         const detail = await extractFnError(error);
@@ -67,9 +89,10 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
         throw new Error(detail);
       }
       if (data?.error) throw new Error(data.error);
-      setGenerated({ url: data.url, expiresAt: data.expires_at });
-    } catch (err: any) {
-      toast({ title: "Failed to generate link", description: err.message || "Unknown error", variant: "destructive" });
+      const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
+      setGenerated({ url, expiresAt: data.expires_at });
+    } catch (err: unknown) {
+      toast({ title: "Failed to generate link", description: getErrorMessage(err), variant: "destructive" });
     } finally {
       setGenerating(false);
     }
@@ -89,16 +112,17 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     const tab = window.open("about:blank", "_blank");
     try {
       const { data, error } = await supabase.functions.invoke("generate-apply-link", {
-        body: { lead_id: leadId, expires_in_hours: 24 },
+        body: { lead_id: leadId, expires_in_hours: 24, mode },
       });
       if (error) throw new Error(await extractFnError(error));
       if (data?.error) throw new Error(data.error);
       if (!data?.url) throw new Error("No link returned");
-      if (tab) tab.location.href = data.url;
-      else window.open(data.url, "_blank"); // popup-blocker fallback
-    } catch (err: any) {
+      const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
+      if (tab) tab.location.href = url;
+      else window.open(url, "_blank"); // popup-blocker fallback
+    } catch (err: unknown) {
       if (tab) tab.close();
-      toast({ title: "Failed to open as student", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to open as student", description: getErrorMessage(err), variant: "destructive" });
     } finally {
       setOpening(false);
     }
@@ -109,6 +133,23 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     await navigator.clipboard.writeText(generated.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const openGeneratedLink = async () => {
+    if (!generated) return;
+    const tab = window.open(generated.url, "_blank", "noopener,noreferrer");
+    if (tab) {
+      tab.opener = null;
+      return;
+    }
+
+    await navigator.clipboard.writeText(generated.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    toast({
+      title: "Popup blocked",
+      description: "Link copied. Open an incognito window and paste it there.",
+    });
   };
 
   const [sendingWa, setSendingWa] = useState(false);
@@ -141,10 +182,10 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
       if (error) throw new Error(await extractFnError(error));
       if (data?.error) throw new Error(data.error);
       toast({ title: "Apply link sent on WhatsApp", description: `Delivered to ${leadPhone}.` });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "Couldn't send via WhatsApp",
-        description: err.message || "Template may still be pending Meta approval — try again in a few minutes.",
+        description: getErrorMessage(err, "Template may still be pending Meta approval - try again in a few minutes."),
         variant: "destructive",
       });
     } finally {
@@ -172,7 +213,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     ) : (
       <Button size="sm" variant="outline" className="gap-2" onClick={openAsStudent} disabled={!leadPhone || opening}>
         {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
-        View as Student
+        {label || (mode === "academic_partner_on_behalf" ? "Complete Application" : "View as Student")}
       </Button>
     );
   }
@@ -195,7 +236,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
       disabled={!leadPhone}
     >
       <LinkIcon className="h-3.5 w-3.5" />
-      Send Login Link
+      {label || (mode === "academic_partner_on_behalf" ? "Copy On-Behalf Link" : "Send Login Link")}
     </Button>
   );
 
@@ -206,13 +247,15 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
         <DialogContent className="max-w-md w-[min(92vw,28rem)]">
           <DialogHeader>
-            <DialogTitle>Apply Portal Login Link</DialogTitle>
+            <DialogTitle>{mode === "academic_partner_on_behalf" ? "On-Behalf Application Link" : "Apply Portal Login Link"}</DialogTitle>
           </DialogHeader>
 
           {!generated ? (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Generate a one-click login link for {leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.
+                {mode === "academic_partner_on_behalf"
+                  ? `Generate a scoped link so you can complete the application for ${leadName || "this lead"}. Actions are audited under your academic partner account.`
+                  : `Generate a one-click login link for ${leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.`}
               </p>
 
               <div>
@@ -254,17 +297,18 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
                   className="shrink-0 rounded-md p-1.5 hover:bg-background transition-colors"
                   aria-label="Copy link"
                 >
-                  {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="pill-outline" size="pill" onClick={openGeneratedLink}>
+                  <ExternalLink className="h-4 w-4" /> Open
+                </Button>
                 <Button variant="pill-outline" size="pill" onClick={copy}>
                   {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
                 </Button>
-                {/* WhatsApp brand green is preserved by overriding bg/hover via
-                    className while keeping the pill shape from variant="pill". */}
-                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-green-600 hover:bg-green-700">
+                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-success hover:bg-success/60">
                   <MessageCircle className="h-4 w-4" /> Send via WhatsApp
                 </Button>
               </div>

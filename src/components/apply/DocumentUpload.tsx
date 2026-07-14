@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,8 @@ interface Props {
   onBack?: () => void;
   saving: boolean;
   readOnly?: boolean;
+  nextLabel?: string;
+  storageTarget?: "r2" | "supabase";
 }
 
 interface DocSpec {
@@ -23,7 +25,17 @@ interface DocSpec {
   required: boolean;
 }
 
-function getRequiredDocs(
+const PARENT_AADHAAR_DOCS: DocSpec[] = [
+  { key: 'father_aadhaar', label: 'Father Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+  { key: 'mother_aadhaar', label: 'Mother Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+  { key: 'guardian_aadhaar', label: 'Guardian Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+];
+
+function isNurseryClass(courseNames: string): boolean {
+  return /\b(pre[-\s]?nursery|nursery)\b/i.test(courseNames);
+}
+
+export function getRequiredDocs(
   programCategory: string,
   academicDetails?: Record<string, any>,
   courseSelections?: { course_name: string }[],
@@ -39,14 +51,20 @@ function getRequiredDocs(
   if (programCategory === 'school') {
     const courseNames = courseSelections?.map(s => s.course_name.toLowerCase()).join(' ') || '';
     const isAboveKG = /grade|class\s*[1-9]/i.test(courseNames);
+    const needsBirthCertificate = isNurseryClass(courseNames);
 
     return [
-      { key: 'birth_certificate', label: 'Birth Certificate', desc: 'PDF or image', required: true },
+      {
+        key: 'birth_certificate',
+        label: 'Birth Certificate',
+        desc: needsBirthCertificate ? 'PDF or image' : 'Required for Nursery only',
+        required: needsBirthCertificate,
+      },
       { key: 'report_card', label: 'Previous Class Report Card', desc: 'Last year marksheet', required: isAboveKG },
       { key: 'student_photo', label: 'Student Photograph', desc: 'Passport size photo', required: true },
       { key: 'transfer_certificate', label: 'Transfer Certificate', desc: 'If applicable', required: false },
       { key: 'aadhaar', label: 'Student Aadhaar Card', desc: 'JPEG / PNG / PDF', required: true },
-      { key: 'parent_aadhaar', label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)', required: false },
+      ...PARENT_AADHAAR_DOCS,
       { key: 'caste_certificate', label: 'Caste Certificate', desc: 'Mandatory for SC / ST / OBC', required: needsCasteCert },
       { key: 'medical_record', label: 'Medical Record', desc: 'If applicable', required: false },
     ];
@@ -100,7 +118,7 @@ function getRequiredDocs(
   // Entrance exam scorecards
   const exams: any[] = academicDetails?.entrance_exams || [];
   exams.forEach((ex: any) => {
-    if (ex && ex.status === 'declared' && ex.exam_name && !/cahet/i.test(ex.exam_name)) {
+    if (ex && ex.status === 'declared' && ex.exam_name && !/cahet|up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling/i.test(ex.exam_name)) {
       base.push({
         key: `entrance_${ex.exam_name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_scorecard`,
         label: `${ex.exam_name} Scorecard`,
@@ -113,7 +131,7 @@ function getRequiredDocs(
   // Identity + parent + caste — required across all higher-ed program
   // categories. Caste cert only kicks in for reserved categories.
   base.push({ key: 'aadhaar',           label: 'Student Aadhaar Card',     desc: 'JPEG / PNG / PDF',                  required: true });
-  base.push({ key: 'parent_aadhaar',    label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)',       required: false });
+  base.push(...PARENT_AADHAAR_DOCS);
   base.push({ key: 'caste_certificate', label: 'Caste Certificate',         desc: 'Mandatory for SC / ST / OBC',       required: needsCasteCert });
 
   // Transfer / Migration Certificate — sourced from the most recent
@@ -141,32 +159,46 @@ function getRequiredDocs(
   return base;
 }
 
-function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: {
+function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, reviewStatus, reviewNotes, invalid }: {
   doc: DocSpec;
   uploading: string | null;
   uploaded: Record<string, boolean>;
   uploadedUrl?: string;
   onUpload: (key: string, file: File) => void;
   disabled?: boolean;
+  reviewStatus?: string;
+  reviewNotes?: string | null;
+  invalid?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isUploading = uploading === doc.key;
   const isUploaded = uploaded[doc.key];
 
+  const isRejected = reviewStatus === "rejected";
+
   return (
-    <Card className={`border-border/60 shadow-none ${isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'}`}>
+    <Card className={`border-border/60 shadow-none ${
+      isRejected
+        ? 'border-destructive/25 bg-destructive/5/40 dark:bg-destructive/90/10'
+        : invalid ? 'border-destructive ring-1 ring-destructive/30 bg-destructive/5'
+        : isUploaded ? 'border-success/20 bg-success/5/30 dark:bg-success/90/10' : doc.required ? '' : 'border-dashed'
+    }`}>
       <CardContent className="p-4 text-center">
-        {isUploaded ? (
-          <CheckCircle className="h-5 w-5 text-emerald-600 mx-auto mb-1.5" />
+        {isRejected ? (
+          <AlertCircle className="h-5 w-5 text-destructive mx-auto mb-1.5" />
+        ) : isUploaded ? (
+          <CheckCircle className="h-5 w-5 text-success mx-auto mb-1.5" />
         ) : isUploading ? (
-          <Loader2 className="h-5 w-5 text-muted-foreground animate-spin mx-auto mb-1.5" />
+          <Loader2 className="h-5 w-5 text-primary animate-spin mx-auto mb-1.5" />
         ) : (
           <Upload className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
         )}
         <h4 className="text-sm font-semibold text-foreground">
           {doc.label} {doc.required && <span className="text-destructive">*</span>}
         </h4>
-        <p className="text-[10px] text-muted-foreground mt-0.5">{isUploaded ? "Uploaded successfully" : doc.desc}</p>
+        <p className={`text-[10px] mt-0.5 ${isRejected ? "text-destructive" : "text-muted-foreground"}`}>
+          {isRejected ? (reviewNotes || "Rejected. Please re-upload this document.") : isUploaded ? "Uploaded successfully" : doc.desc}
+        </p>
         <div className="flex items-center justify-center gap-2 mt-2">
           {isUploaded && uploadedUrl && (
             <a href={uploadedUrl} target="_blank" rel="noreferrer"
@@ -201,11 +233,47 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: 
   );
 }
 
-export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
+function docKeyForFile(name: string): string {
+  if (name.startsWith("passport_photo.")) return "passport_photo";
+  const dashIdx = name.indexOf("-");
+  return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
+}
+
+async function readFunctionErrorMessage(error: unknown, fallback = "Upload failed"): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context && typeof (context as Response).json === "function") {
+    try {
+      const response = typeof (context as Response).clone === "function"
+        ? (context as Response).clone()
+        : (context as Response);
+      const body = await response.json();
+      if (body?.error) return String(body.error);
+      if (body?.message) return String(body.message);
+    } catch {
+      // Fall through to the SDK error message below.
+    }
+  }
+
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+export function DocumentUpload({
+  data,
+  onChange,
+  onNext,
+  onBack,
+  saving,
+  readOnly,
+  nextLabel = "Continue to Review",
+  storageTarget = "r2",
+}: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({});
+  const [reviewStatus, setReviewStatus] = useState<Record<string, string>>({});
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string | null>>({});
   const [uploading, setUploading] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
   const docs = getRequiredDocs(
     data.program_category,
     data.academic_details as Record<string, any>,
@@ -216,27 +284,32 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   // PhotoUpload writes data.passport_photo_path on success (webcam capture
   // or file upload). School category doesn't render PhotoUpload.
   const needsPassportPhoto = data.program_category !== 'school';
-  const passportPhotoUploaded = !!data.passport_photo_path;
+  const passportPhotoUploaded = !!data.passport_photo_path || uploaded.passport_photo;
 
   // Check for existing uploads on mount
   useEffect(() => {
     if (!data.application_id) return;
     (async () => {
-      const { data: files } = await supabase.storage.from('application-documents').list(data.application_id, { limit: 50 });
-      if (files?.length) {
+      const { data: res, error } = await supabase.functions.invoke("list-app-docs", {
+        body: { application_id: data.application_id },
+      });
+      if (!error && (res as any)?.docs?.length) {
         const found: Record<string, boolean> = {};
         const urls: Record<string, string> = {};
-        for (const f of files) {
+        const statuses: Record<string, string> = {};
+        const notes: Record<string, string | null> = {};
+        for (const f of (res as any).docs) {
           if (!f.name || f.name.startsWith('.')) continue;
-          // Extract doc key from filename: "class_10_marksheet-filename.pdf" → "class_10_marksheet"
-          const dashIdx = f.name.indexOf('-');
-          const key = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name;
+          const key = docKeyForFile(f.name);
           found[key] = true;
-          const { data: urlData } = supabase.storage.from('application-documents').getPublicUrl(`${data.application_id}/${f.name}`);
-          urls[key] = urlData.publicUrl;
+          urls[key] = f.url;
+          statuses[key] = f.review_status || "pending";
+          notes[key] = f.review_notes || null;
         }
         setUploaded(prev => ({ ...prev, ...found }));
         setUploadedUrls(prev => ({ ...prev, ...urls }));
+        setReviewStatus(prev => ({ ...prev, ...statuses }));
+        setReviewNotes(prev => ({ ...prev, ...notes }));
       }
     })();
   }, [data.application_id]);
@@ -247,16 +320,19 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
     form.append('application_id', data.application_id);
     form.append('phone', data.phone);
     form.append('doc_key', docKey);
+    form.append('storage_target', storageTarget);
     form.append('file', file);
 
     const { data: res, error } = await supabase.functions.invoke('apply-portal-upload-doc', { body: form });
 
     if (error || (res && res.error)) {
-      const msg = (res && res.error) || error?.message || 'Upload failed';
+      const msg = (res && res.error) || await readFunctionErrorMessage(error);
       toast({ title: 'Upload failed', description: msg, variant: 'destructive' });
     } else {
       setUploaded(prev => ({ ...prev, [docKey]: true }));
       if (res?.url) setUploadedUrls(prev => ({ ...prev, [docKey]: res.url }));
+      setReviewStatus(prev => ({ ...prev, [docKey]: "pending" }));
+      setReviewNotes(prev => ({ ...prev, [docKey]: null }));
       toast({ title: `${docKey.replace(/_/g, ' ')} uploaded` });
     }
     setUploading(null);
@@ -265,6 +341,14 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   const requiredDocs = docs.filter(d => d.required);
   const allRequiredUploaded = requiredDocs.every(d => uploaded[d.key])
     && (!needsPassportPhoto || passportPhotoUploaded);
+  const hasRejectedDocs = Object.values(reviewStatus).some(status => status === "rejected");
+  const handleContinue = () => {
+    if (!allRequiredUploaded || hasRejectedDocs) {
+      setShowErrors(true);
+      return;
+    }
+    onNext();
+  };
 
   return (
     <div className="space-y-5">
@@ -277,12 +361,18 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
       {/* Passport Photo — mandatory for higher-ed applicants. PhotoUpload
           supports both webcam capture and file upload internally. */}
       {needsPassportPhoto && (
-        <div className="space-y-1">
+        <div className={`space-y-1 rounded-2xl ${showErrors && !passportPhotoUploaded ? 'ring-1 ring-destructive/30 border border-destructive bg-destructive/5 p-3' : ''}`}>
           <PhotoUpload
             applicationId={data.application_id}
             phone={data.phone}
+            storageTarget={storageTarget}
             existingUrl={data.passport_photo_path ? undefined : undefined}
-            onUploaded={(path) => onChange({ passport_photo_path: path })}
+            onUploaded={(path) => {
+              onChange({ passport_photo_path: path });
+              setUploaded(prev => ({ ...prev, passport_photo: true }));
+              setReviewStatus(prev => ({ ...prev, passport_photo: "pending" }));
+              setReviewNotes(prev => ({ ...prev, passport_photo: null }));
+            }}
           />
           {!passportPhotoUploaded && (
             <p className="text-[11px] text-destructive">
@@ -292,7 +382,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
         {docs.map(doc => (
           <DocCard
             key={doc.key}
@@ -302,6 +392,9 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             uploadedUrl={uploadedUrls[doc.key]}
             onUpload={handleUpload}
             disabled={readOnly}
+            reviewStatus={reviewStatus[doc.key]}
+            reviewNotes={reviewNotes[doc.key]}
+            invalid={showErrors && doc.required && !uploaded[doc.key]}
           />
         ))}
       </div>
@@ -313,9 +406,9 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={!allRequiredUploaded} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-          Continue to Review
+          {nextLabel}
         </Button>
       </div>
     </div>

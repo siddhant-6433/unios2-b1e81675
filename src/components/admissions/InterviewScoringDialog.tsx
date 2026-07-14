@@ -4,7 +4,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { TextField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { Loader2, UserCheck } from "lucide-react";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 interface InterviewScoringDialogProps {
   open: boolean;
@@ -26,15 +29,26 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
 
   const handleSave = async () => {
     setSaving(true);
-    const updates: any = { interview_score: score, interview_result: result };
-    // Auto-advance: scoring means interview stage at minimum
-    // If passed → move toward offer_sent, if failed → rejected
-    if (result === "passed") updates.stage = "offer_sent";
-    else if (result === "failed") updates.stage = "rejected";
-    else updates.stage = "interview";
-
-    const { error } = await supabase.from("leads").update(updates).eq("id", leadId);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    const { data: lead } = await supabase.from("leads").select("stage").eq("id", leadId).maybeSingle();
+    const transition = resolveLeadTransitionCommand({
+      currentStage: lead?.stage || "interview",
+      command: result === "passed"
+        ? "recordInterviewPassed"
+        : result === "failed"
+          ? "recordInterviewFailed"
+          : "recordInterviewPending",
+    });
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId,
+        transition,
+        extraPatch: { interview_score: score, interview_result: result },
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setSaving(false);
+      return;
+    }
 
     // Log activity
     await supabase.from("lead_activities").insert({
@@ -48,8 +62,6 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
     onSuccess();
   };
 
-  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -57,13 +69,13 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
           <DialogTitle className="flex items-center gap-2"><UserCheck className="h-5 w-5" /> Interview — {leadName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Score (0–100)</label>
-            <input type="number" min={0} max={100} value={score} onChange={e => setScore(Number(e.target.value))} className={inputCls} />
+          <FieldShell label="Score (0–100)">
+            <input type="number" min={0} max={100} value={score} onChange={e => setScore(Number(e.target.value))}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" />
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(score, 100)}%` }} />
             </div>
-          </div>
+          </FieldShell>
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground mb-1">Result</label>
             <div className="flex gap-2">
@@ -75,10 +87,13 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
               ))}
             </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Interviewer Notes</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Observations, strengths, areas of concern..." className={inputCls} />
-          </div>
+          <TextAreaField
+            value={notes}
+            onValueChange={setNotes}
+            label="Interviewer Notes"
+            rows={3}
+            placeholder="Observations, strengths, areas of concern..."
+          />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving} className="gap-1.5">

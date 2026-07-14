@@ -177,22 +177,44 @@ Deno.serve(async (req) => {
     params: string[],
     button_urls?: string[],
     phoneOverride?: string,
-  ) => {
+    options?: {
+      header_document_url?: string;
+      header_document_filename?: string;
+    },
+  ): Promise<boolean> => {
     const phone = phoneOverride ?? lead.phone;
-    if (!phone) return;
+    if (!phone) return false;
     try {
-      await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({
           template_key, phone, lead_id: lead.id, params,
           ...(button_urls?.length ? { button_urls } : {}),
+          ...(options?.header_document_url ? { header_document_url: options.header_document_url } : {}),
+          ...(options?.header_document_filename ? { header_document_filename: options.header_document_filename } : {}),
         }),
       });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error(`[notify-event] whatsapp ${template_key}→${phone} failed ${res.status}:`, errBody.slice(0, 1000));
+        return false;
+      }
+      return true;
     } catch (e) {
       console.error(`[notify-event] whatsapp ${template_key}→${phone} failed:`, e);
+      return false;
     }
   };
+
+  const receiptPdfOptions = (receiptUrl: string, receiptNo: string, paymentId: string) => (
+    receiptUrl
+      ? {
+          header_document_url: receiptUrl,
+          header_document_filename: `Receipt-${receiptNo || paymentId}.pdf`,
+        }
+      : undefined
+  );
 
   // Mirror image of resolveEmails — pulls phone numbers for the same
   // counsellor / team-leader / super-admin set. Used when a payment
@@ -266,6 +288,7 @@ Deno.serve(async (req) => {
   // generator is unreachable — caller still has the lead-CRM fallback.
   const ensureReceipt = async (
     payment_id: string,
+    application_id?: string | null,
   ): Promise<{ receipt_url: string | null; receipt_no: string | null }> => {
     const fresh = async () => {
       const { data } = await db
@@ -275,7 +298,7 @@ Deno.serve(async (req) => {
       return { receipt_url: data?.receipt_url ?? null, receipt_no: data?.receipt_no ?? null, status: data?.status ?? null };
     };
     let row = await fresh();
-    if (row.receipt_url) return row;
+    if (row.receipt_url && !application_id) return row;
     if (row.status !== "confirmed") return row;
 
     // Generator runs synchronously and updates the row in-place.
@@ -283,7 +306,7 @@ Deno.serve(async (req) => {
       await fetch(`${SUPABASE_URL}/functions/v1/generate-payment-receipt`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
-        body: JSON.stringify({ payment_id }),
+        body: JSON.stringify({ payment_id, application_id: application_id || undefined }),
       });
       // brief retry — DB may need a beat to commit
       for (let i = 0; i < 3; i++) {
@@ -317,6 +340,10 @@ Deno.serve(async (req) => {
   const courseName = (lead.courses as any)?.name || "your programme";
   const campusName = (lead.campuses as any)?.name || "";
   const leadUrl = `${CRM_BASE}/leads/${lead.id}`;
+  const appIdFromNotes = (notes?: unknown): string | null => {
+    const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+    return match?.[0]?.toUpperCase() || null;
+  };
 
   // ── Event router ────────────────────────────────────────────────────
   switch (body.event) {
@@ -325,7 +352,7 @@ Deno.serve(async (req) => {
     case "app_submitted": {
       const application_id = (body.context?.application_id as string) || "";
       const { data: app } = await db
-        .from("applications").select("application_id, form_pdf_url, full_name, phone, email")
+        .from("applications").select("application_id, form_pdf_url, full_name, phone, email, payment_status")
         .eq("application_id", application_id).maybeSingle();
       // CRM application detail page — fallback when form_pdf_url isn't yet
       // populated (PDF generator runs in parallel with notify-event and
@@ -334,11 +361,12 @@ Deno.serve(async (req) => {
       const appDetailUrl = `${CRM_BASE}/applications/${application_id}`;
       const formPdf = app?.form_pdf_url || appDetailUrl;
 
-      // PDF templates use a static URL button to the apply portal —
-      // applicant authenticates there to retrieve the actual signed PDF.
-      // No button_urls passed (template button has no {{1}} placeholder).
+      const formPdfOptions = app?.form_pdf_url
+        ? { header_document_url: app.form_pdf_url, header_document_filename: `Application-${application_id}.pdf` }
+        : undefined;
       await sendWhatsApp("application_submitted",
         [lead.name || app?.full_name || "Student", application_id],
+        undefined, undefined, formPdfOptions,
       );
 
       const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
@@ -358,23 +386,50 @@ Deno.serve(async (req) => {
     case "app_fee_paid": {
       const payment_id = body.context?.payment_id as string;
       if (!payment_id) break;
-      // Make sure the receipt PDF is available — we'd rather link to it than
-      // fall back to the CRM page (which is broken from the candidate's POV).
-      const ensured = await ensureReceipt(payment_id);
       const { data: pmt } = await db
         .from("lead_payments")
-        .select("amount, transaction_ref, receipt_no, receipt_url, payment_date")
+        .select("amount, transaction_ref, receipt_no, receipt_url, payment_date, application_id, notes")
         .eq("id", payment_id).maybeSingle();
-      const { data: app } = await db
-        .from("applications").select("application_id, fee_receipt_url, full_name")
-        .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const explicitApplicationId =
+        (body.context?.application_id as string | undefined) ||
+        (pmt?.application_id as string | undefined) ||
+        appIdFromNotes(pmt?.notes) ||
+        "";
+      // Make sure the receipt PDF is available — we'd rather link to it than
+      // fall back to the CRM page (which is broken from the candidate's POV).
+      const ensured = await ensureReceipt(payment_id, explicitApplicationId);
+      let app: any = null;
+      if (explicitApplicationId) {
+        const { data } = await db
+          .from("applications").select("application_id, fee_receipt_url, full_name")
+          .eq("lead_id", lead.id)
+          .eq("application_id", explicitApplicationId)
+          .maybeSingle();
+        app = data || null;
+      }
+      if (!app) {
+        const { data } = await db
+          .from("applications").select("application_id, fee_receipt_url, full_name")
+          .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        app = data || null;
+      }
       const receiptUrl = ensured.receipt_url || pmt?.receipt_url || app?.fee_receipt_url || leadUrl;
       const receiptNo  = ensured.receipt_no  || pmt?.receipt_no  || "";
       const haveReceipt = !!ensured.receipt_url || !!pmt?.receipt_url || !!app?.fee_receipt_url;
 
-      await sendWhatsApp("app_fee_receipt",
-        [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
-      );
+      const appFeeWaParams = [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""];
+      const appFeePdfSent = haveReceipt
+        ? await sendWhatsApp(
+            "app_fee_receipt_pdf",
+            appFeeWaParams,
+            undefined,
+            undefined,
+            receiptPdfOptions(receiptUrl, receiptNo, payment_id),
+          )
+        : false;
+      if (!appFeePdfSent) {
+        await sendWhatsApp("app_fee_receipt", appFeeWaParams);
+      }
 
       // Admission-aware staff list — post-admission drops counsellor/leader.
       const recipients = await resolveEmails(paymentStaffSet);
@@ -595,10 +650,11 @@ Deno.serve(async (req) => {
       const haveReceipt = !!receiptUrl;
 
       const TYPE_LABEL: Record<string, string> = {
-        application_fee:  "Application Fee",
-        token_fee:        "Token Fee",
-        registration_fee: "Registration Fee",
-        other:            "Other Charges",
+        application_fee:     "Application Fee",
+        token_fee:           "Token Fee",
+        pre_admission_token: "Token Fee (prior to admission)",
+        registration_fee:    "Registration Fee",
+        other:               "Other Charges",
       };
       const waParams = [
         lead.name || "Student",
@@ -608,7 +664,14 @@ Deno.serve(async (req) => {
         receiptUrl,
       ];
       // Applicant — primary recipient.
-      await sendWhatsApp("payment_receipt", waParams);
+      const waPdfParams = waParams.slice(0, 4);
+      const pdfOptions = receiptPdfOptions(receiptUrl, receiptNo, payment_id);
+      const applicantPdfSent = haveReceipt
+        ? await sendWhatsApp("payment_receipt_pdf", waPdfParams, undefined, undefined, pdfOptions)
+        : false;
+      if (!applicantPdfSent) {
+        await sendWhatsApp("payment_receipt", waParams);
+      }
 
       // Mirror to staff phones — post-admission drops counsellor/leader so
       // a student's course-fee receipt doesn't ping the counsellor who
@@ -618,7 +681,12 @@ Deno.serve(async (req) => {
       for (const p of staffPhones) {
         // Skip duplicate sends if a staff member shares the lead's phone.
         if (lead.phone && p.replace(/\D/g, "") === lead.phone.replace(/\D/g, "")) continue;
-        await sendWhatsApp("payment_receipt", waParams, undefined, p);
+        const staffPdfSent = haveReceipt
+          ? await sendWhatsApp("payment_receipt_pdf", waPdfParams, undefined, p, pdfOptions)
+          : false;
+        if (!staffPdfSent) {
+          await sendWhatsApp("payment_receipt", waParams, undefined, p);
+        }
         await new Promise(r => setTimeout(r, 300));
       }
 

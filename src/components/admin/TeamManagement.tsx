@@ -14,7 +14,13 @@ interface Team {
   name: string;
   leader_id: string;
   leader_name?: string;
-  members: { id: string; user_id: string; display_name: string }[];
+  members: {
+    id: string;
+    user_id: string;
+    display_name: string;
+    archived_at?: string | null;
+    login_disabled?: boolean;
+  }[];
 }
 
 interface Profile {
@@ -22,6 +28,8 @@ interface Profile {
   user_id: string;
   display_name: string | null;
   role?: string;
+  archived_at?: string | null;
+  login_disabled?: boolean;
 }
 
 export default function TeamManagement() {
@@ -49,7 +57,7 @@ export default function TeamManagement() {
     const [teamsRes, membersRes, profilesRes, rolesRes] = await Promise.all([
       supabase.from("teams").select("*").order("created_at", { ascending: false }),
       supabase.from("team_members").select("*"),
-      supabase.from("profiles").select("id, user_id, display_name"),
+      supabase.from("profiles").select("id, user_id, display_name, archived_at, login_disabled"),
       supabase.from("user_roles").select("user_id, role"),
     ]);
 
@@ -58,20 +66,29 @@ export default function TeamManagement() {
     const employeeUserIds = new Set(roles.filter((r: any) => employeeRoles.includes(r.role)).map((r: any) => r.user_id));
 
     const roleMap = new Map(roles.map((r: any) => [r.user_id, r.role]));
-    const allProfiles = (profilesRes.data || [])
+    const profileById = new Map((profilesRes.data || []).map((p: any) => [p.id, p]));
+    const profileByUserId = new Map((profilesRes.data || []).map((p: any) => [p.user_id, p]));
+    const activeProfiles = (profilesRes.data || [])
       .filter(p => employeeUserIds.has(p.user_id))
+      .filter(p => !p.archived_at && !p.login_disabled)
       .map(p => ({ ...p, role: roleMap.get(p.user_id) || "" }))
       .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-    setProfiles(allProfiles);
+    setProfiles(activeProfiles);
 
     const allMembers = membersRes.data || [];
     const teamList: Team[] = (teamsRes.data || []).map((t: any) => {
-      const leader = allProfiles.find(p => p.id === t.leader_id);
+      const leader = profileById.get(t.leader_id);
       const members = allMembers
         .filter(m => m.team_id === t.id)
         .map(m => {
-          const profile = allProfiles.find(p => p.user_id === m.user_id);
-          return { id: m.id, user_id: m.user_id, display_name: profile?.display_name || "Unknown" };
+          const profile = profileByUserId.get(m.user_id);
+          return {
+            id: m.id,
+            user_id: m.user_id,
+            display_name: profile?.display_name || "Unknown",
+            archived_at: profile?.archived_at || null,
+            login_disabled: !!profile?.login_disabled,
+          };
         });
       return { ...t, leader_name: leader?.display_name || "Unknown", members };
     });
@@ -125,7 +142,7 @@ export default function TeamManagement() {
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   if (loading) {
-    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -164,7 +181,7 @@ export default function TeamManagement() {
                         <Badge variant="secondary" className="text-[10px]">{team.members.length} members</Badge>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <Crown className="h-3 w-3 text-amber-500" />
+                        <Crown className="h-3 w-3 text-warning" />
                         <span className="text-xs text-muted-foreground">{team.leader_name}</span>
                       </div>
                     </div>
@@ -192,6 +209,12 @@ export default function TeamManagement() {
                                   {(m.display_name || "?").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
                                 </div>
                                 <span className="text-sm text-foreground">{m.display_name}</span>
+                                {m.archived_at && (
+                                  <Badge variant="outline" className="text-[10px] text-muted-foreground">Archived</Badge>
+                                )}
+                                {m.login_disabled && (
+                                  <Badge variant="secondary" className="text-[10px]">Login disabled</Badge>
+                                )}
                               </div>
                               <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
                                 <X className="h-3.5 w-3.5" />

@@ -9,6 +9,48 @@ import { useToast } from "@/hooks/use-toast";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { PORTAL_CONFIGS, detectPortal } from "@/components/apply/portalConfig";
 import { getSchoolGradeSortRank } from "@/components/apply/ageValidation";
+import { captureAttribution, type AttributionPayload } from "@/lib/analytics";
+
+function fieldFromSearch(searchParams: URLSearchParams, key: string) {
+  const value = searchParams.get(key);
+  return value && value.trim() ? value.trim() : undefined;
+}
+
+function originFromUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function leadSourceFromAttribution(attribution: AttributionPayload) {
+  const source = (attribution._utm_source || "").toLowerCase();
+  if (attribution._gclid) return "google_ads";
+  if (source === "google" || source === "google_ads" || source === "adwords") return "google_ads";
+  if (["facebook", "fb", "instagram", "meta", "meta_ads"].includes(source)) return "meta_ads";
+  return "website";
+}
+
+function leadIngestAttribution(attribution: AttributionPayload) {
+  return {
+    ga_client_id: attribution._ga_client_id,
+    ga_session_id: attribution._ga_session_id,
+    gclid: attribution._gclid,
+    utm_source: attribution._utm_source,
+    utm_medium: attribution._utm_medium,
+    utm_campaign: attribution._utm_campaign,
+    utm_term: attribution._utm_term,
+    utm_content: attribution._utm_content,
+    landing_page: attribution._landing_page,
+    referrer: attribution._referrer,
+    origin_domain: attribution._origin_domain,
+    fbc: attribution._fbc,
+    fbp: attribution._fbp,
+    portal_brand: attribution._portal_brand,
+  };
+}
 
 const EnquiryForm = () => {
   const [searchParams] = useSearchParams();
@@ -118,7 +160,19 @@ const EnquiryForm = () => {
       const courseName = courseOptions.find(c => c.id === form.course_id)?.name;
       const campusName = filteredCampuses.find(c => c.id === form.campus_id)?.name;
 
-      const { data, error } = await supabase.functions.invoke("lead-ingest?source=website", {
+      const baseAttribution = captureAttribution(currentPortalId);
+      const parentUrl = fieldFromSearch(searchParams, "parent_url");
+      const parentReferrer = fieldFromSearch(searchParams, "parent_referrer");
+      const forwardedOrigin = fieldFromSearch(searchParams, "origin_domain") || originFromUrl(parentUrl);
+      const attribution: AttributionPayload = {
+        ...baseAttribution,
+        _landing_page: parentUrl || baseAttribution._landing_page,
+        _referrer: parentReferrer || baseAttribution._referrer,
+        _origin_domain: forwardedOrigin || baseAttribution._origin_domain,
+      };
+      const leadSource = leadSourceFromAttribution(attribution);
+
+      const { data, error } = await supabase.functions.invoke(`lead-ingest?source=${encodeURIComponent(leadSource)}`, {
         body: {
           name: form.name.trim(),
           phone: form.phone,
@@ -130,6 +184,7 @@ const EnquiryForm = () => {
           course_id: form.course_id || undefined,
           campus_id: form.campus_id || undefined,
           message: form.message.trim() || undefined,
+          ...leadIngestAttribution(attribution),
         },
       });
 
@@ -187,7 +242,7 @@ const EnquiryForm = () => {
   }
 
   return (
-    <div ref={formRef} className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background"}>
+    <div ref={formRef} className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background animate-fade-in"}>
       {/* Header — hidden in embed mode */}
       {!isEmbed && (
         <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">

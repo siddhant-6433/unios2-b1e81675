@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
   Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
-  Video, Mic, Play, Pause,
+  Video, Mic, Play, Pause, CheckCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,12 +25,27 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "abvmu_deposits" | "offer_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+
+interface AbvmuDepositItem {
+  id: string;
+  lead_id: string;
+  lead_name: string;
+  amount: number;
+  status: string;
+  challan_number: string | null;
+  challan_date: string | null;
+  proof_path: string;
+  proof_file_name: string | null;
+  notes: string | null;
+  submitted_at: string;
+}
 
 interface WaiverItem {
   id: string;
   offer_letter_id: string;
   term: string;
+  term_label: string;
   amount: number;
   reason: string | null;
   status: string;
@@ -53,6 +69,20 @@ interface OfferApprovalItem {
   created_at: string;
   requested_by_name: string | null;
   application_id: string | null;
+}
+
+interface ContactChangeItem {
+  id: string;
+  student_id: string;
+  student_name: string;
+  admission_no: string | null;
+  field_name: string;
+  old_value: string | null;
+  new_value: string;
+  reason: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  created_at: string;
 }
 
 interface ApplicationItem {
@@ -107,7 +137,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | AbvmuDepositItem | OfferApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -136,8 +166,7 @@ const fmtTime = (s: string | null | undefined) => {
   return fmtDate(s);
 };
 
-const termLabel = (t: string) =>
-  t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const formatBadgeCount = (n: number) => n > 99 ? "99+" : String(n);
 
 const ADMISSIONS_ROLES = [
   "super_admin", "campus_admin", "principal", "admission_head", "counsellor", "data_entry",
@@ -159,7 +188,9 @@ export default function Inbox() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
+    abvmu_deposits: 0,
     offer_approvals: 0,
+    contact_changes: 0,
     applications: 0,
     followups: 0,
     whatsapp: 0,
@@ -184,7 +215,15 @@ export default function Inbox() {
       icon: Tag,
       count: counts.offer_waivers,
       roles: ["super_admin"],
-      color: "text-amber-600",
+      color: "text-warning-foreground",
+    },
+    {
+      id: "abvmu_deposits",
+      label: "ABVMU Deposits",
+      icon: FileText,
+      count: counts.abvmu_deposits,
+      roles: ["super_admin"],
+      color: "text-info-foreground",
     },
     {
       id: "offer_approvals",
@@ -192,7 +231,15 @@ export default function Inbox() {
       icon: FileText,
       count: counts.offer_approvals,
       roles: APPROVER_ROLES,
-      color: "text-blue-600",
+      color: "text-info-foreground",
+    },
+    {
+      id: "contact_changes",
+      label: "Contact Changes",
+      icon: User,
+      count: counts.contact_changes,
+      roles: ["super_admin", "principal"],
+      color: "text-cyan-600",
     },
     {
       id: "applications",
@@ -200,7 +247,7 @@ export default function Inbox() {
       icon: FileText,
       count: counts.applications,
       roles: ADMISSIONS_ROLES,
-      color: "text-violet-600",
+      color: "text-primary",
     },
     {
       id: "followups",
@@ -208,7 +255,7 @@ export default function Inbox() {
       icon: AlertTriangle,
       count: counts.followups,
       roles: ADMISSIONS_ROLES,
-      color: "text-orange-600",
+      color: "text-warning-foreground",
     },
     {
       id: "whatsapp",
@@ -216,7 +263,7 @@ export default function Inbox() {
       icon: MessageSquare,
       count: counts.whatsapp,
       roles: ADMISSIONS_ROLES,
-      color: "text-green-600",
+      color: "text-success",
     },
     {
       id: "video_approvals",
@@ -224,7 +271,7 @@ export default function Inbox() {
       icon: Video,
       count: counts.video_approvals,
       roles: ["super_admin"],
-      color: "text-rose-600",
+      color: "text-destructive",
     },
     {
       id: "voice_messages",
@@ -232,13 +279,23 @@ export default function Inbox() {
       icon: Mic,
       count: counts.voice_messages,
       roles: APPROVER_ROLES,
-      color: "text-purple-600",
+      color: "text-primary",
     },
   ];
 
   const visibleCategories = allCategories.filter((c) =>
     c.roles.includes(role || "")
   );
+  const selectedCategory = visibleCategories.find((c) => c.id === selected);
+  const categoryDisplayCount = (cat: InboxCategory) =>
+    cat.id === selected && !loading ? items.length : cat.count;
+  const selectedDisplayCount = selectedCategory ? categoryDisplayCount(selectedCategory) : 0;
+  const totalVisibleCount = visibleCategories.reduce((sum, c) => sum + categoryDisplayCount(c), 0);
+
+  const commitItems = useCallback((cat: CategoryId, nextItems: InboxItem[]) => {
+    setItems(nextItems);
+    setCounts((prev) => prev[cat] === nextItems.length ? prev : { ...prev, [cat]: nextItems.length });
+  }, []);
 
   // ── Counts ────────────────────────────────────────────────────────────────
 
@@ -249,7 +306,15 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("offer_waivers")
-            .select("id", { count: "planned", head: true })
+            .select("id")
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
+
+      // abvmu deposit claims — super_admin only
+      isSuperAdmin
+        ? supabase
+            .from("abvmu_deposit_claims" as any)
+            .select("id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -257,24 +322,32 @@ export default function Inbox() {
       isApprover
         ? supabase
             .from("offer_letters")
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("approval_status", "pending_principal")
+        : Promise.resolve({ count: 0 }),
+
+      // contact changes — principal/super_admin
+      (isSuperAdmin || isPrincipal)
+        ? supabase
+            .from("student_contact_change_requests" as any)
+            .select("id")
+            .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
       // applications — admissions (submitted apps awaiting review)
       isAdmissions
         ? supabase
             .from("applications" as any)
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "submitted")
         : Promise.resolve({ count: 0 }),
 
       // followups — admissions
       isAdmissions
         ? (() => {
-            let q = supabase
+            const q = supabase
               .from("lead_followups")
-              .select("id", { count: "planned", head: true })
+              .select("id")
               .eq("status", "pending")
               .lte("scheduled_at", `${today}T23:59:59`);
             return q;
@@ -284,45 +357,46 @@ export default function Inbox() {
       // whatsapp unreplied
       isAdmissions
         ? supabase
-            .from("whatsapp_messages")
-            .select("id", { count: "planned", head: true })
-            .eq("direction", "inbound")
-            .eq("is_read", false)
+            .from("whatsapp_conversations" as any)
+            .select("phone")
+            .gt("unread_count", 0)
         : Promise.resolve({ count: 0 }),
 
       // video approvals — super_admin only (videos awaiting approval)
       isSuperAdmin
         ? supabase
             .from("videos" as any)
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "pending_approval")
         : Promise.resolve({ count: 0 }),
 
-      // voice messages — approvers (unread messages from consultants)
+      // voice messages — approvers (unresolved messages from consultants)
       isApprover
         ? supabase
             .from("consultant_voice_messages" as any)
-            .select("id", { count: "planned", head: true })
-            .eq("status", "unread")
+            .select("id")
+            .neq("status", "resolved")
         : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
       const r = results[i];
-      if (r.status === "fulfilled") return (r.value as any).count || 0;
+      if (r.status === "fulfilled") return (r.value as any).count ?? (r.value as any).data?.length ?? 0;
       return 0;
     };
 
     setCounts({
       offer_waivers: get(0),
-      offer_approvals: get(1),
-      applications: get(2),
-      followups: get(3),
-      whatsapp: get(4),
-      video_approvals: get(5),
-      voice_messages: get(6),
+      abvmu_deposits: get(1),
+      offer_approvals: get(2),
+      contact_changes: get(3),
+      applications: get(4),
+      followups: get(5),
+      whatsapp: get(6),
+      video_approvals: get(7),
+      voice_messages: get(8),
     });
-  }, [role, isSuperAdmin, isApprover, isAdmissions, profile?.id]);
+  }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
   useEffect(() => {
     fetchCounts();
@@ -343,46 +417,111 @@ export default function Inbox() {
     setItems([]); // clear stale items immediately so renderMiddleItem never sees mismatched data
 
     try {
-      if (cat === "offer_waivers") {
-        // offer_letters has course_id → courses FK; use that directly — no applications join needed
+      if (cat === "abvmu_deposits") {
+        const { data, error } = await supabase
+          .from("abvmu_deposit_claims" as any)
+          .select("id, lead_id, amount, status, challan_number, challan_date, proof_path, proof_file_name, notes, submitted_at")
+          .eq("status", "pending")
+          .order("submitted_at", { ascending: false });
+        if (error) throw error;
+        const rows = (data || []) as any[];
+        const leadIds = Array.from(new Set(rows.map((r) => r.lead_id).filter(Boolean)));
+        const leadsById = new Map<string, any>();
+        if (leadIds.length) {
+          const { data: leads } = await supabase.from("leads").select("id, name").in("id", leadIds);
+          for (const l of (leads || []) as any[]) leadsById.set(l.id, l);
+        }
+        commitItems(
+          cat,
+          rows.map((r) => ({
+            id: r.id,
+            lead_id: r.lead_id,
+            lead_name: leadsById.get(r.lead_id)?.name || "Candidate",
+            amount: Number(r.amount),
+            status: r.status,
+            challan_number: r.challan_number,
+            challan_date: r.challan_date,
+            proof_path: r.proof_path,
+            proof_file_name: r.proof_file_name,
+            notes: r.notes,
+            submitted_at: r.submitted_at,
+          })) as AbvmuDepositItem[],
+        );
+      } else if (cat === "offer_waivers") {
+        // Keep the pending waiver row as the source of truth for this inbox.
+        // Related offer/lead/course data is resolved separately so a relationship
+        // shape change cannot make the badge count include a row that the list
+        // then fails to show.
         const { data, error } = await supabase
           .from("offer_waivers")
           .select(`
             id, offer_letter_id, term, amount, reason, status,
-            requested_by_name, requested_by_role, created_at,
-            offer_letters!offer_letter_id (
-              lead_id, course_id, session_id,
-              leads!lead_id ( name ),
-              courses!course_id ( name )
-            )
+            requested_by_name, requested_by_role, created_at
           `)
           .eq("status", "pending")
           .order("created_at", { ascending: false });
 
         if (error) throw error;
+        const waiverRows = (data || []) as any[];
+        const offerIds = Array.from(new Set(waiverRows.map((w) => w.offer_letter_id).filter(Boolean)));
+        const offersById = new Map<string, any>();
+        const leadsById = new Map<string, any>();
+        const coursesById = new Map<string, any>();
+
+        if (offerIds.length > 0) {
+          const { data: offerRows, error: offerError } = await (supabase as any)
+            .from("offer_letters")
+            .select("id, lead_id, course_id, session_id")
+            .in("id", offerIds);
+          if (offerError) throw offerError;
+
+          for (const offer of (offerRows || []) as any[]) {
+            offersById.set(offer.id, offer);
+          }
+
+          const leadIds = Array.from(new Set((offerRows || []).map((o: any) => o.lead_id).filter(Boolean)));
+          const courseIdsFromOffers = Array.from(new Set((offerRows || []).map((o: any) => o.course_id).filter(Boolean)));
+
+          const [leadRes, courseRes] = await Promise.all([
+            leadIds.length > 0
+              ? supabase.from("leads").select("id, name").in("id", leadIds)
+              : Promise.resolve({ data: [], error: null }),
+            courseIdsFromOffers.length > 0
+              ? supabase.from("courses").select("id, name").in("id", courseIdsFromOffers)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+          if (leadRes.error) throw leadRes.error;
+          if (courseRes.error) throw courseRes.error;
+
+          for (const lead of (leadRes.data || []) as any[]) leadsById.set(lead.id, lead);
+          for (const course of (courseRes.data || []) as any[]) coursesById.set(course.id, course);
+        }
 
         // Resolve gross year fee per (course, session, term) from active fee
         // structures so the detail card can show Amount + Applicable-after-waiver.
         const offerKeys = new Set<string>();
-        for (const w of (data || []) as any[]) {
-          const c = w.offer_letters?.course_id;
-          const s = w.offer_letters?.session_id;
+        for (const w of waiverRows) {
+          const offer = offersById.get(w.offer_letter_id);
+          const c = offer?.course_id;
+          const s = offer?.session_id;
           if (c && s) offerKeys.add(`${c}::${s}`);
         }
         const yearAmountByKey = new Map<string, number>();
+        const yearLabelByKey = new Map<string, string>();
         if (offerKeys.size > 0) {
           const pairs = Array.from(offerKeys).map(k => k.split("::"));
           const courseIds = Array.from(new Set(pairs.map(p => p[0])));
           const sessionIds = Array.from(new Set(pairs.map(p => p[1])));
           const { data: fsRows } = await supabase
             .from("fee_structures")
-            .select("course_id, session_id, is_active, fee_structure_items ( term, amount )")
+            .select("course_id, session_id, is_active, metadata, fee_structure_items ( term, amount )")
             .in("course_id", courseIds)
             .in("session_id", sessionIds)
             .eq("is_active", true);
           for (const fs of (fsRows || []) as any[]) {
             const key = `${fs.course_id}::${fs.session_id}`;
             if (!offerKeys.has(key)) continue;
+            const metadata = fs.metadata as Record<string, unknown> | null;
             const byTerm = new Map<string, number>();
             for (const it of (fs.fee_structure_items || []) as any[]) {
               const t = String(it.term || "");
@@ -391,34 +530,41 @@ export default function Inbox() {
             }
             for (const [t, total] of byTerm) {
               yearAmountByKey.set(`${key}::${t}`, total);
+              yearLabelByKey.set(`${key}::${t}`, feeTermLabel(t, metadata));
             }
           }
         }
 
-        setItems(
-          (data || []).map((w: any) => {
-            const courseId = w.offer_letters?.course_id;
-            const sessionId = w.offer_letters?.session_id;
+        const nextItems = waiverRows.map((w: any) => {
+            const offer = offersById.get(w.offer_letter_id);
+            const lead = offer?.lead_id ? leadsById.get(offer.lead_id) : null;
+            const course = offer?.course_id ? coursesById.get(offer.course_id) : null;
+            const courseId = offer?.course_id;
+            const sessionId = offer?.session_id;
             const yearAmount = (courseId && sessionId)
               ? yearAmountByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? null
               : null;
+            const termLabel = (courseId && sessionId)
+              ? yearLabelByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? feeTermLabel(w.term)
+              : feeTermLabel(w.term);
             return {
               id: w.id,
               offer_letter_id: w.offer_letter_id,
               term: w.term,
+              term_label: termLabel,
               amount: Number(w.amount),
               reason: w.reason,
               status: w.status,
               requested_by_name: w.requested_by_name,
               requested_by_role: w.requested_by_role,
               created_at: w.created_at,
-              lead_name: w.offer_letters?.leads?.name || "—",
-              lead_id: w.offer_letters?.lead_id || "",
-              course_name: w.offer_letters?.courses?.name || null,
+              lead_name: lead?.name || "—",
+              lead_id: offer?.lead_id || "",
+              course_name: course?.name || null,
               year_amount: yearAmount,
             } as WaiverItem;
-          })
-        );
+          });
+        commitItems(cat, nextItems);
       } else if (cat === "offer_approvals") {
         // offer_letters has course_id → courses FK; join directly
         const { data, error } = await supabase
@@ -432,8 +578,7 @@ export default function Inbox() {
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        setItems(
-          (data || []).map((o: any) => ({
+        const nextItems = (data || []).map((o: any) => ({
             id: o.id,
             lead_id: o.lead_id,
             lead_name: o.leads?.name || "—",
@@ -442,8 +587,35 @@ export default function Inbox() {
             created_at: o.created_at || null,
             requested_by_name: null,
             application_id: null,
-          } as OfferApprovalItem))
-        );
+          } as OfferApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "contact_changes") {
+        const { data, error } = await supabase
+          .from("student_contact_change_requests" as any)
+          .select(`
+            id, student_id, field_name, old_value, new_value, reason,
+            requested_by_name, requested_by_role, created_at,
+            students!student_id ( name, admission_no, pre_admission_no )
+          `)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (error) throw error;
+        const nextItems = (data || []).map((r: any) => ({
+            id: r.id,
+            student_id: r.student_id,
+            student_name: r.students?.name || "—",
+            admission_no: r.students?.admission_no || r.students?.pre_admission_no || null,
+            field_name: r.field_name,
+            old_value: r.old_value,
+            new_value: r.new_value,
+            reason: r.reason,
+            requested_by_name: r.requested_by_name,
+            requested_by_role: r.requested_by_role,
+            created_at: r.created_at,
+          } as ContactChangeItem));
+        commitItems(cat, nextItems);
       } else if (cat === "applications") {
         const { data, error } = await (supabase as any)
           .from("applications")
@@ -453,8 +625,7 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((a: any) => ({
+        const nextItems = (data || []).map((a: any) => ({
             id: a.id,
             application_id: a.application_id,
             lead_name: a.leads?.name || a.full_name || "—",
@@ -463,8 +634,8 @@ export default function Inbox() {
             stage: a.status,
             phone: a.leads?.phone || a.phone || null,
             app_status: a.status || null,
-          } as ApplicationItem))
-        );
+          } as ApplicationItem));
+        commitItems(cat, nextItems);
       } else if (cat === "followups") {
         const today = new Date().toISOString().slice(0, 10);
         // user_id is FK to auth.users (not profiles); just fetch lead data
@@ -477,8 +648,7 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((f: any) => ({
+        const nextItems = (data || []).map((f: any) => ({
             id: f.id,
             lead_id: f.lead_id,
             lead_name: f.leads?.name || "—",
@@ -486,8 +656,8 @@ export default function Inbox() {
             scheduled_at: f.scheduled_at,
             notes: f.notes,
             counsellor_name: null,
-          } as FollowupItem))
-        );
+          } as FollowupItem));
+        commitItems(cat, nextItems);
       } else if (cat === "whatsapp") {
         // Use whatsapp_conversations view if available, else aggregate
         const { data, error } = await supabase
@@ -498,16 +668,15 @@ export default function Inbox() {
           .limit(100);
 
         if (error) throw error;
-        setItems(
-          (data || []).map((c: any) => ({
+        const nextItems = (data || []).map((c: any) => ({
             phone: c.phone,
             lead_id: c.lead_id,
             lead_name: c.lead_name,
             last_message: c.last_message,
             last_message_at: c.last_message_at,
             unread_count: c.unread_count,
-          } as WhatsAppItem))
-        );
+          } as WhatsAppItem));
+        commitItems(cat, nextItems);
       } else if (cat === "video_approvals") {
         const { data, error } = await supabase
           .from("videos" as any)
@@ -526,8 +695,7 @@ export default function Inbox() {
             .in("id", editorIds);
           for (const e of (eds as any[]) || []) nameById[e.id] = e.name;
         }
-        setItems(
-          rows.map((v: any) => ({
+        const nextItems = rows.map((v: any) => ({
             id: v.id,
             title: v.title,
             drive_url: v.drive_url,
@@ -535,8 +703,8 @@ export default function Inbox() {
             content_type: v.content_type,
             editor_name: nameById[v.editor_id] || "—",
             created_at: v.created_at,
-          } as VideoApprovalInboxItem))
-        );
+          } as VideoApprovalInboxItem));
+        commitItems(cat, nextItems);
       } else if (cat === "voice_messages") {
         const { data, error } = await supabase
           .from("consultant_voice_messages" as any)
@@ -555,8 +723,7 @@ export default function Inbox() {
             .in("user_id", senderIds);
           for (const p of (profs || []) as any[]) nameMap[p.user_id] = p.display_name || "";
         }
-        setItems(
-          rows.map((r: any) => ({
+        const nextItems = rows.map((r: any) => ({
             id: r.id,
             consultant_id: r.consultant_id,
             sender_user_id: r.sender_user_id,
@@ -566,8 +733,8 @@ export default function Inbox() {
             status: r.status,
             created_at: r.created_at,
             sender_name: r.consultants?.name || nameMap[r.sender_user_id] || "Unknown consultant",
-          } as VoiceMessageItem))
-        );
+          } as VoiceMessageItem));
+        commitItems(cat, nextItems);
       }
     } catch (e: any) {
       toast({ title: "Failed to load items", description: e.message, variant: "destructive" });
@@ -575,7 +742,7 @@ export default function Inbox() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, commitItems]);
 
   useEffect(() => {
     if (selected) loadItems(selected);
@@ -608,6 +775,38 @@ export default function Inbox() {
     }
   };
 
+  const decideAbvmuDeposit = async (claim: AbvmuDepositItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      rejection_reason = r || undefined;
+    }
+    setProcessing(claim.id);
+    try {
+      const { data, error } = await (supabase as any).rpc("decide_abvmu_deposit_claim", {
+        _claim_id: claim.id,
+        _decision: decision,
+        _rejection_reason: rejection_reason || null,
+      });
+      if (error || data?.error) throw new Error(error?.message || data?.error);
+      toast({
+        title: decision === "approved" ? "ABVMU deposit approved" : "ABVMU deposit rejected",
+        description: decision === "approved"
+          ? "Year-1 due reduced provisionally. Settle later when university remits funds to issue a receipt."
+          : undefined,
+      });
+      setSelectedItem(null);
+      loadItems("abvmu_deposits");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const decideOfferApproval = async (offer: OfferApprovalItem, decision: "approved" | "rejected") => {
     if (!isApprover) return;
     let rejection_reason: string | undefined;
@@ -629,6 +828,33 @@ export default function Inbox() {
       toast({ title: decision === "approved" ? "Offer letter approved" : "Offer letter rejected" });
       setSelectedItem(null);
       loadItems("offer_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const decideContactChange = async (request: ContactChangeItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin && !isPrincipal) return;
+    let notes: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      notes = r || undefined;
+    }
+    setProcessing(request.id);
+    try {
+      const { error } = await (supabase as any).rpc("review_student_contact_change_request", {
+        _request_id: request.id,
+        _decision: decision,
+        _notes: notes || null,
+      });
+      if (error) throw error;
+      toast({ title: decision === "approved" ? "Contact change approved" : "Contact change rejected" });
+      setSelectedItem(null);
+      loadItems("contact_changes");
       fetchCounts();
     } catch (e: any) {
       toast({ title: "Action failed", description: e.message, variant: "destructive" });
@@ -691,6 +917,29 @@ export default function Inbox() {
     }
   };
 
+  const markWhatsAppRead = async (item: WhatsAppItem) => {
+    if (!item.phone || item.unread_count <= 0) return;
+    setProcessing(item.phone);
+    try {
+      const { error } = await (supabase.rpc as any)("mark_whatsapp_conversation_read", {
+        p_phone: item.phone,
+        p_provider: null,
+        p_business_phone_number_id: null,
+        p_business_phone_number: null,
+      });
+      if (error) throw error;
+      setItems((prev) => prev.filter((row) => (row as WhatsAppItem).phone !== item.phone));
+      setSelectedItem(null);
+      setCounts((prev) => ({ ...prev, whatsapp: Math.max(0, prev.whatsapp - 1) }));
+      toast({ title: "Marked read", description: "WhatsApp notification removed from the inbox." });
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Could not mark read", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const markVoiceResolved = async (id: string) => {
     const { error } = await supabase
       .from("consultant_voice_messages" as any)
@@ -709,11 +958,29 @@ export default function Inbox() {
   const renderMiddleItem = (item: InboxItem) => {
     const isSelected = selectedItem === item;
     const baseClass = cn(
-      "w-full text-left px-4 py-3 border-b border-border/40 transition-colors cursor-pointer",
+      "group w-full text-left px-4 py-3.5 border-b border-border/50 transition-all cursor-pointer",
       isSelected
-        ? "bg-primary/5 border-l-2 border-l-primary"
-        : "hover:bg-muted/30"
+        ? "bg-card shadow-sm ring-1 ring-border border-l-2 border-l-primary"
+        : "hover:bg-card/80"
     );
+
+    if (selected === "abvmu_deposits") {
+      const c = item as AbvmuDepositItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.lead_name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                ABVMU deposit · ₹{Number(c.amount).toLocaleString("en-IN")}
+              </p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.submitted_at)}</p>
+        </button>
+      );
+    }
 
     if (selected === "offer_waivers") {
       const w = item as WaiverItem;
@@ -724,11 +991,11 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{w.lead_name}</p>
               <p className="text-xs text-muted-foreground truncate">{w.course_name || "—"}</p>
             </div>
-            <span className="text-sm font-semibold text-amber-700 shrink-0">{fmtINR(w.amount)}</span>
+            <span className="text-sm font-semibold text-warning-foreground shrink-0">{fmtINR(w.amount)}</span>
           </div>
           <div className="flex items-center gap-2 mt-1">
             <Badge className="bg-muted text-muted-foreground border-0 text-[10px] capitalize">
-              {termLabel(w.term)}
+              {w.term_label}
             </Badge>
             <span className="text-[10px] text-muted-foreground/60">{fmtTime(w.created_at)}</span>
           </div>
@@ -745,9 +1012,25 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{o.lead_name}</p>
               <p className="text-xs text-muted-foreground truncate">{o.course_name || "—"}</p>
             </div>
-            <span className="text-[10px] text-amber-600 font-medium shrink-0">Pending</span>
+            <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "contact_changes") {
+      const c = item as ContactChangeItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{c.field_name.replace(/_/g, " ")}</p>
+            </div>
+            <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.created_at)}</p>
         </button>
       );
     }
@@ -805,8 +1088,8 @@ export default function Inbox() {
                 <p className="text-xs text-muted-foreground truncate">{w.last_message}</p>
               )}
             </div>
-            <Badge className="bg-green-100 text-green-700 border-0 text-[10px] shrink-0">
-              {w.unread_count}
+            <Badge className="bg-success/10 text-success border-0 text-[10px] shrink-0">
+              {formatBadgeCount(w.unread_count)}
             </Badge>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(w.last_message_at)}</p>
@@ -836,10 +1119,10 @@ export default function Inbox() {
       const m = item as VoiceMessageItem;
       const isUnread = m.status === "unread";
       return (
-        <button key={m.id} className={cn(baseClass, isUnread && "bg-purple-50/30 dark:bg-purple-950/10")} onClick={() => setSelectedItem(m)}>
+        <button key={m.id} className={cn(baseClass, isUnread && "bg-primary/5/30 dark:bg-primary/90/10")} onClick={() => setSelectedItem(m)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex items-center gap-1.5">
-              {isUnread && <span className="h-2 w-2 rounded-full bg-purple-500 shrink-0" />}
+              {isUnread && <span className="h-2 w-2 rounded-full bg-primary/50 shrink-0" />}
               <p className="text-sm font-medium text-foreground truncate">{m.sender_name}</p>
             </div>
             <Mic className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
@@ -863,6 +1146,69 @@ export default function Inbox() {
       );
     }
 
+    if (selected === "abvmu_deposits") {
+      const c = selectedItem as AbvmuDepositItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.lead_name}</h3>
+            <p className="text-sm text-muted-foreground">ABVMU deposit challan claim</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Amount" value={`₹${Number(c.amount).toLocaleString("en-IN")}`} highlight />
+            <Row label="Challan no." value={c.challan_number || "—"} />
+            <Row label="Challan date" value={c.challan_date || "—"} />
+            <Row label="Submitted" value={fmtDate(c.submitted_at)} />
+            <Row label="Notes" value={c.notes || "—"} />
+            <Row label="Proof file" value={c.proof_file_name || c.proof_path} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                const { data } = await supabase.storage
+                  .from("application-documents")
+                  .createSignedUrl(c.proof_path, 60 * 30);
+                if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+                else toast({ title: "Could not open proof", variant: "destructive" });
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View proof
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-success/90 hover:bg-success text-white"
+                disabled={!isSuperAdmin || processing === c.id}
+                onClick={() => decideAbvmuDeposit(c, "approved")}
+              >
+                {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="flex-1"
+                disabled={!isSuperAdmin || processing === c.id}
+                onClick={() => decideAbvmuDeposit(c, "rejected")}
+              >
+                <XCircle className="h-4 w-4 mr-1.5" />Reject
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground text-center">
+              Approval reduces year-1 due provisionally. Use settle later (when ABVMU remits) to issue a receipt.
+            </p>
+            {c.lead_id && (
+              <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`/admissions/${c.lead_id}`)}>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View Lead
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     if (selected === "offer_waivers") {
       const w = selectedItem as WaiverItem;
       const applicableAfterWaiver = w.year_amount != null
@@ -876,7 +1222,7 @@ export default function Inbox() {
           </div>
 
           <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Particular" value={termLabel(w.term)} />
+            <Row label="Fee Particular" value={w.term_label} />
             <Row label="Amount" value={fmtINR(w.year_amount)} />
             <Row label="Waiver Requested" value={fmtINR(w.amount)} highlight />
             <Row label="Applicable Amount After Waiver" value={fmtINR(applicableAfterWaiver)} />
@@ -988,6 +1334,67 @@ export default function Inbox() {
       );
     }
 
+    if (selected === "contact_changes") {
+      const c = selectedItem as ContactChangeItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.student_name}</h3>
+            {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Field" value={c.field_name.replace(/_/g, " ")} />
+            <Row label="Current Number" value={c.old_value || "—"} />
+            <Row label="Requested Number" value={c.new_value} highlight />
+            <Row label="Reason" value={c.reason || "—"} />
+            <Row label="Requested By" value={
+              c.requested_by_name
+                ? `${c.requested_by_name}${c.requested_by_role ? ` (${c.requested_by_role.replace("_", " ")})` : ""}`
+                : "—"
+            } />
+            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={(!isSuperAdmin && !isPrincipal) || processing === c.id}
+              onClick={() => decideContactChange(c, "approved")}
+            >
+              {processing === c.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={(!isSuperAdmin && !isPrincipal) || processing === c.id}
+              onClick={() => decideContactChange(c, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          {c.admission_no && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => navigate(`/students/${c.admission_no}`)}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              View Student Profile
+            </Button>
+          )}
+        </div>
+      );
+    }
+
     if (selected === "applications") {
       const a = selectedItem as ApplicationItem;
       const stageLabel: Record<string, string> = {
@@ -1073,6 +1480,20 @@ export default function Inbox() {
           </div>
 
           <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={processing === w.phone}
+              onClick={() => markWhatsAppRead(w)}
+            >
+              {processing === w.phone ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Mark read
+            </Button>
             <Button
               size="sm"
               className="w-full"
@@ -1199,70 +1620,111 @@ export default function Inbox() {
   // ── Layout ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-[hsl(var(--muted)/0.35)]">
       {/* Left: Category list */}
-      <div className="w-56 shrink-0 border-r border-border bg-muted/20 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground">Inbox</h2>
-          <button
-            onClick={() => { fetchCounts(); if (selected) loadItems(selected); }}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground"
-            title="Refresh"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
+      <div className="w-[300px] shrink-0 border-r border-border/70 bg-background/95 flex flex-col">
+        <div className="px-5 py-5 border-b border-border/70">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Command center</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">Inbox</h2>
+            </div>
+            <button
+              onClick={() => { fetchCounts(); if (selected) loadItems(selected); }}
+              className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+              title="Refresh"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">{totalVisibleCount}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">{selectedDisplayCount}</p>
+            </div>
+          </div>
         </div>
-        <nav className="flex-1 overflow-y-auto py-2">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {visibleCategories.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">No categories available</p>
+            <p className="px-3 py-3 text-xs text-muted-foreground">No categories available</p>
           )}
-          {visibleCategories.map((cat) => (
+          {visibleCategories.map((cat) => {
+            const active = selected === cat.id;
+            const displayCount = categoryDisplayCount(cat);
+            return (
             <button
               key={cat.id}
-              onClick={() => { setItems([]); setSelected(cat.id); }}
+              onClick={() => {
+                if (selected === cat.id) {
+                  loadItems(cat.id);
+                  return;
+                }
+                setItems([]);
+                setSelected(cat.id);
+              }}
               className={cn(
-                "w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors text-left",
-                selected === cat.id
-                  ? "bg-primary/8 text-foreground border-l-2 border-l-primary"
-                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                "w-full flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium transition-all text-left",
+                active
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-border"
+                  : "text-muted-foreground hover:bg-card/80 hover:text-foreground"
               )}
             >
-              <cat.icon className={cn("h-4 w-4 shrink-0", cat.color)} />
-              <span className="flex-1 truncate">{cat.label}</span>
-              {cat.count > 0 && (
+              <span className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
+                active ? "border-primary/15 bg-primary/10" : "border-border bg-muted/50"
+              )}>
+                <cat.icon className={cn("h-4 w-4", cat.color)} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{cat.label}</span>
+                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                  {displayCount === 0 ? "All clear" : `${displayCount} open item${displayCount === 1 ? "" : "s"}`}
+                </span>
+              </span>
+              {displayCount > 0 && (
                 <span className={cn(
-                  "flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold text-white px-1",
-                  cat.id === "whatsapp" ? "bg-green-500"
-                  : cat.id === "followups" ? "bg-orange-500"
+                  "flex h-6 min-w-6 items-center justify-center rounded-full text-[10px] font-bold text-white px-1.5",
+                  cat.id === "whatsapp" ? "bg-success/50"
+                  : cat.id === "followups" ? "bg-warning"
                   : "bg-primary"
                 )}>
-                  {cat.count > 99 ? "99+" : cat.count}
+                  {formatBadgeCount(displayCount)}
                 </span>
               )}
             </button>
-          ))}
+          );})}
         </nav>
       </div>
 
       {/* Middle: Item list */}
-      <div className="w-72 shrink-0 border-r border-border bg-background flex flex-col">
-        <div className="px-4 py-3 border-b border-border">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {visibleCategories.find((c) => c.id === selected)?.label || ""}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {items.length} item{items.length !== 1 ? "s" : ""}
-          </p>
+      <div className="w-[380px] shrink-0 border-r border-border/70 bg-background/80 flex flex-col">
+        <div className="px-5 py-4 border-b border-border/70 bg-background/95">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                {selectedCategory?.label || ""}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {items.length} item{items.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="flex-1 overflow-y-auto bg-background/60">
+          {loading && items.length === 0 ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground">
-              <CheckCircle className="h-8 w-8 opacity-20" />
-              <p className="text-xs">All clear!</p>
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">
+              <CheckCircle className="h-9 w-9 opacity-20" />
+              <p className="text-sm font-medium">All clear</p>
+              <p className="text-xs">No open items in this queue.</p>
             </div>
           ) : (
             items.map((item) => renderMiddleItem(item))
@@ -1271,7 +1733,7 @@ export default function Inbox() {
       </div>
 
       {/* Right: Detail pane */}
-      <div className="flex-1 overflow-y-auto bg-muted/10">
+      <div className="flex-1 overflow-y-auto bg-background">
         {renderDetail()}
       </div>
     </div>

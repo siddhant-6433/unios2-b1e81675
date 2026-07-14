@@ -97,19 +97,18 @@ export function HeaderFeedbackWidget() {
           onClick={() => navigate(detailPath)}
           className={`hidden md:flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs transition-colors ${
             isLow
-              ? "border-red-400/60 bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400"
+              ? "border-destructive/25/60 bg-destructive/5 text-destructive hover:bg-destructive/10 dark:bg-destructive/90/30 dark:text-destructive/80"
               : isStrong
-              ? "border-emerald-400/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400"
+              ? "border-success/30/60 bg-success/5 text-success hover:bg-success/10 dark:bg-success/90/30 dark:text-success"
               : "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted"
           }`}
           aria-label={`${label}: ${summary.avg} out of 5 from ${summary.totalResponses} responses`}
         >
           <Star className={`h-3.5 w-3.5 shrink-0 ${isStrong ? "fill-current" : ""}`} />
-          <span className="hidden xl:inline font-medium">Feedback</span>
           <span className="font-bold tabular-nums">{summary.avg}</span>
           <span className="text-muted-foreground tabular-nums">({summary.totalResponses})</span>
           {summary.lowRatings > 0 && (
-            <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-bold text-red-700">
+            <span className="rounded bg-destructive/10 px-1 py-0.5 text-[9px] font-bold text-destructive">
               {summary.lowRatings} low
             </span>
           )}
@@ -121,7 +120,7 @@ export function HeaderFeedbackWidget() {
           <p>Average rating: <strong>{summary.avg}/5</strong></p>
           <p>Responses: <strong>{summary.totalResponses}</strong></p>
           {summary.pending > 0 && <p>Pending requests: <strong>{summary.pending}</strong></p>}
-          {summary.lowRatings > 0 && <p className="text-red-600">Low ratings: <strong>{summary.lowRatings}</strong></p>}
+          {summary.lowRatings > 0 && <p className="text-destructive">Low ratings: <strong>{summary.lowRatings}</strong></p>}
         </div>
         {!isCounsellor && rows.length > 0 && (
           <div className="mt-2 border-t border-border/60 pt-2 space-y-1">

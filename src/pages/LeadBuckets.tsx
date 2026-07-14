@@ -3,14 +3,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { DatePreset } from "@/lib/datePresets";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -22,11 +25,11 @@ function getUrgency(createdAt: string) {
   const hours = mins / 60;
   const days = hours / 24;
 
-  if (mins < 30) return { level: "fresh", label: `${Math.floor(mins)}m`, color: "text-emerald-600", bg: "bg-emerald-500", barWidth: "100%", pulse: false };
-  if (hours < 2) return { level: "warm", label: `${Math.floor(mins)}m`, color: "text-amber-600", bg: "bg-amber-400", barWidth: "75%", pulse: false };
-  if (hours < 6) return { level: "cooling", label: `${Math.round(hours)}h`, color: "text-orange-600", bg: "bg-orange-500", barWidth: "50%", pulse: false };
-  if (hours < 24) return { level: "urgent", label: `${Math.round(hours)}h`, color: "text-red-600", bg: "bg-red-500", barWidth: "25%", pulse: true };
-  return { level: "critical", label: `${Math.round(days)}d`, color: "text-red-700", bg: "bg-red-700", barWidth: "10%", pulse: true };
+  if (mins < 30) return { level: "fresh", label: `${Math.floor(mins)}m`, color: "text-success", bg: "bg-success/50", barWidth: "100%", pulse: false };
+  if (hours < 2) return { level: "warm", label: `${Math.floor(mins)}m`, color: "text-warning-foreground", bg: "bg-warning/40", barWidth: "75%", pulse: false };
+  if (hours < 6) return { level: "cooling", label: `${Math.round(hours)}h`, color: "text-warning-foreground", bg: "bg-warning", barWidth: "50%", pulse: false };
+  if (hours < 24) return { level: "urgent", label: `${Math.round(hours)}h`, color: "text-destructive", bg: "bg-destructive/50", barWidth: "25%", pulse: true };
+  return { level: "critical", label: `${Math.round(days)}d`, color: "text-destructive", bg: "bg-destructive/60", barWidth: "10%", pulse: true };
 }
 
 function UrgencyBadge({ createdAt }: { createdAt: string }) {
@@ -73,6 +76,10 @@ interface BucketLead {
   last_ai_summary: string | null;
   last_ai_disposition: string | null;
   last_ai_conversion_pct: number | null;
+  ai_called: boolean;
+  ai_queue_status: string | null;
+  ai_not_called_reason: string | null;
+  has_paid_or_submitted_application: boolean;
 }
 
 interface LeadBucketCursor {
@@ -84,6 +91,12 @@ interface Counsellor {
   id: string;
   display_name: string;
 }
+
+type FilterMode = "include" | "exclude";
+type ApplicationFilter = "all" | "none_paid_or_submitted" | "has_paid_or_submitted";
+type BucketSortOrder = "newest" | "oldest";
+type AiCallFilter = "all" | "called" | "not_called";
+type AiCallBreakdown = { called: number; not_called: number };
 
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
@@ -113,10 +126,10 @@ interface SourceChipsProps {
 
 function SourceChips({ breakdown, onPick }: SourceChipsProps) {
   const chips: Array<{ key: string; label: string; count: number; cls: string }> = [
-    { key: "meta_ads", label: "Meta", count: breakdown.meta_ads, cls: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900" },
-    { key: "google_ads", label: "Google", count: breakdown.google_ads, cls: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900" },
-    { key: "website", label: "Website", count: breakdown.website, cls: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900" },
-    { key: "web_chat", label: "Web Chat", count: breakdown.web_chat, cls: "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900" },
+    { key: "meta_ads", label: "Meta", count: breakdown.meta_ads, cls: "bg-info/5 text-info-foreground ring-blue-200 dark:bg-info/90/30 dark:text-info/60 dark:ring-blue-900" },
+    { key: "google_ads", label: "Google", count: breakdown.google_ads, cls: "bg-warning/5 text-warning-foreground ring-amber-200 dark:bg-warning/90/30 dark:text-warning/70 dark:ring-amber-900" },
+    { key: "website", label: "Website", count: breakdown.website, cls: "bg-success/5 text-success ring-emerald-200 dark:bg-success/90/30 dark:text-success/60 dark:ring-emerald-900" },
+    { key: "web_chat", label: "Web Chat", count: breakdown.web_chat, cls: "bg-primary/5 text-primary ring-violet-200 dark:bg-primary/90/30 dark:text-primary/50 dark:ring-violet-900" },
   ];
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
@@ -136,12 +149,47 @@ function SourceChips({ breakdown, onPick }: SourceChipsProps) {
   );
 }
 
+function AiCallChips({
+  breakdown,
+  active,
+  onPick,
+}: {
+  breakdown: AiCallBreakdown;
+  active: AiCallFilter;
+  onPick: (filter: Exclude<AiCallFilter, "all">) => void;
+}) {
+  const chips: Array<{ key: Exclude<AiCallFilter, "all">; label: string; count: number; icon: typeof Bot; cls: string }> = [
+    { key: "called", label: "AI Called", count: breakdown.called, icon: Bot, cls: "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:ring-sky-900" },
+    { key: "not_called", label: "Not Called", count: breakdown.not_called, icon: PhoneOff, cls: "bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-950/30 dark:text-slate-300 dark:ring-slate-900" },
+  ];
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {chips.map((c) => {
+        const Icon = c.icon;
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onPick(c.key); }}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-opacity ${c.cls} ${active === c.key ? "ring-2" : ""} ${c.count === 0 ? "opacity-50" : "hover:opacity-80"}`}
+            title={`${c.label}: ${c.count}`}
+          >
+            <Icon className="h-3 w-3" />
+            <span>{c.label}</span>
+            <span className="font-bold">{c.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function LeadBuckets() {
   const { user, role, profile } = useAuth();
   const { selectedCampusId } = useCampus();
   const { toast } = useToast();
 
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 50;
 
   const [activeBucket, setActiveBucket] = useState<"school" | "college">("college");
   const [schoolFilter, setSchoolFilter] = useState<"all" | "mirai" | "nimt">("all");
@@ -149,14 +197,22 @@ export default function LeadBuckets() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [totalCount, setTotalCount] = useState(0);
   const pageRef = useRef(0);
   const cursorRef = useRef<LeadBucketCursor | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [courseFilterMode, setCourseFilterMode] = useState<FilterMode>("include");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
+  const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("all");
+  const [aiCallFilter, setAiCallFilter] = useState<AiCallFilter>("all");
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [sortOrder, setSortOrder] = useState<BucketSortOrder>("newest");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
   // Server-side facet counts (true totals, independent of the loaded page).
   const [courseFacets, setCourseFacets] = useState<{ name: string; count: number }[]>([]);
@@ -178,6 +234,10 @@ export default function LeadBuckets() {
   const [collegeSources, setCollegeSources] = useState<SourceBreakdown>(emptyBreakdown);
   const [nimtSources, setNimtSources] = useState<SourceBreakdown>(emptyBreakdown);
   const [miraiSources, setMiraiSources] = useState<SourceBreakdown>(emptyBreakdown);
+  const emptyAiBreakdown: AiCallBreakdown = { called: 0, not_called: 0 };
+  const [collegeAiCalls, setCollegeAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
+  const [nimtAiCalls, setNimtAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
+  const [miraiAiCalls, setMiraiAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
 
   // Batched CAHET registration status per lead — populated after each page fetch
   // to avoid per-row cahet_registrations queries on render.
@@ -208,8 +268,12 @@ export default function LeadBuckets() {
     // GROUP BY pass over get_unassigned_leads_bucket(). Replaces the old
     // 15-query fan-out (3 bucket totals + 3×4 source breakdown) that each
     // re-ran the full 6-table join — the primary cause of slow load on mobile.
-    const { data, error } = await supabase.rpc("unassigned_bucket_counts" as any);
+    const [{ data, error }, { data: aiRows, error: aiError }] = await Promise.all([
+      supabase.rpc("unassigned_bucket_counts" as any),
+      supabase.rpc("unassigned_bucket_ai_call_counts" as any),
+    ]);
     if (error) { console.error("Bucket counts error:", error); return; }
+    if (aiError) { console.error("Bucket AI-call counts error:", aiError); }
 
     const rows = (data || []) as { bucket_key: string | null; source_key: string | null; n: number }[];
     const sourceKeys: (keyof SourceBreakdown)[] = ["meta_ads", "google_ads", "website", "web_chat"];
@@ -235,6 +299,21 @@ export default function LeadBuckets() {
     setCollegeSources(next.college);
     setNimtSources(next.nimt);
     setMiraiSources(next.mirai);
+
+    const aiNext: Record<string, AiCallBreakdown> = {
+      college: { ...emptyAiBreakdown },
+      nimt: { ...emptyAiBreakdown },
+      mirai: { ...emptyAiBreakdown },
+    };
+    for (const r of (aiRows || []) as { bucket_key: string | null; ai_called: boolean | null; n: number }[]) {
+      const bk = r.bucket_key;
+      if (!bk || !aiNext[bk]) continue;
+      if (r.ai_called) aiNext[bk].called += Number(r.n);
+      else aiNext[bk].not_called += Number(r.n);
+    }
+    setCollegeAiCalls(aiNext.college);
+    setNimtAiCalls(aiNext.nimt);
+    setMiraiAiCalls(aiNext.mirai);
   };
 
   // Apply the active bucket + course/source/search predicates to a query.
@@ -250,14 +329,36 @@ export default function LeadBuckets() {
       // lands on the school bucket with the initial schoolFilter === "all".
       q = q.eq("school_brand", "nimt");
     }
-    if (courseFilter !== "all") q = q.eq("course_name", courseFilter);
+    if (courseFilter !== "all") {
+      q = courseFilterMode === "exclude"
+        ? q.neq("course_name", courseFilter)
+        : q.eq("course_name", courseFilter);
+    }
     if (sourceFilter !== "all") {
       // web_chat coalesces both the legacy `web_chat` and current
       // `website_chat` source values (mirrors the header chips + facets).
-      q = sourceFilter === "web_chat"
-        ? q.in("source", ["web_chat", "website_chat"])
-        : q.eq("source", sourceFilter);
+      if (sourceFilter === "web_chat") {
+        q = sourceFilterMode === "exclude"
+          ? q.not("source", "in", "(web_chat,website_chat)")
+          : q.in("source", ["web_chat", "website_chat"]);
+      } else {
+        q = sourceFilterMode === "exclude"
+          ? q.neq("source", sourceFilter)
+          : q.eq("source", sourceFilter);
+      }
     }
+    if (applicationFilter === "none_paid_or_submitted") {
+      q = q.eq("has_paid_or_submitted_application", false);
+    } else if (applicationFilter === "has_paid_or_submitted") {
+      q = q.eq("has_paid_or_submitted_application", true);
+    }
+    if (aiCallFilter === "called") {
+      q = q.eq("ai_called", true);
+    } else if (aiCallFilter === "not_called") {
+      q = q.eq("ai_called", false);
+    }
+    if (fromDate) q = q.gte("created_at", `${fromDate}T00:00:00`);
+    if (toDate) q = q.lte("created_at", `${toDate}T23:59:59.999`);
     // Strip PostgREST filter-syntax chars so user input can't break the or().
     const s = debouncedSearch.replace(/[%,()]/g, "").trim();
     if (s) q = q.or(`name.ilike.%${s}%,course_name.ilike.%${s}%`);
@@ -272,25 +373,26 @@ export default function LeadBuckets() {
     const cursor = reset ? null : cursorRef.current;
     if (reset) cursorRef.current = null;
 
-    // planned count only on the first page — re-counting on every scroll is
-    // wasteful; subsequent pages infer hasMore from a full page returning.
+    const ascending = sortOrder === "oldest";
     let query = supabase
       .from("unassigned_leads_bucket" as any)
       .select(
         `id, name, phone, stage, source, course_name, campus_name, created_at,
-         lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
-         last_ai_disposition, last_ai_conversion_pct`,
-        reset ? { count: "planned" } : undefined
+         lead_score, lead_temperature, bucket, jd_category, ai_called, ai_queue_status,
+         ai_not_called_reason, last_ai_summary, last_ai_disposition,
+         last_ai_conversion_pct, has_paid_or_submitted_application`
       )
-      .order("created_at", { ascending: true }) // oldest (most urgent) first
-      .order("id", { ascending: true })
+      .order("created_at", { ascending })
+      .order("id", { ascending })
       .limit(PAGE_SIZE + 1);
     if (cursor) {
-      query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+      query = ascending
+        ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+        : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
     }
     query = applyScope(query);
 
-    const { data, error, count } = await query;
+    const { data, error } = await query;
     if (error) console.error("Lead buckets fetch error:", error);
     const fetched = ((data || []) as any) as BucketLead[];
     const rows = fetched.slice(0, PAGE_SIZE);
@@ -299,7 +401,6 @@ export default function LeadBuckets() {
     if (reset) {
       setLeads(rows);
       setSelectedIds(new Set());
-      setTotalCount(count ?? rows.length);
       setHasMore(fetched.length > PAGE_SIZE);
     } else {
       setLeads((prev) => [...prev, ...rows]);
@@ -326,7 +427,11 @@ export default function LeadBuckets() {
       ? null
       : schoolFilter === "mirai" ? "mirai" : "nimt";
     const { data, error } = await supabase.rpc("unassigned_bucket_facets" as any, {
-      _bucket, _school_brand, _source: sourceFilter, _course: courseFilter,
+      _bucket,
+      _school_brand,
+      _source: sourceFilterMode === "include" ? sourceFilter : "all",
+      _course: courseFilterMode === "include" ? courseFilter : "all",
+      _application_state: applicationFilter,
     });
     if (error) { console.error("Facets fetch error:", error); return; }
     const courses: { name: string; count: number }[] = [];
@@ -376,15 +481,20 @@ export default function LeadBuckets() {
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
   // Facets are linked to the active source/course filter, so refetch when
   // either changes (not just on bucket switch).
-  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, courseFilter, selectedCampusId]);
+  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, applicationFilter, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
-  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, sourceFilter, debouncedSearch, selectedCampusId]);
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, aiCallFilter, fromDate, toDate, sortOrder, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
   // bucket and vice versa, so an unintended carry-over would silently
   // produce an empty list.
-  useEffect(() => { setCourseFilter("all"); setSourceFilter("all"); }, [activeBucket, schoolFilter]);
+  useEffect(() => {
+    setCourseFilter("all");
+    setSourceFilter("all");
+    setCourseFilterMode("include");
+    setSourceFilterMode("include");
+  }, [activeBucket, schoolFilter]);
 
   // Fetch every lead id matching the current scope (beyond the loaded page).
   // Used by "Save filter as list" so the saved list covers all matches, not
@@ -394,14 +504,17 @@ export default function LeadBuckets() {
     const STEP = 1000;
     let cursor: LeadBucketCursor | null = null;
     while (true) {
+      const ascending = sortOrder === "oldest";
       let q = supabase
         .from("unassigned_leads_bucket" as any)
         .select("id, created_at")
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
+        .order("created_at", { ascending })
+        .order("id", { ascending })
         .limit(STEP + 1);
       if (cursor) {
-        q = q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+        q = ascending
+          ? q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+          : q.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
       }
       q = applyScope(q);
       const { data, error } = await q;
@@ -460,6 +573,30 @@ export default function LeadBuckets() {
   // `filtered` aliases it for the selection / quick-pick helpers, which
   // operate on the rows currently loaded into the table.
   const filtered = leads;
+  const loadedFilteredCount = filtered.length;
+  const exactCountOrUnknown = (count: number | null | undefined) => {
+    if (typeof count !== "number") return null;
+    return count >= loadedFilteredCount ? count : null;
+  };
+  const exactFilteredCount = (() => {
+    if (!hasMore) return loadedFilteredCount;
+    if (fromDate || toDate) return null;
+    if (debouncedSearch) return null;
+    if (aiCallFilter !== "all") return null;
+    if (courseFilterMode === "exclude" || sourceFilterMode === "exclude") {
+      return null;
+    }
+    if (courseFilter !== "all") {
+      return exactCountOrUnknown(courseFacets.find((c) => c.name === courseFilter)?.count);
+    }
+    if (sourceFilter !== "all") {
+      return exactCountOrUnknown(sourceFacets.find((s) => s.source === sourceFilter)?.count);
+    }
+    return exactCountOrUnknown(courseAllCount);
+  })();
+  const filteredCountLabel = exactFilteredCount === null ? `${loadedFilteredCount}+` : String(exactFilteredCount);
+  const hasMoreThanLoaded = exactFilteredCount === null ? hasMore : exactFilteredCount > loadedFilteredCount;
+  const allLoadedSelected = filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id));
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -470,10 +607,25 @@ export default function LeadBuckets() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filtered.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map((l) => l.id)));
+    setSelectedIds((prev) => {
+      if (allLoadedSelected) {
+        const next = new Set(prev);
+        filtered.forEach((lead) => next.delete(lead.id));
+        return next;
+      }
+      const next = new Set(prev);
+      filtered.forEach((lead) => next.add(lead.id));
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = async () => {
+    setSelectingAllFiltered(true);
+    const ids = await fetchAllScopedIds();
+    setSelectingAllFiltered(false);
+    setSelectedIds(new Set(ids));
+    if (!ids.length) {
+      toast({ title: "No leads found", description: "No leads match the current filters.", variant: "destructive" });
     }
   };
 
@@ -545,7 +697,13 @@ export default function LeadBuckets() {
       bucket: activeBucket,
       school_filter: schoolFilter,
       source: sourceFilter,
+      source_mode: sourceFilterMode,
       course: courseFilter,
+      course_mode: courseFilterMode,
+      application_filter: applicationFilter,
+      ai_call_filter: aiCallFilter,
+      from_date: fromDate || null,
+      to_date: toDate || null,
       search: search || null,
     };
 
@@ -599,7 +757,7 @@ export default function LeadBuckets() {
       <div className="flex gap-3">
         <Card
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "college" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
+          onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setCourseFilter("all"); setSourceFilter(src); }} />
@@ -613,12 +771,17 @@ export default function LeadBuckets() {
               </div>
               <span className="text-xl font-bold text-foreground">{collegeCount}</span>
             </div>
+            <AiCallChips
+              breakdown={collegeAiCalls}
+              active={activeBucket === "college" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("college"); setSchoolFilter("all"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
 
         <Card
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter !== "mirai" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setCourseFilter("all"); setSourceFilter(src); }} />
@@ -632,25 +795,35 @@ export default function LeadBuckets() {
               </div>
               <span className="text-xl font-bold text-foreground">{nimtSchoolCount}</span>
             </div>
+            <AiCallChips
+              breakdown={nimtAiCalls}
+              active={activeBucket === "school" && schoolFilter !== "mirai" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("school"); setSchoolFilter("nimt"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
 
         <Card
-          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-violet-50/50 dark:bg-violet-950/10" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
+          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-primary/5/50 dark:bg-primary/90/10" : "border-border/60"}`}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
-                <School className="h-5 w-5 text-violet-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 dark:bg-primary/80/30 shrink-0">
+                <School className="h-5 w-5 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">Mirai IB Leads</p>
                 <p className="text-xs text-muted-foreground">Mirai Experiential School</p>
               </div>
-              <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
+              <span className="text-xl font-bold text-primary">{miraiSchoolCount}</span>
             </div>
+            <AiCallChips
+              breakdown={miraiAiCalls}
+              active={activeBucket === "school" && schoolFilter === "mirai" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("school"); setSchoolFilter("mirai"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
       </div>
@@ -677,6 +850,23 @@ export default function LeadBuckets() {
           {selectedIds.size > 0 && (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedIds(new Set())}>
               Clear
+            </Button>
+          )}
+          {hasMoreThanLoaded && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={handleSelectAllFiltered}
+              disabled={selectingAllFiltered}
+            >
+              {selectingAllFiltered ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Selecting…
+                </span>
+              ) : (
+                `Select all ${filteredCountLabel} matching filter`
+              )}
             </Button>
           )}
         </div>
@@ -717,6 +907,16 @@ export default function LeadBuckets() {
           />
         </div>
         <select
+          value={courseFilterMode}
+          onChange={(e) => setCourseFilterMode(e.target.value as FilterMode)}
+          disabled={courseFilter === "all"}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+          title="Course filter mode"
+        >
+          <option value="include">Only course</option>
+          <option value="exclude">Except course</option>
+        </select>
+        <select
           value={courseFilter}
           onChange={(e) => setCourseFilter(e.target.value)}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
@@ -733,11 +933,24 @@ export default function LeadBuckets() {
           </Button>
         )}
         <select
+          value={sourceFilterMode}
+          onChange={(e) => setSourceFilterMode(e.target.value as FilterMode)}
+          disabled={sourceFilter === "all"}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+          title="Source filter mode"
+        >
+          <option value="include">Only source</option>
+          <option value="exclude">Except source</option>
+        </select>
+        <select
           value={sourceFilter}
           // Changing source clears the course filter: the previously selected
           // course may not exist for the new source (e.g. Meta Ads leads carry
           // no course), which would otherwise blank the list.
-          onChange={(e) => { setSourceFilter(e.target.value); setCourseFilter("all"); }}
+          onChange={(e) => {
+            setSourceFilter(e.target.value);
+            if (sourceFilterMode === "include") setCourseFilter("all");
+          }}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by source"
         >
@@ -753,23 +966,83 @@ export default function LeadBuckets() {
             Clear source
           </Button>
         )}
+        <select
+          value={applicationFilter}
+          onChange={(e) => setApplicationFilter(e.target.value as ApplicationFilter)}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          title="Filter by linked application"
+        >
+          <option value="all">All application states</option>
+          <option value="none_paid_or_submitted">No paid/submitted application</option>
+          <option value="has_paid_or_submitted">Has paid/submitted application</option>
+        </select>
+        {applicationFilter !== "all" && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setApplicationFilter("all")}>
+            Clear application
+          </Button>
+        )}
+        <div className="inline-flex rounded-xl border border-input bg-card p-0.5" title="Filter by AI call status">
+          {([
+            ["all", "All AI"] as const,
+            ["called", "AI Called"] as const,
+            ["not_called", "Not Called"] as const,
+          ]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setAiCallFilter(value)}
+              className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                aiCallFilter === value
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <DateRangeFilter
+          preset={datePreset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setDatePreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+          ariaPrefix="Lead created"
+        />
+        {(fromDate || toDate) && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => { setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+            Clear dates
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 px-3 text-xs gap-1.5"
+          onClick={() => setSortOrder((current) => current === "newest" ? "oldest" : "newest")}
+          title="Reverse bucket sort order"
+        >
+          <ArrowUpDown className="h-3.5 w-3.5" />
+          {sortOrder === "newest" ? "Newest first" : "Oldest first"}
+        </Button>
         <Button
           variant="outline"
           size="sm"
           className="h-9 px-3 text-xs gap-1.5 ml-auto"
-          disabled={totalCount === 0}
+          disabled={loadedFilteredCount === 0}
           onClick={() => { setListScope("filtered"); setShowSaveList(true); }}
           title="Save the current filtered view as a reusable list for bulk WhatsApp/email"
         >
           <ListPlus className="h-3.5 w-3.5" />
-          Save filter as list ({totalCount})
+          Save filter as list ({filteredCountLabel})
         </Button>
       </div>
 
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -784,7 +1057,7 @@ export default function LeadBuckets() {
               <tr className="border-b border-border bg-muted/40">
                 <th className="px-4 py-3 text-left w-10">
                   <Checkbox
-                    checked={selectedIds.size === filtered.length && filtered.length > 0}
+                    checked={allLoadedSelected}
                     onCheckedChange={toggleSelectAll}
                   />
                 </th>
@@ -802,8 +1075,8 @@ export default function LeadBuckets() {
               {filtered.map((lead) => {
                 const urgency = getUrgency(lead.created_at);
                 const rowBg = selectedIds.has(lead.id) ? "bg-primary/5"
-                  : urgency.level === "critical" ? "bg-red-50/60 dark:bg-red-950/10"
-                  : urgency.level === "urgent" ? "bg-red-50/30 dark:bg-red-950/5"
+                  : urgency.level === "critical" ? "bg-destructive/5/60 dark:bg-destructive/90/10"
+                  : urgency.level === "urgent" ? "bg-destructive/5/30 dark:bg-destructive/90/5"
                   : "";
                 return (
                 <tr
@@ -820,8 +1093,16 @@ export default function LeadBuckets() {
                     <UrgencyBadge createdAt={lead.created_at} />
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
+                    <div className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
                       {lead.name}
+                      <Badge
+                        variant="outline"
+                        className={`gap-1 text-[10px] ${lead.ai_called ? "border-sky-200 bg-sky-50 text-sky-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}
+                        title={lead.ai_called ? "AI call was initiated" : lead.ai_not_called_reason || "AI call not initiated"}
+                      >
+                        {lead.ai_called ? <Bot className="h-3 w-3" /> : <PhoneOff className="h-3 w-3" />}
+                        {lead.ai_called ? "AI Called" : "Not Called"}
+                      </Badge>
                       <CahetPendingBadge
                         leadId={lead.id}
                         leadName={lead.name}
@@ -829,12 +1110,27 @@ export default function LeadBuckets() {
                         courseName={lead.course_name}
                         registeredOverride={cahetStatusMap.has(lead.id) ? (cahetStatusMap.get(lead.id) ?? null) : undefined}
                       />
-                    </p>
+                      <UpdeledPendingBadge
+                        leadId={lead.id}
+                        leadName={lead.name}
+                        phone={lead.phone}
+                        courseName={lead.course_name}
+                      />
+                    </div>
+                    {!lead.ai_called && lead.ai_not_called_reason && (
+                      <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        <PhoneOff className="h-3 w-3" />
+                        <span className="font-semibold">AI not called:</span>
+                        <span className="truncate max-w-[220px]" title={lead.ai_not_called_reason}>
+                          {lead.ai_not_called_reason}
+                        </span>
+                      </p>
+                    )}
                     {lead.jd_category && (() => {
                       const hint = jdCategoryHint(lead.jd_category);
                       return (
                         <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate max-w-[260px]">
-                          <span className="font-semibold text-orange-700 dark:text-orange-400">JD:</span>{" "}
+                          <span className="font-semibold text-warning-foreground dark:text-warning">JD:</span>{" "}
                           {lead.jd_category}
                           {hint && <span className="text-muted-foreground"> · {hint}</span>}
                         </p>
@@ -895,7 +1191,9 @@ export default function LeadBuckets() {
             </Button>
           ) : null}
           <span>
-            Showing {leads.length} of {totalCount} lead{totalCount === 1 ? "" : "s"}
+            {exactFilteredCount === null
+              ? `Showing ${loadedFilteredCount} loaded lead${loadedFilteredCount === 1 ? "" : "s"}`
+              : `Showing ${loadedFilteredCount} of ${exactFilteredCount} lead${exactFilteredCount === 1 ? "" : "s"}`}
           </span>
         </div>
         </>
@@ -946,7 +1244,7 @@ export default function LeadBuckets() {
             <p className="text-sm text-muted-foreground">
               {listScope === "selected"
                 ? `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved.`
-                : `${totalCount} lead${totalCount === 1 ? "" : "s"} matching the current filters will be saved.`}
+                : `All leads matching the current filters will be fetched and saved.`}
               {" "}List is static — the snapshot won't change as new leads come in.
             </p>
             <div>

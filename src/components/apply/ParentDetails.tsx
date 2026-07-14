@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, User, Users, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { getNationalityOptions, isIndianNationality } from "./countries";
@@ -27,7 +28,7 @@ function SectionCard({
 }: {
   title: string;
   subtitle?: string;
-  icon: any;
+  icon: ComponentType<{ className?: string }>;
   accent: string;
   iconColor: string;
   bg: string;
@@ -61,6 +62,8 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const NATIONALITIES = getNationalityOptions();
 
@@ -76,159 +79,213 @@ const INCOME_OPTIONS = [
 
 const MARITAL_OPTIONS = ["Married", "Single", "Divorced", "Widowed", "Separated"];
 
-const POSITION_OPTIONS = [
+const EMPLOYMENT_STATUS_OPTIONS = [
   "Employed", "Self-Employed", "Business Owner", "Professional",
   "Government Employee", "Homemaker", "Retired", "Other",
 ];
+const educationOptions = EDUCATION_OPTIONS.map((value) => ({ value, label: value }));
+const incomeOptions = INCOME_OPTIONS.map((value) => ({ value, label: value }));
+const maritalOptions = MARITAL_OPTIONS.map((value) => ({ value, label: value }));
+const employmentStatusOptions = EMPLOYMENT_STATUS_OPTIONS.map((value) => ({ value, label: value }));
+const occupationOptions = OCCUPATION_OPTIONS.map((value) => ({ value, label: value }));
+const guardianRelationshipOptions = GUARDIAN_RELATIONSHIPS.map((value) => ({ value, label: value }));
 
-/* ── DOB text input helper ── */
-function DobTextInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <input
-      type="text"
-      placeholder="dd/mm/yy"
-      value={value ? (() => {
-        const d = new Date(value);
-        if (isNaN(d.getTime())) return value;
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yy = String(d.getFullYear()).slice(-2);
-        return `${dd}/${mm}/${yy}`;
-      })() : ''}
-      onChange={e => {
-        let val = e.target.value.replace(/[^\d/]/g, '');
-        const digits = val.replace(/\//g, '');
-        if (digits.length <= 2) val = digits;
-        else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
-        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 6);
-        const parts = val.split('/');
-        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 2) {
-          const year = parseInt(parts[2], 10);
-          const fullYear = year <= 50 ? 2000 + year : 1900 + year;
-          onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
-        } else {
-          onChange(val);
-        }
-      }}
-      maxLength={8}
-      className={inputCls}
-    />
-  );
-}
+type ParentRecord = ApplicationData["father"] | ApplicationData["mother"];
 
 /* ── School Parent Block (comprehensive) ── */
 function SchoolParentBlock({
   title,
   value,
   onChange,
+  showErrors,
 }: {
   title: string;
-  value: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
+  value: ParentRecord;
+  onChange: (v: ParentRecord) => void;
+  showErrors?: boolean;
 }) {
-  const isIndian = isIndianNationality(value.nationality);
+  const nationality = value.nationality || "Indian";
+  const isIndian = isIndianNationality(nationality);
   const set = (field: string, val: string) => onChange({ ...value, [field]: val });
+  const legacyStatus = EMPLOYMENT_STATUS_OPTIONS.includes(value.current_position || "")
+    ? value.current_position || ""
+    : "";
+  const employmentStatus = value.employment_status || legacyStatus;
+  const positionValue = value.position || (legacyStatus ? "" : value.current_position || "");
+  const isHomemaker = employmentStatus === "Homemaker";
+  const missing = {
+    first_name: !value.first_name?.trim(),
+    last_name: !value.last_name?.trim(),
+    nationality: !nationality.trim(),
+    education: !value.education?.trim(),
+    employment_status: !employmentStatus,
+    employer_name: !isHomemaker && !value.employer_name?.trim(),
+    current_position: !isHomemaker && !positionValue.trim(),
+    marital_status: !value.marital_status?.trim(),
+    email: !value.email?.trim() || !EMAIL_RE.test(value.email),
+    phone_mobile: !PHONE_DIGITS_RE.test((value.phone_mobile || value.phone || '').replace(/\D/g, '')),
+  };
+  const today = new Date();
+  const minDob = new Date(today.getFullYear() - 100, 0, 1);
+  const maxDob = new Date(today.getFullYear() - 15, today.getMonth(), today.getDate());
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-5">
         {/* Row 1: First Name, Last Name, DOB */}
+        <TextField
+          label="First Name"
+          required
+          value={value.first_name || ''}
+          onValueChange={(nextValue) => set('first_name', nextValue)}
+          error={showErrors && missing.first_name ? "First name is required." : undefined}
+          inputClassName={inputCls}
+        />
+        <TextField
+          label="Last Name"
+          required
+          value={value.last_name || ''}
+          onValueChange={(nextValue) => set('last_name', nextValue)}
+          error={showErrors && missing.last_name ? "Last name is required." : undefined}
+          inputClassName={inputCls}
+        />
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">First Name *</label>
-          <input value={value.first_name || ''} onChange={e => set('first_name', e.target.value)} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Name *</label>
-          <input value={value.last_name || ''} onChange={e => set('last_name', e.target.value)} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of Birth</label>
-          <DobTextInput value={value.dob || ''} onChange={v => set('dob', v)} />
+          <DatePickerField
+            label="Date of Birth"
+            value={value.dob || ''}
+            onValueChange={v => set('dob', v)}
+            placeholder="Select date of birth"
+            minDate={minDob}
+            maxDate={maxDob}
+            fromYear={minDob.getFullYear()}
+            toYear={maxDob.getFullYear()}
+            defaultMonth={maxDob}
+            triggerClassName={inputCls}
+          />
         </div>
 
         {/* Row 2: Nationality, ID Type + Number */}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality *</label>
-          <select
-            value={value.nationality || 'Indian'}
-            onChange={e => {
-              const nat = e.target.value;
+        <SelectField
+          label="Nationality"
+          required
+          value={nationality}
+          onValueChange={(nat) => {
               onChange({
                 ...value,
                 nationality: nat,
                 id_type: nat === 'Indian' ? 'aadhaar' : 'passport',
                 id_number: '', // reset on nationality change
               });
-            }}
-            className={inputCls}
-          >
-            {NATIONALITIES.map(n => (
-              <option key={n.value} value={n.value}>{n.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="sm:col-span-2">
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            {isIndian ? '🇮🇳 Aadhaar No' : '🛂 Passport No'}
-          </label>
-          <input
-            value={value.id_number || ''}
-            onChange={e => {
+          }}
+          options={NATIONALITIES}
+          error={showErrors && missing.nationality ? "Nationality is required." : undefined}
+          triggerClassName={`${inputCls} ${showErrors && missing.nationality ? invalidCls : ''}`}
+        />
+        <TextField
+          label={isIndian ? '🇮🇳 Aadhaar No' : '🛂 Passport No'}
+          value={value.id_number || ''}
+          onValueChange={(nextValue) => {
               const val = isIndian
-                ? e.target.value.replace(/\D/g, '').slice(0, 12)
-                : e.target.value.toUpperCase().slice(0, 15);
+                ? nextValue.replace(/\D/g, '').slice(0, 12)
+                : nextValue.toUpperCase().slice(0, 15);
               set('id_number', val);
-            }}
-            placeholder={isIndian ? '12-digit Aadhaar number' : 'Passport number'}
-            className={inputCls}
-          />
-        </div>
+          }}
+          placeholder={isIndian ? '12-digit Aadhaar number' : 'Passport number'}
+          containerClassName="sm:col-span-2"
+          inputClassName={inputCls}
+        />
 
-        {/* Row 3: Education, Annual Income, Employer Name */}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Education *</label>
-          <select value={value.education || ''} onChange={e => set('education', e.target.value)} className={inputCls}>
-            <option value="">Select Education</option>
-            {EDUCATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Annual Income</label>
-          <select value={value.annual_income || ''} onChange={e => set('annual_income', e.target.value)} className={inputCls}>
-            <option value="">Select Annual Income</option>
-            {INCOME_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Employer Name *</label>
-          <input value={value.employer_name || ''} onChange={e => set('employer_name', e.target.value)} placeholder="Employer Name" className={inputCls} />
-        </div>
+        {/* Row 3: Education, Marital Status, Email */}
+        <SelectField
+          label="Education"
+          required
+          value={value.education || ''}
+          onValueChange={(nextValue) => set('education', nextValue)}
+          options={educationOptions}
+          placeholder="Select Education"
+          error={showErrors && missing.education ? "Education is required." : undefined}
+          triggerClassName={`${inputCls} ${showErrors && missing.education ? invalidCls : ''}`}
+        />
+        <SelectField
+          label="Marital Status"
+          required
+          value={value.marital_status || ''}
+          onValueChange={(nextValue) => set('marital_status', nextValue)}
+          options={maritalOptions}
+          placeholder="Select Marital Status"
+          error={showErrors && missing.marital_status ? "Marital status is required." : undefined}
+          triggerClassName={`${inputCls} ${showErrors && missing.marital_status ? invalidCls : ''}`}
+        />
+        <TextField
+          label="Email Address"
+          required
+          type="email"
+          value={value.email || ''}
+          onValueChange={(nextValue) => set('email', nextValue)}
+          placeholder="Email Address"
+          error={showErrors && missing.email ? "A valid email address is required." : undefined}
+          inputClassName={inputCls}
+        />
 
-        {/* Row 4: Current Position, Marital Status, Email */}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Current Position *</label>
-          <select value={value.current_position || ''} onChange={e => set('current_position', e.target.value)} className={inputCls}>
-            <option value="">Select Current Position</option>
-            {POSITION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marital Status *</label>
-          <select value={value.marital_status || ''} onChange={e => set('marital_status', e.target.value)} className={inputCls}>
-            <option value="">Select Marital Status</option>
-            {MARITAL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email Address *</label>
-          <input type="email" value={value.email || ''} onChange={e => set('email', e.target.value)} placeholder="Email Address" className={inputCls} />
+        <div className="sm:col-span-3 space-y-3 border-t border-border pt-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Employment Details</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-4 gap-y-5">
+            <SelectField
+              label="Employment Status"
+              required
+              value={employmentStatus}
+              onValueChange={(status) => {
+                  onChange({
+                    ...value,
+                    employment_status: status,
+                    employer_name: status === "Homemaker" ? "" : value.employer_name,
+                    position: status === "Homemaker" ? "" : value.position,
+                    current_position: status === "Homemaker" || legacyStatus ? "" : value.current_position,
+                  });
+              }}
+              options={employmentStatusOptions}
+              placeholder="Select Status"
+              error={showErrors && missing.employment_status ? "Employment status is required." : undefined}
+              triggerClassName={`${inputCls} ${showErrors && missing.employment_status ? invalidCls : ''}`}
+            />
+            {!isHomemaker && (
+              <>
+                <TextField
+                  label="Employer Name"
+                  required
+                  value={value.employer_name || ''}
+                  onValueChange={(nextValue) => set('employer_name', nextValue)}
+                  placeholder="Employer Name"
+                  error={showErrors && missing.employer_name ? "Employer name is required." : undefined}
+                  inputClassName={`${inputCls} ${showErrors && missing.employer_name ? invalidCls : ''}`}
+                />
+                <TextField
+                  label="Position"
+                  required
+                  value={positionValue}
+                  onValueChange={(nextValue) => onChange({ ...value, position: nextValue, current_position: nextValue })}
+                  placeholder="Position"
+                  error={showErrors && missing.current_position ? "Position is required." : undefined}
+                  inputClassName={`${inputCls} ${showErrors && missing.current_position ? invalidCls : ''}`}
+                />
+              </>
+            )}
+            <SelectField
+              label="Annual Income"
+              value={value.annual_income || ''}
+              onValueChange={(nextValue) => set('annual_income', nextValue)}
+              options={incomeOptions}
+              placeholder="Select Annual Income"
+              triggerClassName={inputCls}
+            />
+          </div>
         </div>
 
         {/* Row 5: Phone (Mobile), Phone (Home) */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone Number (Mobile) *</label>
-          <PhoneInput value={value.phone_mobile || value.phone || ''} onChange={v => set('phone_mobile', v)} />
+          <PhoneInput value={value.phone_mobile || value.phone || ''} onChange={v => set('phone_mobile', v)} invalid={showErrors && missing.phone_mobile} />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone Number (Home)</label>
@@ -246,8 +303,8 @@ function SimpleParentBlock({
   required,
   showErrors,
 }: {
-  value: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
+  value: ParentRecord;
+  onChange: (v: ParentRecord) => void;
   /** When true, Name and Phone are mandatory and validated. */
   required?: boolean;
   /** Render inline error messages (only after a failed Save attempt). */
@@ -257,17 +314,15 @@ function SimpleParentBlock({
   const phoneMissing = required && !PHONE_DIGITS_RE.test((value.phone || '').replace(/\D/g, ''));
   const isOtherOccupation = value.occupation === 'Other';
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-          Name {required && <span className="text-destructive">*</span>}
-        </label>
-        <input value={value.name || ''} onChange={e => onChange({ ...value, name: e.target.value })}
-          className={`${inputCls} ${showErrors && nameMissing ? 'border-destructive' : ''}`} />
-        {showErrors && nameMissing && (
-          <p className="mt-1 text-[11px] text-destructive">Name is required.</p>
-        )}
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+      <TextField
+        label="Name"
+        required={required}
+        value={value.name || ''}
+        onValueChange={(nextValue) => onChange({ ...value, name: nextValue })}
+        error={showErrors && nameMissing ? "Name is required." : undefined}
+        inputClassName={inputCls}
+      />
       <div>
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
           Mobile {required && <span className="text-destructive">*</span>}
@@ -275,36 +330,44 @@ function SimpleParentBlock({
         <PhoneInput
           value={value.phone || ''}
           onChange={(phone) => onChange({ ...value, phone })}
+          invalid={showErrors && phoneMissing}
         />
         {showErrors && phoneMissing && (
           <p className="mt-1 text-[11px] text-destructive">A valid 10-digit mobile number is required.</p>
         )}
       </div>
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email (optional)</label>
-        <input type="email" value={value.email || ''} onChange={e => onChange({ ...value, email: e.target.value })} className={inputCls} />
-      </div>
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Occupation</label>
-        <select value={value.occupation || ''}
-          onChange={e => onChange({ ...value, occupation: e.target.value, occupation_other: e.target.value === 'Other' ? (value.occupation_other || '') : '' })}
-          className={inputCls}>
-          <option value="">Select occupation</option>
-          {OCCUPATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
-      </div>
+      <TextField
+        label="Email (optional)"
+        type="email"
+        value={value.email || ''}
+        onValueChange={(nextValue) => onChange({ ...value, email: nextValue })}
+        inputClassName={inputCls}
+      />
+      <SelectField
+        label="Occupation"
+        value={value.occupation || ''}
+        onValueChange={(nextValue) => onChange({ ...value, occupation: nextValue, occupation_other: nextValue === 'Other' ? (value.occupation_other || '') : '' })}
+        options={occupationOptions}
+        placeholder="Select occupation"
+        triggerClassName={inputCls}
+      />
       {isOtherOccupation && (
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Specify occupation</label>
-          <input value={value.occupation_other || ''} onChange={e => onChange({ ...value, occupation_other: e.target.value })}
-            placeholder="e.g. Architect, Chef" className={inputCls} />
-        </div>
+        <TextField
+          label="Specify occupation"
+          value={value.occupation_other || ''}
+          onValueChange={(nextValue) => onChange({ ...value, occupation_other: nextValue })}
+          placeholder="e.g. Architect, Chef"
+          inputClassName={inputCls}
+        />
       )}
-      <div className={isOtherOccupation ? '' : 'sm:col-span-2'}>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Workplace / Employer (optional)</label>
-        <input value={value.employer_name || ''} onChange={e => onChange({ ...value, employer_name: e.target.value })}
-          placeholder="Company, organisation, or self-employed" className={inputCls} />
-      </div>
+      <TextField
+        label="Workplace / Employer (optional)"
+        value={value.employer_name || ''}
+        onValueChange={(nextValue) => onChange({ ...value, employer_name: nextValue })}
+        placeholder="Company, organisation, or self-employed"
+        containerClassName={isOtherOccupation ? '' : 'sm:col-span-2'}
+        inputClassName={inputCls}
+      />
     </div>
   );
 }
@@ -340,74 +403,68 @@ function GuardianBlock({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Name <span className="text-destructive">*</span>
-          </label>
-          <input value={value.name || ''} onChange={e => set({ name: e.target.value })}
-            className={`${inputCls} ${showErrors && nameMissing ? 'border-destructive' : ''}`} />
-          {showErrors && nameMissing && (
-            <p className="mt-1 text-[11px] text-destructive">Guardian name is required.</p>
-          )}
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+        <TextField
+          label="Name"
+          required
+          value={value.name || ''}
+          onValueChange={(nextValue) => set({ name: nextValue })}
+          error={showErrors && nameMissing ? "Guardian name is required." : undefined}
+          inputClassName={inputCls}
+        />
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
             Mobile <span className="text-destructive">*</span>
           </label>
-          <PhoneInput value={value.phone || ''} onChange={(phone) => set({ phone })} />
+          <PhoneInput value={value.phone || ''} onChange={(phone) => set({ phone })} invalid={showErrors && phoneMissing} />
           {showErrors && phoneMissing && (
             <p className="mt-1 text-[11px] text-destructive">A valid 10-digit mobile number is required.</p>
           )}
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Relationship <span className="text-destructive">*</span>
-          </label>
-          <select
-            value={value.relationship || ''}
-            onChange={e => set({ relationship: e.target.value, relationship_other: e.target.value === 'Other' ? (value.relationship_other || '') : undefined })}
-            className={`${inputCls} ${showErrors && relMissing ? 'border-destructive' : ''}`}
-          >
-            <option value="">Select relationship</option>
-            {GUARDIAN_RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          {showErrors && relMissing && value.relationship !== 'Other' && (
-            <p className="mt-1 text-[11px] text-destructive">Relationship is required.</p>
-          )}
-        </div>
+        <SelectField
+          label="Relationship"
+          required
+          value={value.relationship || ''}
+          onValueChange={(nextValue) => set({ relationship: nextValue, relationship_other: nextValue === 'Other' ? (value.relationship_other || '') : undefined })}
+          options={guardianRelationshipOptions}
+          placeholder="Select relationship"
+          error={showErrors && relMissing && value.relationship !== 'Other' ? "Relationship is required." : undefined}
+          triggerClassName={`${inputCls} ${showErrors && relMissing ? invalidCls : ''}`}
+        />
         {value.relationship === 'Other' && (
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-              Specify relationship <span className="text-destructive">*</span>
-            </label>
-            <input value={value.relationship_other || ''} onChange={e => set({ relationship_other: e.target.value })}
-              className={`${inputCls} ${showErrors && relMissing ? 'border-destructive' : ''}`}
-              placeholder="e.g. Step-parent, Legal guardian" />
-            {showErrors && relMissing && (
-              <p className="mt-1 text-[11px] text-destructive">Please specify the relationship.</p>
-            )}
-          </div>
+          <TextField
+            label="Specify relationship"
+            required
+            value={value.relationship_other || ''}
+            onValueChange={(nextValue) => set({ relationship_other: nextValue })}
+            error={showErrors && relMissing ? "Please specify the relationship." : undefined}
+            placeholder="e.g. Step-parent, Legal guardian"
+            inputClassName={inputCls}
+          />
         )}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email (optional)</label>
-          <input type="email" value={value.email || ''} onChange={e => set({ email: e.target.value })} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Occupation (optional)</label>
-          <select value={value.occupation || ''}
-            onChange={e => set({ occupation: e.target.value, occupation_other: e.target.value === 'Other' ? (value.occupation_other || '') : undefined })}
-            className={inputCls}>
-            <option value="">Select occupation</option>
-            {OCCUPATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
+        <TextField
+          label="Email (optional)"
+          type="email"
+          value={value.email || ''}
+          onValueChange={(nextValue) => set({ email: nextValue })}
+          inputClassName={inputCls}
+        />
+        <SelectField
+          label="Occupation (optional)"
+          value={value.occupation || ''}
+          onValueChange={(nextValue) => set({ occupation: nextValue, occupation_other: nextValue === 'Other' ? (value.occupation_other || '') : undefined })}
+          options={occupationOptions}
+          placeholder="Select occupation"
+          triggerClassName={inputCls}
+        />
         {isOtherOccupation && (
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Specify occupation</label>
-            <input value={value.occupation_other || ''} onChange={e => set({ occupation_other: e.target.value })}
-              placeholder="e.g. Architect, Chef" className={inputCls} />
-          </div>
+          <TextField
+            label="Specify occupation"
+            value={value.occupation_other || ''}
+            onValueChange={(nextValue) => set({ occupation_other: nextValue })}
+            placeholder="e.g. Architect, Chef"
+            inputClassName={inputCls}
+          />
         )}
       </div>
 
@@ -415,35 +472,48 @@ function GuardianBlock({
         <p className="text-xs font-semibold text-foreground uppercase tracking-wide">
           Guardian Address <span className="text-destructive">*</span>
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address Line <span className="text-destructive">*</span></label>
-            <input value={addr.line1 || ''} onChange={e => setAddr({ line1: e.target.value })}
-              className={`${inputCls} ${showErrors && addrMissing.line1 ? 'border-destructive' : ''}`} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">City <span className="text-destructive">*</span></label>
-            <input value={addr.city || ''} onChange={e => setAddr({ city: e.target.value })}
-              className={`${inputCls} ${showErrors && addrMissing.city ? 'border-destructive' : ''}`} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">State <span className="text-destructive">*</span></label>
-            <input value={addr.state || ''} onChange={e => setAddr({ state: e.target.value })}
-              className={`${inputCls} ${showErrors && addrMissing.state ? 'border-destructive' : ''}`} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Country <span className="text-destructive">*</span></label>
-            <input value={addr.country || 'India'} onChange={e => setAddr({ country: e.target.value })}
-              className={`${inputCls} ${showErrors && addrMissing.country ? 'border-destructive' : ''}`} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIN Code <span className="text-destructive">*</span></label>
-            <input value={addr.pin_code || ''} onChange={e => setAddr({ pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) })}
-              className={`${inputCls} ${showErrors && addrMissing.pin ? 'border-destructive' : ''}`} />
-            {showErrors && addrMissing.pin && (
-              <p className="mt-1 text-[11px] text-destructive">Enter a valid 6-digit PIN code.</p>
-            )}
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+          <TextField
+            label="Address Line"
+            required
+            value={addr.line1 || ''}
+            onValueChange={(nextValue) => setAddr({ line1: nextValue })}
+            error={showErrors && addrMissing.line1 ? "Address line is required." : undefined}
+            containerClassName="sm:col-span-2"
+            inputClassName={inputCls}
+          />
+          <TextField
+            label="City"
+            required
+            value={addr.city || ''}
+            onValueChange={(nextValue) => setAddr({ city: nextValue })}
+            error={showErrors && addrMissing.city ? "City is required." : undefined}
+            inputClassName={inputCls}
+          />
+          <TextField
+            label="State"
+            required
+            value={addr.state || ''}
+            onValueChange={(nextValue) => setAddr({ state: nextValue })}
+            error={showErrors && addrMissing.state ? "State is required." : undefined}
+            inputClassName={inputCls}
+          />
+          <TextField
+            label="Country"
+            required
+            value={addr.country || 'India'}
+            onValueChange={(nextValue) => setAddr({ country: nextValue })}
+            error={showErrors && addrMissing.country ? "Country is required." : undefined}
+            inputClassName={inputCls}
+          />
+          <TextField
+            label="PIN Code"
+            required
+            value={addr.pin_code || ''}
+            onValueChange={(nextValue) => setAddr({ pin_code: nextValue.replace(/\D/g, '').slice(0, 6) })}
+            error={showErrors && addrMissing.pin ? "Enter a valid 6-digit PIN code." : undefined}
+            inputClassName={inputCls}
+          />
         </div>
       </div>
     </div>
@@ -466,9 +536,31 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
   const [guardianOn, setGuardianOn] = useState(guardianHasData);
 
   const validPhone = (p?: string) => PHONE_DIGITS_RE.test((p || '').replace(/\D/g, ''));
+  const schoolParentOk = (p: Record<string, string>) => {
+    const legacyStatus = EMPLOYMENT_STATUS_OPTIONS.includes(p.current_position || "")
+      ? p.current_position || ""
+      : "";
+    const employmentStatus = p.employment_status || legacyStatus;
+    const isHomemaker = employmentStatus === "Homemaker";
+    const positionValue = p.position || (legacyStatus ? "" : p.current_position || "");
+    const nationality = p.nationality || "Indian";
+
+    return !!(
+      p.first_name?.trim()
+      && p.last_name?.trim()
+      && nationality.trim()
+      && p.education?.trim()
+      && employmentStatus
+      && (isHomemaker || p.employer_name?.trim())
+      && (isHomemaker || positionValue.trim())
+      && p.marital_status?.trim()
+      && p.email?.trim()
+      && EMAIL_RE.test(p.email)
+      && validPhone(p.phone_mobile || p.phone)
+    );
+  };
   const parentsOk = isSchool
-    ? !!(father.first_name && father.last_name && validPhone(father.phone_mobile)
-        && mother.first_name && mother.last_name && validPhone(mother.phone_mobile))
+    ? schoolParentOk(father) && schoolParentOk(mother)
     : !!(father.name?.trim() && validPhone(father.phone)
         && mother.name?.trim() && validPhone(mother.phone));
   const guardianOk = !guardianOn || (
@@ -501,20 +593,20 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
         <div className="space-y-6">
           <SectionCard title="Father" icon={User}
-            accent="border-blue-500" iconColor="text-blue-600" bg="bg-blue-50/60">
+            accent="border-info/35" iconColor="text-info-foreground" bg="bg-info/5/60">
             {isSchool ? (
-              <SchoolParentBlock title="" value={data.father as any} onChange={v => onChange({ father: v })} />
+              <SchoolParentBlock title="" value={data.father} onChange={v => onChange({ father: v })} showErrors={showErrors} />
             ) : (
-              <SimpleParentBlock value={data.father as any} onChange={v => onChange({ father: v })} required showErrors={showErrors} />
+              <SimpleParentBlock value={data.father} onChange={v => onChange({ father: v })} required showErrors={showErrors} />
             )}
           </SectionCard>
 
           <SectionCard title="Mother" icon={User}
             accent="border-pink-500" iconColor="text-pink-600" bg="bg-pink-50/60">
             {isSchool ? (
-              <SchoolParentBlock title="" value={data.mother as any} onChange={v => onChange({ mother: v })} />
+              <SchoolParentBlock title="" value={data.mother} onChange={v => onChange({ mother: v })} showErrors={showErrors} />
             ) : (
-              <SimpleParentBlock value={data.mother as any} onChange={v => onChange({ mother: v })} required showErrors={showErrors} />
+              <SimpleParentBlock value={data.mother} onChange={v => onChange({ mother: v })} required showErrors={showErrors} />
             )}
           </SectionCard>
 
@@ -522,9 +614,9 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
             title="Guardian"
             subtitle="Optional — add if a guardian other than parents should also be on record."
             icon={guardianOn ? Users : UserPlus}
-            accent={guardianOn ? "border-violet-500" : "border-border"}
-            iconColor={guardianOn ? "text-violet-600" : "text-muted-foreground"}
-            bg={guardianOn ? "bg-violet-50/60" : "bg-muted/30"}
+            accent={guardianOn ? "border-primary/35" : "border-border"}
+            iconColor={guardianOn ? "text-primary" : "text-muted-foreground"}
+            bg={guardianOn ? "bg-primary/5/60" : "bg-muted/30"}
             headerRight={
               <Switch checked={guardianOn} onCheckedChange={setGuardianOn} aria-label="Toggle guardian section" />
             }
@@ -543,7 +635,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <p className="text-xs text-destructive font-medium">
             {!parentsOk
-              ? "Please fill in the Father's and Mother's name and mobile to continue."
+              ? "Please complete all required Father and Mother fields to continue."
               : "Please complete the Guardian's name, mobile, relationship and address — or toggle the Guardian section off."}
           </p>
         </div>

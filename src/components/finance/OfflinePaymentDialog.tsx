@@ -9,15 +9,19 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
-  { value: "application_fee", label: "Application Fee" },
-  { value: "token_fee",       label: "Token Fee" },
-  { value: "registration_fee",label: "Registration Fee" },
-  { value: "other",           label: "Other Charges" },
+  { value: "application_fee",     label: "Application Fee" },
+  { value: "pre_admission_token", label: "Token Fee (prior to admission)" },
+  { value: "token_fee",           label: "Token Fee" },
+  { value: "registration_fee",    label: "Registration Fee" },
+  { value: "other",               label: "Other Charges" },
 ];
 
 // Payment modes the candidate's offline channel might use. The DB CHECK
@@ -46,17 +50,20 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   leadId: string;
+  applicationId?: string | null;
   defaultType?: string;
   onRecorded?: () => void;
 }
 
-export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, onRecorded }: Props) {
+export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId, defaultType, onRecorded }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
 
   const [type,   setType]   = useState<string>(defaultType || "application_fee");
   const [amount, setAmount] = useState<string>("");
-  const [date,   setDate]   = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const initialDateTime = getCurrentIndiaDateTimeInput();
+  const [date,   setDate]   = useState<string>(initialDateTime.date);
+  const [time,   setTime]   = useState<string>(initialDateTime.time);
   const [mode,   setMode]   = useState<string>("cash");
   const [txnRef, setTxnRef] = useState<string>("");
   const [bank,   setBank]   = useState<string>("");
@@ -65,14 +72,18 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const allowedRole = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  // Owner decision: offline cash recording is cashier (accountant) + super_admin
+  // only — no counsellors, no campus admins, no consultants.
+  const allowedRole = ["super_admin", "accountant"].includes(role || "");
 
   if (!allowedRole) return null;
 
   const reset = () => {
+    const now = getCurrentIndiaDateTimeInput();
     setType(defaultType || "application_fee");
     setAmount("");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(now.date);
+    setTime(now.time);
     setMode("cash");
     setTxnRef("");
     setBank("");
@@ -87,11 +98,6 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
       toast({ title: "Enter a valid amount", variant: "destructive" });
       return;
     }
-    // DB enforces token_fee >= ₹5,000 via chk_lead_payments_token_fee_min
-    if (type === "token_fee" && amt < 5000) {
-      toast({ title: "Token fee must be at least ₹5,000", variant: "destructive" });
-      return;
-    }
     if (mode === "cheque" && !txnRef.trim()) {
       toast({ title: "Cheque / DD number is required", variant: "destructive" });
       return;
@@ -104,6 +110,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     // Pack mode-specific context into notes so the receipt + audit trail
     // captures it (we don't want to grow the schema for every mode).
     const noteBits: string[] = [];
+    if (type === "application_fee" && applicationId) noteBits.push(`Application: ${applicationId}`);
     if (mode === "cheque" && bank) noteBits.push(`Bank: ${bank}`);
     if (mode === "bank_transfer" && bank) noteBits.push(`Bank: ${bank}`);
     if (mode === "upi" && wallet) noteBits.push(`Wallet/App: ${wallet}`);
@@ -137,12 +144,13 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
       amount:          amt,
       payment_mode:    mode,
       transaction_ref: txnRef.trim() || null,
-      payment_date:    `${date}T00:00:00+05:30`,
+      payment_date:    combineIndiaDateTimeInput(date, time),
       status:          "confirmed",
       recorded_by:     profile?.id || null,
       gateway:         "offline",
       notes:           notes || null,
       proof_url:       proofUrl,
+      application_id:   type === "application_fee" ? applicationId || null : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
 
@@ -162,7 +170,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     if (paymentId) {
       const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
       supabase.functions.invoke("notify-event", {
-        body: { event, lead_id: leadId, context: { payment_id: paymentId } },
+        body: { event, lead_id: leadId, context: { payment_id: paymentId, application_id: applicationId || undefined } },
       }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
     }
 
@@ -175,8 +183,6 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     onRecorded?.();
   };
 
-  const inputCls = "w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="max-w-lg">
@@ -188,94 +194,105 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* Type + Amount + Date row */}
+          {/* Type + amount row */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Fee Type</label>
-              <select className={inputCls} value={type} onChange={e => setType(e.target.value)}>
-                {PAY_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Amount (₹)</label>
-              <input
-                className={inputCls}
+            <SelectField
+              value={type}
+              onValueChange={setType}
+              options={PAY_TYPES.map(p => ({ value: p.value, label: p.label }))}
+              label="Fee Type"
+              allowEmpty={false}
+            />
+            <FieldShell label="Amount (₹)">
+              <Input
                 type="number" min="1" step="1" inputMode="numeric"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 autoFocus
               />
-            </div>
+            </FieldShell>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Transaction Date</label>
-              <input className={inputCls} type="date" value={date} onChange={e => setDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
-              <select className={inputCls} value={mode} onChange={e => { setMode(e.target.value); setTxnRef(""); setBank(""); setWallet(""); }}>
-                {MODE_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
-            </div>
+            <FieldShell label="Transaction Date">
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </FieldShell>
+            <FieldShell label="Transaction Time">
+              <Input type="time" value={time} onChange={e => setTime(e.target.value)} />
+            </FieldShell>
           </div>
+
+          <SelectField
+            value={mode}
+            onValueChange={value => { setMode(value); setTxnRef(""); setBank(""); setWallet(""); }}
+            options={MODE_OPTIONS.map(m => ({ value: m.value, label: m.label }))}
+            label="Payment Mode"
+            allowEmpty={false}
+          />
 
           {/* Mode-specific fields */}
           {mode === "cheque" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Cheque / DD Number</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="e.g. 123456" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Bank</label>
-                <select className={inputCls} value={bank} onChange={e => setBank(e.target.value)}>
-                  <option value="">Select Bank</option>
-                  {BANK_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="Cheque / DD Number"
+                placeholder="e.g. 123456"
+              />
+              <SelectField
+                value={bank}
+                onValueChange={setBank}
+                options={[{ value: "", label: "Select Bank" }, ...BANK_OPTIONS.map(b => ({ value: b, label: b }))]}
+                label="Bank"
+                placeholder="Select Bank"
+              />
             </div>
           )}
 
           {mode === "bank_transfer" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">UTR / Reference Number</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="e.g. NEFT123456" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Bank</label>
-                <select className={inputCls} value={bank} onChange={e => setBank(e.target.value)}>
-                  <option value="">Select Bank</option>
-                  {BANK_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="UTR / Reference Number"
+                placeholder="e.g. NEFT123456"
+              />
+              <SelectField
+                value={bank}
+                onValueChange={setBank}
+                options={[{ value: "", label: "Select Bank" }, ...BANK_OPTIONS.map(b => ({ value: b, label: b }))]}
+                label="Bank"
+                placeholder="Select Bank"
+              />
             </div>
           )}
 
           {mode === "upi" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">UPI / Txn Reference</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="UPI ref / txn id" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Wallet / App</label>
-                <select className={inputCls} value={wallet} onChange={e => setWallet(e.target.value)}>
-                  <option value="">Select</option>
-                  {WALLET_OPTIONS.map(w => <option key={w} value={w}>{w}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="UPI / Txn Reference"
+                placeholder="UPI ref / txn id"
+              />
+              <SelectField
+                value={wallet}
+                onValueChange={setWallet}
+                options={[{ value: "", label: "Select" }, ...WALLET_OPTIONS.map(w => ({ value: w, label: w }))]}
+                label="Wallet / App"
+                placeholder="Select"
+              />
             </div>
           )}
 
           {mode === "online" && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Reference / Receipt Number</label>
-              <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="External ref no" />
-            </div>
+            <TextField
+              value={txnRef}
+              onValueChange={setTxnRef}
+              label="Reference / Receipt Number"
+              placeholder="External ref no"
+            />
           )}
 
           {/* Cash needs no extra fields */}
@@ -318,15 +335,12 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
             )}
           </div>
 
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Remarks (optional)</label>
-            <textarea
-              className={`${inputCls} min-h-[60px]`}
-              value={remarks}
-              onChange={e => setRemarks(e.target.value)}
-              placeholder="Internal note for finance / counsellor"
-            />
-          </div>
+          <TextAreaField
+            value={remarks}
+            onValueChange={setRemarks}
+            label="Remarks (optional)"
+            placeholder="Internal note for finance / counsellor"
+          />
 
           <p className="text-[11px] text-muted-foreground">
             Marking this confirmed will trigger receipt-number allocation, fee-ledger credit, and applicant + finance notifications.

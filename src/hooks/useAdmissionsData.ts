@@ -26,26 +26,21 @@ export function useMyProfileId() {
   });
 }
 
-export interface AdmissionsStats {
-  new_leads: number;
-  today_leads: number;
-  app_started: number;
-  app_submitted: number;
-  admitted: number;
-  fee_paid: number;
-  offer_sent: number;
-  token_paid: number;
-  pre_admitted: number;
-  pending_followups: number;
-  today_followups: number;
-  overdue_followups: number;
-  upcoming_visits: number;
-  completed_visits: number;
-  post_visit_pending_lead_ids: string[];
+export interface AdmissionsFollowupCounts {
+  pending: number;
+  overdue: number;
+  today: number;
+  upcoming: number;
 }
 
 export interface AdmissionsOverviewPayload {
   stage_counts: Record<string, number>;
+  new_lead_assignment_counts: {
+    assigned: number;
+    unassigned: number;
+    unassigned_ai_called: number;
+    unassigned_not_ai_called: number;
+  };
   interested_lead_ids: string[];
   visit_action_counts: {
     missedCallbacks: number;
@@ -70,23 +65,41 @@ export interface AdmissionsOverviewPayload {
 }
 
 /**
- * Cached wrapper around the admissions_stats RPC. Survives Admissions →
- * LeadDetail → Admissions navigation without a DB round trip.
+ * Counts for the Admissions follow-up alert/card. Uses the same RPC as the
+ * destination page so the dashboard numbers match the Today/Overdue tabs.
  */
-export function useAdmissionsStats(opts: {
+export function useAdmissionsFollowupCounts(opts: {
   counsellorId: string | null;
-  campusId: string | null;
+  enabled?: boolean;
 }) {
-  const { counsellorId, campusId } = opts;
-  return useQuery<AdmissionsStats>({
-    queryKey: ["admissions-stats", counsellorId, campusId],
+  const { counsellorId, enabled = true } = opts;
+  return useQuery<AdmissionsFollowupCounts>({
+    queryKey: ["admissions-followup-counts", counsellorId],
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: 30_000,
+    refetchOnMount: "always",
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("admissions_stats" as any, {
-        p_counsellor_id: counsellorId,
-        p_campus_id: campusId,
+      const { data, error } = await supabase.rpc("pending_followups_payload" as any, {
+        p_tab: "overdue",
+        p_scope_counsellor_id: counsellorId,
+        p_scope_unassigned: false,
+        p_page: 0,
+        p_page_size: 1,
       });
       if (error) throw error;
-      return (data || {}) as AdmissionsStats;
+
+      const counts = ((data as any)?.counts ?? {}) as Record<string, unknown>;
+      const overdue = Number(counts.overdue ?? 0);
+      const today = Number(counts.today ?? 0);
+      const upcoming = Number(counts.upcoming ?? 0);
+
+      return {
+        pending: overdue + today + upcoming,
+        overdue,
+        today,
+        upcoming,
+      };
     },
   });
 }
@@ -111,6 +124,12 @@ export function useAdmissionsOverview(opts: {
       if (error) throw error;
       return (data || {
         stage_counts: {},
+        new_lead_assignment_counts: {
+          assigned: 0,
+          unassigned: 0,
+          unassigned_ai_called: 0,
+          unassigned_not_ai_called: 0,
+        },
         interested_lead_ids: [],
         visit_action_counts: {
           missedCallbacks: 0,

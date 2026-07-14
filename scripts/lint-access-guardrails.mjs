@@ -22,6 +22,11 @@
  *      duplicate policy / constraint names.
  *      (Bit us: whatsapp_inbound_events on 2026-06-07.)
  *
+ *   E. Duplicate migration version prefixes. Supabase records only the numeric
+ *      version, so two files named 20260619110000_*.sql are not two migrations;
+ *      one recorded version can make the other file look already applied.
+ *      (Bit us: branch-only db push on 2026-06-13.)
+ *
  * Each rule supports an inline `lint-allow: <reason>` override:
  *   - SQL:  `-- lint-allow: <reason>` on the same line or the line above
  *   - TS:   `// lint-allow: <reason>` on the same line or the line above
@@ -296,6 +301,11 @@ async function ruleD(violations) {
       if (isAllowed(lines, idx)) continue;
 
       const prefixWindow = text.slice(Math.max(0, m.index - 1600), m.index);
+      const hasDrop =
+        /drop\s+constraint\s+if\s+exists/i.test(prefixWindow) &&
+        new RegExp(`\\b${escapeRegex(constraintName)}\\b`, "i").test(prefixWindow);
+      if (hasDrop) continue;
+
       const hasGuard =
         /\bpg_constraint\b/i.test(prefixWindow) &&
         new RegExp(`\\b${escapeRegex(constraintName)}\\b`, "i").test(prefixWindow);
@@ -310,6 +320,41 @@ async function ruleD(violations) {
           `If this migration partially applies in production before schema_migrations records it, ` +
           `the next db push will fail with SQLSTATE 42P07. Guard it in a DO block, ` +
           `or add 'lint-allow: <reason>' if the statement is intentionally one-shot.`,
+      });
+    }
+  }
+}
+
+// ---------- rule E: migration version prefixes must be unique ---------------
+
+async function ruleE(violations) {
+  const migrationsDir = join(REPO_ROOT, "supabase", "migrations");
+  const files = await walk(migrationsDir, (p) => p.endsWith(".sql"));
+  const byVersion = new Map();
+
+  for (const f of files) {
+    const version = migrationVersion(f);
+    if (!version) continue;
+    const rows = byVersion.get(version) || [];
+    rows.push(f);
+    byVersion.set(version, rows);
+  }
+
+  for (const [version, rows] of byVersion.entries()) {
+    if (rows.length <= 1) continue;
+    rows.sort();
+    for (const f of rows) {
+      const { lines } = await readLines(f);
+      if (isAllowed(lines, 0)) continue;
+      violations.push({
+        file: relative(REPO_ROOT, f),
+        line: 1,
+        rule: "E:migration-version-duplicate",
+        message:
+          `Migration version '${version}' is used by ${rows.length} files: ` +
+          `${rows.map((row) => relative(REPO_ROOT, row)).join(", ")}. ` +
+          `Supabase tracks only the numeric version, so later files can be skipped as already applied. ` +
+          `Rename each migration to a unique timestamp, or add 'lint-allow: <reason>' after a deliberate history repair.`,
       });
     }
   }
@@ -337,6 +382,7 @@ function violationKey(v) {
   await ruleB(violations);
   await ruleC(violations);
   await ruleD(violations);
+  await ruleE(violations);
 
   // Stable sort: file then line.
   violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);

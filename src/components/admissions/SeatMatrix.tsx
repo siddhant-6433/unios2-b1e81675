@@ -54,20 +54,20 @@ export function SeatMatrix() {
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="h-5 w-5 animate-spin text-primary" />
       </div>
     );
   }
 
   const fillPct = (admitted: number, total: number) => (total > 0 ? Math.round((admitted / total) * 100) : 0);
   const fillColor = (pct: number) =>
-    pct >= 95 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : pct >= 50 ? "bg-primary" : "bg-primary/60";
+    pct >= 95 ? "bg-destructive/50" : pct >= 80 ? "bg-warning/50" : pct >= 50 ? "bg-primary" : "bg-primary/60";
   const fillBadge = (pct: number) =>
     pct >= 95
-      ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+      ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
       : pct >= 80
-        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-        : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
+        ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
+        : "bg-success/10 text-success dark:bg-success/80/30 dark:text-success";
 
   const schoolAdmitted = schoolRows.reduce((s, r) => s + r.admitted, 0);
 
@@ -75,35 +75,50 @@ export function SeatMatrix() {
     <div className="space-y-4">
       {/* Summary cards — college seats only */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "0ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-foreground">{totals.seats}</p>
-            <p className="text-xs text-muted-foreground">College Seats</p>
+            <p className="text-xs font-medium text-muted-foreground">College Seats</p>
+            <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{totals.seats}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "60ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-primary">{totals.admitted}</p>
-            <p className="text-xs text-muted-foreground">College Admitted</p>
+            <p className="text-xs font-medium text-muted-foreground">College Admitted</p>
+            <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{totals.admitted}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "120ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-emerald-600">{totals.available}</p>
-            <p className="text-xs text-muted-foreground">Available</p>
+            <p className="text-xs font-medium text-muted-foreground">Available</p>
+            <p className="text-2xl font-bold text-success mt-2 tabular-nums">{totals.available}</p>
           </CardContent>
         </Card>
-        <Card className="border-border/60 shadow-none">
+        <Card
+          className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+          style={{ animationDelay: "180ms" }}
+        >
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-amber-600">{totals.pipeline}</p>
-            <p className="text-xs text-muted-foreground">In Pipeline</p>
+            <p className="text-xs font-medium text-muted-foreground">In Pipeline</p>
+            <p className="text-2xl font-bold text-warning-foreground mt-2 tabular-nums">{totals.pipeline}</p>
           </CardContent>
         </Card>
         {schoolRows.length > 0 && (
-          <Card className="border-border/60 shadow-none border-violet-200 dark:border-violet-800">
+          <Card
+            className="border-border/60 shadow-none border-primary/20 dark:border-primary/50 hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard animate-rs-slide-up"
+            style={{ animationDelay: "240ms" }}
+          >
             <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-violet-600">{schoolAdmitted}</p>
-              <p className="text-xs text-muted-foreground">School Enrolled</p>
+              <p className="text-xs font-medium text-muted-foreground">School Enrolled</p>
+              <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{schoolAdmitted}</p>
             </CardContent>
           </Card>
         )}
@@ -158,7 +173,7 @@ export function SeatMatrix() {
                     <td className="px-4 py-3 text-center font-semibold text-foreground">{row.total_seats || "—"}</td>
                     <td className="px-4 py-3 text-center font-semibold text-primary">{row.admitted}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`font-semibold ${row.available <= 5 && row.total_seats > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                      <span className={`font-semibold ${row.available <= 5 && row.total_seats > 0 ? "text-destructive" : "text-success"}`}>
                         {row.total_seats > 0 ? row.available : "—"}
                       </span>
                     </td>
@@ -172,7 +187,7 @@ export function SeatMatrix() {
                           <Badge className={`text-[10px] font-semibold border-0 min-w-[40px] justify-center ${fillBadge(pct)}`}>
                             {pct}%
                           </Badge>
-                          {pct >= 95 && <AlertTriangle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
+                          {pct >= 95 && <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />}
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">No intake set</span>
@@ -194,7 +209,7 @@ export function SeatMatrix() {
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-center text-foreground">{totals.seats}</td>
                   <td className="px-4 py-3 text-center text-primary">{totals.admitted}</td>
-                  <td className="px-4 py-3 text-center text-emerald-600">{totals.available}</td>
+                  <td className="px-4 py-3 text-center text-success">{totals.available}</td>
                   <td className="px-4 py-3 text-center text-muted-foreground">{totals.pipeline}</td>
                   <td className="px-4 py-3">
                     <Badge className={`text-[10px] font-semibold border-0 ${fillBadge(fillPct(totals.admitted, totals.seats))}`}>
@@ -213,7 +228,7 @@ export function SeatMatrix() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">School Admissions</h3>
-            <Badge className="bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 border-0 text-[10px]">
+            <Badge className="bg-primary/10 text-primary dark:bg-primary/80/30 dark:text-primary/50 border-0 text-[10px]">
               {filteredSchool.reduce((s, r) => s + r.admitted, 0)} enrolled
             </Badge>
           </div>
@@ -221,7 +236,7 @@ export function SeatMatrix() {
             <CardContent className="p-0">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-violet-50/50 dark:bg-violet-950/10">
+                  <tr className="border-b border-border bg-primary/5/50 dark:bg-primary/90/10">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Programme / Grade</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campus</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Enrolled</th>
@@ -236,7 +251,7 @@ export function SeatMatrix() {
                         <div className="text-xs text-muted-foreground">{row.department_name}</div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{row.campus_name}</td>
-                      <td className="px-4 py-3 text-center font-semibold text-violet-600">{row.admitted}</td>
+                      <td className="px-4 py-3 text-center font-semibold text-primary">{row.admitted}</td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{row.pipeline_leads}</td>
                     </tr>
                   ))}
@@ -245,7 +260,7 @@ export function SeatMatrix() {
                   <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                     <td className="px-4 py-3 text-foreground">Total ({filteredSchool.length} programmes)</td>
                     <td className="px-4 py-3" />
-                    <td className="px-4 py-3 text-center text-violet-600">
+                    <td className="px-4 py-3 text-center text-primary">
                       {filteredSchool.reduce((s, r) => s + r.admitted, 0)}
                     </td>
                     <td className="px-4 py-3 text-center text-muted-foreground">

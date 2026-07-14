@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,9 +10,11 @@ import {
   Loader2, Phone, MessageSquare, CalendarCheck, MapPin, UserCheck,
   Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp,
   Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown,
-  ExternalLink, CalendarDays,
+  ExternalLink, CalendarDays, History,
 } from "lucide-react";
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
+import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
+import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 interface CounsellorStats {
   counsellor_id: string;
@@ -89,15 +92,15 @@ const DISPOSITION_LABELS: Record<string, string> = {
 };
 
 const DISPOSITION_COLORS: Record<string, string> = {
-  interested: "bg-emerald-100 text-emerald-700",
-  not_interested: "bg-red-100 text-red-700",
+  interested: "bg-success/10 text-success",
+  not_interested: "bg-destructive/10 text-destructive",
   ineligible: "bg-gray-100 text-gray-600",
-  not_answered: "bg-amber-100 text-amber-700",
-  call_back: "bg-blue-100 text-blue-700",
+  not_answered: "bg-warning/10 text-warning-foreground",
+  call_back: "bg-info/10 text-info-foreground",
   wrong_number: "bg-pink-100 text-pink-700",
-  do_not_contact: "bg-red-200 text-red-800",
-  voicemail: "bg-purple-100 text-purple-700",
-  busy: "bg-orange-100 text-orange-700",
+  do_not_contact: "bg-destructive/15 text-destructive",
+  voicemail: "bg-primary/10 text-primary",
+  busy: "bg-warning/10 text-warning-foreground",
 };
 
 type BreakdownSortCol = "counsellor_name" | "total" | "new_lead" | "called" | "not_called"
@@ -190,9 +193,9 @@ function FeedbackSummary() {
                 <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-muted-foreground uppercase">Counsellor</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Avg Rating</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Responses</th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-emerald-600 uppercase">5-Star</th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-blue-600 uppercase">4-Star</th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-red-600 uppercase">Low (1-2)</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-success uppercase">5-Star</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-info-foreground uppercase">4-Star</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-destructive uppercase">Low (1-2)</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Pending</th>
               </tr>
             </thead>
@@ -203,7 +206,7 @@ function FeedbackSummary() {
                   <td className="px-3 py-2.5 text-center">
                     {f.avg_rating ? (
                       <span className={`text-xs font-bold ${
-                        f.avg_rating >= 4 ? "text-emerald-600" : f.avg_rating >= 3 ? "text-amber-600" : "text-red-600"
+                        f.avg_rating >= 4 ? "text-success" : f.avg_rating >= 3 ? "text-warning-foreground" : "text-destructive"
                       }`}>
                         {f.avg_rating}/5
                       </span>
@@ -212,17 +215,17 @@ function FeedbackSummary() {
                   <td className="px-3 py-2.5 text-center text-xs">{f.total_responses}</td>
                   <td className="px-3 py-2.5 text-center">
                     {f.five_star > 0 ? (
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{f.five_star}</span>
+                      <span className="text-[10px] font-bold text-success bg-success/10 rounded-full px-1.5 py-0.5">{f.five_star}</span>
                     ) : <span className="text-[10px] text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     {f.four_star > 0 ? (
-                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{f.four_star}</span>
+                      <span className="text-[10px] font-bold text-info-foreground bg-info/10 rounded-full px-1.5 py-0.5">{f.four_star}</span>
                     ) : <span className="text-[10px] text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     {f.low_rating > 0 ? (
-                      <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{f.low_rating}</span>
+                      <span className="text-[10px] font-bold text-destructive bg-destructive/10 rounded-full px-1.5 py-0.5">{f.low_rating}</span>
                     ) : <span className="text-[10px] text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">{f.pending || 0}</td>
@@ -265,7 +268,7 @@ function PostVisitPipeline() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{totalPending} pending follow-ups</span>
           {totalVisited > 0 && (
-            <span className={`font-medium ${totalFollowed / totalVisited >= 0.8 ? "text-emerald-600" : "text-amber-600"}`}>
+            <span className={`font-medium ${totalFollowed / totalVisited >= 0.8 ? "text-success" : "text-warning-foreground"}`}>
               {Math.round((totalFollowed / totalVisited) * 100)}% follow-up rate (7d)
             </span>
           )}
@@ -279,7 +282,7 @@ function PostVisitPipeline() {
                 <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-muted-foreground uppercase">Counsellor</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Visited (7d)</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Followed Up</th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-red-600 uppercase">Pending</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-destructive uppercase">Pending</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">F/U Rate</th>
                 <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Avg Wait</th>
               </tr>
@@ -291,18 +294,18 @@ function PostVisitPipeline() {
                   <tr key={c.counsellor_id} className="border-b border-border/40 hover:bg-muted/20">
                     <td className="px-4 py-2.5 font-medium text-foreground text-xs">{c.counsellor_name}</td>
                     <td className="px-3 py-2.5 text-center text-xs">{c.visited_7d}</td>
-                    <td className="px-3 py-2.5 text-center text-xs text-emerald-600 font-medium">{c.followed_up_7d}</td>
+                    <td className="px-3 py-2.5 text-center text-xs text-success font-medium">{c.followed_up_7d}</td>
                     <td className="px-3 py-2.5 text-center">
                       {Number(c.pending_total) > 0 ? (
-                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-red-100 text-red-700">
+                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-destructive/10 text-destructive">
                           {c.pending_total}
                         </span>
                       ) : (
-                        <span className="text-xs text-green-600">0</span>
+                        <span className="text-xs text-success">0</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`text-[10px] font-bold ${rate >= 80 ? "text-emerald-600" : rate >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                      <span className={`text-[10px] font-bold ${rate >= 80 ? "text-success" : rate >= 50 ? "text-warning-foreground" : "text-destructive"}`}>
                         {rate}%
                       </span>
                     </td>
@@ -326,7 +329,7 @@ const CounsellorDashboard = () => {
   const [stats, setStats] = useState<CounsellorStats[]>([]);
   const [overdue, setOverdue] = useState<OverdueFollowup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling" | "funnel">("leaderboard");
+  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling" | "assignments" | "funnel">("leaderboard");
   const [activityData, setActivityData] = useState<any[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [callingData, setCallingData] = useState<any[]>([]);
@@ -817,16 +820,16 @@ const CounsellorDashboard = () => {
       : overdue.filter(f => f.counsellor_id === overdueFilter);
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   const summaryCards = [
-    { label: "Total Calls", value: totals.calls, icon: Phone, color: "bg-blue-100 dark:bg-blue-900/30", iconColor: "text-blue-600" },
-    { label: "WhatsApps Sent", value: totals.whatsapps, icon: MessageSquare, color: "bg-green-100 dark:bg-green-900/30", iconColor: "text-green-600" },
-    { label: "Follow-ups Done", value: totals.followups, icon: CalendarCheck, color: "bg-orange-100 dark:bg-orange-900/30", iconColor: "text-orange-600" },
-    { label: "Visits Scheduled", value: totals.visits, icon: MapPin, color: "bg-purple-100 dark:bg-purple-900/30", iconColor: "text-purple-600" },
-    { label: "Conversions", value: totals.conversions, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
-    { label: "Overdue Follow-ups", value: totals.overdue, icon: AlertTriangle, color: totals.overdue > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: totals.overdue > 0 ? "text-red-600" : "text-muted-foreground" },
+    { label: "Total Calls", value: totals.calls, icon: Phone, color: "bg-info/10 dark:bg-info/80/30", iconColor: "text-info-foreground" },
+    { label: "WhatsApps Sent", value: totals.whatsapps, icon: MessageSquare, color: "bg-success/10 dark:bg-success/80/30", iconColor: "text-success" },
+    { label: "Follow-ups Done", value: totals.followups, icon: CalendarCheck, color: "bg-warning/10 dark:bg-warning/80/30", iconColor: "text-warning-foreground" },
+    { label: "Visits Scheduled", value: totals.visits, icon: MapPin, color: "bg-primary/10 dark:bg-primary/80/30", iconColor: "text-primary" },
+    { label: "Conversions", value: totals.conversions, icon: UserCheck, color: "bg-success/10 dark:bg-success/80/30", iconColor: "text-success" },
+    { label: "Overdue Follow-ups", value: totals.overdue, icon: AlertTriangle, color: totals.overdue > 0 ? "bg-destructive/10 dark:bg-destructive/80/30" : "bg-muted", iconColor: totals.overdue > 0 ? "text-destructive" : "text-muted-foreground" },
   ];
 
   // Sortable column header renderer
@@ -871,7 +874,10 @@ const CounsellorDashboard = () => {
         ))}
       </div>
 
-      <CahetSprintLeaderboard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CahetSprintLeaderboard />
+        <UpdeledSprintLeaderboard />
+      </div>
 
       {/* Tab toggle */}
       <div className="flex items-center gap-3 overflow-x-auto">
@@ -894,7 +900,7 @@ const CounsellorDashboard = () => {
           >
             Overdue Follow-ups
             {overdue.length > 0 && (
-              <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "overdue" ? "bg-white/20 text-primary-foreground" : "bg-red-500 text-white"}`}>
+              <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "overdue" ? "bg-white/20 text-primary-foreground" : "bg-destructive/50 text-white"}`}>
                 {overdue.length}
               </span>
             )}
@@ -905,7 +911,7 @@ const CounsellorDashboard = () => {
           >
             TAT Defaults
             {tatDefaults.filter(d => d.total_defaults > 0).length > 0 && (
-              <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "tat-defaults" ? "bg-white/20 text-primary-foreground" : "bg-red-500 text-white"}`}>
+              <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "tat-defaults" ? "bg-white/20 text-primary-foreground" : "bg-destructive/50 text-white"}`}>
                 {tatDefaults.reduce((s: number, d: any) => s + d.total_defaults, 0)}
               </span>
             )}
@@ -921,6 +927,13 @@ const CounsellorDashboard = () => {
             className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "calling" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Lead Calling
+          </button>
+          <button
+            onClick={() => setTab("assignments")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "assignments" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <History className="h-3.5 w-3.5" />
+            Assignments
           </button>
           <button
             onClick={() => setTab("funnel")}
@@ -971,14 +984,14 @@ const CounsellorDashboard = () => {
                       Dialer %
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversions</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-violet-600 uppercase tracking-wide">Apps</th>
-                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-orange-600 uppercase tracking-wide" title="New leads not contacted within SLA">New Due</th>
-                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-amber-600 uppercase tracking-wide" title="Overdue follow-ups">F/U Due</th>
-                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-blue-600 uppercase tracking-wide" title="Application stage check-ins overdue">Check-ins</th>
-                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-red-600 uppercase tracking-wide" title="Total TAT defaults">Defaults</th>
-                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-emerald-600 uppercase">+</th>
-                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-red-600 uppercase">-</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-blue-600 uppercase tracking-wide">Today</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-primary uppercase tracking-wide">Apps</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-warning-foreground uppercase tracking-wide" title="New leads not contacted within SLA">New Due</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-warning-foreground uppercase tracking-wide" title="Overdue follow-ups">F/U Due</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-info-foreground uppercase tracking-wide" title="Application stage check-ins overdue">Check-ins</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-destructive uppercase tracking-wide" title="Total TAT defaults">Defaults</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-success uppercase">+</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-destructive uppercase">-</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-info-foreground uppercase tracking-wide">Today</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">All Time</th>
                   </tr>
                 </thead>
@@ -988,9 +1001,9 @@ const CounsellorDashboard = () => {
                     return (
                     <tr key={s.counsellor_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 text-center">
-                        {i === 0 ? <Trophy className="h-4 w-4 text-amber-500 mx-auto" /> :
+                        {i === 0 ? <Trophy className="h-4 w-4 text-warning mx-auto" /> :
                          i === 1 ? <Trophy className="h-4 w-4 text-gray-400 mx-auto" /> :
-                         i === 2 ? <Trophy className="h-4 w-4 text-amber-700 mx-auto" /> :
+                         i === 2 ? <Trophy className="h-4 w-4 text-warning-foreground mx-auto" /> :
                          <span className="text-muted-foreground text-xs">{i + 1}</span>}
                       </td>
                       <td className="px-4 py-3 font-medium text-foreground">
@@ -1003,9 +1016,9 @@ const CounsellorDashboard = () => {
                           <span className="text-[10px] text-muted-foreground/60">—</span>
                         ) : (
                           <span className={`inline-flex h-5 min-w-[34px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
-                            s.dialer_usage_pct >= 70 ? "bg-emerald-100 text-emerald-700" :
-                            s.dialer_usage_pct >= 50 ? "bg-amber-100 text-amber-700" :
-                            "bg-red-100 text-red-700"
+                            s.dialer_usage_pct >= 70 ? "bg-success/10 text-success" :
+                            s.dialer_usage_pct >= 50 ? "bg-warning/10 text-warning-foreground" :
+                            "bg-destructive/10 text-destructive"
                           }`}>{s.dialer_usage_pct}%</span>
                         )}
                       </td>
@@ -1015,45 +1028,45 @@ const CounsellorDashboard = () => {
                       <td className="px-4 py-3 text-center">
                         {s.applications > 0 ? (
                           <span className="text-xs">
-                            <span className="font-semibold text-violet-700">{s.applications_paid}</span>
+                            <span className="font-semibold text-primary">{s.applications_paid}</span>
                             <span className="text-muted-foreground">/{s.applications}</span>
                           </span>
                         ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tat && tat.new_leads_overdue > 0 ? (
-                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-orange-100 text-orange-700">{tat.new_leads_overdue}</span>
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-warning/10 text-warning-foreground">{tat.new_leads_overdue}</span>
                         ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tat && tat.overdue_followups > 0 ? (
-                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">{tat.overdue_followups}</span>
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-warning/10 text-warning-foreground">{tat.overdue_followups}</span>
                         ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tat && tat.app_checkins_overdue > 0 ? (
-                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">{tat.app_checkins_overdue}</span>
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-info/10 text-info-foreground">{tat.app_checkins_overdue}</span>
                         ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tat && tat.total_defaults > 0 ? (
-                          <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${tat.total_defaults > 5 ? "bg-red-500 text-white" : "bg-red-100 text-red-700"}`}>{tat.total_defaults}</span>
+                          <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${tat.total_defaults > 5 ? "bg-destructive/50 text-white" : "bg-destructive/10 text-destructive"}`}>{tat.total_defaults}</span>
                         ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-3 py-3 text-center">
-                        <span className="text-[10px] font-bold text-emerald-600">{s.positive_actions}</span>
+                        <span className="text-[10px] font-bold text-success">{s.positive_actions}</span>
                       </td>
                       <td className="px-3 py-3 text-center">
-                        <span className={`text-[10px] font-bold ${s.negative_actions > 0 ? "text-red-600" : "text-muted-foreground"}`}>{s.negative_actions}</span>
+                        <span className={`text-[10px] font-bold ${s.negative_actions > 0 ? "text-destructive" : "text-muted-foreground"}`}>{s.negative_actions}</span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge className={`border-0 text-xs font-bold ${
-                          s.daily_score > 0 ? "bg-blue-100 text-blue-700" : s.daily_score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                          s.daily_score > 0 ? "bg-info/10 text-info-foreground" : s.daily_score < 0 ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
                         }`}>{s.daily_score > 0 ? `+${s.daily_score}` : s.daily_score}</Badge>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge className={`border-0 text-xs font-bold ${
-                          s.total_score > 0 ? "bg-primary/10 text-primary" : s.total_score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                          s.total_score > 0 ? "bg-primary/10 text-primary" : s.total_score < 0 ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
                         }`}>{s.total_score}</Badge>
                       </td>
                     </tr>
@@ -1120,18 +1133,18 @@ const CounsellorDashboard = () => {
               </Button>
             </div>
 
-            {breakdownLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {breakdownLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
           </div>
 
           {/* Breakdown summary cards */}
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
-              { label: "Total Assigned", value: breakdownTotals.total, icon: Users, color: "bg-blue-100 dark:bg-blue-900/30", iconColor: "text-blue-600" },
-              { label: "New / Untouched", value: breakdownTotals.new_lead, icon: Clock, color: "bg-amber-100 dark:bg-amber-900/30", iconColor: "text-amber-600" },
-              { label: "Called", value: breakdownTotals.called, icon: PhoneCall, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
-              { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-red-600" : "text-muted-foreground" },
-              { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
-              { label: "Online Now", value: breakdownData.filter((b) => isCounsellorOnline(b.user_id)).length, icon: Users, color: "bg-green-100 dark:bg-green-900/30", iconColor: "text-green-600" },
+              { label: "Total Assigned", value: breakdownTotals.total, icon: Users, color: "bg-info/10 dark:bg-info/80/30", iconColor: "text-info-foreground" },
+              { label: "New / Untouched", value: breakdownTotals.new_lead, icon: Clock, color: "bg-warning/10 dark:bg-warning/80/30", iconColor: "text-warning-foreground" },
+              { label: "Called", value: breakdownTotals.called, icon: PhoneCall, color: "bg-success/10 dark:bg-success/80/30", iconColor: "text-success" },
+              { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-destructive/10 dark:bg-destructive/80/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-destructive" : "text-muted-foreground" },
+              { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-success/10 dark:bg-success/80/30", iconColor: "text-success" },
+              { label: "Online Now", value: breakdownData.filter((b) => isCounsellorOnline(b.user_id)).length, icon: Users, color: "bg-success/10 dark:bg-success/80/30", iconColor: "text-success" },
             ].map((c) => (
               <Card key={c.label} className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
                 <CardContent className="p-4">
@@ -1189,23 +1202,23 @@ const CounsellorDashboard = () => {
                             <td className="px-3 py-3 font-medium text-foreground">
                               <div className="flex items-center gap-2">
                                 {isCounsellorOnline(b.user_id) && (
-                                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" title="Online now" />
+                                  <span className="h-2 w-2 rounded-full bg-success/50 shrink-0" title="Online now" />
                                 )}
                                 {b.counsellor_name}
                               </div>
                             </td>
                             <td className="px-3 py-3 text-center font-bold text-foreground">{b.total}</td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-semibold ${b.new_lead > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{b.new_lead}</span>
+                              <span className={`text-xs font-semibold ${b.new_lead > 0 ? "text-warning-foreground" : "text-muted-foreground"}`}>{b.new_lead}</span>
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <span className="text-xs font-semibold text-emerald-600">{b.called}</span>
+                              <span className="text-xs font-semibold text-success">{b.called}</span>
                             </td>
                             <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
                               {b.not_called > 0 ? (
                                 <button
                                   onClick={() => navigate(`/admissions?counsellor=${b.counsellor_id}&not_called=true`)}
-                                  className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 border-0 text-[10px] font-bold px-2.5 py-0.5 hover:bg-red-200 transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-1 rounded-full bg-destructive/10 text-destructive border-0 text-[10px] font-bold px-2.5 py-0.5 hover:bg-destructive/15 transition-colors cursor-pointer"
                                   title="View not-called leads — bulk transfer available"
                                 >
                                   {b.not_called}
@@ -1223,18 +1236,18 @@ const CounsellorDashboard = () => {
                             </td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">{b.rejected}</td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-bold ${b.call_rate >= 80 ? "text-emerald-600" : b.call_rate >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                              <span className={`text-xs font-bold ${b.call_rate >= 80 ? "text-success" : b.call_rate >= 50 ? "text-warning-foreground" : "text-destructive"}`}>
                                 {b.call_rate}%
                               </span>
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-bold ${b.conversion_rate >= 10 ? "text-emerald-600" : b.conversion_rate >= 5 ? "text-amber-600" : "text-muted-foreground"}`}>
+                              <span className={`text-xs font-bold ${b.conversion_rate >= 10 ? "text-success" : b.conversion_rate >= 5 ? "text-warning-foreground" : "text-muted-foreground"}`}>
                                 {b.conversion_rate}%
                               </span>
                             </td>
                             <td className="px-3 py-3 text-center">
                               {b.avg_response_hrs !== null ? (
-                                <span className={`text-xs font-medium ${b.avg_response_hrs <= 2 ? "text-emerald-600" : b.avg_response_hrs <= 6 ? "text-amber-600" : "text-red-600"}`}>
+                                <span className={`text-xs font-medium ${b.avg_response_hrs <= 2 ? "text-success" : b.avg_response_hrs <= 6 ? "text-warning-foreground" : "text-destructive"}`}>
                                   {b.avg_response_hrs < 1 ? `${Math.round(b.avg_response_hrs * 60)}m` : `${b.avg_response_hrs}h`}
                                 </span>
                               ) : (
@@ -1286,11 +1299,11 @@ const CounsellorDashboard = () => {
                                     {(() => {
                                       const totalDisp = Object.values(b.dispositions).reduce((a, b) => a + b, 0);
                                       const barColors: Record<string, string> = {
-                                        interested: "bg-emerald-500", not_interested: "bg-red-400",
-                                        ineligible: "bg-gray-400", not_answered: "bg-amber-400",
-                                        call_back: "bg-blue-400", wrong_number: "bg-pink-400",
-                                        do_not_contact: "bg-red-600", voicemail: "bg-purple-400",
-                                        busy: "bg-orange-400",
+                                        interested: "bg-success/50", not_interested: "bg-destructive/40",
+                                        ineligible: "bg-gray-400", not_answered: "bg-warning/40",
+                                        call_back: "bg-info/40", wrong_number: "bg-pink-400",
+                                        do_not_contact: "bg-destructive", voicemail: "bg-primary/40",
+                                        busy: "bg-warning/50",
                                       };
                                       return Object.entries(b.dispositions)
                                         .sort(([, a], [, b]) => b - a)
@@ -1316,7 +1329,7 @@ const CounsellorDashboard = () => {
                                       </div>
                                       {dispLoading ? (
                                         <div className="flex items-center justify-center py-6">
-                                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
                                         </div>
                                       ) : dispLeads.length === 0 ? (
                                         <div className="px-3 py-4 text-center text-xs text-muted-foreground">No leads found</div>
@@ -1401,7 +1414,7 @@ const CounsellorDashboard = () => {
                         className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${overdueFilter === id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
                       >
                         {name}
-                        <span className={`ml-1 text-[10px] font-bold ${overdueFilter === id ? "opacity-70" : "text-red-500"}`}>({count})</span>
+                        <span className={`ml-1 text-[10px] font-bold ${overdueFilter === id ? "opacity-70" : "text-destructive"}`}>({count})</span>
                       </button>
                     );
                   })}
@@ -1411,7 +1424,7 @@ const CounsellorDashboard = () => {
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${overdueFilter === "unassigned" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
                     >
                       Unassigned
-                      <span className={`ml-1 text-[10px] font-bold ${overdueFilter === "unassigned" ? "opacity-70" : "text-orange-500"}`}>({overdue.filter(f => !f.counsellor_id).length})</span>
+                      <span className={`ml-1 text-[10px] font-bold ${overdueFilter === "unassigned" ? "opacity-70" : "text-warning"}`}>({overdue.filter(f => !f.counsellor_id).length})</span>
                     </button>
                   )}
                 </div>
@@ -1422,7 +1435,7 @@ const CounsellorDashboard = () => {
               <CardContent className="p-0">
                 {filteredOverdue.length === 0 ? (
                   <div className="px-4 py-8 text-center">
-                    <CalendarCheck className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+                    <CalendarCheck className="h-8 w-8 text-success mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground">All caught up!</p>
                     <p className="text-xs text-muted-foreground">No overdue follow-ups</p>
                   </div>
@@ -1451,7 +1464,7 @@ const CounsellorDashboard = () => {
                             <div className="text-xs text-muted-foreground">{f.lead_phone}</div>
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {f.counsellor_id ? (overdueCounsellorNameMap[f.counsellor_id] || "—") : <span className="text-orange-500">Unassigned</span>}
+                            {f.counsellor_id ? (overdueCounsellorNameMap[f.counsellor_id] || "—") : <span className="text-warning">Unassigned</span>}
                           </td>
                           <td className="px-4 py-3">
                             <Badge variant="outline" className="text-[10px]">{STAGE_LABELS[f.lead_stage] || f.lead_stage}</Badge>
@@ -1462,9 +1475,9 @@ const CounsellorDashboard = () => {
                           </td>
                           <td className="px-4 py-3 text-center">
                             <Badge className={`border-0 text-[10px] font-semibold ${
-                              f.days_overdue > 5 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                : f.days_overdue > 2 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                  : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                              f.days_overdue > 5 ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
+                                : f.days_overdue > 2 ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
+                                  : "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
                             }`}>
                               {f.days_overdue}d
                             </Badge>
@@ -1504,23 +1517,23 @@ const CounsellorDashboard = () => {
                     <tr key={d.profile_id} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium text-foreground">{d.counsellor_name}</td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.new_leads_overdue > 0 ? "bg-red-100 text-red-700" : "text-muted-foreground"}`}>
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.new_leads_overdue > 0 ? "bg-destructive/10 text-destructive" : "text-muted-foreground"}`}>
                           {d.new_leads_overdue}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.overdue_followups > 0 ? "bg-amber-100 text-amber-700" : "text-muted-foreground"}`}>
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.overdue_followups > 0 ? "bg-warning/10 text-warning-foreground" : "text-muted-foreground"}`}>
                           {d.overdue_followups}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.app_checkins_overdue > 0 ? "bg-orange-100 text-orange-700" : "text-muted-foreground"}`}>
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.app_checkins_overdue > 0 ? "bg-warning/10 text-warning-foreground" : "text-muted-foreground"}`}>
                           {d.app_checkins_overdue}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${
-                          d.total_defaults > 5 ? "bg-red-500 text-white" : d.total_defaults > 0 ? "bg-red-100 text-red-700" : "text-muted-foreground"
+                          d.total_defaults > 5 ? "bg-destructive/50 text-white" : d.total_defaults > 0 ? "bg-destructive/10 text-destructive" : "text-muted-foreground"
                         }`}>
                           {d.total_defaults}
                         </span>
@@ -1549,7 +1562,7 @@ const CounsellorDashboard = () => {
                 </button>
               ))}
             </div>
-            {activityLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {activityLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
           </div>
 
           <Card className="border-border/60 shadow-none overflow-hidden">
@@ -1565,7 +1578,7 @@ const CounsellorDashboard = () => {
                       <tr className="border-b border-border bg-muted/50">
                         <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Counsellor</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Leads</th>
-                        <th className="px-3 py-3 text-center text-xs font-semibold text-red-600 uppercase">Not Called</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-destructive uppercase">Not Called</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Calls</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Time</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">WhatsApp</th>
@@ -1574,11 +1587,11 @@ const CounsellorDashboard = () => {
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">AI Calls</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Total Actions</th>
                         {/* Disposition columns */}
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-emerald-600 uppercase">Interested</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-red-600 uppercase">Not Int.</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-amber-600 uppercase">No Ans.</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-blue-600 uppercase">Call Back</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-orange-600 uppercase">Busy</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-success uppercase">Interested</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-destructive uppercase">Not Int.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-warning-foreground uppercase">No Ans.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-info-foreground uppercase">Call Back</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-warning-foreground uppercase">Busy</th>
                         <th className="px-2 py-3 text-center text-[9px] font-semibold text-gray-600 uppercase">Other</th>
                       </tr>
                     </thead>
@@ -1598,7 +1611,7 @@ const CounsellorDashboard = () => {
                               {a.notCalled > 0 ? (
                                 <button
                                   onClick={() => navigate(`/admissions?counsellor=${a.profileId}&not_called=true`)}
-                                  className="inline-flex items-center gap-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 hover:bg-red-200 transition-colors"
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-destructive/10 text-destructive text-[10px] font-bold px-2 py-0.5 hover:bg-destructive/15 transition-colors"
                                 >
                                   {a.notCalled}
                                 </button>
@@ -1607,22 +1620,22 @@ const CounsellorDashboard = () => {
                               )}
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-bold ${a.calls > 0 ? "text-blue-600" : "text-muted-foreground"}`}>{a.calls}</span>
+                              <span className={`text-xs font-bold ${a.calls > 0 ? "text-info-foreground" : "text-muted-foreground"}`}>{a.calls}</span>
                             </td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">
                               {callMins > 0 ? `${callMins}m` : "—"}
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-bold ${a.whatsapps > 0 ? "text-green-600" : "text-muted-foreground"}`}>{a.whatsapps}</span>
+                              <span className={`text-xs font-bold ${a.whatsapps > 0 ? "text-success" : "text-muted-foreground"}`}>{a.whatsapps}</span>
                             </td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">{a.notes || "—"}</td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">{a.stageChanges || "—"}</td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs ${a.aiCalls > 0 ? "font-bold text-purple-600" : "text-muted-foreground"}`}>{a.aiCalls || "—"}</span>
+                              <span className={`text-xs ${a.aiCalls > 0 ? "font-bold text-primary" : "text-muted-foreground"}`}>{a.aiCalls || "—"}</span>
                             </td>
                             <td className="px-3 py-3 text-center">
                               <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${
-                                totalActions > 20 ? "bg-emerald-100 text-emerald-700" : totalActions > 5 ? "bg-blue-100 text-blue-700" : "bg-muted text-muted-foreground"
+                                totalActions > 20 ? "bg-success/10 text-success" : totalActions > 5 ? "bg-info/10 text-info-foreground" : "bg-muted text-muted-foreground"
                               }`}>
                                 {totalActions}
                               </span>
@@ -1630,27 +1643,27 @@ const CounsellorDashboard = () => {
                             {/* Dispositions */}
                             <td className="px-2 py-3 text-center">
                               {a.dispositions.interested ? (
-                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{a.dispositions.interested}</span>
+                                <span className="text-[10px] font-bold text-success bg-success/10 rounded-full px-1.5 py-0.5">{a.dispositions.interested}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {a.dispositions.not_interested ? (
-                                <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{a.dispositions.not_interested}</span>
+                                <span className="text-[10px] font-bold text-destructive bg-destructive/10 rounded-full px-1.5 py-0.5">{a.dispositions.not_interested}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {a.dispositions.not_answered ? (
-                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{a.dispositions.not_answered}</span>
+                                <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 rounded-full px-1.5 py-0.5">{a.dispositions.not_answered}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {a.dispositions.call_back ? (
-                                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{a.dispositions.call_back}</span>
+                                <span className="text-[10px] font-bold text-info-foreground bg-info/10 rounded-full px-1.5 py-0.5">{a.dispositions.call_back}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {a.dispositions.busy ? (
-                                <span className="text-[10px] font-bold text-orange-700 bg-orange-100 rounded-full px-1.5 py-0.5">{a.dispositions.busy}</span>
+                                <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 rounded-full px-1.5 py-0.5">{a.dispositions.busy}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
@@ -1685,7 +1698,7 @@ const CounsellorDashboard = () => {
                 </button>
               ))}
             </div>
-            {callingLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {callingLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
           </div>
 
           {/* Summary pills */}
@@ -1701,15 +1714,15 @@ const CounsellorDashboard = () => {
                 return (
                   <>
                     {totalNotCalled > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-900/30 px-2.5 py-1 text-xs font-semibold text-red-700 dark:text-red-300">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 dark:bg-destructive/80/30 px-2.5 py-1 text-xs font-semibold text-destructive dark:text-destructive/60">
                         <PhoneOff className="h-3 w-3" /> {totalNotCalled} Not Called
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-info/10 dark:bg-info/80/30 px-2.5 py-1 text-xs font-semibold text-info-foreground dark:text-info/60">
                       <PhoneCall className="h-3 w-3" /> {totalCalls} Calls
                     </span>
                     {totalOverdue > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 dark:bg-warning/80/30 px-2.5 py-1 text-xs font-semibold text-warning-foreground dark:text-warning/70">
                         <Clock className="h-3 w-3" /> {totalOverdue} Overdue
                       </span>
                     )}
@@ -1732,18 +1745,18 @@ const CounsellorDashboard = () => {
                       <tr className="border-b border-border bg-muted/50">
                         <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Counsellor</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Active Leads</th>
-                        <th className="px-3 py-3 text-center text-xs font-semibold text-red-600 uppercase">Not Called</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-destructive uppercase">Not Called</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Calls</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Time</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Rate</th>
-                        <th className="px-3 py-3 text-center text-xs font-semibold text-amber-600 uppercase">Overdue F/U</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-warning-foreground uppercase">Overdue F/U</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Avg Response</th>
                         {/* Disposition columns */}
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-emerald-600 uppercase">Interested</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-red-600 uppercase">Not Int.</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-amber-600 uppercase">No Ans.</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-blue-600 uppercase">Call Back</th>
-                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-orange-600 uppercase">Busy</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-success uppercase">Interested</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-destructive uppercase">Not Int.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-warning-foreground uppercase">No Ans.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-info-foreground uppercase">Call Back</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-warning-foreground uppercase">Busy</th>
                         <th className="px-2 py-3 text-center text-[9px] font-semibold text-gray-600 uppercase">Other</th>
                         <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Action</th>
                       </tr>
@@ -1762,29 +1775,29 @@ const CounsellorDashboard = () => {
                             <td className="px-3 py-3 text-center text-xs font-bold text-foreground">{c.activeLeads}</td>
                             <td className="px-3 py-3 text-center">
                               {c.notCalled > 0 ? (
-                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-destructive/10 text-destructive dark:bg-destructive/80/40 dark:text-destructive/60">
                                   {c.notCalled}
                                 </span>
                               ) : (
-                                <span className="text-xs text-green-600 font-medium">0</span>
+                                <span className="text-xs text-success font-medium">0</span>
                               )}
                             </td>
                             <td className="px-3 py-3 text-center">
-                              <span className={`text-xs font-bold ${c.callsInPeriod > 0 ? "text-blue-600" : "text-muted-foreground"}`}>{c.callsInPeriod}</span>
+                              <span className={`text-xs font-bold ${c.callsInPeriod > 0 ? "text-info-foreground" : "text-muted-foreground"}`}>{c.callsInPeriod}</span>
                             </td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">
                               {callMins > 0 ? `${callMins}m` : "—"}
                             </td>
                             <td className="px-3 py-3 text-center">
                               <span className={`inline-flex h-6 min-w-8 items-center justify-center rounded-full text-[10px] font-bold ${
-                                callRate >= 80 ? "bg-emerald-100 text-emerald-700" : callRate >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                                callRate >= 80 ? "bg-success/10 text-success" : callRate >= 50 ? "bg-warning/10 text-warning-foreground" : "bg-destructive/10 text-destructive"
                               }`}>
                                 {callRate}%
                               </span>
                             </td>
                             <td className="px-3 py-3 text-center">
                               {c.overdueFollowups > 0 ? (
-                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-warning/10 text-warning-foreground">
                                   {c.overdueFollowups}
                                 </span>
                               ) : (
@@ -1793,7 +1806,7 @@ const CounsellorDashboard = () => {
                             </td>
                             <td className="px-3 py-3 text-center text-xs text-muted-foreground">
                               {c.avgResponseHrs != null ? (
-                                <span className={`font-medium ${c.avgResponseHrs <= 4 ? "text-emerald-600" : c.avgResponseHrs <= 12 ? "text-amber-600" : "text-red-600"}`}>
+                                <span className={`font-medium ${c.avgResponseHrs <= 4 ? "text-success" : c.avgResponseHrs <= 12 ? "text-warning-foreground" : "text-destructive"}`}>
                                   {c.avgResponseHrs}h
                                 </span>
                               ) : "—"}
@@ -1801,27 +1814,27 @@ const CounsellorDashboard = () => {
                             {/* Dispositions */}
                             <td className="px-2 py-3 text-center">
                               {c.dispositions.interested ? (
-                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{c.dispositions.interested}</span>
+                                <span className="text-[10px] font-bold text-success bg-success/10 rounded-full px-1.5 py-0.5">{c.dispositions.interested}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {c.dispositions.not_interested ? (
-                                <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{c.dispositions.not_interested}</span>
+                                <span className="text-[10px] font-bold text-destructive bg-destructive/10 rounded-full px-1.5 py-0.5">{c.dispositions.not_interested}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {c.dispositions.not_answered ? (
-                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{c.dispositions.not_answered}</span>
+                                <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 rounded-full px-1.5 py-0.5">{c.dispositions.not_answered}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {c.dispositions.call_back ? (
-                                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{c.dispositions.call_back}</span>
+                                <span className="text-[10px] font-bold text-info-foreground bg-info/10 rounded-full px-1.5 py-0.5">{c.dispositions.call_back}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {c.dispositions.busy ? (
-                                <span className="text-[10px] font-bold text-orange-700 bg-orange-100 rounded-full px-1.5 py-0.5">{c.dispositions.busy}</span>
+                                <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 rounded-full px-1.5 py-0.5">{c.dispositions.busy}</span>
                               ) : <span className="text-[10px] text-muted-foreground">—</span>}
                             </td>
                             <td className="px-2 py-3 text-center">
@@ -1834,7 +1847,7 @@ const CounsellorDashboard = () => {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="h-7 text-[10px] gap-1 border-red-200 text-red-700 hover:bg-red-50"
+                                  className="h-7 text-[10px] gap-1 border-destructive/20 text-destructive hover:bg-destructive/5"
                                   onClick={() => navigate(`/admissions?counsellor=${c.profileId}&not_called=true`)}
                                 >
                                   <ExternalLink className="h-3 w-3" />
@@ -1853,9 +1866,9 @@ const CounsellorDashboard = () => {
                           <td className="px-4 py-3 text-foreground text-xs uppercase">Total</td>
                           <td className="px-3 py-3 text-center text-xs">{callingData.reduce((s: number, c: any) => s + c.activeLeads, 0)}</td>
                           <td className="px-3 py-3 text-center">
-                            <span className="text-xs font-bold text-red-700">{callingData.reduce((s: number, c: any) => s + c.notCalled, 0)}</span>
+                            <span className="text-xs font-bold text-destructive">{callingData.reduce((s: number, c: any) => s + c.notCalled, 0)}</span>
                           </td>
-                          <td className="px-3 py-3 text-center text-xs text-blue-600">{callingData.reduce((s: number, c: any) => s + c.callsInPeriod, 0)}</td>
+                          <td className="px-3 py-3 text-center text-xs text-info-foreground">{callingData.reduce((s: number, c: any) => s + c.callsInPeriod, 0)}</td>
                           <td className="px-3 py-3 text-center text-xs text-muted-foreground">
                             {Math.round(callingData.reduce((s: number, c: any) => s + c.callDuration, 0) / 60)}m
                           </td>
@@ -1867,13 +1880,13 @@ const CounsellorDashboard = () => {
                               return <span className="text-[10px] font-bold">{rate}%</span>;
                             })()}
                           </td>
-                          <td className="px-3 py-3 text-center text-xs text-amber-700">{callingData.reduce((s: number, c: any) => s + c.overdueFollowups, 0)}</td>
+                          <td className="px-3 py-3 text-center text-xs text-warning-foreground">{callingData.reduce((s: number, c: any) => s + c.overdueFollowups, 0)}</td>
                           <td className="px-3 py-3 text-center text-xs text-muted-foreground">—</td>
-                          <td className="px-2 py-3 text-center text-[10px] text-emerald-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.interested || 0), 0) || "—"}</td>
-                          <td className="px-2 py-3 text-center text-[10px] text-red-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_interested || 0), 0) || "—"}</td>
-                          <td className="px-2 py-3 text-center text-[10px] text-amber-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_answered || 0), 0) || "—"}</td>
-                          <td className="px-2 py-3 text-center text-[10px] text-blue-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.call_back || 0), 0) || "—"}</td>
-                          <td className="px-2 py-3 text-center text-[10px] text-orange-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.busy || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-success">{callingData.reduce((s: number, c: any) => s + (c.dispositions.interested || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-destructive">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_interested || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-warning-foreground">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_answered || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-info-foreground">{callingData.reduce((s: number, c: any) => s + (c.dispositions.call_back || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-warning-foreground">{callingData.reduce((s: number, c: any) => s + (c.dispositions.busy || 0), 0) || "—"}</td>
                           <td className="px-2 py-3 text-center text-[10px] text-gray-700">
                             {callingData.reduce((s: number, c: any) => {
                               const other = Object.entries(c.dispositions)
@@ -1892,6 +1905,8 @@ const CounsellorDashboard = () => {
             </CardContent>
           </Card>
         </div>
+      ) : tab === "assignments" ? (
+        <LeadAssignmentHistory limit={200} />
       ) : tab === "funnel" ? (
         <FunnelTab
           rows={funnelRows}
@@ -1992,7 +2007,7 @@ const FunnelTab = ({
             </button>
           ))}
         </div>
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
       </div>
 
       <Card className="rounded-2xl">
@@ -2018,7 +2033,7 @@ const FunnelTab = ({
                     <div className="w-32 shrink-0 text-xs text-muted-foreground">{STAGE_LABEL[stage]}</div>
                     <div className="flex-1 relative h-7 rounded-md bg-muted/40 overflow-hidden">
                       <div
-                        className={`absolute inset-y-0 left-0 ${idx === FUNNEL_STAGES.length - 1 ? "bg-emerald-500/80" : "bg-primary/70"} transition-all`}
+                        className={`absolute inset-y-0 left-0 ${idx === FUNNEL_STAGES.length - 1 ? "bg-success/50/80" : "bg-primary/70"} transition-all`}
                         style={{ width: `${width}%` }}
                       />
                       <span className="relative z-10 flex items-center h-full px-2.5 text-xs font-semibold text-foreground">
@@ -2026,7 +2041,7 @@ const FunnelTab = ({
                       </span>
                     </div>
                     {nextStage && (
-                      <div className={`w-20 text-right text-xs tabular-nums ${isLeak ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+                      <div className={`w-20 text-right text-xs tabular-nums ${isLeak ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
                         {dropTo !== null ? `${dropTo}% →` : "—"}
                       </div>
                     )}

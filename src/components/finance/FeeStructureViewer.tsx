@@ -1,8 +1,10 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { ScholarshipPanel } from "./ScholarshipPanel";
+import { formatFeeTerm } from "@/lib/schoolFeeProposal";
 
 const categoryBadge: Record<string, string> = {
   tuition: "bg-pastel-blue", lab: "bg-pastel-purple", enrollment: "bg-pastel-green",
@@ -241,7 +243,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     return { oneTime, tuition, boarding, transport, other };
   };
 
-  if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   if (structures.length === 0) {
     return <p className="text-xs text-muted-foreground text-center py-4">No fee structure available{courseId ? " for this course" : ""}</p>;
@@ -249,11 +251,18 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
+  const sectionTotalLabel = (items: FeeItem[]) => {
+    const terms = Array.from(new Set(items.map((item) => String(item.term || "").trim().toLowerCase().replace(/[\s-]+/g, "_")).filter(Boolean)));
+    const isQuarterlyAnnual = terms.length > 1 && terms.every((term) => /^q[1-4]$/.test(term) || /^quarter_[1-4]$/.test(term));
+    return isQuarterlyAnnual ? "Annual total" : "Total";
+  };
+
   // Collect year-wise data from metadata (year_1, year_2, ... keys or years/year_wise array)
-  const getYearData = (meta: any): { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[] => {
+  type PeriodData = { year: number; label: string; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string };
+
+  const getYearData = (meta: any): PeriodData[] => {
     if (!meta) return [];
-    const result: typeof retType = [];
-    type retType = { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[];
+    const result: PeriodData[] = [];
 
     // Check year_1, year_2, ... keys
     for (let i = 1; i <= 8; i++) {
@@ -261,6 +270,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
       if (y && typeof y === "object") {
         result.push({
           year: i,
+          label: y.label || `${meta.period_label || "Year"} ${i}`,
           fee: Number(y.fee || y.amount || 0),
           discount: Number(y.discount || 0),
           discountCondition: y.discount_condition || "",
@@ -278,6 +288,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
           if (y.fee || y.amount) {
             result.push({
               year: i + 1,
+              label: y.label || `${meta.period_label || "Year"} ${i + 1}`,
               fee: Number(y.fee || y.amount || 0),
               discount: Number(y.discount || 0),
               discountCondition: y.discount_condition || "",
@@ -315,11 +326,11 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     if (highlights.length === 0 && yearData.length === 0) return null;
 
     return (
-      <div className="border-t border-amber-200/30">
+      <div className="border-t border-warning/20/30">
         {/* General highlights */}
         {highlights.length > 0 && (
-          <div className="px-3 py-2 bg-amber-50/50 dark:bg-amber-950/10">
-            <p className="text-[9px] font-semibold text-amber-800 dark:text-amber-400 uppercase mb-1">Fee Details</p>
+          <div className="px-3 py-2 bg-warning/5/50 dark:bg-warning/90/10">
+            <p className="text-[9px] font-semibold text-warning-foreground dark:text-warning uppercase mb-1">Fee Details</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
               {highlights.map((h, i) => (
                 <div key={i} className="flex items-center justify-between gap-1">
@@ -342,12 +353,12 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
           return (
             <div className="px-3 py-2 bg-muted/20">
-              <p className="text-[9px] font-semibold text-muted-foreground uppercase mb-1.5">Year-wise Breakdown</p>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase mb-1.5">{meta.period_label_plural || "Year-wise Breakdown"}</p>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-muted-foreground">
-                    <th className="text-left font-medium pb-1">Year</th>
-                    <th className="text-right font-medium pb-1">{feeColLabel}</th>
+                    <th className="text-left font-medium pb-1">{meta.period_label || "Year"}</th>
+                    <th className="text-right font-medium pb-1">{meta.period_fee_label || feeColLabel}</th>
                     {hasAnyDiscount && (
                       <>
                         <th className="text-right font-medium pb-1">Waiver</th>
@@ -383,13 +394,13 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
                     return (
                       <tr key={y.year} className="border-t border-border/30">
-                        <td className="py-1.5 font-medium text-foreground">Year {y.year}</td>
+                        <td className="py-1.5 font-medium text-foreground">{y.label || `Year ${y.year}`}</td>
                         <td className="py-1.5 text-right text-foreground">{fmt(y.fee)}</td>
                         {hasAnyDiscount && (
                           <>
                             <td className="py-1.5 text-right">
                               {y.discount > 0 ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-{fmt(y.discount)}</span>
+                                <span className="text-success dark:text-success font-semibold">-{fmt(y.discount)}</span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
                               )}
@@ -418,7 +429,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     <tr className="border-t border-border/50">
                       <td className="pt-1.5 font-semibold text-foreground">Total</td>
                       <td className="pt-1.5 text-right text-foreground">{fmt(yearData.reduce((s, y) => s + y.fee, 0))}</td>
-                      <td className="pt-1.5 text-right text-emerald-600 dark:text-emerald-400 font-semibold">
+                      <td className="pt-1.5 text-right text-success dark:text-success font-semibold">
                         -{fmt(yearData.reduce((s, y) => s + y.discount, 0))}
                       </td>
                       <td className="pt-1.5 text-right font-bold text-primary">
@@ -441,6 +452,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
   const versionLabel = (v: string) => {
     if (v?.includes("existing_parent")) return "Existing Parent";
     if (v?.includes("new_admission")) return "New Admission";
+    if (v?.includes("stetho_batch")) return "Stetho Batch";
     return v || "Standard";
   };
 
@@ -522,7 +534,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     <>
                       <span className="text-xs text-muted-foreground line-through mr-1.5">{fmt(fs.total)}</span>
                       <span className="text-sm font-bold text-primary">{fmt(totalAfterDiscount)}</span>
-                      <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Save {fmt(totalDiscount)} on annual payment</span>
+                      <span className="block text-[10px] text-success dark:text-success font-medium">Save {fmt(totalDiscount)} on annual payment</span>
                     </>
                   ) : (
                     <span className="text-sm font-bold text-primary">{fmt(headerTotal)}</span>
@@ -550,7 +562,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 items.map((item, i) => (
                   <tr key={i} className="border-b border-border/40 last:border-0">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{item.term}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatFeeTerm(item.term)}</td>
                     <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
                   </tr>
                 ));
@@ -573,7 +585,8 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                       </thead>
                       <tbody>{renderItemRows(items)}</tbody>
                     </table>
-                    <div className="px-3 py-1.5 bg-muted/20 border-t border-border/40 flex items-center justify-end">
+                    <div className="px-3 py-1.5 bg-muted/20 border-t border-border/40 flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-muted-foreground">{sectionTotalLabel(items)}</span>
                       <span className="text-[11px] font-semibold text-foreground">{fmt(total)}</span>
                     </div>
                   </div>
@@ -649,8 +662,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                                   </tr></thead>
                                   <tbody>{renderItemRows(selectedItems)}</tbody>
                                 </table>
-                                <div className="px-3 py-1.5 bg-pastel-mint/20 border-t border-border/40 flex items-center justify-end">
-                                  <span className="text-[11px] font-semibold text-foreground">{fmt(selectedTotal)}/year</span>
+                                <div className="px-3 py-1.5 bg-pastel-mint/20 border-t border-border/40 flex items-center justify-between">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Annual total</span>
+                                  <span className="text-[11px] font-semibold text-foreground">{fmt(selectedTotal)}</span>
                                 </div>
                               </>
                             )}
@@ -736,8 +750,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                               </tr></thead>
                               <tbody>{renderItemRows(selectedZoneItems)}</tbody>
                             </table>
-                            <div className="px-3 py-1.5 bg-pastel-yellow/20 border-t border-border/40 flex items-center justify-end">
-                              <span className="text-[11px] font-semibold text-foreground">{fmt(selectedZoneTotal)}/year</span>
+                            <div className="px-3 py-1.5 bg-pastel-yellow/20 border-t border-border/40 flex items-center justify-between">
+                              <span className="text-[11px] font-medium text-muted-foreground">Annual total</span>
+                              <span className="text-[11px] font-semibold text-foreground">{fmt(selectedZoneTotal)}</span>
                             </div>
                           </>
                         )}

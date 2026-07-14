@@ -15,10 +15,11 @@ const corsHeaders = {
 };
 
 const PAY_TYPE_LABELS: Record<string, string> = {
-  application_fee:  "Application Fee",
-  token_fee:        "Token / Admission Fee",
-  registration_fee: "Registration Fee",
-  other:            "Other Charges",
+  application_fee:     "Application Fee",
+  token_fee:           "Token / Admission Fee",
+  pre_admission_token: "Token Fee (prior to admission)",
+  registration_fee:    "Registration Fee",
+  other:               "Other Charges",
 };
 
 const MODE_LABELS: Record<string, string> = {
@@ -34,12 +35,33 @@ const GATEWAY_LABELS: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici:    "ICICI",
   cashfree: "Cashfree",
+  razorpay: "Razorpay",
   // Manually-recorded payments — admin entered an UTR / cheque ref through
   // the UI rather than going through a gateway. Render as "Marked Offline"
   // so the receipt is unambiguous about the source.
   offline:  "Marked Offline",
   manual:   "Marked Offline",
 };
+
+function inferGatewayFromPaymentRef(paymentRef?: string | null) {
+  const ref = (paymentRef || "").trim().toLowerCase();
+  if (!ref) return null;
+  if (ref.startsWith("pay_") || ref.startsWith("order_")) return "razorpay";
+  if (ref.startsWith("manual_")) return "manual";
+  if (ref.startsWith("cf_") || ref.includes("cashfree")) return "cashfree";
+  if (ref.startsWith("icici") || ref.startsWith("ic_") || ref.startsWith("lp-")) return "icici";
+  if (ref.startsWith("eb") || ref.includes("easepay")) return "easebuzz";
+  return null;
+}
+
+function gatewayLabel(gateway?: string | null, paymentMode?: string | null, paymentRef?: string | null) {
+  if (gateway) return GATEWAY_LABELS[gateway] || gateway;
+  const inferred = inferGatewayFromPaymentRef(paymentRef);
+  if (inferred) return GATEWAY_LABELS[inferred] || inferred;
+  if (paymentMode === "gateway" || paymentMode === "online") return "Online Gateway";
+  if (paymentMode) return GATEWAY_LABELS.manual;
+  return "Not Recorded";
+}
 
 // Per-portal brand colour (matches portalConfig.ts in the React app).
 const BRAND_BY_SLUG: Record<string, string> = {
@@ -102,7 +124,10 @@ const fmtDateShort = (d?: string | null) => {
   if (!d) return "—";
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return d;
-  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return dt.toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
 };
 
 function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 6): string[] {
@@ -124,9 +149,24 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
   return lines.length ? lines : [""];
 }
 
+function fitText(text: string, font: any, size: number, maxWidth: number): string {
+  if (!text) return "—";
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}...`;
+}
+
 // Symbol-safe rupee marker — Helvetica doesn't ship the ₹ glyph and pdf-lib
 // throws on missing glyphs, so use "Rs." in the body and the band.
 const RUP = "Rs. ";
+
+const appIdFromNotes = (notes?: unknown): string | null => {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+};
 
 interface Branding {
   slug?: string | null;
@@ -143,6 +183,7 @@ interface BuildOpts {
   rows: [string, string][];      // payer detail rows
   amount: number;
   paymentMode: string;
+  paymentGateway?: string | null;
   paymentRef: string;
   paymentDate: string;
   campusName: string | null;
@@ -279,26 +320,23 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   y -= bandH + 16;
 
-  // ── Payment-method + transaction-ref cards ─────────────────────────
-  const halfW = (width - margin * 2 - 12) / 2;
+  // ── Payment-method + gateway + transaction-ref cards ───────────────
+  const paymentCards: [string, string][] = [["PAYMENT METHOD", opts.paymentMode.toUpperCase()]];
+  if (opts.paymentGateway) paymentCards.push(["PAYMENT GATEWAY", opts.paymentGateway]);
+  paymentCards.push(["TRANSACTION REF", opts.paymentRef || "—"]);
+  const gap = 12;
+  const boxW = (width - margin * 2 - gap * (paymentCards.length - 1)) / paymentCards.length;
   const boxH = 52;
-  // left
-  page.drawRectangle({
-    x: margin, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("PAYMENT METHOD", { x: margin + 12, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentMode.toUpperCase(), {
-    x: margin + 12, y: y - 36, size: 11, font: bold, color: text,
-  });
-  // right
-  page.drawRectangle({
-    x: margin + halfW + 12, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("TRANSACTION REF", { x: margin + halfW + 24, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentRef || "—", {
-    x: margin + halfW + 24, y: y - 36, size: 11, font: bold, color: text,
+  paymentCards.forEach(([label, value], index) => {
+    const x = margin + index * (boxW + gap);
+    page.drawRectangle({
+      x, y: y - boxH, width: boxW, height: boxH,
+      color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+    });
+    page.drawText(label, { x: x + 12, y: y - 16, size: 8, font: bold, color: muted });
+    page.drawText(fitText(value, bold, 11, boxW - 24), {
+      x: x + 12, y: y - 36, size: 11, font: bold, color: text,
+    });
   });
   y -= boxH + 26;
 
@@ -330,6 +368,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const lead_payment_id = body.lead_payment_id || body.payment_id;
+    const requestedApplicationId = body.application_id || null;
     if (!lead_payment_id) {
       return new Response(JSON.stringify({ error: "lead_payment_id required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -340,7 +379,7 @@ Deno.serve(async (req) => {
       .from("lead_payments")
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
-        payment_date, status, receipt_url, created_at, recorded_by, notes,
+        payment_date, status, receipt_url, created_at, recorded_by, notes, application_id,
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
           courses:course_id ( name ),
@@ -362,7 +401,23 @@ Deno.serve(async (req) => {
     }
 
     const lead: any = lp.leads;
-    const courseName = lead?.courses?.name ?? null;
+    const isApp = lp.type === "application_fee";
+    const resolvedApplicationId =
+      isApp
+        ? requestedApplicationId || lp.application_id || appIdFromNotes(lp.notes) || lead?.application_id || null
+        : null;
+    let app: any = null;
+    if (resolvedApplicationId && lead?.id) {
+      const { data } = await admin
+        .from("applications")
+        .select("application_id, full_name, phone, email, course_selections")
+        .eq("lead_id", lead.id)
+        .eq("application_id", resolvedApplicationId)
+        .maybeSingle();
+      app = data || null;
+    }
+    const firstChoice = (app?.course_selections || [])[0] || {};
+    const courseName = isApp ? firstChoice.course_name ?? lead?.courses?.name ?? null : lead?.courses?.name ?? null;
     const campusName = lead?.campuses?.name ?? null;
 
     const { data: branding } = await admin.rpc("lead_branding" as any, {
@@ -379,20 +434,21 @@ Deno.serve(async (req) => {
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 
     let paymentMode: string;
+    let paymentGateway: string | null = null;
     if (lp.payment_mode === "gateway" || lp.payment_mode === "online") {
-      const gw = lp.gateway ? (GATEWAY_LABELS[lp.gateway] || lp.gateway) : "";
-      paymentMode = gw ? `Online · ${gw}` : "Online";
+      paymentMode = "Online";
+      paymentGateway = gatewayLabel(lp.gateway, lp.payment_mode, lp.transaction_ref);
     } else {
       paymentMode = MODE_LABELS[lp.payment_mode] || lp.payment_mode || "—";
+      paymentGateway = gatewayLabel(lp.gateway, lp.payment_mode, lp.transaction_ref);
     }
 
-    const isApp = lp.type === "application_fee";
     const rows: [string, string][] = [
-      ["Name",  lead?.name || "—"],
-      ["Phone", lead?.phone || "—"],
+      ["Name",  app?.full_name || lead?.name || "—"],
+      ["Phone", app?.phone || lead?.phone || "—"],
     ];
-    if (lead?.email) rows.push(["Email", lead.email]);
-    if (isApp && lead?.application_id) rows.push(["Application ID", lead.application_id]);
+    if (app?.email || lead?.email) rows.push(["Email", app?.email || lead?.email]);
+    if (isApp && resolvedApplicationId) rows.push(["Application ID", resolvedApplicationId]);
     if (!isApp) {
       if (lead?.admission_no) rows.push(["Admission No", lead.admission_no]);
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
@@ -400,6 +456,14 @@ Deno.serve(async (req) => {
     }
     rows.push(["Fee Head", PAY_TYPE_LABELS[lp.type] || lp.type]);
     rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
+
+    // Pre-admission token receipts must carry the adjustable-against-admission
+    // wording (owner requirement) so the candidate knows this money is credited
+    // toward the eventual admission fee.
+    const isPreAdmissionToken = lp.type === "pre_admission_token";
+    if (isPreAdmissionToken) {
+      rows.push(["Note", "Token fee prior to admission — adjustable against admission fee"]);
+    }
 
     // Counsellor / staff who recorded the offline receipt — gives the candidate
     // and auditors a name to attach to the transaction. We resolve the profile
@@ -420,11 +484,12 @@ Deno.serve(async (req) => {
 
     const pdfBytes = await buildPdf({
       receiptNo:     lp.receipt_no || "—",
-      receiptTitle:  isApp ? "APPLICATION RECEIPT" : "PAYMENT RECEIPT",
+      receiptTitle:  isApp ? "APPLICATION RECEIPT" : isPreAdmissionToken ? "TOKEN FEE RECEIPT" : "PAYMENT RECEIPT",
       payerHeading:  isApp ? "APPLICANT DETAILS" : "PAYER DETAILS",
       rows,
       amount:        Number(lp.amount),
       paymentMode,
+      paymentGateway,
       paymentRef:    lp.transaction_ref || "—",
       paymentDate:   lp.payment_date || lp.created_at,
       campusName,
@@ -447,9 +512,16 @@ Deno.serve(async (req) => {
     const receiptUrl = urlData?.publicUrl || path;
 
     await admin.from("lead_payments").update({ receipt_url: receiptUrl }).eq("id", lp.id);
+    if (isApp && resolvedApplicationId) {
+      await admin
+        .from("applications")
+        .update({ fee_receipt_url: receiptUrl })
+        .eq("application_id", resolvedApplicationId)
+        .eq("lead_id", lead?.id);
+    }
 
     return new Response(JSON.stringify({
-      ok: true, receipt_no: lp.receipt_no, receipt_url: receiptUrl,
+      ok: true, receipt_no: lp.receipt_no, receipt_url: receiptUrl, application_id: resolvedApplicationId,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err) {

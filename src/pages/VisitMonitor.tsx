@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Calendar, MapPin, User, CheckCircle2, XCircle, Clock, Footprints,
   AlertCircle, Filter, RefreshCw, Loader2, ChevronRight, PhoneCall,
@@ -31,10 +33,10 @@ interface Campus { id: string; name: string; }
 type Tab = "scheduled" | "completed" | "no_show" | "unmarked" | "walkins" | "post_visit";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  scheduled:  { label: "Scheduled",  color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
+  scheduled:  { label: "Scheduled",  color: "text-info-foreground",   bg: "bg-info/5 border-info/20" },
   confirmed:  { label: "Confirmed",  color: "text-teal-700",   bg: "bg-teal-50 border-teal-200" },
-  completed:  { label: "Completed",  color: "text-emerald-700",bg: "bg-emerald-50 border-emerald-200" },
-  no_show:    { label: "No Show",    color: "text-rose-700",   bg: "bg-rose-50 border-rose-200" },
+  completed:  { label: "Completed",  color: "text-success",bg: "bg-success/5 border-success/20" },
+  no_show:    { label: "No Show",    color: "text-destructive",   bg: "bg-destructive/5 border-destructive/20" },
 };
 
 function fmtDate(iso: string) {
@@ -168,11 +170,11 @@ export default function VisitMonitor() {
   });
 
   const TABS: { key: Tab; label: string; icon: typeof Calendar; countKey: keyof typeof counts; accent: string }[] = [
-    { key: "scheduled",  label: "Scheduled",      icon: Calendar,     countKey: "scheduled",  accent: "text-blue-600" },
-    { key: "completed",  label: "Completed",      icon: CheckCircle2, countKey: "completed",  accent: "text-emerald-600" },
-    { key: "no_show",    label: "No Show",        icon: XCircle,      countKey: "no_show",    accent: "text-rose-600" },
-    { key: "unmarked",   label: "Unmarked",       icon: AlertCircle,  countKey: "unmarked",   accent: "text-amber-600" },
-    { key: "walkins",    label: "Walk-ins",       icon: Footprints,   countKey: "walkins",    accent: "text-purple-600" },
+    { key: "scheduled",  label: "Scheduled",      icon: Calendar,     countKey: "scheduled",  accent: "text-info-foreground" },
+    { key: "completed",  label: "Completed",      icon: CheckCircle2, countKey: "completed",  accent: "text-success" },
+    { key: "no_show",    label: "No Show",        icon: XCircle,      countKey: "no_show",    accent: "text-destructive" },
+    { key: "unmarked",   label: "Unmarked",       icon: AlertCircle,  countKey: "unmarked",   accent: "text-warning-foreground" },
+    { key: "walkins",    label: "Walk-ins",       icon: Footprints,   countKey: "walkins",    accent: "text-primary" },
     { key: "post_visit", label: "Post-Visit",     icon: Clock,        countKey: "post_visit", accent: "text-slate-600" },
   ];
 
@@ -199,34 +201,38 @@ export default function VisitMonitor() {
           <Filter className="h-3.5 w-3.5" /> Filters
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">From</label>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">To</label>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
+        <FieldShell label="From" hideLabel>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        </FieldShell>
+        <FieldShell label="To" hideLabel>
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        </FieldShell>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Counsellor</label>
-          <select value={counsellorId} onChange={e => setCounsellorId(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-w-[150px]">
-            <option value="">All Counsellors</option>
-            {counsellors.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
-          </select>
-        </div>
+        <SelectField
+          value={counsellorId}
+          onValueChange={setCounsellorId}
+          options={[
+            { value: "", label: "All Counsellors" },
+            ...counsellors.map(c => ({ value: c.id, label: c.display_name })),
+          ]}
+          label="Counsellor"
+          hideLabel
+          placeholder="All Counsellors"
+          className="min-w-[160px]"
+        />
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Campus / Location</label>
-          <select value={campusId} onChange={e => setCampusId(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-w-[150px]">
-            <option value="">All Campuses</option>
-            {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <SelectField
+          value={campusId}
+          onValueChange={setCampusId}
+          options={[
+            { value: "", label: "All Campuses" },
+            ...campuses.map(c => ({ value: c.id, label: c.name })),
+          ]}
+          label="Campus / Location"
+          hideLabel
+          placeholder="All Campuses"
+          className="min-w-[160px]"
+        />
 
         {/* Quick date shortcuts */}
         <div className="flex gap-1.5 self-end flex-wrap">
@@ -292,7 +298,7 @@ export default function VisitMonitor() {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : tabRows.length === 0 ? (
         <div className="rounded-xl border border-border bg-card flex flex-col items-center gap-2 py-16 text-muted-foreground">
@@ -406,7 +412,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
             {sc.label}
           </span>
           {v.visit_type === "walk_in" && (
-            <span className="inline-flex w-fit items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
+            <span className="inline-flex w-fit items-center gap-1 rounded-md border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-semibold text-primary">
               <Footprints className="h-2.5 w-2.5" /> Walk-in
             </span>
           )}
@@ -418,7 +424,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
         <td className="px-4 py-3 max-w-[200px]">
           {v.feedback
             ? <p className="text-xs text-muted-foreground line-clamp-2">{v.feedback}</p>
-            : <span className="text-[11px] text-rose-500 font-medium">No feedback</span>
+            : <span className="text-[11px] text-destructive font-medium">No feedback</span>
           }
         </td>
       )}
@@ -426,7 +432,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
       {/* Overdue (unmarked tab only) */}
       {tab === "unmarked" && (
         <td className="px-4 py-3">
-          <span className={`text-sm font-semibold ${overdueDays > 2 ? "text-rose-600" : "text-amber-600"}`}>
+          <span className={`text-sm font-semibold ${overdueDays > 2 ? "text-destructive" : "text-warning-foreground"}`}>
             {overdueDays}d ago
           </span>
         </td>

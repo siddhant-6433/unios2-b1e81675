@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 interface SubjectTagInputProps {
   label: string;
@@ -8,6 +9,7 @@ interface SubjectTagInputProps {
   onChange: (selected: string[]) => void;
   placeholder?: string;
   allowCustom?: boolean;
+  invalid?: boolean;
 }
 
 export function SubjectTagInput({
@@ -17,6 +19,7 @@ export function SubjectTagInput({
   onChange,
   placeholder = "Type to search or add…",
   allowCustom = true,
+  invalid = false,
 }: SubjectTagInputProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -78,7 +81,9 @@ export function SubjectTagInput({
         {label}
       </label>
       <div
-        className="min-h-[42px] w-full rounded-xl border border-input bg-card py-1.5 px-2 flex flex-wrap gap-1.5 items-center cursor-text focus-within:ring-2 focus-within:ring-ring/20"
+        className={`min-h-[42px] w-full rounded-xl border bg-card py-1.5 px-2 flex flex-wrap gap-1.5 items-center cursor-text focus-within:ring-2 ${
+          invalid ? "border-destructive ring-1 ring-destructive/30 focus-within:ring-destructive/30" : "border-input focus-within:ring-ring/20"
+        }`}
         onClick={() => setOpen(true)}
       >
         {selected.map((tag, i) => (
@@ -99,7 +104,7 @@ export function SubjectTagInput({
             </button>
           </span>
         ))}
-        <input
+        <Input
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -108,7 +113,7 @@ export function SubjectTagInput({
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder={selected.length === 0 ? placeholder : ""}
-          className="flex-1 min-w-[80px] bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground"
+          className="h-auto min-h-7 flex-1 min-w-[80px] border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
         />
       </div>
 

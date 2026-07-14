@@ -120,11 +120,11 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
           {/* Age limits */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Min Age (as of July 31)</Label>
+              <Label className="text-xs">Min Age (UG/PG: Dec 31, school: school cutoff)</Label>
               <Input type="number" value={minAge} onChange={e => setMinAge(e.target.value)} placeholder="e.g. 17" />
             </div>
             <div>
-              <Label className="text-xs">Max Age (as of July 31)</Label>
+              <Label className="text-xs">Max Age (UG/PG: Dec 31, school: school cutoff)</Label>
               <Input type="number" value={maxAge} onChange={e => setMaxAge(e.target.value)} placeholder="e.g. 25" />
             </div>
           </div>

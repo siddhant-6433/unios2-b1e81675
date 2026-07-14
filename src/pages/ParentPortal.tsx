@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
@@ -20,7 +21,6 @@ interface StudentInfo {
   name: string;
   admission_no: string;
   course_name: string;
-  semester: string;
   campus_name: string;
   batch_name: string;
 }
@@ -64,7 +64,7 @@ export default function ParentPortal() {
     // Find student linked to this parent/user
     const { data: studentData } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
       .or(`user_id.eq.${user?.id},father_user_id.eq.${user?.id},mother_user_id.eq.${user?.id},guardian_user_id.eq.${user?.id}`)
       .limit(1)
       .single();
@@ -75,7 +75,6 @@ export default function ParentPortal() {
         name: studentData.name,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
         course_name: (studentData as any).courses?.name || "",
-        semester: studentData.semester || "",
         campus_name: (studentData as any).campuses?.name || "",
         batch_name: (studentData as any).batches?.name || "",
       });
@@ -90,7 +89,7 @@ export default function ParentPortal() {
       if (feeData) {
         setFees(feeData.map((f: any) => ({
           id: f.id,
-          fee_code_name: f.fee_codes?.name || f.term || "Fee",
+          fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
           category: f.fee_codes?.category || "other",
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
@@ -163,7 +162,6 @@ export default function ParentPortal() {
               <h2 className="text-lg font-bold text-gray-900 truncate">{student.name}</h2>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-0.5">
                 {student.course_name && <span>{student.course_name}</span>}
-                {student.semester && <span>Sem {student.semester}</span>}
                 <span className="font-mono">{student.admission_no}</span>
               </div>
             </div>
@@ -201,7 +199,7 @@ export default function ParentPortal() {
               </div>
               <div className="rounded-xl bg-white border border-gray-200 p-4">
                 <p className="text-xs text-gray-500 mb-1">Total Paid</p>
-                <p className="text-2xl font-bold text-green-600">₹{totalPaid.toLocaleString("en-IN")}</p>
+                <p className="text-2xl font-bold text-success">₹{totalPaid.toLocaleString("en-IN")}</p>
               </div>
             </div>
 
@@ -225,15 +223,15 @@ export default function ParentPortal() {
                   <div key={fee.id} className="flex items-center gap-3 p-4">
                     <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${
                       fee.status === "paid"
-                        ? "bg-green-100"
+                        ? "bg-success/10"
                         : fee.status === "overdue"
-                        ? "bg-red-100"
+                        ? "bg-destructive/10"
                         : "bg-yellow-100"
                     }`}>
                       {fee.status === "paid" ? (
-                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <CheckCircle className="h-4 w-4 text-success" />
                       ) : fee.status === "overdue" ? (
-                        <AlertCircle className="h-4 w-4 text-red-600" />
+                        <AlertCircle className="h-4 w-4 text-destructive" />
                       ) : (
                         <Clock className="h-4 w-4 text-yellow-600" />
                       )}
@@ -246,12 +244,12 @@ export default function ParentPortal() {
                     </div>
                     <div className="text-right">
                       {fee.status === "paid" ? (
-                        <p className="text-sm font-semibold text-green-600">₹{fee.paid_amount.toLocaleString("en-IN")}</p>
+                        <p className="text-sm font-semibold text-success">₹{fee.paid_amount.toLocaleString("en-IN")}</p>
                       ) : (
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
                       )}
                       <p className={`text-[10px] font-medium capitalize ${
-                        fee.status === "paid" ? "text-green-600" : fee.status === "overdue" ? "text-red-500" : "text-yellow-600"
+                        fee.status === "paid" ? "text-success" : fee.status === "overdue" ? "text-destructive" : "text-yellow-600"
                       }`}>
                         {fee.status}
                       </p>
@@ -290,8 +288,8 @@ export default function ParentPortal() {
                 {/* Breakdown */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "Present", value: attendance.present, color: "text-green-600", bg: "bg-green-50" },
-                    { label: "Absent", value: attendance.absent, color: "text-red-600", bg: "bg-red-50" },
+                    { label: "Present", value: attendance.present, color: "text-success", bg: "bg-success/5" },
+                    { label: "Absent", value: attendance.absent, color: "text-destructive", bg: "bg-destructive/5" },
                     { label: "Late", value: attendance.late, color: "text-yellow-600", bg: "bg-yellow-50" },
                   ].map((stat) => (
                     <div key={stat.label} className={`rounded-xl ${stat.bg} p-4 text-center`}>

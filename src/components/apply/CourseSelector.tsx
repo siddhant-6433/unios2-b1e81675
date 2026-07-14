@@ -1,10 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, Loader2, CalendarIcon, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info, Calendar } from "lucide-react";
+import { ArrowRight, Loader2, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar as CalendarPicker } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, isValid, parse } from "date-fns";
+import { DatePickerField, SelectField } from "@/components/ui/state-fields";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
@@ -23,94 +21,28 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
 
-// ── DOB Calendar Picker ──────────────────────────────────────────
-function DobPicker({ value, onChange, inputCls }: { value: string; onChange: (iso: string) => void; inputCls: string }) {
-  const [open, setOpen] = useState(false);
-  const [monthYear, setMonthYear] = useState<Date>(
-    value && isValid(new Date(value)) ? new Date(value) : new Date(2015, 0, 1)
-  );
-  // Manual input state
-  const [typed, setTyped] = useState("");
-
-  const selected = value && isValid(new Date(value)) ? new Date(value) : undefined;
-
-  const handleSelect = (date: Date | undefined) => {
-    if (date) {
-      onChange(format(date, "yyyy-MM-dd"));
-      setOpen(false);
-    }
+type CourseRecord = {
+  id: string;
+  name: string;
+  code?: string;
+  ageValidation?: AgeValidationResult;
+  departments?: {
+    id?: string;
+    name?: string;
+    institutions?: {
+      id?: string;
+      name?: string;
+      campus_id?: string;
+      type?: string;
+      campuses?: {
+        id?: string;
+        name?: string;
+      };
+    };
   };
-
-  const handleTyped = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    setTyped(raw);
-    // Try parse dd/mm/yyyy or dd-mm-yyyy
-    const cleaned = raw.replace(/[-]/g, "/");
-    const parsed = parse(cleaned, "dd/MM/yyyy", new Date());
-    if (isValid(parsed)) {
-      onChange(format(parsed, "yyyy-MM-dd"));
-      setMonthYear(parsed);
-    }
-  };
-
-  const displayValue = selected ? format(selected, "dd / MM / yyyy") : "";
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={`${inputCls} flex items-center justify-between text-left ${!selected ? "text-muted-foreground" : ""}`}
-        >
-          <span>{displayValue || "Select date of birth"}</span>
-          <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        {/* Month/Year quick-nav */}
-        <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-          <select
-            value={monthYear.getMonth()}
-            onChange={e => setMonthYear(new Date(monthYear.getFullYear(), parseInt(e.target.value), 1))}
-            className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs focus:outline-none"
-          >
-            {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
-              <option key={m} value={i}>{m}</option>
-            ))}
-          </select>
-          <select
-            value={monthYear.getFullYear()}
-            onChange={e => setMonthYear(new Date(parseInt(e.target.value), monthYear.getMonth(), 1))}
-            className="w-24 rounded-lg border border-input bg-card px-2 py-1 text-xs focus:outline-none"
-          >
-            {Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - 3 - i).map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
-        <CalendarPicker
-          mode="single"
-          selected={selected}
-          onSelect={handleSelect}
-          month={monthYear}
-          onMonthChange={setMonthYear}
-          disabled={(d) => d > new Date()}
-          initialFocus
-        />
-        {/* Manual type fallback */}
-        <div className="px-3 pb-3">
-          <input
-            placeholder="or type  dd/mm/yyyy"
-            value={typed}
-            onChange={handleTyped}
-            className="w-full rounded-lg border border-input bg-muted/40 px-3 py-1.5 text-xs focus:outline-none"
-          />
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
+};
 
 export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete, existingSelections, existingSession, onCancel }: Props) {
   const { toast } = useToast();
@@ -118,12 +50,13 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   const isSchoolPortal = portal.programCategories.includes("school");
   const isEditing = !!(existingSelections && existingSelections.length > 0);
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<CourseRecord[]>([]);
   const [selectedSession, setSelectedSession] = useState(existingSession || '');
   const [selections, setSelections] = useState<CourseSelection[]>(existingSelections || []);
   const [addingCourse, setAddingCourse] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedSchool, setSelectedSchool] = useState('');
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -147,7 +80,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   // Filter courses based on portal config
   const portalFilteredCourses = useMemo(() => {
     if (portal.gradeKeywords.length === 0 && portal.institutionTypes.length === 0 && (!portal.campusKeywords || portal.campusKeywords.length === 0)) return courses;
-    return courses.filter((c: any) => {
+    return courses.filter((c) => {
       if (portal.institutionTypes.length > 0) {
         const instType = c.departments?.institutions?.type?.toLowerCase() || "";
         if (!portal.institutionTypes.some(t => instType.includes(t))) return false;
@@ -175,7 +108,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   const schoolOptions = useMemo(() => {
     if (!isSchoolPortal) return [];
     const seen = new Map<string, string>(); // id → name
-    filteredCourses.forEach((c: any) => {
+    filteredCourses.forEach((c) => {
       const inst = c.departments?.institutions;
       if (inst?.id && inst?.name) seen.set(inst.id, inst.name);
     });
@@ -190,12 +123,12 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   }, [schoolOptions, isSchoolPortal, selectedSchool]);
 
   const coursesByGroup = useMemo(() => {
-    const map = new Map<string, { label: string; courses: any[] }>();
+    const map = new Map<string, { label: string; courses: CourseRecord[] }>();
     const sourceCourses = isSchoolPortal && selectedSchool
-      ? filteredCourses.filter((c: any) => c.departments?.institutions?.id === selectedSchool)
+      ? filteredCourses.filter((c) => c.departments?.institutions?.id === selectedSchool)
       : filteredCourses;
 
-    sourceCourses.forEach((c: any) => {
+    sourceCourses.forEach((c) => {
       // For school portals use institution name as group label; otherwise campus — dept
       const label = isSchoolPortal
         ? (c.departments?.institutions?.name || "Unknown School")
@@ -206,7 +139,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
     return Array.from(map.values()).map(group => ({
       ...group,
-      courses: [...group.courses].sort((a: any, b: any) => {
+      courses: [...group.courses].sort((a, b) => {
         const rankA = getSchoolGradeSortRank(a.name || "", a.code || "", portal.id);
         const rankB = getSchoolGradeSortRank(b.name || "", b.code || "", portal.id);
         if (rankA !== rankB) return rankA - rankB;
@@ -217,11 +150,12 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
   const addCourse = () => {
     if (!addingCourse) return;
-    const course = filteredCourses.find((c: any) => c.id === addingCourse);
+    const course = filteredCourses.find((c) => c.id === addingCourse);
     if (!course || selections.some(s => s.course_id === addingCourse)) return;
 
     const campusName = course.departments?.institutions?.campuses?.name || '';
     const campusId = course.departments?.institutions?.campus_id || '';
+    const institutionId = course.departments?.institutions?.id || null;
     const programCat = determineProgramCategory(course.code, course.name);
 
     setSelections(prev => [
@@ -229,6 +163,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       {
         course_id: course.id,
         campus_id: campusId,
+        institution_id: institutionId,
         course_name: course.name,
         campus_name: campusName,
         preference_order: prev.length + 1,
@@ -260,6 +195,9 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   };
 
   const estimatedFee = calculateFee(selections);
+  const today = new Date();
+  const childDobFromYear = today.getFullYear() - 32;
+  const childDobToYear = today.getFullYear() - 3;
 
   // Check if any selection has strict age block
   const hasStrictBlock = selections.some(s => {
@@ -268,11 +206,13 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   });
 
   const handleContinue = async () => {
-    if (!selectedSession || selections.length === 0) {
+    if (!selectedSession || selections.length === 0 || (isSchoolPortal && !childDob) || (isSchoolPortal && schoolOptions.length > 1 && !selectedSchool)) {
+      setShowErrors(true);
       toast({ title: 'Select session and at least one course', variant: 'destructive' });
       return;
     }
     if (hasStrictBlock) {
+      setShowErrors(true);
       toast({ title: 'Age requirement not met', description: 'Remove ineligible grades to continue.', variant: 'destructive' });
       return;
     }
@@ -304,14 +244,20 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
       {/* Child DOB for school portals */}
       {isSchoolPortal && (
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Child's Date of Birth *
-          </label>
-          <DobPicker
+        <div className="space-y-1">
+          <DatePickerField
+            label="Child's Date of Birth"
+            required
             value={childDob}
-            onChange={onDobChange}
-            inputCls={inputCls}
+            onValueChange={onDobChange}
+            error={showErrors && !childDob ? "Child's date of birth is required." : undefined}
+            placeholder="Select date of birth"
+            fromYear={childDobFromYear}
+            toYear={childDobToYear}
+            maxDate={today}
+            defaultMonth={new Date(2015, 0, 1)}
+            triggerClassName={inputCls}
+            allowManualInput
           />
           {childDob && (
             <p className="text-xs text-muted-foreground mt-1">
@@ -323,25 +269,31 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       )}
 
       <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-          <Calendar className="h-3.5 w-3.5 inline mr-1" /> Admission Session *
-        </label>
-        <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className={inputCls}>
-          <option value="">Select intake cycle</option>
-          {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <SelectField
+          label={<><Calendar className="h-3.5 w-3.5 inline mr-1" /> Admission Session</>}
+          required
+          value={selectedSession}
+          onValueChange={setSelectedSession}
+          options={sessions.map((session) => ({ value: session.id, label: session.name }))}
+          placeholder="Select intake cycle"
+          error={showErrors && !selectedSession ? "Admission session is required." : undefined}
+          triggerClassName={`${inputCls} ${showErrors && !selectedSession ? invalidCls : ''}`}
+        />
       </div>
 
       {/* School selector — shown only for school portals with multiple schools */}
       {isSchoolPortal && schoolOptions.length > 1 && (
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            <MapPin className="h-3.5 w-3.5 inline mr-1" /> Select Campus *
-          </label>
-          <select value={selectedSchool} onChange={e => { setSelectedSchool(e.target.value); setAddingCourse(''); }} className={inputCls}>
-            <option value="">Select campus</option>
-            {schoolOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SelectField
+            label={<><MapPin className="h-3.5 w-3.5 inline mr-1" /> Select Campus</>}
+            required
+            value={selectedSchool}
+            onValueChange={(value) => { setSelectedSchool(value); setAddingCourse(''); }}
+            options={schoolOptions.map((school) => ({ value: school.id, label: school.name }))}
+            placeholder="Select campus"
+            error={showErrors && !selectedSchool ? "Campus is required." : undefined}
+            triggerClassName={`${inputCls} ${showErrors && !selectedSchool ? invalidCls : ''}`}
+          />
         </div>
       )}
 
@@ -350,31 +302,27 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           {isSchoolPortal ? "Select Grade" : selections.length === 0 ? "Select Your Course" : "Add Another Course (Recommended)"}
         </label>
         <div className="flex gap-2">
-          <select
+          <SelectField
             value={addingCourse}
-            onChange={e => setAddingCourse(e.target.value)}
-            className={`${inputCls} flex-1`}
+            onValueChange={setAddingCourse}
+            options={[]}
+            groups={coursesByGroup.map((group) => ({
+              label: group.label,
+              options: group.courses.map((course) => {
+                const ageInfo = course.ageValidation;
+                const ineligible = ageInfo && !ageInfo.eligible && ageInfo.enforcement === "strict";
+                return {
+                  value: course.id,
+                  disabled: selections.some(s => s.course_id === course.id) || !!ineligible,
+                  label: `${course.name}${ageInfo && !ageInfo.eligible ? ` (Age: ${ageInfo.ageAsOfJuly31}y - ${ageInfo.enforcement === "strict" ? "ineligible" : "guidance"})` : ""}`,
+                };
+              }),
+            }))}
+            placeholder={isSchoolPortal ? "Select grade to add" : selections.length === 0 ? "Select course to add" : "Add another course preference..."}
+            triggerClassName={`${inputCls} flex-1 ${showErrors && selections.length === 0 ? invalidCls : ''}`}
+            className="flex-1"
             disabled={isSchoolPortal && schoolOptions.length > 1 && !selectedSchool}
-          >
-            <option value="">{isSchoolPortal ? "Select grade to add" : selections.length === 0 ? "Select course to add" : "Add another course preference..."}</option>
-            {coursesByGroup.map(g => (
-              <optgroup key={g.label} label={g.label}>
-                {g.courses.map((c: any) => {
-                  const ageInfo = c.ageValidation;
-                  const ineligible = ageInfo && !ageInfo.eligible && ageInfo.enforcement === "strict";
-                  return (
-                    <option
-                      key={c.id}
-                      value={c.id}
-                      disabled={selections.some(s => s.course_id === c.id) || !!ineligible}
-                    >
-                      {c.name}{ageInfo && !ageInfo.eligible ? ` (Age: ${ageInfo.ageAsOfJuly31}y — ${ageInfo.enforcement === "strict" ? "ineligible" : "guidance"})` : ""}
-                    </option>
-                  );
-                })}
-              </optgroup>
-            ))}
-          </select>
+          />
           <Button onClick={addCourse} disabled={!addingCourse} variant="outline" className="shrink-0 gap-1.5">
             <Plus className="h-4 w-4" />
             Add Course
@@ -431,20 +379,20 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
           {/* Nudge to add more courses */}
           {selections.length === 1 && !isSchoolPortal && (
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40">
-              <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40">
+              <Info className="h-4 w-4 text-warning-foreground shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Add more courses to improve your chances!</p>
-                <p className="text-xs text-amber-700/70 dark:text-amber-400/70 mt-0.5">
+                <p className="text-sm font-medium text-warning-foreground dark:text-warning/70">Add more courses to improve your chances!</p>
+                <p className="text-xs text-warning-foreground/70 dark:text-warning/70 mt-0.5">
                   Add multiple course preferences in a single application. If your first preference is full, you'll automatically be considered for your next choice.
                 </p>
               </div>
             </div>
           )}
           {selections.length >= 2 && !isSchoolPortal && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              <p className="text-xs text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-success/5 dark:bg-success/90/20 border border-success/20 dark:border-success/60/40">
+              <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+              <p className="text-xs text-success dark:text-success">
                 {selections.length} preferences selected — your chances of admission are higher with multiple choices.
               </p>
             </div>
@@ -459,11 +407,20 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         </div>
       )}
 
+      {showErrors && (!selectedSession || selections.length === 0 || (isSchoolPortal && !childDob) || (isSchoolPortal && schoolOptions.length > 1 && !selectedSchool) || hasStrictBlock) && (
+        <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive font-medium">
+            Please complete the highlighted admission selection fields before continuing.
+          </p>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button variant="outline" onClick={onCancel}>Cancel</Button>
         )}
-        <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0 || hasStrictBlock} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           {isEditing ? "Update Selections" : "Continue to Application"}
         </Button>

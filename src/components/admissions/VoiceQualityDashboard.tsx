@@ -117,7 +117,7 @@ export function VoiceQualityDashboard() {
       value: String(noDisp7),
       sub: noDisp7 > 0 ? "calls with no followup" : "all calls dispositioned",
       icon: AlertTriangle,
-      bg: noDisp7 > 0 ? "bg-red-100 dark:bg-red-900/40" : "bg-pastel-green",
+      bg: noDisp7 > 0 ? "bg-destructive/10 dark:bg-destructive/80/40" : "bg-pastel-green",
     },
   ];
 

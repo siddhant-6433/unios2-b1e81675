@@ -2,13 +2,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   digits,
   errorMessage,
+  isLikelyBusinessPhoneNumber,
   sendWhatsAppText,
   type WhatsAppChannelHint,
   type WhatsAppProvider,
 } from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
-import { recordWhatsAppOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
-import { upsertConversationState } from "../_shared/whatsapp-conversation-state.ts";
+import { recordManualReplyConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +17,7 @@ const corsHeaders = {
 };
 
 async function inferRouteFromLatestMessage(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   phone: string,
   requestedPhoneNumberId: string | null,
 ): Promise<WhatsAppChannelHint> {
@@ -85,8 +85,15 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const requestedProvider: WhatsAppProvider | null = provider === "plivo" || provider === "meta" ? provider : null;
-    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
-    const requestedBusinessNumber = typeof business_number === "string" ? digits(business_number) : null;
+    const rawRequestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const requestedPhoneNumberId = rawRequestedPhoneNumberId && !isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)
+      ? rawRequestedPhoneNumberId
+      : null;
+    const requestedBusinessNumber = typeof business_number === "string"
+      ? digits(business_number)
+      : rawRequestedPhoneNumberId && isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)
+        ? digits(rawRequestedPhoneNumberId)
+        : null;
     const channelHint: WhatsAppChannelHint = requestedProvider
       ? {
         provider: requestedProvider,
@@ -129,91 +136,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Log to whatsapp_messages
-    const { data: insertedMessage } = await admin.from("whatsapp_messages").insert({
-      lead_id: lead_id || null,
-      wa_message_id: sendResult.messageId,
-      direction: "outbound",
+    const actionResult = await recordManualReplyConversationAction(admin, {
+      kind: "manualReply",
       phone: waPhone,
-      message_type: "text",
-      content: message,
-      status: "sent",
-      is_read: true,
-      provider: sendResult.provider,
-      business_phone_number_id: sendResult.businessPhoneNumberId,
-      business_phone_number: sendResult.businessNumber,
-      template_key: "manual_reply",
-      sender_user_id: user.id,
-    }).select("id").maybeSingle();
-
-    await recordWhatsAppOutboundContext(admin, {
-      messageId: insertedMessage?.id || null,
-      providerMessageId: sendResult.messageId,
-      phone: waPhone,
-      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelHint.businessNumber,
-      provider: sendResult.provider,
+      message,
       leadId: lead_id || null,
-      templateKey: "manual_reply",
-      outboundKind: "manual_reply",
-      expectedReplyType: "general",
-      responsePolicy: "human",
-      metadata: { user_id: user.id },
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      userId: user.id,
+      businessNumberFallback: channelHint.businessNumber,
+      sendResult,
     });
-
-    await logWhatsAppAutomationEvent(admin, {
-      phone: waPhone,
-      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelHint.businessNumber,
-      provider: sendResult.provider,
-      leadId: lead_id || null,
-      eventType: "handoff_created",
-      decision: "manual_reply_sent",
-      reason: "counsellor_reply",
-      metadata: { message_id: sendResult.messageId, user_id: user.id },
-    });
-
-    // Log activity
-    if (lead_id) {
-      await admin.from("lead_activities").insert({
-        lead_id,
-        user_id: user.id,
-        type: "whatsapp",
-        description: `WhatsApp reply: ${message.substring(0, 100)}`,
-      });
-    }
-
-    const stateBusinessNumber = sendResult.businessNumber || sendResult.businessPhoneNumberId;
-    if (stateBusinessNumber) {
-      await admin
-        .from("whatsapp_ai_mode")
-        .upsert(
-          {
-            phone: waPhone,
-            business_number: stateBusinessNumber,
-            mode: "human",
-            updated_at: new Date().toISOString(),
-            updated_by: user.id,
-          },
-          { onConflict: "phone,business_number" },
-        );
-
-      await upsertConversationState(admin, {
-        phone: waPhone,
-        businessNumber: stateBusinessNumber,
-        provider: sendResult.provider,
-        leadId: lead_id || null,
-        mode: "human",
-        state: "human_active",
-        ownerUserId: user.id,
-        handoffReason: "manual_reply",
-        updatedBy: user.id,
-      });
-    }
 
     return new Response(
       JSON.stringify({
         success: true,
         message_id: sendResult.messageId,
+        conversation_message_id: actionResult.messageId,
         provider: sendResult.provider,
         business_phone_number_id: sendResult.businessPhoneNumberId,
         business_phone_number: sendResult.businessNumber,

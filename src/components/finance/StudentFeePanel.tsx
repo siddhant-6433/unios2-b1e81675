@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,10 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2,
-  Receipt, FileText,
+  Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
+  Receipt, FileText, RefreshCw,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
+import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
   student: any;
@@ -36,19 +39,36 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
+  const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
+  const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
+  const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
+  const courseCode = student?.courses?.code || student?.course_code || "";
+  const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
+  const isStethoBatch = student?.fee_structure_version === "stetho_batch";
 
   useEffect(() => {
     if (student?.id) {
       fetchFees();
       fetchPayments();
+      fetchConsultantFlag();
     }
   }, [student?.id, student?.lead_id]);
+
+  // Cashier note: is this candidate's fee consultant-managed (structure hidden
+  // from the student login)? Staff-readable via v_student_fee_visibility.
+  const fetchConsultantFlag = async () => {
+    const { data } = await (supabase.from("v_student_fee_visibility") as any)
+      .select("effective_hidden, consultant_name")
+      .eq("student_id", student.id)
+      .maybeSingle();
+    setConsultantManaged(data?.effective_hidden ? (data.consultant_name || "consultant") : null);
+  };
 
   const fetchFees = async () => {
     setLoading(true);
@@ -107,6 +127,31 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     setProvisioning(false);
   };
 
+  const handleMigrateToStetho = async () => {
+    const confirmed = window.confirm(
+      "Migrate this DAOTT/DOTT admission to the Stetho Batch fee structure? The current ledger will be snapshotted before the live ledger is rebuilt.",
+    );
+    if (!confirmed) return;
+
+    setMigratingStetho(true);
+    const { data, error } = await (supabase as any).rpc("migrate_daott_student_to_stetho_batch", {
+      _student_id: student.id,
+    });
+    setMigratingStetho(false);
+
+    if (error) {
+      toast({ title: "Migration failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: "Migrated to Stetho Batch",
+      description: `Snapshot preserved. ${data?.ledger_rows_created || 0} fee rows created.`,
+    });
+    await fetchFees();
+    onRefresh?.();
+  };
+
   const handleRemoveUnpaid = async (feeId: string) => {
     const { error } = await supabase
       .from("fee_ledger")
@@ -128,7 +173,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const totalBalance = fees.reduce((s, f) => s + Number(f.balance || 0), 0);
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   return (
@@ -147,11 +192,22 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </Badge>
         )}
         {student.fee_structure_version && (
-          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-blue-100 text-blue-700 border-blue-200"}>
-            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : "New Admission"}
+          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-warning/10 text-warning-foreground border-warning/20" : isStethoBatch ? "bg-primary/10 text-primary border-primary/20" : "bg-info/10 text-info-foreground border-info/20"}>
+            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : isStethoBatch ? "Stetho Batch" : "New Admission"}
           </Badge>
         )}
       </div>
+
+      {/* Cashier note — consultant-managed fee */}
+      {consultantManaged && (
+        <div className="rounded-xl border border-warning/20 bg-warning/5 dark:border-warning/60/50 dark:bg-warning/80/20 px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle className="h-4 w-4 text-warning-foreground shrink-0 mt-0.5" />
+          <p className="text-sm text-warning-foreground dark:text-warning/40">
+            Fee for this candidate is managed via consultant login / consultant-sent payment links
+            <span className="font-medium"> ({consultantManaged})</span>. The fee structure is hidden from the student&rsquo;s login.
+          </p>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex flex-wrap items-center gap-2">
@@ -171,6 +227,17 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {canRequestConcession && fees.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
             <HandCoins className="h-3.5 w-3.5" /> Request Concession
+          </Button>
+        )}
+        {isFinanceRole && student?.id && (
+          <Button size="sm" variant="outline" onClick={() => setSendLinkOpen(true)} className="gap-1.5">
+            <LinkIcon className="h-3.5 w-3.5" /> Send Payment Link
+          </Button>
+        )}
+        {isFinanceRole && isDaott && !isStethoBatch && (
+          <Button size="sm" variant="outline" onClick={handleMigrateToStetho} disabled={migratingStetho} className="gap-1.5">
+            {migratingStetho ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Migrate to Stetho Batch
           </Button>
         )}
       </div>
@@ -212,7 +279,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
                   <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{f.term}</td>
+                <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}</td>
                 <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                 <td className="px-4 py-3 text-right text-muted-foreground">
                   {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}
@@ -362,6 +429,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         studentId={student.id}
         feeItems={fees}
         onSuccess={() => { fetchFees(); onRefresh?.(); }}
+      />
+
+      <SendPaymentLinkDialog
+        open={sendLinkOpen}
+        onOpenChange={setSendLinkOpen}
+        studentId={student.id}
+        leadId={student.lead_id || undefined}
+        defaultAmount={totalBalance > 0 ? Math.round(totalBalance) : null}
+        defaultPurpose="fee_due"
+        onCreated={() => { fetchPayments(); onRefresh?.(); }}
       />
     </div>
   );

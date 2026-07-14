@@ -1,9 +1,17 @@
 import { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
-
-const NON_STAFF_ROLES = ["student", "parent"] as const;
+import {
+  decideApplicantAccess,
+  decideBlockedRoleAccess,
+  decidePermissionAccess,
+  decidePortalRoleAccess,
+  decideRoleAccess,
+  decideStaffAppAccess,
+  type AccessDecision,
+  type AccessState,
+} from "@/lib/accessPolicy";
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-background">
@@ -14,60 +22,82 @@ const Spinner = () => (
   </div>
 );
 
+const renderDecision = (decision: AccessDecision, children: ReactNode) => {
+  if (decision.allowed) return <>{children}</>;
+  return <Navigate to={decision.redirectTo} replace />;
+};
+
 // ── ProtectedRoute ──────────────────────────────────────────────────────────
 // Legacy: kept for backward compat on routes that don't need role segmentation.
 // Prefer StaffRoute for the main staff app catchall.
 export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, realRole, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, permissions, isImpersonating, loading, roleLoaded } = useAuth();
   if (loading || !roleLoaded) return <Spinner />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (role === null && realRole !== "super_admin") return <Navigate to="/my-applications" replace />;
-  return <>{children}</>;
+  return renderDecision(decideStaffAppAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, "/"), children);
 };
 
 // ── StaffRoute ──────────────────────────────────────────────────────────────
 // For the main /* staff catchall. Blocks student/parent roles from entering
 // the staff app and routes them to their own portals instead.
 export const StaffRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, realRole, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, permissions, isImpersonating, loading, roleLoaded } = useAuth();
+  const location = useLocation();
   if (loading || !roleLoaded) return <Spinner />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (role === "student") return <Navigate to="/student" replace />;
-  if (role === "parent") return <Navigate to="/parent" replace />;
-  if (role === null && realRole !== "super_admin") return <Navigate to="/my-applications" replace />;
-  return <>{children}</>;
+  return renderDecision(decideStaffAppAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, location.pathname), children);
 };
 
 // ── StudentRoute ────────────────────────────────────────────────────────────
 // Only allows users with role=student (or super_admin impersonating one).
 export const StudentRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, realRole, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, permissions, isImpersonating, loading, roleLoaded } = useAuth();
   if (loading || !roleLoaded) return <Spinner />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (realRole === "super_admin") return <>{children}</>;
-  if (role !== "student") return <Navigate to="/" replace />;
-  return <>{children}</>;
+  return renderDecision(decidePortalRoleAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, "student"), children);
 };
 
 // ── ParentRoute ─────────────────────────────────────────────────────────────
 // Only allows users with role=parent (or super_admin impersonating one).
 export const ParentRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, realRole, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, permissions, isImpersonating, loading, roleLoaded } = useAuth();
   if (loading || !roleLoaded) return <Spinner />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (realRole === "super_admin") return <>{children}</>;
-  if (role !== "parent") return <Navigate to="/" replace />;
-  return <>{children}</>;
+  return renderDecision(decidePortalRoleAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, "parent"), children);
 };
 
 // ── ApplicantRoute ──────────────────────────────────────────────────────────
 // For /my-applications: requires session, but redirects staff/students to main app.
 export const ApplicantRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, permissions, isImpersonating, loading, roleLoaded } = useAuth();
   if (loading || !roleLoaded) return <Spinner />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (role !== null) return <Navigate to="/" replace />;
-  return <>{children}</>;
+  return renderDecision(decideApplicantAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }), children);
 };
 
 // ── RequirePermission ───────────────────────────────────────────────────────
@@ -84,10 +114,16 @@ export const RequirePermission = ({
   children: ReactNode;
 }) => {
   const { permissions, loading } = usePermissions();
-  const { realRole } = useAuth();
+  const { session, role, realRole, isImpersonating } = useAuth();
   if (loading) return <Spinner />;
-  if (realRole === "super_admin" || permissions.has(`${module}:${action}`)) return <>{children}</>;
-  return <Navigate to="/forbidden" replace />;
+  const accessState: AccessState = {
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  };
+  return renderDecision(decidePermissionAccess(accessState, `${module}:${action}`), children);
 };
 
 // ── RequireRole ─────────────────────────────────────────────────────────────
@@ -100,8 +136,32 @@ export const RequireRole = ({
   roles: string[];
   children: ReactNode;
 }) => {
-  const { role, realRole } = useAuth();
-  if (realRole === "super_admin") return <>{children}</>;
-  if (role && roles.includes(role)) return <>{children}</>;
-  return <Navigate to="/forbidden" replace />;
+  const { session, role, realRole, permissions, isImpersonating } = useAuth();
+  return renderDecision(decideRoleAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, roles), children);
+};
+
+// ── BlockRole ───────────────────────────────────────────────────────────────
+// Use when a broad permission is shared by a narrow portal role but a specific
+// full-staff route must stay unavailable to that role.
+export const BlockRole = ({
+  roles,
+  children,
+}: {
+  roles: string[];
+  children: ReactNode;
+}) => {
+  const { session, role, realRole, permissions, isImpersonating } = useAuth();
+  return renderDecision(decideBlockedRoleAccess({
+    isAuthenticated: !!session,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, roles), children);
 };

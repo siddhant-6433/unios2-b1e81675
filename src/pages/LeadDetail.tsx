@@ -1,13 +1,14 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
-  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
+  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles,
+  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -16,13 +17,15 @@ import { Badge } from "@/components/ui/badge";
 // Dialogs are lazy — they only need to download when the user actually opens them.
 const TransferLeadDialog = lazy(() =>
   import("@/components/admissions/TransferLeadDialog").then(m => ({ default: m.TransferLeadDialog })));
+const ExternalOwnerDialog = lazy(() =>
+  import("@/components/admissions/ExternalOwnerDialog").then(m => ({ default: m.ExternalOwnerDialog })));
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 // Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
-import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { ExamPendingBadge } from "@/components/leads/ExamPendingBadge";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { recordCallDisposition } from "@/lib/callDisposition";
 
@@ -43,6 +46,7 @@ const ScorePopup            = lazy(() => import("@/components/admissions/ScorePo
 // Lazy: dialogs — only loaded when the user opens them
 const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
 const OfferLetterDialog            = lazy(() => import("@/components/admissions/OfferLetterDialog").then(m => ({ default: m.OfferLetterDialog })));
+const SchoolFeeProposalDialog      = lazy(() => import("@/components/admissions/SchoolFeeProposalDialog").then(m => ({ default: m.SchoolFeeProposalDialog })));
 const ConvertToStudentDialog       = lazy(() => import("@/components/admissions/ConvertToStudentDialog").then(m => ({ default: m.ConvertToStudentDialog })));
 const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendWhatsAppDialog").then(m => ({ default: m.SendWhatsAppDialog })));
 const AddSecondaryCounsellorDialog = lazy(() => import("@/components/leads/AddSecondaryCounsellorDialog").then(m => ({ default: m.AddSecondaryCounsellorDialog })));
@@ -51,12 +55,16 @@ const ScheduleFollowupDialog       = lazy(() => import("@/components/admissions/
 const loadCallDispositionDialog = () => import("@/components/admissions/CallDispositionDialog");
 const CallDispositionDialog        = lazy(() => loadCallDispositionDialog().then(m => ({ default: m.CallDispositionDialog })));
 const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
+const SendPaymentLinkDialog        = lazy(() => import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
 const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
+import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -70,40 +78,45 @@ const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
   wrong_number: { points: -2, label: "Wrong number" },
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
-  ai_called: "AI Called", counsellor_call: "In Follow Up",
-  visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
-  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold", rejected: "Rejected",
-};
-
-const STAGE_ORDER = [
-  "new_lead", "application_in_progress", "application_submitted",
-  "ai_called", "counsellor_call", "visit_scheduled", "interview",
-  "offer_sent", "token_paid", "pre_admitted", "admitted",
-];
-
 const stageIndex = (stage: string) => {
   const idx = STAGE_ORDER.indexOf(stage);
   return idx === -1 ? -1 : idx;
 };
 
-/** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
-const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (["rejected", "not_interested", "ineligible", "dnc", "deferred"].includes(currentStage)) return false;
-  return stageIndex(newStage) > stageIndex(currentStage);
+const FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 12);
+const PAYMENT_LINK_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 16);
+
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
+
+type FollowupQueueState = {
+  ids: string[];
+  index: number;
+  tab: string;
+  returnUrl: string;
 };
 
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const followupQueue = (location.state as { followupQueue?: FollowupQueueState } | null)?.followupQueue;
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { user, role, profile } = useAuth();
+  const { user, role, profile, hasPermission } = useAuth();
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
+  // External owner (consultant / academic partner). Mirrors can_assign_lead_external_owner:
+  // super_admin, principal, leads:assign_external_owner, or counsellor with consultants:view.
+  const canAssignExternalOwner =
+    isSuperAdmin
+    || role === "principal"
+    || hasPermission("leads:assign_external_owner")
+    || (role === "counsellor" && hasPermission("consultants:view"));
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -118,6 +131,7 @@ const LeadDetail = () => {
   const [courses, setCourses] = useState<any[]>([]);
   const [showInterview, setShowInterview] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
+  const [showFeeProposal, setShowFeeProposal] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
@@ -125,6 +139,7 @@ const LeadDetail = () => {
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showExternalOwner, setShowExternalOwner] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
@@ -141,6 +156,7 @@ const LeadDetail = () => {
   const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [showSendPaymentLink, setShowSendPaymentLink] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
   const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
@@ -168,6 +184,18 @@ const LeadDetail = () => {
   // just the assignee's display name — no contact info, no stage.
   const [assignmentInfo, setAssignmentInfo] = useState<{ exists: boolean; lead_name: string | null; counsellor_name: string | null } | null>(null);
   const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id, lead?.counsellor_id);
+  const nextFollowupQueueId = followupQueue && followupQueue.index < followupQueue.ids.length - 1
+    ? followupQueue.ids[followupQueue.index + 1]
+    : null;
+
+  const navigateWithinFollowupQueue = (nextIndex: number, startCall = false) => {
+    if (!followupQueue) return;
+    const nextId = followupQueue.ids[nextIndex];
+    if (!nextId) return;
+    navigate(`/admissions/${nextId}${startCall ? "?action=call" : ""}`, {
+      state: { followupQueue: { ...followupQueue, index: nextIndex } },
+    });
+  };
 
   // useLeadDetail handles initial fetch + refetch on id change automatically.
   // Reset local state when navigating between leads so the old data doesn't
@@ -472,14 +500,6 @@ const LeadDetail = () => {
 
   const addFollowup = async (data: { scheduled_at: string; type: string; notes: string }) => {
     if (!data.scheduled_at || !id) return;
-    // Mark all existing pending follow-ups for this lead as completed
-    // (creating a new follow-up implies the previous ones have been acted on)
-    await supabase
-      .from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-      .eq("lead_id", id)
-      .eq("status", "pending");
-
     const { error } = await supabase.from("lead_followups").insert({
       lead_id: id, user_id: user?.id,
       scheduled_at: data.scheduled_at, type: data.type, notes: data.notes || null,
@@ -511,15 +531,6 @@ const LeadDetail = () => {
       setDispositionWaSent(false); // reset flag
       await fetchAll(true);
     }
-  };
-
-  const completeFollowup = async (fid: string) => {
-    await supabase.from("lead_followups").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", fid);
-    await supabase.from("lead_activities").insert({
-      lead_id: id!, user_id: profileId, type: "followup",
-      description: "Follow-up marked as completed",
-    });
-    await fetchAll(true);
   };
 
   const scheduleVisit = async (data: { visit_date: string; campus_id: string }) => {
@@ -641,25 +652,33 @@ const LeadDetail = () => {
       });
       return;
     }
-    const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
-      old_stage: lead.stage as any, new_stage: newStage as any,
+    const transition = resolveLeadTransitionCommand({
+      currentStage: lead.stage,
+      command: "adminOverrideStage",
+      targetStage: newStage,
     });
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        reason: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     await fetchAll(true);
   };
 
   const markAsDnc = async () => {
     if (!id || !lead || lead.stage === "dnc") return;
-    const { error } = await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: `Lead marked as Do Not Contact (DNC)`,
-      old_stage: lead.stage as any, new_stage: "dnc" as any,
-    });
+    const transition = resolveLeadTransitionCommand({ currentStage: lead.stage, command: "markDnc" });
+    try {
+      await applyResolvedLeadTransition(supabase as any, { leadId: id, transition });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     // Send DNC acknowledgment via WhatsApp if phone available
     if (lead.phone) {
       try {
@@ -678,13 +697,13 @@ const LeadDetail = () => {
 
   const unmarkDnc = async () => {
     if (!id || !lead || lead.stage !== "dnc") return;
-    const { error } = await supabase.from("leads").update({ stage: "new_lead" as any }).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: "Lead removed from DNC list and moved back to New Lead",
-      old_stage: "dnc" as any, new_stage: "new_lead" as any,
-    });
+    const transition = resolveLeadTransitionCommand({ currentStage: lead.stage, command: "restoreFromDnc" });
+    try {
+      await applyResolvedLeadTransition(supabase as any, { leadId: id, transition });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({ title: "DNC removed", description: "Lead restored to New Lead." });
     await fetchAll(true);
   };
@@ -693,11 +712,15 @@ const LeadDetail = () => {
   const autoAdvanceStage = async (targetStage: string) => {
     if (!id || !lead) return;
     if (shouldAutoAdvance(lead.stage, targetStage)) {
-      await supabase.from("leads").update({ stage: targetStage as any }).eq("id", id);
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
-        old_stage: lead.stage as any, new_stage: targetStage as any,
+      const transition = resolveLeadTransitionCommand({
+        currentStage: lead.stage,
+        command: "adminOverrideStage",
+        targetStage,
+      });
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        reason: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
       });
     }
   };
@@ -887,13 +910,18 @@ const LeadDetail = () => {
     setSavingNotInterested(true);
 
     // Update lead stage + category (lock to prevent auto-override)
-    const { error: stageErr } = await supabase.from("leads").update({
-      stage: "not_interested",
-      person_role: notInterestedCategory,
-      category_locked: true,
-    } as any).eq("id", id);
-    if (stageErr) {
-      toast({ title: "Error", description: stageErr.message, variant: "destructive" });
+    const transition = resolveLeadTransitionCommand({ currentStage: lead?.stage || "new_lead", command: "classifyNotInterested" });
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        extraPatch: {
+          person_role: notInterestedCategory,
+          category_locked: true,
+        },
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
       setSavingNotInterested(false);
       return;
     }
@@ -930,6 +958,27 @@ const LeadDetail = () => {
   const handleDeleteLead = async () => {
     if (!id) return;
     setDeletingLead(true);
+    const { data: linkedApps, error: linkedAppsError } = await supabase
+      .from("applications")
+      .select("application_id, status, payment_status")
+      .eq("lead_id", id)
+      .limit(5);
+    if (linkedAppsError) {
+      toast({ title: "Delete failed", description: linkedAppsError.message, variant: "destructive" });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if ((linkedApps || []).length > 0) {
+      toast({
+        title: "Cannot delete lead with applications",
+        description: `Delete or transfer linked application ${linkedApps![0].application_id} before deleting this lead.`,
+        variant: "destructive",
+      });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
@@ -941,24 +990,24 @@ const LeadDetail = () => {
     }
   };
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
   if (!lead) {
     // Distinguish "this lead exists but isn't assigned to you" from "no such lead".
     // assignmentInfo comes from the SECURITY DEFINER lead_assignment_info RPC.
     if (assignmentInfo?.exists && assignmentInfo.counsellor_name) {
       return (
         <div className="mx-auto max-w-xl py-16">
-          <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-3">
+          <div className="rounded-2xl border border-warning/30/60 bg-warning/5 dark:bg-warning/90/20 p-6 space-y-3">
             <div className="flex items-center gap-2">
-              <UserCheck className="h-5 w-5 text-amber-600 shrink-0" />
-              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">Lead access restricted</h2>
+              <UserCheck className="h-5 w-5 text-warning-foreground shrink-0" />
+              <h2 className="text-base font-semibold text-warning-foreground dark:text-warning/40">Lead access restricted</h2>
             </div>
-            <p className="text-sm text-amber-900/90 dark:text-amber-100/90">
+            <p className="text-sm text-warning-foreground/90 dark:text-warning/30/90">
               Lead currently assigned to <span className="font-semibold">{assignmentInfo.counsellor_name}</span>.
               Please get the lead reassigned to you from admin to access this lead data.
             </p>
             <div className="pt-1">
-              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:underline">
+              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
                 <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
               </Link>
             </div>
@@ -969,16 +1018,16 @@ const LeadDetail = () => {
     if (assignmentInfo?.exists && !assignmentInfo.counsellor_name) {
       return (
         <div className="mx-auto max-w-xl py-16">
-          <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-3">
+          <div className="rounded-2xl border border-warning/30/60 bg-warning/5 dark:bg-warning/90/20 p-6 space-y-3">
             <div className="flex items-center gap-2">
-              <UserCheck className="h-5 w-5 text-amber-600 shrink-0" />
-              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">Lead access restricted</h2>
+              <UserCheck className="h-5 w-5 text-warning-foreground shrink-0" />
+              <h2 className="text-base font-semibold text-warning-foreground dark:text-warning/40">Lead access restricted</h2>
             </div>
-            <p className="text-sm text-amber-900/90 dark:text-amber-100/90">
+            <p className="text-sm text-warning-foreground/90 dark:text-warning/30/90">
               This lead is currently unassigned. Please ask an admin to assign it to you to access this lead data.
             </p>
             <div className="pt-1">
-              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:underline">
+              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
                 <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
               </Link>
             </div>
@@ -996,21 +1045,74 @@ const LeadDetail = () => {
       <Loader2 className="h-4 w-4 animate-spin" />
     </div>
   );
+  const currentExternalOwner = lead.consultant_id
+    ? {
+        type: "consultant" as const,
+        id: lead.consultant_id as string,
+        label: `Consultant: ${lead.lead_consultant?.name || "Assigned"}`,
+      }
+    : lead.academic_partner_id
+      ? {
+          type: "academic_partner" as const,
+          id: lead.academic_partner_id as string,
+          label: `Admission Partner: ${lead.lead_academic_partner?.organization || lead.lead_academic_partner?.name || "Assigned"}`,
+        }
+      : {
+          type: "none" as const,
+          id: null,
+          label: "No external owner",
+        };
+  const ExternalOwnerIcon = currentExternalOwner.type === "academic_partner" ? School : Handshake;
 
   return (
     <Suspense fallback={lazyFallback}>
     <div className="space-y-4 animate-fade-in px-0">
       {/* DNC Banner */}
       {lead.stage === "dnc" && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-400/60 bg-red-50 dark:bg-red-950/30 px-4 py-3">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/25/60 bg-destructive/5 dark:bg-destructive/90/30 px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <Ban className="h-4 w-4 text-red-600 shrink-0" />
+            <Ban className="h-4 w-4 text-destructive shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-red-700 dark:text-red-400">Do Not Contact (DNC)</p>
-              <p className="text-xs text-red-600/80 dark:text-red-500">This lead has opted out. No calls or WhatsApp messages should be sent.</p>
+              <p className="text-sm font-semibold text-destructive dark:text-destructive/80">Do Not Contact (DNC)</p>
+              <p className="text-xs text-destructive/80 dark:text-destructive">This lead has opted out. No calls or WhatsApp messages should be sent.</p>
             </div>
           </div>
-          <button onClick={unmarkDnc} className="text-xs font-medium text-red-600 hover:underline shrink-0">Remove DNC</button>
+          <button onClick={unmarkDnc} className="text-xs font-medium text-destructive hover:underline shrink-0">Remove DNC</button>
+        </div>
+      )}
+
+      {/* Followup queue navigation bar */}
+      {followupQueue && followupQueue.ids.length > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-warning/30/50 bg-warning/5 dark:bg-warning/90/30 px-3 py-2">
+          <Link
+            to={followupQueue.returnUrl}
+            className="flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:text-warning-foreground dark:hover:text-warning/30 shrink-0"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to follow-ups
+          </Link>
+          <span className="text-warning/60">/</span>
+          <span className="text-xs text-warning-foreground dark:text-warning/70 flex-1">
+            {followupQueue.index + 1} / {followupQueue.ids.length} in queue
+          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              disabled={followupQueue.index === 0}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-warning/30/40 bg-white/60 dark:bg-white/10 text-warning-foreground dark:text-warning/70 hover:bg-warning/10 dark:hover:bg-warning/80/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={() => navigateWithinFollowupQueue(followupQueue.index - 1)}
+              title="Previous lead"
+            >
+              <ChevronRight className="h-3.5 w-3.5 rotate-180" />
+            </button>
+            <button
+              disabled={followupQueue.index >= followupQueue.ids.length - 1}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-warning/30/40 bg-white/60 dark:bg-white/10 text-warning-foreground dark:text-warning/70 hover:bg-warning/10 dark:hover:bg-warning/80/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={() => navigateWithinFollowupQueue(followupQueue.index + 1)}
+              title="Next lead"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1025,11 +1127,12 @@ const LeadDetail = () => {
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
         <span className="shrink-0">
-          <CahetPendingBadge
+          <ExamPendingBadge
             leadId={lead.id}
             leadName={lead.name}
             phone={lead.phone}
             courseName={courseName}
+            campusName={campusName}
           />
         </span>
         {/* Assigned counsellor badge */}
@@ -1045,13 +1148,31 @@ const LeadDetail = () => {
             <UserCheck className="h-3 w-3" />
             {counsellorName || "Unassigned"}
           </span>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              currentExternalOwner.type === "consultant"
+                ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400"
+                : currentExternalOwner.type === "academic_partner"
+                  ? "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
+                  : "bg-muted text-muted-foreground"
+            }`}
+            title="External owner"
+          >
+            <ExternalOwnerIcon className="h-3 w-3" />
+            {currentExternalOwner.label}
+          </span>
           {canTransfer && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
             </Button>
           )}
+          {canAssignExternalOwner && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowExternalOwner(true)}>
+              <Handshake className="h-3.5 w-3.5" /> Assign Owner
+            </Button>
+          )}
           {lead.stage !== "dnc" && (
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-red-600 border-red-300/60 hover:bg-red-50 dark:hover:bg-red-950/20" onClick={markAsDnc}>
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive border-destructive/30/60 hover:bg-destructive/5 dark:hover:bg-destructive/90/20" onClick={markAsDnc}>
               <Ban className="h-3.5 w-3.5" /> Mark DNC
             </Button>
           )}
@@ -1100,18 +1221,8 @@ const LeadDetail = () => {
 
       {/* Quick action icon bar */}
       {(() => {
-        // Payment is restricted to super_admin only
-        const canRecordPayment = role === "super_admin";
-        // Offer requires application to be submitted (or later stage). Pre-offer stages can't issue.
-        const appSubmittedOrLater = stageIndex(lead.stage) >= stageIndex("application_submitted");
-        const canIssueOffer = appSubmittedOrLater && (
-          role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin"
-        );
-        const offerDisabledReason = !appSubmittedOrLater
-          ? "Offer can only be issued after application is submitted"
-          : !canIssueOffer
-          ? "You do not have permission to issue offers"
-          : undefined;
+        const canCreateProposal = role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin";
+        const showFeeProposalNewBadge = new Date() < FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL;
 
         const actions = [
           // Manual "Call" action removed — it opened the disposition dialog
@@ -1126,34 +1237,37 @@ const LeadDetail = () => {
             icon: Sparkles, label: "Add to Dialer", color: "text-fuchsia-600 bg-fuchsia-100 dark:bg-fuchsia-900/30",
             action: pinToDialer, disabled: pinningToDialer,
           },
-          { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
-          { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
-          { icon: MapPin, label: "Schedule Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
-          { icon: Footprints, label: "Log Walk-In", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
+          { icon: WhatsAppIcon, label: "WhatsApp", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWhatsApp(true) },
+          { icon: Clock, label: "Follow Up", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: () => setShowFollowup(true) },
+          { icon: MapPin, label: "Schedule Visit", color: "text-primary bg-primary/10 dark:bg-primary/80/30", action: () => setShowScheduleVisit(true) },
+          { icon: Footprints, label: "Log Walk-In", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
-          ...(role !== "counsellor" ? [{
-            icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling,
+          ...(isSuperAdmin ? [{
+            icon: Bot, label: "AI Call", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: triggerAiCall, disabled: aiCalling,
           }] : []),
-          { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
           {
-            icon: FileText, label: "Offer",
-            color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30",
-            action: () => setShowOfferLetter(true),
-            disabled: !canIssueOffer,
-            tooltip: offerDisabledReason,
+            icon: School, label: "Fee Proposal",
+            color: "text-lime-700 bg-lime-100 dark:bg-lime-900/30",
+            action: () => setShowFeeProposal(true),
+            disabled: !canCreateProposal,
+            tooltip: canCreateProposal ? undefined : "You do not have permission to create fee proposals",
+            badge: showFeeProposalNewBadge ? "New" : undefined,
           },
-          // Payment only visible for super_admin
-          ...(canRecordPayment ? [{
-            icon: IndianRupee, label: "Payment",
-            color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30",
-            action: () => setShowRecordPayment(true),
-          }] : []),
-          { icon: ThumbsDown, label: "Not Interested", color: "text-red-600 bg-red-100 dark:bg-red-900/30", action: () => setShowNotInterested(true) },
+          // Payment link — any staff with leads access (the QuickActions bar is
+          // already gated by the leads:view page permission).
+          {
+            icon: LinkIcon, label: "Payment Link",
+            color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30",
+            action: () => setShowSendPaymentLink(true),
+            badge: new Date() < PAYMENT_LINK_NEW_BADGE_VISIBLE_UNTIL ? "New" : undefined,
+            tooltip: "Send a payment link via WhatsApp/Email. Pick purpose (token/fee due/custom), set amount & expiry, then send or copy the link.",
+          },
+          { icon: ThumbsDown, label: "Not Interested", color: "text-destructive bg-destructive/10 dark:bg-destructive/80/30", action: () => setShowNotInterested(true) },
         ];
 
         return (
           <div className="flex items-center gap-1 overflow-x-auto pb-1">
-            {actions.map(({ icon: Icon, label, color, action, disabled, tooltip }: any) => (
+            {actions.map(({ icon: Icon, label, color, action, disabled, tooltip, badge }: any) => (
               <button
                 key={label}
                 onClick={action}
@@ -1164,7 +1278,14 @@ const LeadDetail = () => {
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
                   {disabled && (label === "AI Call" || label === "Cloud Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
-                <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                <div className="flex min-h-4 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                  <span>{label}</span>
+                  {badge && (
+                    <Badge className="h-3.5 rounded-full border-0 bg-success/10 px-1.5 text-[8px] font-semibold leading-none text-success dark:bg-success/80/40 dark:text-success/60">
+                      {badge}
+                    </Badge>
+                  )}
+                </div>
               </button>
             ))}
           </div>
@@ -1205,10 +1326,9 @@ const LeadDetail = () => {
             await placeManualCall();
           }}
           onCancelCall={activeCallUuid ? async () => {
-            // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
-            // records the call as cancelled_by_counsellor in call_logs +
-            // ai_call_records. Failures surface as a toast — the panel still
-            // closes so the counsellor isn't stuck on a broken state.
+            // Cancel the in-flight Cloud Call: hangs up both Plivo legs without
+            // recording a call disposition or call metric. Failures surface as
+            // a toast — the panel still closes so the counsellor isn't stuck.
             try {
               const { error } = await supabase.functions.invoke("manual-call-cancel", {
                 body: { call_id: activeCallUuid, caller_user_id: user?.id },
@@ -1319,8 +1439,8 @@ const LeadDetail = () => {
             if (pendingFollowups.length === 0 && upcomingVisits.length === 0) return null;
 
             return (
-              <div className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-2.5">
-                <h3 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide flex items-center gap-1.5">
+              <div className="rounded-xl border border-info/20 dark:border-info/50/40 bg-info/5/50 dark:bg-info/90/20 p-4 space-y-2.5">
+                <h3 className="text-xs font-semibold text-info-foreground dark:text-info/60 uppercase tracking-wide flex items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5" /> What's Next
                 </h3>
 
@@ -1341,18 +1461,18 @@ const LeadDetail = () => {
                   const isHumanCallback = f.type === "human_callback" || f.type === "callback";
                   const isAiCallback = f.type === "ai_callback";
                   return (
-                    <div key={f.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isOverdue ? "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40" : "bg-white dark:bg-card border border-border/50"}`}>
+                    <div key={f.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isOverdue ? "bg-destructive/5 dark:bg-destructive/90/20 border border-destructive/20 dark:border-destructive/50/40" : "bg-white dark:bg-card border border-border/50"}`}>
                       <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${
-                        isOverdue ? "bg-red-500" :
-                        isHumanCallback ? "bg-violet-500" :
-                        isAiCallback ? "bg-indigo-500" :
-                        isToday ? "bg-amber-500" : "bg-blue-500"
+                        isOverdue ? "bg-destructive/50" :
+                        isHumanCallback ? "bg-primary/50" :
+                        isAiCallback ? "bg-primary/50" :
+                        isToday ? "bg-warning/50" : "bg-info/50"
                       } text-white`}>
                         <Phone className="h-3.5 w-3.5" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground">{followupLabel}</p>
-                        <p className={`text-[10px] ${isOverdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+                        <p className={`text-[10px] ${isOverdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
                           {isOverdue ? "⚠️ Overdue — " : isToday ? "Today — " : ""}
                           {dt.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
                           {" at "}
@@ -1378,7 +1498,7 @@ const LeadDetail = () => {
                   const campusName = campuses.find((c: any) => c.id === v.campus_id)?.name || "Campus";
                   return (
                     <div key={v.id} className="flex items-center gap-3 rounded-lg bg-white dark:bg-card border border-border/50 px-3 py-2 text-sm">
-                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${isToday ? "bg-violet-500" : "bg-violet-400"} text-white`}>
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${isToday ? "bg-primary/50" : "bg-primary/40"} text-white`}>
                         <MapPin className="h-3.5 w-3.5" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -1412,19 +1532,19 @@ const LeadDetail = () => {
           {callLogs.length > 0 && (
             <Card className="border-border/60 shadow-none">
               <CardContent className="p-4">
-                <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <p className="text-[10px] font-semibold text-warning-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
                   <FileText className="h-3 w-3" />Previous Call Notes ({callLogs.length})
                 </p>
                 <div className="space-y-2 max-h-[200px] overflow-y-auto">
                   {callLogs.map((c: any) => (
-                    <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-amber-200 pl-2.5 py-1">
+                    <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-warning/20 pl-2.5 py-1">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge className={`text-[9px] border-0 shrink-0 ${
-                            c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
-                            c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
-                            c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
-                            c.disposition === "busy" ? "bg-orange-100 text-orange-700" :
+                            c.disposition === "interested" ? "bg-success/10 text-success" :
+                            c.disposition === "not_interested" ? "bg-destructive/10 text-destructive" :
+                            c.disposition === "not_answered" ? "bg-warning/10 text-warning-foreground" :
+                            c.disposition === "busy" ? "bg-warning/10 text-warning-foreground" :
                             c.disposition === "cancelled" ? "bg-gray-100 text-gray-600" :
                             "bg-gray-100 text-gray-600"
                           }`}>{c.disposition?.replace(/_/g, " ") || "—"}</Badge>
@@ -1459,11 +1579,11 @@ const LeadDetail = () => {
             followups={followups}
             visits={visits}
             callLogs={callLogs}
+            leadPhone={lead.phone}
             newNote={newNote}
             setNewNote={setNewNote}
             onAddNote={addNote}
             savingNote={savingNote}
-            onCompleteFollowup={completeFollowup}
             onAddFollowup={addFollowup}
             onScheduleVisit={scheduleVisit}
             onUpdateVisitStatus={async (vid, status, newDate) => {
@@ -1489,7 +1609,12 @@ const LeadDetail = () => {
       <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
-        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
+        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} courseName={courseName} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
+      <SchoolFeeProposalDialog
+        open={showFeeProposal}
+        onOpenChange={setShowFeeProposal}
+        lead={{ id: lead.id, name: lead.name, phone: lead.phone }}
+      />
       <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} courseName={courseName} campusName={campusName} onSuccess={() => fetchAll(true)} />
       <SendWhatsAppDialog
         open={showWhatsApp}
@@ -1524,6 +1649,15 @@ const LeadDetail = () => {
         leadId={lead.id}
         leadName={lead.name}
         onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+      />
+
+      {/* Send Payment Link — custom-amount pre-application token or dues */}
+      <SendPaymentLinkDialog
+        open={showSendPaymentLink}
+        onOpenChange={setShowSendPaymentLink}
+        leadId={lead.id}
+        defaultPurpose="pre_admission_token"
+        onCreated={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
       />
 
       {/* Super-admin manual override: Token Paid — requires transaction details + screenshot */}
@@ -1588,12 +1722,16 @@ const LeadDetail = () => {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-lg animate-fade-in">
           <div className="rounded-xl border border-primary/20 bg-card shadow-lg px-5 py-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 shrink-0">
-                <CheckCircle className="h-5 w-5 text-green-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10 dark:bg-success/80/30 shrink-0">
+                <CheckCircle className="h-5 w-5 text-success" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground">Call logged: {lastDisposition}</p>
-                {nextLead ? (
+                {nextFollowupQueueId ? (
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                    Next pending follow-up in this tab
+                  </p>
+                ) : nextLead ? (
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">
                     Next: <span className="font-medium text-foreground">{nextLead.name}</span> — {nextLead.bucketName}
                   </p>
@@ -1602,7 +1740,19 @@ const LeadDetail = () => {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {nextLead && (
+                {nextFollowupQueueId ? (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => {
+                      setShowNextLeadPrompt(false);
+                      navigateWithinFollowupQueue(followupQueue!.index + 1, true);
+                    }}
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    Call Next
+                  </Button>
+                ) : nextLead && (
                   <Button
                     size="sm"
                     className="gap-1.5 text-xs"
@@ -1637,6 +1787,14 @@ const LeadDetail = () => {
         leadNames={[lead.name]}
         onSuccess={() => fetchAll(true)}
       />
+      <ExternalOwnerDialog
+        open={showExternalOwner}
+        onOpenChange={setShowExternalOwner}
+        leadId={lead.id}
+        leadName={lead.name}
+        currentOwner={currentExternalOwner}
+        onSuccess={() => fetchAll(true)}
+      />
 
       {/* Not Interested Dialog */}
       <AlertDialog open={showNotInterested} onOpenChange={(o) => { if (!savingNotInterested) { setShowNotInterested(o); if (!o) { setNotInterestedReason(""); setNotInterestedCategory("lead"); } } }}>
@@ -1654,9 +1812,9 @@ const LeadDetail = () => {
               <p className="text-xs font-medium text-muted-foreground mb-1.5">Category</p>
               <div className="flex flex-wrap gap-1.5">
                 {([
-                  { value: "lead", label: "Admission Enquiry", color: "bg-blue-100 text-blue-700 border-blue-300" },
-                  { value: "job_applicant", label: "Job Applicant", color: "bg-purple-100 text-purple-700 border-purple-300" },
-                  { value: "vendor", label: "Vendor", color: "bg-amber-100 text-amber-700 border-amber-300" },
+                  { value: "lead", label: "Admission Enquiry", color: "bg-info/10 text-info-foreground border-info/30" },
+                  { value: "job_applicant", label: "Job Applicant", color: "bg-primary/10 text-primary border-primary/25" },
+                  { value: "vendor", label: "Vendor", color: "bg-warning/10 text-warning-foreground border-warning/30" },
                   { value: "other", label: "Other", color: "bg-gray-100 text-gray-600 border-gray-300" },
                 ] as const).map(cat => (
                   <button key={cat.value} type="button"
@@ -1701,7 +1859,7 @@ const LeadDetail = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{lead.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this lead and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+              This will permanently delete this lead and associated non-application data. Leads with linked applications cannot be deleted until the application is deleted or transferred, because admission steps depend on the lead record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1851,8 +2009,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
 
   return (
     <>
-      <div className="rounded-xl border border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-950/20 p-4 space-y-3">
-        <h3 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide flex items-center gap-1.5">
+      <div className="rounded-xl border border-primary/20 dark:border-primary/50/40 bg-primary/5/50 dark:bg-primary/90/20 p-4 space-y-3">
+        <h3 className="text-xs font-semibold text-primary dark:text-primary/50 uppercase tracking-wide flex items-center gap-1.5">
           <MapPin className="h-3.5 w-3.5" /> Scheduled Visits
         </h3>
         {scheduled.map((v: any) => {
@@ -1873,11 +2031,11 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
                 >Reschedule</button>
                 <button
                   onClick={() => { setCompletingVisitId(v.id); setFollowupDate(""); setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); }}
-                  className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                  className="rounded-lg bg-success px-2.5 py-1 text-xs font-medium text-white hover:bg-success/90"
                 >Mark Complete</button>
                 <button
                   onClick={() => { setNoShowDialog({ visitId: v.id, campusId: v.campus_id }); setNoShowAction("followup"); setNoShowDate(""); }}
-                  className="rounded-lg border border-amber-200 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                  className="rounded-lg border border-warning/20 px-2.5 py-1 text-xs font-medium text-warning-foreground hover:bg-warning/5"
                 >No Show</button>
                 <button
                   onClick={async () => {
@@ -1885,7 +2043,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
                     await supabase.from("lead_activities").insert({ lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit cancelled" });
                     toast({ title: "Visit cancelled" }); onRefresh();
                   }}
-                  className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  className="rounded-lg border border-destructive/20 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/5"
                 >Cancel</button>
               </div>
             </div>
@@ -1898,7 +2056,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {isWalkin ? <Footprints className="h-4 w-4 text-emerald-600" /> : <CheckCircle className="h-4 w-4 text-emerald-600" />}
+              {isWalkin ? <Footprints className="h-4 w-4 text-success" /> : <CheckCircle className="h-4 w-4 text-success" />}
               {isWalkin ? "Log Walk-in Visit" : "Complete Visit"}
             </DialogTitle>
           </DialogHeader>
@@ -1970,8 +2128,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               </div>
             </div>
 
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 space-y-3">
-              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+            <div className="rounded-xl border border-success/20 dark:border-success/60/40 bg-success/5/50 dark:bg-success/90/20 p-3 space-y-3">
+              <p className="text-xs font-semibold text-success dark:text-success/60 uppercase tracking-wide">
                 Mandatory Follow-up (within 3 days)
               </p>
               <div className="grid grid-cols-1 gap-3">
@@ -1994,13 +2152,13 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
                 </div>
               </div>
               {maxFollowupDate && (
-                <p className="text-[10px] text-emerald-600">Follow-up must be by {new Date(maxFollowupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</p>
+                <p className="text-[10px] text-success">Follow-up must be by {new Date(maxFollowupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</p>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
-            <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-success hover:bg-success/90">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
               {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
             </Button>
@@ -2017,7 +2175,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">Pick a new date and time for the campus visit.</p>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-destructive">*</span></label>
               <input type="datetime-local" value={rescheduleNewDate} onChange={e => setRescheduleNewDate(e.target.value)}
                 className={inputCls} />
             </div>
@@ -2060,7 +2218,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">
-                {noShowAction === "followup" ? "Follow-up Call Date" : "New Visit Date"} <span className="text-red-500">*</span>
+                {noShowAction === "followup" ? "Follow-up Call Date" : "New Visit Date"} <span className="text-destructive">*</span>
               </label>
               <input type="datetime-local" value={noShowDate} onChange={e => setNoShowDate(e.target.value)} className={inputCls} />
             </div>
@@ -2077,7 +2235,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
                   visit_date: new Date(noShowDate).toISOString(), status: "scheduled",
                   scheduled_by: userId,
                 } as any);
-                await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", leadId);
+                const transition = resolveLeadTransitionCommand({ currentStage: "visit_scheduled", command: "rescheduleVisit" });
+                await applyResolvedLeadTransition(supabase as any, { leadId, transition });
                 toast({ title: "No-show recorded", description: `Visit rescheduled for ${new Date(noShowDate).toLocaleDateString("en-IN")}` });
               } else {
                 await supabase.from("lead_followups").insert({

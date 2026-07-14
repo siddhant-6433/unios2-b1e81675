@@ -1,14 +1,17 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { TextField, SelectField, TextAreaField } from "@/components/ui/state-fields";
 import { Loader2, Plus, CloudUpload, CheckCircle2 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { DuplicateLeadWarning } from "@/components/admissions/DuplicateLeadWarning";
 import { LEAD_SOURCES } from "@/config/leadSources";
+import { isBscNursingCourse } from "@/lib/bscNursing";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 interface AddLeadDialogProps {
   open: boolean;
@@ -23,6 +26,8 @@ interface AddLeadDialogProps {
 const EMPTY_FORM = {
   name: "", phone: "", email: "", guardian_name: "", guardian_phone: "",
   source: "" as string, course_id: "", campus_id: "", counsellor_id: "", consultant_id: "", notes: "",
+  cnet_appeared: "" as "" | "yes" | "no",
+  cahet_registered: "" as "" | "yes" | "no",
 };
 
 export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
@@ -42,6 +47,13 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
   const skipNextAutosave = useRef(false);
 
   const filteredCampuses = getCampusesForCourse(form.course_id || null);
+  const courseChoices = useMemo(
+    () => coursesByDepartment.flatMap(g => g.courses ?? []),
+    [coursesByDepartment],
+  );
+  const selectedCourse = courseChoices.find(c => c.id === form.course_id);
+  const asksCnetAppeared = isBscNursingCourse(selectedCourse || null);
+  const asksCahetRegistered = isBptOrBmritCourseName(selectedCourse?.name);
 
   // Counsellor list — fetched once on open.
   useEffect(() => {
@@ -102,7 +114,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     const handle = setTimeout(async () => {
       if (!user?.id) return;
       setDraftStatus("saving");
-      const courseEntry = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === form.course_id);
+      const courseEntry = courseChoices.find(c => c.id === form.course_id);
       const payload = {
         created_by: user.id,
         data: form,
@@ -124,17 +136,32 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     }, 800);
 
     return () => clearTimeout(handle);
-  }, [form, open, user?.id, coursesByDepartment, saving, onDraftChange]);
+  }, [form, open, user?.id, courseChoices, saving, onDraftChange]);
 
   // Auto-select campus when course changes
   const handleCourseChange = (courseId: string) => {
     const campuses = getCampusesForCourse(courseId || null);
-    setForm(p => ({ ...p, course_id: courseId, campus_id: campuses.length === 1 ? campuses[0].id : "" }));
+    const course = courseChoices.find(c => c.id === courseId);
+    setForm(p => ({
+      ...p,
+      course_id: courseId,
+      campus_id: campuses.length === 1 ? campuses[0].id : "",
+      cnet_appeared: isBscNursingCourse(course || null) ? p.cnet_appeared : "",
+      cahet_registered: isBptOrBmritCourseName(course?.name) ? p.cahet_registered : "",
+    }));
   };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.phone.trim() || !form.source) {
       toast({ title: "Required", description: "Name, phone and source are required", variant: "destructive" });
+      return;
+    }
+    if (asksCnetAppeared && !form.cnet_appeared) {
+      toast({ title: "Required", description: "Please mark whether the B.Sc Nursing lead appeared for CNET", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !form.cahet_registered) {
+      toast({ title: "Required", description: "Please mark whether the BPT/BMRIT lead registered for CAHET", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -151,6 +178,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       _counsellor_id: form.counsellor_id || null,
       _notes: form.notes.trim() || null,
       _consultant_id: form.source === "consultant" ? (form.consultant_id || null) : null,
+      _cnet_appeared: asksCnetAppeared ? form.cnet_appeared === "yes" : null,
+      _cahet_registered: asksCahetRegistered ? form.cahet_registered === "yes" : null,
     });
     setSaving(false);
     if (error) {
@@ -180,8 +209,6 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     onSuccess();
   };
 
-  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -194,7 +221,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
                 {draftStatus === "saving" ? (
                   <><CloudUpload className="h-3 w-3 animate-pulse" />Saving draft…</>
                 ) : (
-                  <><CheckCircle2 className="h-3 w-3 text-emerald-600" />Draft saved</>
+                  <><CheckCircle2 className="h-3 w-3 text-success" />Draft saved</>
                 )}
               </span>
             )}
@@ -202,108 +229,157 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name *</label>
-              <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Student name" className={inputCls} />
-            </div>
+            <TextField
+              value={form.name}
+              onValueChange={value => setForm(p => ({ ...p, name: value }))}
+              label="Name"
+              required
+              placeholder="Student name"
+            />
             <div className="min-w-0">
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
               <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
             </div>
           </div>
           <DuplicateLeadWarning phone={form.phone} />
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
-            <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@example.com" className={inputCls} />
-          </div>
+          <TextField
+            value={form.email}
+            onValueChange={value => setForm(p => ({ ...p, email: value }))}
+            label="Email"
+            type="email"
+            placeholder="email@example.com"
+          />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Guardian Name</label>
-              <input value={form.guardian_name} onChange={e => setForm(p => ({ ...p, guardian_name: e.target.value }))} className={inputCls} />
-            </div>
+            <TextField
+              value={form.guardian_name}
+              onValueChange={value => setForm(p => ({ ...p, guardian_name: value }))}
+              label="Guardian Name"
+            />
             <div className="min-w-0">
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Guardian Phone</label>
               <PhoneInput value={form.guardian_phone} onChange={phone => setForm(p => ({ ...p, guardian_phone: phone }))} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Source <span className="text-destructive">*</span></label>
-              <select
-                value={form.source}
-                onChange={e => setForm(p => ({
-                  ...p,
-                  source: e.target.value,
-                  consultant_id: e.target.value === "consultant" ? p.consultant_id : "",
-                }))}
-                className={`${inputCls} ${!form.source ? "text-muted-foreground" : ""}`}
-              >
-                <option value="">Select source *</option>
-                {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course</label>
-              <select value={form.course_id} onChange={e => handleCourseChange(e.target.value)} className={inputCls}>
-                <option value="">Select course</option>
-                {coursesByDepartment.map(g => (
-                  <optgroup key={g.department} label={g.department}>
-                    {g.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
+            <SelectField
+              value={form.source}
+              onValueChange={value => setForm(p => ({
+                ...p,
+                source: value,
+                consultant_id: value === "consultant" ? p.consultant_id : "",
+              }))}
+              options={LEAD_SOURCES.map(s => ({ value: s.value, label: s.label }))}
+              label="Source"
+              required
+              placeholder="Select source"
+            />
+            <SelectField
+              value={form.course_id}
+              onValueChange={handleCourseChange}
+              groups={coursesByDepartment.map(g => ({
+                label: g.department,
+                options: (g.courses ?? []).map(c => ({ value: c.id, label: c.name })),
+              }))}
+              label="Course"
+              placeholder="Select course"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus</label>
-              <select
-                value={form.campus_id}
-                onChange={e => setForm(p => ({ ...p, campus_id: e.target.value }))}
-                className={inputCls}
-                disabled={filteredCampuses.length <= 1}
-              >
-                {!form.course_id ? (
-                  <option value="">Select course first</option>
-                ) : filteredCampuses.length === 1 ? (
-                  <option value={filteredCampuses[0].id}>{filteredCampuses[0].name}</option>
-                ) : (
-                  <>
-                    <option value="">Select campus</option>
-                    {filteredCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </>
-                )}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Counsellor</label>
-              <select value={form.counsellor_id} onChange={e => setForm(p => ({ ...p, counsellor_id: e.target.value }))} className={inputCls}>
-                <option value="">Unassigned</option>
-                {counsellors.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
-              </select>
-            </div>
-          </div>
-          {form.source === "consultant" && (
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Consultant</label>
-              <select
-                value={form.consultant_id}
-                onChange={e => setForm(p => ({ ...p, consultant_id: e.target.value }))}
-                className={inputCls}
-              >
-                <option value="">Select consultant (optional)</option>
-                {consultants.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.organization ? ` — ${c.organization}` : ""}
-                  </option>
+          {asksCnetAppeared && (
+            <div className="rounded-xl border border-info/20 bg-info/5/60 p-3 dark:border-info/60/50 dark:bg-info/90/20">
+              <label className="block text-[11px] font-medium text-info-foreground dark:text-info/40 mb-2">
+                CNET appeared? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm(p => ({ ...p, cnet_appeared: value }))}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      form.cnet_appeared === value
+                        ? "border-info/40 bg-info text-white"
+                        : "border-info/20 bg-background text-foreground hover:bg-info/5 dark:border-info/60"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           )}
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
-            <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={inputCls} />
+          {asksCahetRegistered && (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5/60 p-3 dark:border-destructive/60/50 dark:bg-destructive/90/20">
+              <label className="block text-[11px] font-medium text-destructive dark:text-destructive/40 mb-2">
+                Registered for CAHET? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm(p => ({ ...p, cahet_registered: value }))}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      form.cahet_registered === value
+                        ? "border-destructive/40 bg-destructive text-white"
+                        : "border-destructive/20 bg-background text-foreground hover:bg-destructive/5 dark:border-destructive/60"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <SelectField
+              value={form.campus_id}
+              onValueChange={value => setForm(p => ({ ...p, campus_id: value }))}
+              options={
+                !form.course_id
+                  ? [{ value: "", label: "Select course first" }]
+                  : filteredCampuses.length === 1
+                    ? [{ value: filteredCampuses[0].id, label: filteredCampuses[0].name }]
+                    : [
+                        { value: "", label: "Select campus" },
+                        ...filteredCampuses.map(c => ({ value: c.id, label: c.name })),
+                      ]
+              }
+              label="Campus"
+              disabled={filteredCampuses.length <= 1}
+              allowEmpty={false}
+            />
+            <SelectField
+              value={form.counsellor_id}
+              onValueChange={value => setForm(p => ({ ...p, counsellor_id: value }))}
+              options={[
+                { value: "", label: "Unassigned" },
+                ...counsellors.map(c => ({ value: c.id, label: c.display_name })),
+              ]}
+              label="Counsellor"
+              placeholder="Unassigned"
+            />
           </div>
+          {form.source === "consultant" && (
+            <SelectField
+              value={form.consultant_id}
+              onValueChange={value => setForm(p => ({ ...p, consultant_id: value }))}
+              options={[
+                { value: "", label: "Select consultant (optional)" },
+                ...consultants.map(c => ({
+                  value: c.id,
+                  label: c.organization ? `${c.name} — ${c.organization}` : c.name,
+                })),
+              ]}
+              label="Consultant"
+              placeholder="Select consultant"
+            />
+          )}
+          <TextAreaField
+            value={form.notes}
+            onValueChange={value => setForm(p => ({ ...p, notes: value }))}
+            label="Notes"
+            rows={2}
+          />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={saving} className="gap-1.5">

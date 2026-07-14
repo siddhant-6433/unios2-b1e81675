@@ -39,19 +39,19 @@ const META: Record<LeadFunnelStage, {
   iconBg: string; iconColor: string; tint: string; ring: string; bar: string;
 }> = {
   untouched: { label: "Untouched", icon: Users,           iconBg: "bg-slate-100",   iconColor: "text-slate-600",   tint: "bg-slate-50/60",   ring: "ring-slate-400",   bar: "bg-slate-400" },
-  contacted: { label: "Contacted", icon: Phone,           iconBg: "bg-blue-100",    iconColor: "text-blue-600",    tint: "bg-blue-50/60",    ring: "ring-blue-400",    bar: "bg-blue-400" },
-  hot:       { label: "Hot",       icon: Flame,           iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
-  applied:   { label: "Applied",   icon: FileText,        iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
-  approved:  { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-orange-100", iconColor: "text-orange-600", tint: "bg-orange-50/60", ring: "ring-orange-400", bar: "bg-orange-400" },
+  contacted: { label: "Contacted", icon: Phone,           iconBg: "bg-info/10",    iconColor: "text-info-foreground",    tint: "bg-info/5/60",    ring: "ring-blue-400",    bar: "bg-info/40" },
+  hot:       { label: "Hot",       icon: Flame,           iconBg: "bg-warning/10",   iconColor: "text-warning-foreground",   tint: "bg-warning/5/60",   ring: "ring-amber-400",   bar: "bg-warning/40" },
+  applied:   { label: "Applied",   icon: FileText,        iconBg: "bg-primary/10",  iconColor: "text-primary",  tint: "bg-primary/5/60",  ring: "ring-violet-400",  bar: "bg-primary/40" },
+  approved:  { label: "Pending Offer", icon: ClipboardCheck, iconBg: "bg-warning/10", iconColor: "text-warning-foreground", tint: "bg-warning/5/60", ring: "ring-orange-400", bar: "bg-warning/50" },
   offered:   { label: "Offered",   icon: Gift,            iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
-  admitted:  { label: "Admitted",  icon: GraduationCap,   iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+  admitted:  { label: "Admitted",  icon: GraduationCap,   iconBg: "bg-success/10",   iconColor: "text-success",   tint: "bg-success/5/60",   ring: "ring-green-400",   bar: "bg-success/50" },
 };
 
 const conversionTone = (pct: number | null) => {
   if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
-  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
+  if (pct >= 90)   return "text-success bg-success/5 border-success/20";
+  if (pct >= 70)   return "text-warning-foreground bg-warning/5 border-warning/20";
+  return "text-destructive bg-destructive/5 border-destructive/20";
 };
 
 interface Props {
@@ -66,9 +66,28 @@ interface Props {
   activeStage: LeadFunnelStage | "leakage" | null;
   /** Click handler — pass the bucket key or null to clear. */
   onStageClick: (stage: LeadFunnelStage | "leakage" | null) => void;
+  /** Split of new_lead rows by counsellor assignment. */
+  newLeadAssignmentCounts?: {
+    assigned: number;
+    unassigned: number;
+    unassigned_ai_called?: number;
+    unassigned_not_ai_called?: number;
+  };
+  /** Active assigned/unassigned untouched filter, or null for no split filter. */
+  activeNewLeadAssignment?: "assigned" | "unassigned" | null;
+  /** Click handler for the assigned/unassigned untouched split. */
+  onNewLeadAssignmentClick?: (assignment: "assigned" | "unassigned" | null) => void;
 }
 
-export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageClick }: Props) {
+export function LeadPipeline({
+  stageCounts,
+  extraHot = 0,
+  activeStage,
+  onStageClick,
+  newLeadAssignmentCounts,
+  activeNewLeadAssignment = null,
+  onNewLeadAssignmentClick,
+}: Props) {
   // Bucket counts by collapsing raw lead_stage rows into the 7 funnel keys.
   const bucket: Record<LeadFunnelStage, number> = {
     untouched: 0, contacted: 0, hot: 0, applied: 0, approved: 0, offered: 0, admitted: 0,
@@ -104,6 +123,12 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
     leakageTotal += c;
   }
   const hotCount = bucket.hot;
+  const untouchedSplit = newLeadAssignmentCounts ?? {
+    assigned: bucket.untouched,
+    unassigned: 0,
+    unassigned_ai_called: 0,
+    unassigned_not_ai_called: 0,
+  };
 
   return (
     <Card className="rounded-2xl border-border/40 shadow-none">
@@ -121,8 +146,8 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
                 onClick={() => onStageClick(activeStage === "hot" ? null : "hot")}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                   activeStage === "hot"
-                    ? "border-amber-400 bg-amber-100 text-amber-800 ring-2 ring-amber-300"
-                    : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    ? "border-warning/30 bg-warning/10 text-warning-foreground ring-2 ring-amber-300"
+                    : "border-warning/30 bg-warning/5 text-warning-foreground hover:bg-warning/10"
                 }`}
                 title="High-intent leads — counsellor-flagged"
               >
@@ -135,8 +160,8 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
                 onClick={() => onStageClick(activeStage === "leakage" ? null : "leakage")}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                   activeStage === "leakage"
-                    ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                    : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    ? "border-destructive/30 bg-destructive/10 text-destructive ring-2 ring-rose-300"
+                    : "border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10"
                 }`}
                 title={Object.entries(leakageByStage)
                   .map(([s, c]) => `${c} ${LEAKAGE_LABEL[s as LeakageStage]}`)
@@ -160,7 +185,8 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
             const prev = i > 0 ? reached[LEAD_FUNNEL_ORDER[i - 1]] : null;
             const conv = prev != null && prev > 0 ? Math.round((r / prev) * 100) : null;
             const isActive = activeStage === stage;
-            const widthBasis = total > 0 ? Math.max(96, (r / total) * 220) : 96;
+            const widthBasis = total > 0 ? Math.max(124, (r / total) * 220) : 124;
+            const untouchedWidth = Math.max(widthBasis + 112, 246);
             const reachPct = total > 0 ? (r / total) * 100 : 0;
 
             return (
@@ -173,30 +199,82 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
                     <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 mt-0.5" />
                   </div>
                 )}
-                <button
-                  onClick={() => onStageClick(isActive ? null : stage)}
-                  className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
-                    isActive
-                      ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
-                      : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
-                  }`}
-                  style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
-                  title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                      <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                {stage === "untouched" ? (
+                  <div
+                    className="grid grid-cols-2 gap-1.5 shrink-0"
+                    style={{ flex: `0 0 ${untouchedWidth}px`, width: untouchedWidth }}
+                  >
+                    {([
+                      {
+                        key: "unassigned" as const,
+                        label: "Unassigned",
+                        count: untouchedSplit.unassigned,
+                        title: "new leads not assigned to a counsellor",
+                        detail: `${(untouchedSplit.unassigned_ai_called ?? 0).toLocaleString("en-IN")} AI called / ${(untouchedSplit.unassigned_not_ai_called ?? 0).toLocaleString("en-IN")} not called`,
+                      },
+                      {
+                        key: "assigned" as const,
+                        label: "Assigned",
+                        count: untouchedSplit.assigned,
+                        title: "new leads assigned to counsellors",
+                        detail: `${stuck.toLocaleString("en-IN")} total untouched`,
+                      },
+                    ]).map((part) => {
+                      const partActive = activeNewLeadAssignment === part.key;
+                      return (
+                        <button
+                          key={part.key}
+                          onClick={() => onNewLeadAssignmentClick?.(partActive ? null : part.key)}
+                          className={`group relative rounded-xl border transition-all text-left p-3 min-w-0 overflow-hidden ${
+                            partActive
+                              ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
+                              : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
+                          }`}
+                          title={`${part.count.toLocaleString("en-IN")} ${part.title}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                            <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                              <Icon className={`h-3 w-3 ${meta.iconColor}`} />
+                            </div>
+                            <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">
+                              {part.count.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <p className="text-[11px] font-medium text-foreground/80 truncate">{part.label} untouched</p>
+                          <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                            <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                          </div>
+                          <p className="mt-1.5 text-[10px] text-muted-foreground truncate">{part.detail}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => onStageClick(isActive ? null : stage)}
+                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
+                      isActive
+                        ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
+                        : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
+                    }`}
+                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
+                    title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
+                      </div>
+                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck.toLocaleString("en-IN")}</p>
                     </div>
-                    <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck.toLocaleString("en-IN")}</p>
-                  </div>
-                  <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
-                  <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
-                    <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
-                  </div>
-                  <p className="mt-1.5 text-[10px] text-muted-foreground">
-                    <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
-                  </p>
-                </button>
+                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                      <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                    </div>
+                    <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
+                      <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
+                    </p>
+                  </button>
+                )}
               </Fragment>
             );
           })}

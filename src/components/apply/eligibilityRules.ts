@@ -3,12 +3,11 @@
  * Marks parsing: values ≤ 10 treated as CGPA → converted via CGPA × 9.5.
  */
 
-import { supabase } from "@/integrations/supabase/client";
-
 export interface EligibilityRule {
   minAge?: number;
   maxAge?: number;
   class12MinMarks?: number;
+  scStMinMarks?: number;
   graduationMinMarks?: number;
   requiresGraduation?: boolean;
   entranceExamName?: string;
@@ -25,6 +24,7 @@ export interface EligibilityRuleDB {
   min_age: number | null;
   max_age: number | null;
   class_12_min_marks: number | null;
+  sc_st_min_marks: number | null;
   graduation_min_marks: number | null;
   requires_graduation: boolean;
   entrance_exam_name: string | null;
@@ -40,6 +40,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
     minAge: row.min_age ?? undefined,
     maxAge: row.max_age ?? undefined,
     class12MinMarks: row.class_12_min_marks ?? undefined,
+    scStMinMarks: row.sc_st_min_marks ?? undefined,
     graduationMinMarks: row.graduation_min_marks ?? undefined,
     requiresGraduation: row.requires_graduation,
     entranceExamName: row.entrance_exam_name ?? undefined,
@@ -53,6 +54,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
 /** Fetch eligibility rules for a set of course IDs from DB. Returns map of courseId → rule. */
 export async function fetchEligibilityRules(courseIds: string[]): Promise<Record<string, EligibilityRule>> {
   if (!courseIds.length) return {};
+  const { supabase } = await import("@/integrations/supabase/client");
   const { data, error } = await supabase
     .from("eligibility_rules")
     .select("*")
@@ -165,6 +167,21 @@ export function calculateAgeAtCutoff(dob: string, admissionYear: number, cutoffM
   return Math.round(years * 10) / 10;
 }
 
+export function getDobEligibilityCutoff(
+  programCategory: string,
+  admissionYear: number,
+  campusName?: string,
+): { month: number; day: number; label: string } {
+  if (programCategory === 'school') {
+    const isMirai = campusName?.toLowerCase().includes('mirai');
+    return isMirai
+      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
+      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+  }
+
+  return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
+}
+
 export interface ValidationResult {
   field: string;
   message: string;
@@ -176,24 +193,32 @@ function getRule(programCategory: string, courseRule?: EligibilityRule): Eligibi
   return courseRule || ELIGIBILITY_RULES[programCategory] || {};
 }
 
+const SC_ST_CATEGORIES = new Set(['SC', 'ST']);
+
 export function validateAcademicEligibility(
   programCategory: string,
   academicDetails: Record<string, any>,
   courseRule?: EligibilityRule,
   additionalQualifications?: Record<string, any>[],
+  applicantCategory?: string,
 ): ValidationResult[] {
   const rules = getRule(programCategory, courseRule);
   const results: ValidationResult[] = [];
 
-  // Class 12 marks check
-  if (rules.class12MinMarks) {
+  // Class 12 marks check — SC/ST applicants use scStMinMarks when set.
+  const isScSt = applicantCategory ? SC_ST_CATEGORIES.has(applicantCategory.toUpperCase()) : false;
+  const effectiveMinMarks = (isScSt && rules.scStMinMarks != null)
+    ? rules.scStMinMarks
+    : rules.class12MinMarks;
+
+  if (effectiveMinMarks) {
     const c12 = academicDetails?.class_12;
     if (c12 && c12.result_status !== 'not_declared') {
       const pct = parseMarksToPercentage(c12?.marks);
-      if (pct !== null && pct < rules.class12MinMarks) {
+      if (pct !== null && pct < effectiveMinMarks) {
         results.push({
           field: 'class_12',
-          message: `Minimum ${rules.class12MinMarks}% required in Class 12. You have ${pct.toFixed(1)}%.`,
+          message: `Minimum ${effectiveMinMarks}% required in Class 12 (${applicantCategory || 'General'}). You have ${pct.toFixed(1)}%.`,
           type: 'error',
         });
       }
@@ -372,13 +397,9 @@ export function validateDobEligibility(
   const rules = getRule(programCategory, courseRule);
   if (!dob) return null;
 
-  // Mirai uses June 1st cutoff (Month index 5)
-  const isMirai = campusName?.toLowerCase().includes('mirai');
-  const cutoffMonth = isMirai ? 5 : 6;
-  const cutoffDay = isMirai ? 1 : 31;
-  const cutoffLabel = isMirai ? `June 1, ${admissionYear}` : `July 31, ${admissionYear}`;
+  const cutoff = getDobEligibilityCutoff(programCategory, admissionYear, campusName);
 
-  const age = calculateAgeAtCutoff(dob, admissionYear, cutoffMonth, cutoffDay);
+  const age = calculateAgeAtCutoff(dob, admissionYear, cutoff.month, cutoff.day);
   if (age === null) return null;
 
   const isGrade1 = courseName?.toLowerCase().includes('grade i') || courseName?.toLowerCase().includes('pyp 1');
@@ -395,7 +416,7 @@ export function validateDobEligibility(
   if (rules.minAge && age < rules.minAge) {
     return {
       field: 'dob',
-      message: `Minimum age ${rules.minAge} years required (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      message: `Minimum age ${rules.minAge} years required (as of ${cutoff.label}). Applicant is ${age} years old.`,
       type: getValidationType(true),
     };
   }
@@ -403,7 +424,7 @@ export function validateDobEligibility(
   if (rules.maxAge && age > rules.maxAge) {
     return {
       field: 'dob',
-      message: `Maximum age ${rules.maxAge} years allowed (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      message: `Maximum age ${rules.maxAge} years allowed (as of ${cutoff.label}). Applicant is ${age} years old.`,
       type: getValidationType(false),
     };
   }
@@ -489,10 +510,11 @@ export function validatePerCourseEligibility(
   courseRules: Record<string, EligibilityRule>,
   sessionYear: number,
   additionalQualifications?: Record<string, any>[],
+  applicantCategory?: string,
 ): CourseEligibilityResult[] {
   return courseSelections.map(cs => {
     const rule = courseRules[cs.course_id];
-    const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications);
+    const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications, applicantCategory);
     const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule, cs.course_name, cs.campus_name);
     const yearResults = validateAcademicYears(academicDetails, sessionYear, rule?.requiresGraduation);
     const hasErrors = results.some(r => r.type === 'error')

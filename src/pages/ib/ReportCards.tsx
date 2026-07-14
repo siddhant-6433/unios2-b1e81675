@@ -52,9 +52,9 @@ const INPUT_CLASS =
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   draft: { label: "Draft", color: "bg-yellow-100 text-yellow-800" },
-  teacher_review: { label: "Teacher Review", color: "bg-blue-100 text-blue-800" },
-  coordinator_review: { label: "Coordinator Review", color: "bg-purple-100 text-purple-800" },
-  published: { label: "Published", color: "bg-green-100 text-green-800" },
+  teacher_review: { label: "Teacher Review", color: "bg-info/10 text-info-foreground" },
+  coordinator_review: { label: "Coordinator Review", color: "bg-primary/10 text-primary" },
+  published: { label: "Published", color: "bg-success/10 text-success-foreground" },
 };
 
 const ReportCards = () => {
@@ -271,10 +271,10 @@ const ReportCards = () => {
   });
 
   const summaryCards = [
-    { label: "Total Students", count: total, icon: Users, color: "text-blue-600 bg-blue-50" },
+    { label: "Total Students", count: total, icon: Users, color: "text-info-foreground bg-info/5" },
     { label: "Draft", count: draftCount, icon: FileText, color: "text-yellow-600 bg-yellow-50" },
-    { label: "In Review", count: reviewCount, icon: Clock, color: "text-purple-600 bg-purple-50" },
-    { label: "Published", count: publishedCount, icon: CheckCircle, color: "text-green-600 bg-green-50" },
+    { label: "In Review", count: reviewCount, icon: Clock, color: "text-primary bg-primary/5" },
+    { label: "Published", count: publishedCount, icon: CheckCircle, color: "text-success bg-success/5" },
   ];
 
   return (
@@ -378,7 +378,7 @@ const ReportCards = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">

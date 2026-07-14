@@ -5,6 +5,13 @@ export type FeeBreakdownStatus = {
   post_scholarship_year_1?: number | null;
 };
 
+export type CoursePaymentStatus = {
+  paid_toward_course?: number | null;
+  total_paid?: number | null;
+  application_paid?: number | null;
+  registration_paid?: number | null;
+};
+
 export type FeeBreakdownRow = {
   term: string;
   raw: number;
@@ -28,6 +35,18 @@ export type OneTimePaymentOptions = {
 
 const clampMoney = (value: number) => Math.max(0, Number(value) || 0);
 const roundMoney = (value: number) => Math.round(clampMoney(value));
+
+export function resolvePaidTowardCourse(status: CoursePaymentStatus): number {
+  if (status.paid_toward_course != null) {
+    return clampMoney(status.paid_toward_course);
+  }
+
+  return clampMoney(
+    clampMoney(status.total_paid || 0) -
+      clampMoney(status.application_paid || 0) -
+      clampMoney(status.registration_paid || 0),
+  );
+}
 
 export function buildApplicantFeeBreakdownRows({
   yearFeesNet,
@@ -107,4 +126,8 @@ export function buildApplicantOneTimePaymentOptions({
     year1AmountDue: Math.max(0, roundMoney(year1NetFee - paid - year1Discount)),
     fullCourseAmountDue: Math.max(0, roundMoney(totalNetFee - paid - fullCourseDiscount)),
   };
+}
+
+export function hasApplicantOneTimePaymentOptions(options: OneTimePaymentOptions): boolean {
+  return options.year1NetFee > 0 || options.totalNetFee > 0;
 }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap,
+  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap, ExternalLink, Megaphone,
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
@@ -11,7 +11,8 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold",
 };
 
 // Pipeline stages can only be reached via their proper workflow (call log, visit
@@ -29,6 +30,36 @@ const AUTO_ONLY_STAGES = new Set([
   "application_fee_paid",
   "application_submitted",
 ]);
+
+function absoluteLandingUrl(lead: any): string | null {
+  const landingPage = typeof lead.landing_page === "string" ? lead.landing_page.trim() : "";
+  const originDomain = typeof lead.origin_domain === "string" ? lead.origin_domain.trim() : "";
+  if (!landingPage && !originDomain) return null;
+  if (/^https?:\/\//i.test(landingPage)) return landingPage;
+  if (originDomain && landingPage.startsWith("/")) return `https://${originDomain}${landingPage}`;
+  if (originDomain && landingPage) return `https://${originDomain}/${landingPage.replace(/^\/+/, "")}`;
+  return landingPage || `https://${originDomain}`;
+}
+
+function compactUrlLabel(url: string) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function attributionChips(lead: any) {
+  const chips: string[] = [];
+  if (lead.gclid) chips.push("Google Ads");
+  if (lead.utm_source) chips.push(`utm_source: ${lead.utm_source}`);
+  if (lead.utm_medium) chips.push(`utm_medium: ${lead.utm_medium}`);
+  if (lead.utm_campaign) chips.push(`campaign: ${lead.utm_campaign}`);
+  if (lead.utm_term) chips.push(`term: ${lead.utm_term}`);
+  if (lead.utm_content) chips.push(`content: ${lead.utm_content}`);
+  return chips;
+}
 
 interface LeadInfoCardProps {
   lead: any;
@@ -155,7 +186,7 @@ export function LeadInfoCard({
           {/* Course — grouped dropdown */}
           <EditableSelectRow
             icon={<GraduationCap className="h-4 w-4" />}
-            iconColor="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
+            iconColor="bg-primary/10 text-primary dark:bg-primary/80/30 dark:text-primary/60"
             label="Course"
             value={lead.course_id}
             displayValue={courseName || "Not set"}
@@ -176,7 +207,7 @@ export function LeadInfoCard({
           {/* Campus — filtered by course */}
           <EditableSelectRow
             icon={<Building2 className="h-4 w-4" />}
-            iconColor="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+            iconColor="bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
             label="Campus"
             value={lead.campus_id}
             displayValue={campusName || "Not set"}
@@ -191,7 +222,7 @@ export function LeadInfoCard({
           {campusCity && (
             <InfoRow
               icon={<MapPin className="h-4 w-4" />}
-              iconColor="bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
+              iconColor="bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/70"
               label="City"
               value={campusCity}
             />
@@ -200,14 +231,14 @@ export function LeadInfoCard({
           {/* Email — inline text edit */}
           <EditableInfoRow
             icon={<Mail className="h-4 w-4" />}
-            iconColor="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            iconColor="bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
             label="Email" field="email" fieldLabel="Email"
             value={lead.email || ""} onSave={onFieldUpdate}
           />
 
           <InfoRow
             icon={<Globe className="h-4 w-4" />}
-            iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+            iconColor="bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
             label="Source"
             value={[
               lead.source,
@@ -217,10 +248,14 @@ export function LeadInfoCard({
             className="capitalize"
           />
 
+          {(lead.landing_page || lead.origin_domain || lead.referrer || lead.gclid || lead.utm_source) && (
+            <AttributionInfoRow lead={lead} />
+          )}
+
           {lead.jd_category && (
             <InfoRow
               icon={<FileText className="h-4 w-4" />}
-              iconColor="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+              iconColor="bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
               label="JD Keyword"
               value={
                 jdCategoryHint(lead.jd_category)
@@ -259,9 +294,9 @@ export function LeadInfoCard({
             <span className="text-sm text-muted-foreground">Interest Level</span>
             <Badge
               className={`text-xs font-semibold border-0 ${
-                lead.interview_score >= 7 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                lead.interview_score >= 7 ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
                 : lead.interview_score >= 4 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                : "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
               }`}
             >
               {lead.interview_score >= 7 ? "High" : lead.interview_score >= 4 ? "Medium" : "Low"}
@@ -451,7 +486,7 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
 
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning">
         <User className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
@@ -495,6 +530,51 @@ function InfoRow({ icon, iconColor, label, value, className }: { icon: React.Rea
       <div className="min-w-0">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         <p className={`text-sm font-medium text-foreground mt-0.5 ${className || ""}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function AttributionInfoRow({ lead }: { lead: any }) {
+  const landingUrl = absoluteLandingUrl(lead);
+  const chips = attributionChips(lead);
+  const referrer = typeof lead.referrer === "string" && lead.referrer.trim() ? lead.referrer.trim() : null;
+
+  return (
+    <div className="px-5 py-3 flex items-start gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+        <Megaphone className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-muted-foreground">Lead capture URL</p>
+        {landingUrl ? (
+          <a
+            href={landingUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 text-sm font-medium text-foreground hover:text-primary"
+            title={landingUrl}
+          >
+            <span className="truncate">{compactUrlLabel(landingUrl)}</span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+          </a>
+        ) : (
+          <p className="text-sm font-medium text-foreground mt-0.5">Not captured</p>
+        )}
+        {chips.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {chips.map((chip) => (
+              <span key={chip} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {chip}
+              </span>
+            ))}
+          </div>
+        )}
+        {referrer && (
+          <p className="mt-1.5 truncate text-[11px] text-muted-foreground" title={referrer}>
+            Referrer: {compactUrlLabel(referrer)}
+          </p>
+        )}
       </div>
     </div>
   );

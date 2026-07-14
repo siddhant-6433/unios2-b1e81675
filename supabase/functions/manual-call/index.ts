@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { maskPhoneForLog, normalizePlivoVoiceNumber } from "../_shared/phone.ts";
+import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumberPool } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +30,12 @@ function json(data: any, status = 200) {
   });
 }
 
+function chooseNextDialerNumber(dialerNumbers: string[], previousFromNumber: string | null | undefined): string {
+  const previous = normalizePlivoVoiceNumber(previousFromNumber);
+  const previousIndex = previous ? dialerNumbers.indexOf(previous) : -1;
+  return dialerNumbers[(previousIndex + 1) % dialerNumbers.length];
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -39,18 +45,32 @@ Deno.serve(async (req) => {
     // Cloud-dialer caller-id — separate from the AI agent's number so leads
     // can tell whether they're being called by an AI vs a human counsellor.
     const PLIVO_DIALER_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER");
+    const PLIVO_DIALER_PHONE_NUMBERS = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
+    const dialerNumberSecrets = [PLIVO_DIALER_PHONE_NUMBERS, PLIVO_DIALER_PHONE_NUMBER];
+
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !dialerNumberSecrets.some(Boolean) || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
-    const dialerFrom = normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER);
-    if (!dialerFrom) {
-      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER for voice calls:", maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER));
+    const dialerNumbers = normalizePlivoVoiceNumberPool(dialerNumberSecrets);
+    if (dialerNumbers.length === 0) {
+      console.error(
+        "Invalid PLIVO_DIALER_PHONE_NUMBER(S) for voice calls:",
+        dialerNumberSecrets.map(maskPhoneForLog).filter(Boolean).join(", "),
+      );
       return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
+    }
+    if (dialerNumbers.length < 2) {
+      console.error(
+        "At least two unique PLIVO_DIALER_PHONE_NUMBER(S) are required for Cloud Call rotation:",
+        dialerNumbers.map(maskPhoneForLog).join(", "),
+      );
+      return json({ error: "At least two calling numbers must be configured. Contact admin." }, 503);
     }
 
     // Auth: accept anon key (manual button) or service role (internal).
@@ -58,11 +78,51 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
+    const callerDb = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: authData, error: authErr } = await callerDb.auth.getUser();
+    if (authErr || !authData?.user?.id) return json({ error: "Unauthorized" }, 401);
+
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const { lead_id, caller_user_id } = await req.json();
+    const { lead_id } = await req.json();
     if (!lead_id) return json({ error: "lead_id required" }, 400);
 
-    const userId = caller_user_id || null;
+    const userId = authData.user.id;
+
+    const { data: callerRole, error: roleErr } = await db.rpc("get_user_role", { _user_id: userId });
+    if (roleErr || !callerRole) return json({ error: "Caller role not found" }, 403);
+    if (["student", "parent"].includes(String(callerRole))) {
+      return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
+    }
+    if (callerRole === "academic_partner" || callerRole === "academic_partner_offer_letter") {
+      const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+        _user_id: userId,
+        _lead_id: lead_id,
+      });
+      if (scopeErr) {
+        console.error("Academic partner call scope check failed:", scopeErr);
+        return json({ error: "Could not verify lead access." }, 500);
+      }
+      if (!canCallLead) {
+        return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
+      }
+    }
+
+    const { data: latestManualCall, error: latestManualCallErr } = await db
+      .from("ai_call_records")
+      .select("from_number")
+      .eq("call_type", "manual")
+      .not("from_number", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestManualCallErr) {
+      console.warn("Could not read last Plivo caller ID for rotation; defaulting to first dialer number:", latestManualCallErr);
+    }
+    const dialerFrom = latestManualCallErr
+      ? dialerNumbers[0]
+      : chooseNextDialerNumber(dialerNumbers, (latestManualCall as any)?.from_number);
 
     // Fetch lead
     const { data: lead, error: leadErr } = await db
@@ -110,6 +170,7 @@ Deno.serve(async (req) => {
       status: "initiated",
       call_type: "manual",
       caller_user_id: userId,
+      from_number: dialerFrom,
       summary: `Cloud Call: dialing counsellor ${profile.display_name}`,
     });
 
@@ -118,25 +179,7 @@ Deno.serve(async (req) => {
       return json({ error: "Could not start call tracking. Try again." }, 500);
     }
 
-    // Set bridge context on voice agent server
-    const ctxRes = await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        leadId: lead_id,
-        leadName: lead.name,
-        courseName: (lead.courses as any)?.name || null,
-        campusName: (lead.campuses as any)?.name || null,
-        counsellorPhone,
-        studentPhone,
-        counsellorName: profile.display_name,
-        counsellorUserId: userId,
-      }),
-    });
-
-    if (!ctxRes.ok) {
-      const ctxText = await ctxRes.text().catch(() => "");
-      console.error("Bridge context setup failed:", ctxRes.status, ctxText);
+    const failCallSetup = async (summary: string, error: string, status = 502) => {
       await db
         .from("ai_call_records")
         .update({
@@ -144,14 +187,49 @@ Deno.serve(async (req) => {
           disposition: "call_setup_failed",
           duration_seconds: 0,
           completed_at: new Date().toISOString(),
-          summary: "Cloud Call failed before provider dial: bridge context setup failed",
+          summary,
         } as any)
         .eq("call_uuid", callId);
-      return json({ error: "Call setup failed before dialing your phone. Try again." }, 502);
+      return json({ error }, status);
+    };
+
+    // Set bridge context on voice agent server
+    let ctxRes: Response;
+    try {
+      ctxRes = await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: lead_id,
+          leadName: lead.name,
+          courseName: (lead.courses as any)?.name || null,
+          campusName: (lead.campuses as any)?.name || null,
+          counsellorPhone,
+          studentPhone,
+          dialerFrom,
+          counsellorName: profile.display_name,
+          counsellorUserId: userId,
+        }),
+      });
+    } catch (err: any) {
+      console.error("Bridge context request failed:", err);
+      return await failCallSetup(
+        `Cloud Call failed before provider dial: bridge context request failed: ${err?.message || "network error"}`,
+        "Call setup failed before dialing your phone. Try again.",
+      );
+    }
+
+    if (!ctxRes.ok) {
+      const ctxText = await ctxRes.text().catch(() => "");
+      console.error("Bridge context setup failed:", ctxRes.status, ctxText);
+      return await failCallSetup(
+        "Cloud Call failed before provider dial: bridge context setup failed",
+        "Call setup failed before dialing your phone. Try again.",
+      );
     }
 
     // Plivo: call the counsellor first
-    const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${studentPhone}`;
+    const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${encodeURIComponent(studentPhone)}&caller=${encodeURIComponent(dialerFrom)}`;
     const plivoUrl = `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/`;
 
     const hangupUrl = `${VOICE_AGENT_URL}/bridge-hangup/${callId}`;
@@ -162,36 +240,45 @@ Deno.serve(async (req) => {
       to: counsellorPhone,
       answer_url: answerUrl,
       answer_method: "GET",
+      ring_url: stateCallbackUrl,
+      ring_method: "POST",
       hangup_url: hangupUrl,
       hangup_method: "POST",
-      // Per-state callback. Plivo POSTs this URL on every CallStatus change
-      // (initiated / ringing / in-progress / completed) for the parent
-      // counsellor leg. Student connection is detected by the bridged B-leg
-      // callback in voice-agent.
-      callback_url: stateCallbackUrl,
-      callback_method: "POST",
       ring_timeout: 30,
       caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
     };
 
-    const plivoRes = await fetch(plivoUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
-      },
-      body: JSON.stringify(plivoPayload),
-    });
+    let plivoRes: Response;
+    try {
+      plivoRes = await fetch(plivoUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
+        },
+        body: JSON.stringify(plivoPayload),
+      });
+    } catch (err: any) {
+      console.error("Plivo call request failed before provider accepted call:", err);
+      return await failCallSetup(
+        `Cloud Call failed before ringing counsellor: Plivo request failed: ${err?.message || "network error"}`,
+        "Call failed before reaching Plivo. Try again.",
+        500,
+      );
+    }
 
     const plivoText = await plivoRes.text();
     let plivoData: any = {};
     try { plivoData = JSON.parse(plivoText); } catch { plivoData = { raw: plivoText }; }
+    const rawRequestUuid = plivoData.request_uuid;
+    const requestUuid = Array.isArray(rawRequestUuid) ? rawRequestUuid[0] : rawRequestUuid;
 
     console.log("Plivo response:", plivoRes.status, plivoText);
     console.log("Plivo payload sent:", JSON.stringify({
       ...plivoPayload,
       from: maskPhoneForLog(dialerFrom),
       to: maskPhoneForLog(counsellorPhone),
+      dialer_pool_size: dialerNumbers.length,
     }));
 
     if (!plivoRes.ok) {
@@ -209,15 +296,18 @@ Deno.serve(async (req) => {
       return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
-    // Patch any provider identifier Call.create returned. Some Plivo accounts
-    // return only "async api spawned"; bridge-call-status will persist the real
-    // CallUUID on the first callback in that case.
+    // Patch the provider request identifier returned by Call.create when
+    // present. Some Plivo accounts return only "async api spawned"; in that
+    // case the ring/answer/hangup webhooks below persist the real CallUUID.
+    const callRecordPatch: Record<string, unknown> = {
+      summary: requestUuid
+        ? `Cloud Call: connecting by ${profile.display_name}`
+        : `Cloud Call: accepted by Plivo; waiting for counsellor leg callback for ${profile.display_name}`,
+    };
+    if (requestUuid) callRecordPatch.plivo_call_uuid = requestUuid;
     await db
       .from("ai_call_records")
-      .update({
-        plivo_call_uuid: plivoData.request_uuid || null,
-        summary: `Cloud Call: connecting by ${profile.display_name}`,
-      } as any)
+      .update(callRecordPatch as any)
       .eq("call_uuid", callId);
 
     // Log activity
@@ -237,7 +327,7 @@ Deno.serve(async (req) => {
     return json({
       success: true,
       call_id: callId,
-      plivo_request_uuid: plivoData.request_uuid,
+      plivo_request_uuid: requestUuid || null,
       message: `Calling your phone (${profile.phone})... Pick up to connect to ${lead.name || "the student"}.`,
     });
   } catch (err: any) {

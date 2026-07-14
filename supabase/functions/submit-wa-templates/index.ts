@@ -18,11 +18,58 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Each template has BODY (parameterised) + optionally BUTTONS.
-// Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
-// For PDF receipts (no fixed prefix possible) we use a static button to
-// the apply portal — applicant authenticates via OTP/magic link to
-// retrieve the actual PDF in-portal.
+function cahetDeadlineMessage(): string {
+  const bodyDate = "14th June 2026";
+  const prefix = "";
+  return `Dear Applicant,
+
+This is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - ${prefix}Last date for Application Submission is *${bodyDate}, 11:59 PM*
+
+For admission Candidates *MUST*
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
+
+For any details please call 9555192192
+9667691872
+7428499849`;
+}
+
+function cnetNotQualifiedBptBmritMessage(): string {
+  return `Dear {{1}}
+
+CNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.
+
+Last date: *14th June 2026*.
+
+Both are mandatory:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192
+
+---
+
+प्रिय {{1}}
+
+CNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।
+
+Last date: *14th June 2026*.
+
+दोनों mandatory हैं:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192`;
+}
+
+// Each template has BODY (parameterised) + optionally HEADER / BUTTONS.
+// Button URLs follow Meta's rules: full URL prefix + {{1}} suffix. Receipt
+// PDFs use DOCUMENT headers, which require a sample media handle at submission.
+const DOCUMENT_HEADER_HANDLE_PLACEHOLDER = "__DOCUMENT_HEADER_HANDLE__";
+
 const TEMPLATES = [
   {
     name: "student_portal_invite",
@@ -46,18 +93,19 @@ const TEMPLATES = [
     ],
   },
   {
-    name: "application_submitted",
+    name: "application_submitted_v2",
     category: "UTILITY",
     language: "en",
     components: [
       {
-        type: "BODY",
-        text: "Hi {{1}}, your application ({{2}}) has been received at NIMT Educational Institutions. Please complete the application fee payment to begin processing. Your form PDF is available in the apply portal.",
-        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
       },
       {
-        type: "BUTTONS",
-        buttons: [{ type: "URL", text: "Open Apply Portal", url: "https://uni.nimt.ac.in/apply" }],
+        type: "BODY",
+        text: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
+        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
       },
     ],
   },
@@ -74,6 +122,23 @@ const TEMPLATES = [
       {
         type: "BUTTONS",
         buttons: [{ type: "URL", text: "View Receipt", url: "https://uni.nimt.ac.in/apply" }],
+      },
+    ],
+  },
+  {
+    name: "app_fee_receipt_pdf",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+      },
+      {
+        type: "BODY",
+        text: "Hi {{1}}, we've received your application fee of Rs.{{2}} for application {{3}}. Your receipt PDF is attached for your records.",
+        example: { body_text: [["Rahul Sharma", "750", "APP-26-AB12"]] },
       },
     ],
   },
@@ -213,6 +278,23 @@ const TEMPLATES = [
       {
         type: "BUTTONS",
         buttons: [{ type: "URL", text: "Open Apply Portal", url: "https://uni.nimt.ac.in/apply" }],
+      },
+    ],
+  },
+  {
+    name: "payment_receipt_pdf",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+      },
+      {
+        type: "BODY",
+        text: "Hi {{1}}, we've received your payment of Rs.{{3}} towards {{2}}. Receipt No: {{4}}. Your receipt PDF is attached for your records.",
+        example: { body_text: [["Rahul Sharma", "Token Fee", "30000", "N00123"]] },
       },
     ],
   },
@@ -370,7 +452,19 @@ const TEMPLATES = [
     components: [
       {
         type: "BODY",
-        text: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+        text: cahetDeadlineMessage(),
+      },
+    ],
+  },
+  {
+    name: "cnet_not_qualified_bpt_bmrit",
+    category: "MARKETING",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: cnetNotQualifiedBptBmritMessage(),
+        example: { body_text: [["Rahul Sharma"]] },
       },
     ],
   },
@@ -496,6 +590,44 @@ const TEMPLATES = [
       },
     ],
   },
+  // ── Navya (AI voice agent) notifications ─────────────────────────────────
+  // Staff alert when Navya books a campus visit during a live call. Sent to
+  // the lead owner + leadership phones (config: navya_visit_wa_staff_recipients).
+  {
+    name: "navya_visit_alert",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, Navya (AI counsellor) booked a campus visit during a live call.\n\nStudent: {{2}}\nCourse: {{3}}\nVisit: {{4}}\nLead owner: {{5}}\n\nPlease prepare for the visit and confirm with the student.",
+        example: { body_text: [["Kushal Chauhan", "Rahul Sharma", "MBA", "Sun 13 Jul, 11:00 AM", "Rahul Bhati"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Lead", url: "https://uni.nimt.ac.in/admissions" }],
+      },
+    ],
+  },
+  // Post-call details the caller explicitly requested — transactional wording
+  // keeps this UTILITY (course_info* templates get flipped to MARKETING and
+  // hit Meta's per-user frequency cap; this one must not).
+  {
+    name: "call_requested_details",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, sharing the details you requested during our call today regarding {{2}}. Tap below to open your application. If you need anything else, simply reply to this message and our admissions team will assist you.",
+        example: { body_text: [["Rahul Sharma", "GNM admission at NIMT"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Application", url: "https://uni.nimt.ac.in/apply/nimt" }],
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {
@@ -512,6 +644,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body?.action || "submit";
+    const documentHeaderHandle =
+      typeof body?.document_header_handle === "string" && body.document_header_handle.trim()
+        ? body.document_header_handle.trim()
+        : Deno.env.get("WHATSAPP_TEMPLATE_DOCUMENT_HEADER_HANDLE") || "";
 
     // ── status: list current state (name → status) for all templates ──
     if (action === "status") {
@@ -541,12 +677,46 @@ Deno.serve(async (req) => {
     // If omitted, every template in the array is (re-)submitted; Meta returns
     // 400 with code 2388023 for any that already exist, which is fine.
     const filterNames: string[] | null = Array.isArray(body?.names) ? body.names : null;
-    const queue = filterNames
+    const queueBase = filterNames
       ? TEMPLATES.filter(t => filterNames.includes(t.name))
       : TEMPLATES;
+    const queue = queueBase.map((tpl) => ({
+      ...tpl,
+      components: tpl.components.map((component: any) => {
+        if (tpl.name === "bpt_bmrit_cahet_deadline" && component.type === "BODY") {
+          return { ...component, text: cahetDeadlineMessage() };
+        }
+        if (
+          component.type === "HEADER" &&
+          component.format === "DOCUMENT" &&
+          component.example?.header_handle?.[0] === DOCUMENT_HEADER_HANDLE_PLACEHOLDER
+        ) {
+          return {
+            ...component,
+            example: { header_handle: [documentHeaderHandle || DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+          };
+        }
+        return component;
+      }),
+    }));
 
     for (const tpl of queue) {
       try {
+        const missingDocumentHandle = tpl.components.some((component: any) =>
+          component.type === "HEADER" &&
+          component.format === "DOCUMENT" &&
+          component.example?.header_handle?.[0] === DOCUMENT_HEADER_HANDLE_PLACEHOLDER
+        );
+        if (missingDocumentHandle) {
+          results[tpl.name] = {
+            ok: false,
+            status: 400,
+            body: {
+              error: "document_header_handle is required for DOCUMENT header templates. Upload a sample PDF with whatsapp-template-media-upload first.",
+            },
+          };
+          continue;
+        }
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

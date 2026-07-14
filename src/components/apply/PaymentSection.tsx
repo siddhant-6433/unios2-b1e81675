@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { usePaymentGateways, type PaymentGateway } from "@/hooks/usePaymentGateways";
-import { useAuth } from "@/contexts/AuthContext";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { trackPixelCompleteRegistration } from "@/lib/analytics";
+import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 interface Props {
   data: ApplicationData;
@@ -15,6 +15,12 @@ interface Props {
   onNext: () => void;
   onBack?: () => void;
   saving: boolean;
+  onBehalfContext?: {
+    mode: "academic_partner_on_behalf";
+    token: string;
+    academic_partner_id: string;
+    lead_id: string;
+  } | null;
 }
 
 declare global {
@@ -23,7 +29,7 @@ declare global {
   }
 }
 
-export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
+export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehalfContext }: Props) {
   const isPaid   = data.payment_status === "paid";
   const isWaived = data.fee_amount === 0;
   const portal   = usePortal();
@@ -47,23 +53,16 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     primaryColor: portal.primaryColor,
   };
 
-  const { portalGateways: dbGateways, loading: gwLoading } = usePaymentGateways();
-  const { role } = useAuth();
-  const isSuperAdmin = role === "super_admin";
-
-  // Super-admin-only ICICI test option, injected on top of the DB-driven list.
-  // Hidden from regular applicants until ICICI goes through full UAT sign-off
-  // and we flip its row in payment_gateway_config.
-  const portalGateways: PaymentGateway[] = useMemo(() => {
-    const hasIcici = dbGateways.some(g => g.gateway === "icici");
-    if (!isSuperAdmin || hasIcici) return dbGateways;
-    return [...dbGateways, {
-      gateway: "icici",
-      display_name: "ICICI (UAT — admin only)",
-      is_enabled_fee_collection: true,
-      is_enabled_portal_payment: true,
-    }];
-  }, [dbGateways, isSuperAdmin]);
+  const firstSelection = data.course_selections[0];
+  const { gateways: portalGateways, loading: gwLoading } = useScopedPaymentGateways({
+    context: "application_fee",
+    applicationId: data.application_id,
+    courseId: firstSelection?.course_id,
+    campusId: firstSelection?.campus_id,
+    institutionId: firstSelection?.institution_id,
+    institutionType: firstSelection?.program_category === "school" ? "school" : null,
+    enabled: !isPaid && !isWaived,
+  });
 
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
@@ -89,12 +88,13 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     // path, so we don't need to duplicate the settle logic here.
   };
 
-  // Auto-select single gateway
+  // Auto-select the first resolved gateway so DB priority controls the default.
   useEffect(() => {
-    if (!gwLoading && portalGateways.length === 1) {
-      setSelectedGateway(portalGateways[0].gateway);
+    if (gwLoading) return;
+    if (!selectedGateway || !portalGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(portalGateways));
     }
-  }, [gwLoading, portalGateways]);
+  }, [gwLoading, portalGateways, selectedGateway]);
 
   // Load Cashfree JS SDK only when cashfree is selected
   useEffect(() => {
@@ -139,8 +139,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
-        stopPolling();
-        checkAndUpdatePayment();
+        void checkAndUpdatePayment();
+        if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       }
     };
     window.addEventListener("message", handler);
@@ -153,6 +153,27 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     setElapsed(0);
   };
 
+  const auditOnBehalfPayment = async (
+    action: "application_fee_initiated_by_partner" | "application_fee_paid_by_partner",
+    metadata: Record<string, unknown> = {},
+    paymentRef?: string | null,
+  ) => {
+    if (!onBehalfContext?.token) return;
+    await supabase.functions.invoke("academic-partner-on-behalf-audit", {
+      body: {
+        token: onBehalfContext.token,
+        action,
+        application_id: data.application_id,
+        payment_ref: paymentRef || data.payment_ref || null,
+        metadata: {
+          amount: data.fee_amount,
+          gateway: selectedGateway,
+          ...metadata,
+        },
+      },
+    }).catch(() => {});
+  };
+
   const checkAndUpdatePayment = async () => {
     const { data: row } = await supabase
       .from("applications")
@@ -163,12 +184,16 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     if (row?.payment_status === "paid") {
       stopPolling();
       onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
+      await auditOnBehalfPayment("application_fee_paid_by_partner", { source: "payment_poll" }, row.payment_ref);
       setLoading(false);
       if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
     }
   };
 
-  const handleMarkPaid = () => onChange({ payment_status: "paid" });
+  const handleMarkPaid = () => {
+    onChange({ payment_status: "paid" });
+    void auditOnBehalfPayment("application_fee_paid_by_partner", { source: "dev_mark_paid" });
+  };
 
   // ── Cashfree ────────────────────────────────────────────────────
   const handlePayCashfree = async () => {
@@ -183,6 +208,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           customer_name: data.full_name,
           customer_phone: data.phone,
           customer_email: data.email || undefined,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
 
@@ -190,6 +216,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { order_id, payment_session_id } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "cashfree", order_id }, order_id);
 
       if (!cashfreeRef.current) {
         cashfreeRef.current = window.Cashfree({ mode: import.meta.env.DEV ? "sandbox" : "production" });
@@ -209,6 +236,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           if (verifyError) throw new Error(verifyError.message);
           if (verifyData?.order_status === "PAID") {
             onChange({ payment_status: "paid", payment_ref: order_id });
+            await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "cashfree" }, order_id);
           } else {
             setError("Payment could not be confirmed. If amount was deducted, contact support.");
           }
@@ -242,6 +270,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           firstname: nameParts[0],
           email: data.email || undefined,
           phone: data.phone,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
 
@@ -249,6 +278,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "easebuzz", txnid }, txnid);
 
       // Open EaseBuzz hosted payment page in popup
       popupRef.current = window.open(
@@ -288,6 +318,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             });
             if (verifyData?.status?.toLowerCase() === "success") {
               onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });
+              await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "easebuzz", txnid }, verifyData.easepayid || txnid);
               setLoading(false);
               return;
             }
@@ -324,6 +355,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           firstname: nameParts[0],
           email: data.email || undefined,
           phone: data.phone,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
       // supabase-js puts the response body on fnError.context for non-2xx, not on fnData.
@@ -341,6 +373,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "icici", txnid }, txnid);
       popupRef.current = window.open(pay_url, "icici_payment", "width=680,height=720,scrollbars=yes,resizable=yes");
       if (!popupRef.current) throw new Error("Popup was blocked. Please allow popups for this site and try again.");
       setPopupStartedAt(Date.now());
@@ -362,8 +395,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           // Fallback: ask ICICI directly via /command STATUS
           try {
             const { data: verifyData } = await supabase.functions.invoke("icici-payment", {
-              body: { action: "verify-payment", txnid },
-            });
+            body: { action: "verify-payment", txnid, application_id: data.application_id },
+          });
             if (verifyData?.status === "SUC" || verifyData?.raw?.responseCode === "0000" || verifyData?.raw?.responseCode === "000") {
               await checkAndUpdatePayment();
               return;
@@ -381,9 +414,35 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     }
   };
 
+  // ── Razorpay Standard Checkout (modal + server signature verification) ───
+  const handlePayRazorpay = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await openRazorpayCheckout({
+        amountPaise: Math.round(Number(data.fee_amount || 0) * 100),
+        receipt: buildRazorpayReceipt("app", data.application_id),
+        context: "application_fee",
+        description: "Application Processing Fee",
+        applicationId: data.application_id,
+        customerName: data.full_name,
+        customerEmail: data.email || undefined,
+        customerPhone: data.phone,
+      });
+      onChange({ payment_status: "paid", payment_ref: result.paymentId });
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "razorpay" }, result.paymentId);
+      await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "razorpay" }, result.paymentId);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Payment was cancelled.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePay = () => {
     if (selectedGateway === "easebuzz") return handlePayEasebuzz();
     if (selectedGateway === "icici")    return handlePayIcici();
+    if (selectedGateway === "razorpay") return handlePayRazorpay();
     return handlePayCashfree();
   };
 
@@ -455,7 +514,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
           {gwLoading && (
             <div className="flex justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           )}
 
@@ -503,7 +562,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
                     )}
                   </div>
                   {elapsed >= 90 && (
-                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                    <p className="text-[11px] text-warning-foreground leading-relaxed">
                       Bank is taking longer than usual. If your payment was deducted it will reconcile automatically within 5 minutes — you can safely cancel and retry, or wait it out.
                     </p>
                   )}

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -18,6 +19,8 @@ import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -32,9 +35,18 @@ const categoryBadge: Record<string, string> = {
   transport: "bg-pastel-yellow text-foreground/70", other: "bg-muted text-foreground/70",
 };
 const modeBadge: Record<string, string> = {
-  online: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
+  online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
   upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
 };
+const gatewayLabels: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+const gatewayLabel = (gateway?: string | null) =>
+  gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 const Finance = () => {
   const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports" | "audit">("ledger");
@@ -46,6 +58,9 @@ const Finance = () => {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
   const { selectedCampusId } = useCampus();
+  const { can } = usePermissions();
+  const canCreateFinance = can("finance", "create");
+  const canEditFinance = can("finance", "edit");
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
@@ -116,9 +131,9 @@ const Finance = () => {
     { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
     { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
-  ];
+  ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <>
@@ -131,7 +146,7 @@ const Finance = () => {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
-          <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
+          {canCreateFinance && <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>}
         </div>
       </div>
 
@@ -164,7 +179,7 @@ const Finance = () => {
             className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <t.icon className="h-4 w-4" />{t.label}
             {t.badge > 0 && (
-              <span className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${tab === t.id ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>
+              <span className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${tab === t.id ? "bg-white/20 text-white" : "bg-warning/10 text-warning-foreground"}`}>
                 {t.badge}
               </span>
             )}
@@ -212,7 +227,7 @@ const Finance = () => {
                         <td className="px-4 py-3">
                           <Badge className={`text-[10px] font-medium border-0 capitalize ${categoryBadge[fee.fee_codes?.category] || "bg-muted"}`}>{fee.fee_codes?.category || "—"}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{fee.term}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(fee.term)}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.total_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.paid_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(fee.balance || 0).toLocaleString()}</td>
@@ -249,6 +264,7 @@ const Finance = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gateway</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transaction Ref</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recorded By</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
@@ -257,7 +273,7 @@ const Finance = () => {
               </thead>
               <tbody>
                 {filteredPayments.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
                 ) : filteredPayments.map((p: any) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
@@ -270,6 +286,7 @@ const Finance = () => {
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{p.payment_mode.replace("_", " ")}</Badge>
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{p.profiles?.display_name || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(p.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
@@ -285,6 +302,7 @@ const Finance = () => {
                           recorded_by: p.profiles?.display_name || undefined,
                           amount: Number(p.amount),
                           payment_ref: p.transaction_ref,
+                          payment_gateway: p.gateway || null,
                           payment_date: p.paid_at,
                           receipt_url: p.receipt_url || null,
                           payment_id: p.id || null,

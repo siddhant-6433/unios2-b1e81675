@@ -2,9 +2,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate, type WhatsAppChannelRoute } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
-  recordWhatsAppOutboundContext,
   responsePolicyForTemplate,
 } from "../_shared/whatsapp-outbound-context.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,15 +12,70 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const CUET_2026_COUNSELLING_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+
+function cahetDeadlineMessage(): string {
+  const bodyDate = "14th June 2026";
+  const prefix = "";
+  return `Dear Applicant,
+
+This is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - ${prefix}Last date for Application Submission is *${bodyDate}, 11:59 PM*
+
+For admission Candidates *MUST*
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
+
+For any details please call 9555192192
+9667691872
+7428499849`;
+}
+
+function cnetNotQualifiedBptBmritMessage(): string {
+  return `Dear {{1}}
+
+CNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.
+
+Last date: *14th June 2026*.
+
+Both are mandatory:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192
+
+---
+
+प्रिय {{1}}
+
+CNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।
+
+Last date: *14th June 2026*.
+
+दोनों mandatory हैं:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192`;
+}
+
 // Template definitions with their expected parameters
-const TEMPLATES: Record<string, { name: string; params: string[] }> = {
+const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
+  // Navya (AI voice agent): staff alert when a campus visit is booked mid-call.
+  navya_visit_alert: { name: "navya_visit_alert", params: ["staff_name", "student_name", "course_name", "visit_datetime", "owner_name"] },
+  // Navya: transactional post-call details (UTILITY — replaces marketing-capped
+  // course templates for "send me the apply link" requests).
+  call_requested_details: { name: "call_requested_details", params: ["student_name", "course_context"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
-  // Meta-approved template is named `application_submitted` (see
+  // Meta-approved template is named `application_submitted_v2` (see
   // submit-wa-templates). Internal key stays `application_received` for
   // backwards compatibility with callers, AutomationRules, and the inbox UI.
-  application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
+  application_received: { name: "application_submitted_v2", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
@@ -31,6 +86,9 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // untagged campus, and the correct uni.nimt.ac.in apply domain.
   course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
+  cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
+  cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -80,10 +138,11 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // approved there, sends fail gracefully and the trigger logs the URL
   // for manual delivery via lead_activities.
 
-  // 1. Application submitted — confirms receipt, attaches form PDF as button URL.
-  application_submitted:  { name: "application_submitted",  params: ["student_name", "application_id"] },
-  // 2. Application fee paid — receipt + form PDF link.
+  // 1. Application submitted — confirms receipt, attaches form PDF as document header.
+  application_submitted:  { name: "application_submitted_v2",  params: ["student_name", "application_id"] },
+  // 2. Application fee paid — receipt PDF as document-header template.
   app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
+  app_fee_receipt_pdf:    { name: "app_fee_receipt_pdf",    params: ["student_name", "amount", "application_id"] },
   // 3. Offer letter issued — offer PDF + magic-link to accept & pay token.
   // button_urls = [offer_pdf_url, magic_pay_url]
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
@@ -117,6 +176,26 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
     params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"],
   },
 
+  // Entrance-exam registration check — asks the candidate whether they've
+  // registered/cleared the entrance exam / counselling their course requires.
+  // Submit to Meta as UTILITY with TWO quick-reply buttons whose payloads MUST
+  // be "Yes, registered" and "Not registered yet" (the webhook matches on the
+  // title/id via regcheck handling). Body params:
+  //   {{1}} student_name  {{2}} course_name  {{3}} exam_name (display name)
+  exam_registration_check: {
+    name: "exam_registration_check",
+    params: ["student_name", "course_name", "exam_name"],
+  },
+
+  // Application put on hold for eligibility — the candidate can't be processed
+  // (fails the entrance-exam-registration / eligibility gate and isn't
+  // interested in an alternative course). UTILITY. Body params:
+  //   {{1}} student_name  {{2}} course_name  {{3}} exam_name (display name)
+  application_on_hold_eligibility: {
+    name: "application_on_hold_eligibility",
+    params: ["student_name", "course_name", "exam_name"],
+  },
+
   // 5. Token / other fee paid — uses the pre-existing APPROVED template
   // in Meta whose body is:
   //   "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}.
@@ -127,6 +206,11 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // here because the template is already approved and we don't want to
   // submit a divergent variant.
   payment_receipt:        { name: "payment_receipt",        params: ["student_name", "payment_type", "amount", "receipt_no", "download_url"] },
+
+  // Custom-amount payment link (create-payment-link). button_urls=[link token]
+  // — Meta substitutes the {{1}} suffix of https://uni.nimt.ac.in/pay/{{1}}.
+  payment_link_request:   { name: "payment_link_request",   params: ["student_name", "purpose_label", "amount", "valid_till"] },
+  payment_receipt_pdf:    { name: "payment_receipt_pdf",    params: ["student_name", "payment_type", "amount", "receipt_no"] },
 
   // ── Course info (data-driven) ─────────────────────────────────────────
   // Body params + both button URLs are resolved per-lead via the
@@ -173,6 +257,28 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // post it and submit the published Instagram/LinkedIn/YouTube links.
   video_approved_editor:   { name: "video_approved_editor",  params: ["editor_name", "video_title"] },
 };
+
+function templateBodyFromComponents(components: unknown): string | null {
+  if (!Array.isArray(components)) return null;
+  const body = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BODY";
+  }) as Record<string, unknown> | undefined;
+  return typeof body?.text === "string" ? body.text : null;
+}
+
+function templateHasDynamicUrlButton(components: unknown): boolean {
+  if (!Array.isArray(components)) return false;
+  const buttons = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BUTTONS";
+  }) as Record<string, unknown> | undefined;
+  if (!Array.isArray(buttons?.buttons)) return false;
+  return buttons.buttons.some((button) => {
+    const data = button as Record<string, unknown>;
+    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
+  });
+}
 
 type WhatsAppRoute = "default" | "call" | "visit";
 
@@ -258,17 +364,21 @@ Deno.serve(async (req) => {
       user = data.user;
     }
 
-    let {
-      template_key,
+    const requestBody = await req.json();
+    let { template_key, params, button_urls } = requestBody;
+    const {
       phone,
-      params,
       lead_id,
+      header_image_url,
       header_video_url,
-      button_urls,
+      header_document_url,
+      header_document_filename,
+      clear_unread_after_send,
+      rendered_template,
       provider,
       business_number,
       business_phone_number_id,
-    } = await req.json();
+    } = requestBody;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -482,16 +592,34 @@ Deno.serve(async (req) => {
       );
     }
 
-    const templateDef = TEMPLATES[template_key];
+    let dynamicTemplateBody: string | null = null;
+    let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
-      return new Response(
-        JSON.stringify({ error: `Unknown template: ${template_key}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const { data: dynamicTemplate, error: dynamicErr } = await admin
+        .from("whatsapp_templates")
+        .select("name, status, placeholder_count, has_media, header_format, components")
+        .eq("name", template_key)
+        .eq("status", "APPROVED")
+        .maybeSingle();
+      if (dynamicErr) console.error("Dynamic WhatsApp template lookup failed:", dynamicErr.message);
+      const canSendDynamic = dynamicTemplate
+        && (dynamicTemplate as any).placeholder_count === 0
+        && (dynamicTemplate as any).has_media !== true
+        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
+        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
+      if (!canSendDynamic) {
+        return new Response(
+          JSON.stringify({ error: `Unknown template: ${template_key}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
+      templateDef = { name: (dynamicTemplate as any).name, params: [] };
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
     const channelRoute: WhatsAppChannelRoute = phoneRoute === "default" ? "admissions" : phoneRoute;
+    const effectiveHeaderImageUrl = header_image_url || templateDef.headerImageUrl;
 
     // Build template components
     const waPhone = phone.replace(/[^0-9]/g, "");
@@ -499,11 +627,28 @@ Deno.serve(async (req) => {
 
     const components: any[] = [];
 
-    // Header component (video or image)
-    if (header_video_url) {
+    // Header component (media templates). Document headers are used for PDF
+    // receipts; video is retained for existing callers.
+    if (header_document_url) {
+      components.push({
+        type: "header",
+        parameters: [{
+          type: "document",
+          document: {
+            link: header_document_url,
+            ...(header_document_filename ? { filename: header_document_filename } : {}),
+          },
+        }],
+      });
+    } else if (header_video_url) {
       components.push({
         type: "header",
         parameters: [{ type: "video", video: { link: header_video_url } }],
+      });
+    } else if (effectiveHeaderImageUrl) {
+      components.push({
+        type: "header",
+        parameters: [{ type: "image", image: { link: effectiveHeaderImageUrl } }],
       });
     }
 
@@ -527,17 +672,15 @@ Deno.serve(async (req) => {
     const requestedProvider = provider === "plivo" || provider === "meta" ? provider : null;
     const requestedBusinessNumber = typeof business_number === "string" ? business_number.replace(/[^0-9]/g, "") : null;
     const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
-    const sendResult = await sendWhatsAppTemplate(admin, requestedProvider
+    const sendResult = await sendWhatsAppTemplate(admin as any, requestedProvider
       ? {
         provider: requestedProvider,
         route: requestedProvider === "plivo" ? "plivo_admissions" : channelRoute,
         businessNumber: requestedBusinessNumber || requestedPhoneNumberId,
         businessPhoneNumberId: requestedPhoneNumberId,
-        requireBulk: requestedProvider === "plivo" ? false : channelRoute === "bulk",
       }
       : {
         route: channelRoute,
-        requireBulk: channelRoute === "bulk",
       }, waPhone, {
       name: templateDef.name,
       language: "en",
@@ -545,7 +688,6 @@ Deno.serve(async (req) => {
     });
     const waResult = sendResult.raw as { error?: { message?: string }; messages?: { id?: string }[] } | null;
     const phoneNumberId = sendResult.businessPhoneNumberId;
-    const waResultText = "";
 
     // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
     const adminClient = admin;
@@ -564,7 +706,8 @@ Deno.serve(async (req) => {
       fee_reminder: "Hi {{1}}, this is a reminder that a fee payment of Rs.{{2}} is due by {{3}}. Please complete the payment to avoid any delays.",
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
       course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
-      bpt_bmrit_cahet_deadline: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+      bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
+      cnet_not_qualified_bpt_bmrit: cnetNotQualifiedBptBmritMessage(),
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",
@@ -576,15 +719,19 @@ Deno.serve(async (req) => {
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
-      application_submitted: "Hi {{1}}, your application ({{2}}) has been received. Please pay the application fee to begin processing. The completed form PDF is attached for your records.",
+      application_submitted: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
       app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+      app_fee_receipt_pdf: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",
       pan_nudge_balance: "Hi {{1}}, your pre-admission number is {{2}}. Pay the balance of ₹{{3}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
       payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
+      payment_receipt_pdf: "Dear {{1}}, payment of ₹{{3}} received towards {{2}}. Receipt no: {{4}}. The receipt PDF is attached for your records.",
       doc_rejected: "Hi {{1}}, your uploaded document \"{{2}}\" needs attention. Reason: {{3}}. Please re-upload a corrected version in the apply portal so your admission can proceed.",
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       application_approved: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
+      cuet_2026_counselling_open: "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions",
+      cuet_counselling_booking: "CUET counselling booking is now open at NIMT. Share this approved Meta template with CUET leads so they can book a counselling session with the admissions team.",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
       ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
       ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
@@ -599,7 +746,9 @@ Deno.serve(async (req) => {
       video_approved_editor: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
     };
 
-    let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;
+    let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()
+      ? rendered_template.body.trim()
+      : TEMPLATE_TEXTS[template_key] || dynamicTemplateBody || `[Template: ${template_key}]`;
     if (params && Array.isArray(params)) {
       params.forEach((p: string, i: number) => {
         readableContent = readableContent.replace(`{{${i + 1}}}`, p);
@@ -614,35 +763,37 @@ Deno.serve(async (req) => {
           http_status: sendResult.status,
           ...(waResult?.error ? { error: waResult.error } : {}),
           ...(waResult && !waResult.error ? { body: waResult } : {}),
-          ...(!waResult && waResultText ? { raw: waResultText.slice(0, 1000) } : {}),
         }
       : null;
 
-    const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
-      lead_id: lead_id || null,
-      wa_message_id: sendResult.messageId,
-      direction: "outbound",
+    await recordOutboundConversationAction(adminClient, {
+      kind: "templateSend",
       phone: waPhone,
-      message_type: "template",
-      content: readableContent,
-      template_key,
-      status: metaFailed ? "failed" : "sent",
-      is_read: true,
-      provider: sendResult.provider,
-      business_phone_number_id: phoneNumberId,
-      business_phone_number: sendResult.businessNumber,
-      status_error: statusErrorPayload,
-      sender_user_id: user.id,
-    }).select("id").maybeSingle();
-
-    await recordWhatsAppOutboundContext(adminClient, {
-      messageId: insertedMessage?.id || null,
-      providerMessageId: sendResult.messageId,
-      phone: waPhone,
-      businessNumber: sendResult.businessNumber || phoneNumberId,
-      provider: sendResult.provider,
       leadId: lead_id || null,
+      content: readableContent,
+      messageType: "template",
       templateKey: template_key,
+      status: metaFailed ? "failed" : "sent",
+      userId: user.id,
+      sendResult,
+      statusError: statusErrorPayload,
+      renderMetadata: rendered_template && typeof rendered_template === "object"
+        ? {
+            ...rendered_template,
+            params,
+            button_urls,
+            provider_template_name: templateDef.name,
+            language: rendered_template.language || "en",
+          }
+        : {
+            key: template_key,
+            label: template_key.replace(/_/g, " "),
+            body: readableContent,
+            params,
+            button_urls,
+            provider_template_name: templateDef.name,
+            language: "en",
+          },
       outboundKind: "template",
       expectedReplyType: expectedReplyTypeForTemplate(template_key),
       responsePolicy: responsePolicyForTemplate(template_key),
@@ -654,21 +805,12 @@ Deno.serve(async (req) => {
         invoked_by_user_id: user.id,
       },
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      activityDescription: lead_id
+        ? user.id === null
+          ? `Automated WhatsApp ${metaFailed ? "failed" : "sent"} — ${template_key.replace(/_/g, " ")}`
+          : `WhatsApp ${metaFailed ? "failed" : "sent"} — Template: ${template_key.replace(/_/g, " ")}`
+        : null,
     });
-
-    if (lead_id) {
-      const isSystem = user.id === null;
-      const statusLabel = metaFailed ? "failed" : "sent";
-      const { error: actErr } = await adminClient.from("lead_activities").insert({
-        lead_id,
-        user_id: user.id,
-        type: "whatsapp",
-        description: isSystem
-          ? `Automated WhatsApp ${statusLabel} — ${template_key.replace(/_/g, " ")}`
-          : `WhatsApp ${statusLabel} — Template: ${template_key.replace(/_/g, " ")}`,
-      });
-      if (actErr) console.error("lead_activities insert failed:", actErr.message);
-    }
 
     if (metaFailed) {
       return new Response(
@@ -678,6 +820,17 @@ Deno.serve(async (req) => {
         }),
         { status: sendResult.status >= 400 && sendResult.status < 500 ? sendResult.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    if (clear_unread_after_send === true) {
+      await adminClient.rpc("mark_whatsapp_conversation_read", {
+        p_phone: waPhone,
+        p_provider: sendResult.provider,
+        p_business_phone_number_id: phoneNumberId,
+        p_business_phone_number: sendResult.businessNumber,
+      }).then(({ error }) => {
+        if (error) console.error("mark_whatsapp_conversation_read failed:", error.message);
+      });
     }
 
     return new Response(

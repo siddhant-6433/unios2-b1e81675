@@ -27,6 +27,7 @@ import {
   sarvamSTT, sarvamTTS, detectSarvamLanguageCode,
 } from "./sarvam.ts";
 import { elevenLabsTTS } from "./elevenlabs.ts";
+import { cartesiaTTS, cartesiaTTSPcm, cartesiaSTT, CartesiaSttStream, CartesiaTtsStream } from "./cartesia.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
@@ -52,10 +53,41 @@ const PLACEHOLDER_NAMES = new Set([
 
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GOOGLE_AI_API_KEY}`;
 
+function normalizePlivoCallerId(value: string | null | undefined, defaultCountryCode = "91"): string | null {
+  let digits = String(value || "").replace(/\D/g, "");
+  const countryCode = defaultCountryCode.replace(/\D/g, "") || "91";
+  if (!digits) return null;
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (countryCode === "91") {
+    if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+    if (digits.length === 10) digits = `${countryCode}${digits}`;
+    if (digits.length === 13 && digits.startsWith("910")) digits = `91${digits.slice(3)}`;
+  } else if (digits.length === 10) {
+    digits = `${countryCode}${digits}`;
+  }
+  return /^[1-9]\d{10,14}$/.test(digits) ? digits : null;
+}
+
+function firstPlivoCallerIdFromEnv(): string {
+  const raws = [
+    Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS"),
+    Deno.env.get("PLIVO_DIALER_PHONE_NUMBER"),
+    Deno.env.get("PLIVO_PHONE_NUMBER"),
+  ];
+  for (const raw of raws) {
+    for (const part of String(raw || "").split(/[,;\n]+/)) {
+      const callerId = normalizePlivoCallerId(part);
+      if (callerId) return callerId;
+    }
+  }
+  return "";
+}
+
 // In-memory store for active call contexts (call_id → context)
 interface ActiveCall extends CallContext {
   leadId?: string;
   callLogId?: string;
+  bridgeCallerId?: string;
   callerTranscript: string[];
   aiTranscript: string[];
   toolCallsMade: { name: string; args: any; result: any }[];
@@ -68,7 +100,7 @@ interface ActiveCall extends CallContext {
   userTurnEndAtMsList?: number[]; // each timestamp the caller stopped speaking (VAD)
   agentTurnStartAtMsList?: number[]; // matching agent-started timestamps
   voiceSwitchCount?: number;      // cascade EL→Sarvam fallbacks during this call
-  agentProvider?: "gemini-live" | "cascade"; // which path was used end-to-end
+  agentProvider?: "gemini-live" | "cascade" | "cartesia-cascade"; // which path was used end-to-end
 }
 const activeCallContexts = new Map<string, ActiveCall>();
 
@@ -517,6 +549,139 @@ function finalizeQualityMetrics(callCtx: ActiveCall): Record<string, unknown> | 
   };
 }
 
+// Clamp an ISO timestamp into the AI-call business window (9 AM–8 PM IST).
+// ai-call-batch's cron (`process-ai-call-queue`, every minute) only fires rows
+// whose scheduled_at has passed AND the current wall-clock is inside the
+// window, so a callback promised for 9 PM would otherwise sit idle until the
+// next morning tick anyway — clamp it forward to the next 9 AM IST. Mirrors the
+// inline logic in the /status/ retry path.
+function clampToBusinessHoursIso(iso: string): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return iso;
+  const istDate = new Date(t + IST_OFFSET_MS);
+  const totalMins = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+  if (totalMins >= 540 && totalMins < 1200) return new Date(t).toISOString(); // within 9AM–8PM
+  const y = istDate.getUTCFullYear(), mo = istDate.getUTCMonth(), d = istDate.getUTCDate();
+  const dayOffset = totalMins >= 1200 ? 1 : 0; // past 8PM → next day; before 9AM → same day
+  return new Date(Date.UTC(y, mo, d + dayOffset, 3, 30, 0)).toISOString(); // 03:30 UTC = 09:00 IST
+}
+
+// Queue an AI callback: ai-call-batch's process-ai-call-queue cron picks up
+// pending rows and dials the lead via the voice-call edge fn. Mirrors the exact
+// row shape the /status/ retry path inserts. The partial unique index
+// (lead_id) WHERE status='pending' means a duplicate pending row 409s and is
+// harmlessly ignored — the lead_followups row keeps CRM visibility either way.
+async function queueAiCallback(
+  leadId: string,
+  scheduledAtIso: string,
+  dbHeaders: Record<string, string>,
+): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/ai_call_queue`, {
+    method: "POST",
+    headers: { ...dbHeaders, Prefer: "return=minimal" },
+    body: JSON.stringify({
+      lead_id: leadId,
+      status: "pending",
+      scheduled_at: clampToBusinessHoursIso(scheduledAtIso),
+    }),
+  }).catch((e) => console.error(`[queueAiCallback] failed for ${leadId}:`, e?.message));
+}
+
+// Notify the lead's current counsellor that Navya booked a campus visit.
+// In-app notification (→ push via the notifications fan-out trigger). Staff
+// WhatsApp is intentionally NOT sent: the only staff-WA mechanism
+// (resend-staff-wa) is a hardcoded broadcast of the `nimt_new_staff` template
+// to a fixed list — not reusable for a per-visit message, and we won't invent a
+// new template. notifications.user_id FKs auth.users, so we resolve
+// profiles.user_id from the lead's counsellor_id (which is profiles.id).
+async function notifyVisitBooked(
+  leadId: string,
+  visitDateIso: string,
+  dbHeaders: Record<string, string>,
+): Promise<void> {
+  try {
+    const ldRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=name,counsellor_id,courses:course_id(name)`,
+      { headers: dbHeaders },
+    );
+    const ld = (await ldRes.json().catch(() => []))?.[0];
+    if (!ld) return;
+
+    const when = new Date(visitDateIso).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    const courseName = (ld.courses as any)?.name || "course not set";
+
+    // 1) In-app + push notification to the lead owner
+    let ownerName = "Unassigned";
+    let ownerPhone = "";
+    if (ld.counsellor_id) {
+      const pRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${ld.counsellor_id}&select=user_id,display_name,phone`,
+        { headers: dbHeaders },
+      );
+      const prof = (await pRes.json().catch(() => []))?.[0];
+      ownerName = prof?.display_name || "Unassigned";
+      ownerPhone = prof?.phone || "";
+      if (prof?.user_id) {
+        await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            user_id: prof.user_id,
+            type: "visit_due",
+            title: `Campus visit booked by Navya: ${ld.name || "lead"}`,
+            body: `Visit scheduled for ${when}.`,
+            link: `/admissions/${leadId}`,
+            lead_id: leadId,
+          }),
+        });
+      }
+    }
+
+    // 2) Staff WhatsApp (navya_visit_alert UTILITY template — exempt from
+    //    Meta's marketing frequency cap): lead owner + leadership phones from
+    //    _app_config.navya_visit_wa_staff_recipients (JSON [{name, phone}]).
+    //    Fails soft (logged) until Meta approves the template.
+    const staffTargets: { name: string; phone: string }[] = [];
+    if (ownerPhone) staffTargets.push({ name: ownerName, phone: ownerPhone });
+    try {
+      const cfgRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/_app_config?key=eq.navya_visit_wa_staff_recipients&select=value`,
+        { headers: dbHeaders },
+      );
+      const raw = (await cfgRes.json().catch(() => []))?.[0]?.value;
+      const extra = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(extra)) {
+        for (const t of extra) {
+          if (t?.phone && !staffTargets.some(s => s.phone === String(t.phone))) {
+            staffTargets.push({ name: t.name || "Team", phone: String(t.phone) });
+          }
+        }
+      }
+    } catch { /* config missing/malformed — owner-only */ }
+
+    for (const target of staffTargets) {
+      fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        body: JSON.stringify({
+          template_key: "navya_visit_alert",
+          phone: target.phone,
+          params: [target.name.split(" ")[0], ld.name || "Unknown", courseName, when, ownerName],
+        }),
+      }).then(async (r) => {
+        if (!r.ok) console.warn(`[notifyVisitBooked] staff WA to ${target.phone} failed ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+      }).catch((e) => console.warn(`[notifyVisitBooked] staff WA to ${target.phone} threw:`, e?.message));
+    }
+  } catch (e: any) {
+    console.error(`[notifyVisitBooked] failed for ${leadId}:`, e?.message);
+  }
+}
+
 async function reconcilePostCall(
   callCtx: ActiveCall | null,
   leadId: string,
@@ -568,7 +733,7 @@ async function reconcilePostCall(
     );
     const dedupRows = await dedupRes.json().catch(() => []);
     if (!dedupRows?.length) {
-      const visitBody: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      const visitBody: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled", booked_by: "navya" };
       if (campusId) visitBody.campus_id = campusId;
       const vRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
         method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody),
@@ -585,6 +750,7 @@ async function reconcilePostCall(
           body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${visitDate} (${visitTime}). AI promised but didn't call schedule_visit.` }),
         });
         await assignLeadRoundRobin(leadId);
+        await notifyVisitBooked(leadId, visitTimestamp, dbHeaders);
         fireAutomation("visit_scheduled", leadId);
       }
     }
@@ -618,7 +784,13 @@ async function reconcilePostCall(
       method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
       body: JSON.stringify({ lead_id: leadId, content: reasonNote }),
     });
-    await assignLeadRoundRobin(leadId);
+    if (wantsHuman) {
+      // Human callback needs a responsible counsellor.
+      await assignLeadRoundRobin(leadId);
+    } else {
+      // AI callback: Navya calls back herself — no human owner, enqueue instead.
+      await queueAiCallback(leadId, scheduledAt, dbHeaders);
+    }
     actions.push(extractedAt ? `${followupType}_created:${scheduledAt}` : `${followupType}_created`);
   }
 
@@ -684,7 +856,7 @@ async function reconcilePostCall(
       const ldData2 = await ldRes2.json();
       const campusId2 = ldData2?.[0]?.campus_id || null;
 
-      const visitBody2: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      const visitBody2: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled", booked_by: "navya" };
       if (campusId2) visitBody2.campus_id = campusId2;
       const createRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
         method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody2),
@@ -701,6 +873,7 @@ async function reconcilePostCall(
           body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${extractedDate} — disposition was visit_scheduled but no visit record existed.` }),
         });
         await assignLeadRoundRobin(leadId);
+        await notifyVisitBooked(leadId, visitTimestamp, dbHeaders);
         fireAutomation("visit_scheduled", leadId);
       }
     }
@@ -919,6 +1092,7 @@ async function executeTool(
           lead_id: callCtx.leadId,
           visit_date: visitTimestamp,
           status: "scheduled",
+          booked_by: "navya",
         };
         if (campusId) body.campus_id = campusId;
 
@@ -949,6 +1123,8 @@ async function executeTool(
           });
           // Assign counsellor via round-robin so the visit has a responsible counsellor
           await assignLeadRoundRobin(callCtx.leadId);
+          // Notify the (now-assigned) counsellor that Navya booked this visit.
+          await notifyVisitBooked(callCtx.leadId, visitTimestamp, headers);
           // Fire automations for visit_scheduled and stage_change
           fireAutomation("visit_scheduled", callCtx.leadId);
           fireAutomation("stage_change", callCtx.leadId, { old_stage: "counsellor_call", new_stage: "visit_scheduled" });
@@ -1093,7 +1269,10 @@ async function executeTool(
         // Assign counsellor via round-robin for actionable dispositions, then
         // resolve the user_id so the followup we create can be owned by them
         // (and therefore picked up by the counsellor-reminders cron).
-        const needsAssignment = ["interested", "callback_requested", "call_back", "partial_conversation"].includes(args.disposition);
+        // NOTE: call_back / callback_requested are AI callbacks — Navya calls the
+        // lead back herself via ai_call_queue, so they need no human owner and
+        // are deliberately excluded from assignment below.
+        const needsAssignment = ["interested", "partial_conversation"].includes(args.disposition);
         let dispCounsellorUserId: string | null = null;
         if (needsAssignment) {
           let counsellorProfileId = await assignLeadRoundRobin(callCtx.leadId);
@@ -1135,6 +1314,8 @@ async function executeTool(
             headers: { ...headers, Prefer: "return=minimal" },
             body: JSON.stringify({
               lead_id: callCtx.leadId,
+              // AI callbacks have no human owner (user_id stays null via the
+              // needsAssignment exclusion) — the followup row is CRM-visibility only.
               user_id: dispCounsellorUserId,
               scheduled_at: followupDate,
               type: isAiCallback ? "ai_callback" : "call",
@@ -1143,6 +1324,13 @@ async function executeTool(
             }),
           });
           console.log(`[Followup] Scheduled for ${callCtx.leadId}: ${args.disposition} → ${followupDate} (user=${dispCounsellorUserId || "unassigned"})`);
+
+          // AI callback → actually make Navya call back: enqueue in ai_call_queue
+          // so process-ai-call-queue dials the lead at the requested time.
+          if (isAiCallback) {
+            await queueAiCallback(callCtx.leadId, followupDate, headers);
+            console.log(`[AI Callback] Queued for ${callCtx.leadId} at ${clampToBusinessHoursIso(followupDate)}`);
+          }
         }
 
         // Mark do_not_contact
@@ -1186,9 +1374,12 @@ async function executeTool(
         switch (args.message_type) {
           case "course_info":
           case "apply_link":
-            // Post-call summary — opens with "as discussed on our call".
-            waTemplateKey = "ai_call_post_summary";
-            waParams = [waLead.name, waCourse, waCampus, courseUrl, applyUrl, videoUrl];
+            // UTILITY template — transactional "details you requested on our
+            // call". Not subject to Meta's marketing frequency cap (which
+            // silently killed course_info_* deliveries). Falls back to
+            // ai_call_post_summary below if not yet approved.
+            waTemplateKey = "call_requested_details";
+            waParams = [waLead.name, `${waCourse} admission at NIMT`];
             break;
           case "visit_confirmation":
             waTemplateKey = "visit_confirmation";
@@ -1203,11 +1394,28 @@ async function executeTool(
 
         if (waTemplateKey) {
           try {
-            await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
-              body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
-            });
+            const sendTemplate = async (key: string, params: string[]) =>
+              fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+                body: JSON.stringify({ template_key: key, phone: waLead.phone, params, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
+              });
+
+            let waRes = await sendTemplate(waTemplateKey, waParams);
+            // call_requested_details may not be Meta-approved yet — fall back
+            // to the legacy post-summary template rather than failing the send.
+            if (!waRes.ok && waTemplateKey === "call_requested_details") {
+              const body = await waRes.text().catch(() => "");
+              console.warn(`[WhatsApp] call_requested_details failed ${waRes.status} (${body.slice(0, 150)}) — falling back to ai_call_post_summary`);
+              waTemplateKey = "ai_call_post_summary";
+              waParams = [waLead.name, waCourse, waCampus, courseUrl, applyUrl, videoUrl];
+              waRes = await sendTemplate(waTemplateKey, waParams);
+            }
+            if (!waRes.ok) {
+              const body = await waRes.text().catch(() => "");
+              console.error(`[WhatsApp] send failed ${waRes.status}: ${body.slice(0, 300)}`);
+              return { success: false, message: "WhatsApp send failed — tell the caller the counsellor will send it instead. Do NOT claim it was sent." };
+            }
             console.log(`[WhatsApp] Sent ${waTemplateKey} to ${waLead.phone}`);
             return { success: true, type: args.message_type };
           } catch (e: any) {
@@ -1519,7 +1727,14 @@ async function executeTool(
               params: [ld.name || "there", courseName],
               lead_id: callCtx.leadId,
             }),
-          }).catch((e) => console.error(`[request_human_callback] WA send failed:`, e?.message));
+          })
+            .then(async (r) => {
+              if (!r.ok) {
+                const body = await r.text().catch(() => "");
+                console.error(`[request_human_callback] WA send failed ${r.status}: ${body.slice(0, 300)}`);
+              }
+            })
+            .catch((e) => console.error(`[request_human_callback] WA send failed:`, e?.message));
         }
 
         // 5) Audit note for the timeline.
@@ -1538,6 +1753,69 @@ async function executeTool(
           scheduled_at: scheduledAt,
           whatsapp_sent: !!ld.phone,
         };
+      }
+
+      case "flag_knowledge_gap": {
+        // Self-improving loop: the AI couldn't answer confidently. Record the
+        // gap so an admin can supply a verified answer, notify super_admins,
+        // and leave a timeline note. The gap insert is the only awaited call;
+        // everything else is fire-and-forget so a slow notify never blocks
+        // the live call.
+        const callerTail = (callCtx.callerTranscript || []).slice(-3).map((t) => `Caller: ${t}`);
+        const aiTail = (callCtx.aiTranscript || []).slice(-3).map((t) => `Navya: ${t}`);
+        const snippet = [...callerTail, ...aiTail].join("\n") || null;
+
+        const gapRes = await fetch(`${SUPABASE_URL}/rest/v1/voice_knowledge_gaps`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            call_id: callCtx.callLogId || null,
+            lead_id: callCtx.leadId || null,
+            question_text: args.question,
+            ai_answer_given: args.answer_given || null,
+            transcript_snippet: snippet,
+          }),
+        });
+        if (!gapRes.ok) {
+          const body = await gapRes.text().catch(() => "");
+          console.error(`[flag_knowledge_gap] insert failed ${gapRes.status}: ${body.slice(0, 300)}`);
+          return { success: false, message: "Could not record the query — the counsellor will follow up." };
+        }
+
+        // Notify every super_admin (fire-and-forget).
+        fetch(`${SUPABASE_URL}/rest/v1/user_roles?role=eq.super_admin&select=user_id`, { headers })
+          .then((r) => r.json())
+          .then((rows: any[]) => {
+            for (const row of rows || []) {
+              if (!row?.user_id) continue;
+              fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+                method: "POST",
+                headers: { ...headers, Prefer: "return=minimal" },
+                body: JSON.stringify({
+                  user_id: row.user_id,
+                  type: "system",
+                  title: "Navya needs an answer",
+                  body: String(args.question).slice(0, 200),
+                  link: "/admin/navya-knowledge",
+                }),
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+
+        // Timeline note (fire-and-forget).
+        if (callCtx.leadId) {
+          fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+            method: "POST",
+            headers: { ...headers, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              lead_id: callCtx.leadId,
+              content: `🤖 Navya couldn't answer: ${args.question} — forwarded to senior counsellor`,
+            }),
+          }).catch(() => {});
+        }
+
+        return { success: true, message: "Query forwarded to senior counsellor team." };
       }
 
       default:
@@ -2110,6 +2388,45 @@ Deno.serve({ port: PORT }, async (req) => {
       console.error(`[${callId}] Lead lookup failed:`, e);
     }
 
+    // Intake round-robin: a lead with no assigned counsellor (fresh inbound, or
+    // an old lead nobody owns) is distributed across the admin-maintained intake
+    // pool (preferring counsellors who are currently online). The DB function
+    // sets leads.counsellor_id and returns the chosen profile id; we then
+    // resolve their phone so the call can be forwarded to them. Returns null
+    // when no pool is configured / nobody is reachable → the AI agent answers
+    // from the start (the fallback below). The same pool backs WhatsApp intake.
+    if (leadId && !counsellorPhone && SUPABASE_URL) {
+      try {
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/fn_intake_round_robin_assign`, {
+          method: "POST",
+          headers: dbHeaders,
+          body: JSON.stringify({ _lead_id: leadId }),
+        });
+        const assignedProfileId = await rpcRes.json().catch(() => null);
+        if (assignedProfileId && typeof assignedProfileId === "string") {
+          const profRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${assignedProfileId}&select=phone,display_name,user_id`,
+            { headers: dbHeaders },
+          );
+          const prof = (await profRes.json().catch(() => []))?.[0];
+          if (prof?.phone) {
+            counsellorPhone = prof.phone.replace(/[^0-9+]/g, "");
+            if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.substring(1);
+            if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
+            counsellorName = prof.display_name || "Counsellor";
+            counsellorUserId = prof.user_id || "";
+            console.log(`[${callId}] Intake round-robin assigned lead ${leadId} → ${counsellorName} (${counsellorPhone})`);
+          } else {
+            console.log(`[${callId}] Intake round-robin picked ${assignedProfileId} but no phone on file — AI will handle`);
+          }
+        } else {
+          console.log(`[${callId}] No intake-pool counsellor available — AI will handle`);
+        }
+      } catch (e) {
+        console.error(`[${callId}] Intake round-robin assign failed:`, (e as Error).message);
+      }
+    }
+
     activeCallContexts.set(callId, {
       direction: "inbound",
       leadId: leadId || undefined,
@@ -2145,15 +2462,13 @@ Deno.serve({ port: PORT }, async (req) => {
     const istDayEarly  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
     const offHours = !((istHourEarly >= 9 && istHourEarly < 20) && istDayEarly !== "Sun");
 
-    // Will the AI actually handle this call from the start? True when:
-    //   - Lead dialed an AI-dedicated DID, OR
-    //   - It's outside business hours, OR
-    //   - The lead has no assigned counsellor (or no counsellor phone), OR
-    //   - There's no lead at all (cold caller, not in DB)
-    // When this is true, the call goes straight to the AI <Stream> below and
-    // no counsellor leg is ever attempted.
-    const aiHandlesFromStart =
-      isAiInboundNumberEarly || offHours || !counsellorPhone || !leadId;
+    // Will the AI actually handle this call from the start? Only when there is
+    // no counsellor we can forward to — i.e. no lead, or no reachable counsellor
+    // (the lead's own AND the intake round-robin pool both came up empty). When
+    // a counsellor phone exists we always forward first (during AND outside
+    // business hours) and the AI is the no-answer fallback. `offHours` is still
+    // tracked below purely to flag the call for next-day follow-up.
+    const aiHandlesFromStart = !counsellorPhone || !leadId;
 
     // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
     if (leadId && SUPABASE_URL) {
@@ -2181,44 +2496,32 @@ Deno.serve({ port: PORT }, async (req) => {
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const hangupUrl = `https://${host}/inbound-hangup/${callId}`;
 
-    // Routing decision based on which DID the lead dialed:
+    // Routing: forward the call to a counsellor whenever we have one — the
+    // lead's own assigned counsellor (existing leads, incl. callbacks), or one
+    // just picked from the intake round-robin pool (new/unowned leads). This
+    // holds during AND outside business hours: off-hours still rings the
+    // counsellor's phone, with the AI as the no-answer fallback. The AI answers
+    // from the start only when no counsellor is reachable (empty/absent pool).
     //
-    //  - AI primary (PLIVO_AI_PHONE_NUMBER) or its HA backup
-    //    → answer with the AI agent immediately. This is the dedicated
-    //      inbound number leads call after seeing it on a marketing
-    //      landing page or a previous AI outbound; they expect the AI.
-    //
-    //  - Dialer number (PLIVO_DIALER_PHONE_NUMBER) or any other DID
-    //    → ring assigned counsellor first (20s) then fall back to AI.
-    //      ONLY during business hours (9 AM-8 PM IST, Mon-Sat). Outside
-    //      that window, no counsellor is on duty so every inbound goes
-    //      straight to the AI agent, and the call is flagged for
-    //      next-day counsellor follow-up via the missed-calls queue.
-    //
-    // Phone normalisation: Plivo strips the leading + from params.To
-    // (so "918035374903" arrives) but our env vars store with the +
-    // ("+918035374903"). Without normalising both sides to digits-only,
-    // no DID ever matched and every call fell through to the counsellor
-    // branch — the bug behind "AI primary number rings counsellor".
-    const onlyDigits = (s: string) => (s || "").replace(/\D/g, "");
-    const dialedTo  = onlyDigits(params.To as string);
-    const aiPrimary = onlyDigits(Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "");
-    const aiBackup  = onlyDigits(Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "");
-    const isAiInboundNumber = !!dialedTo && (dialedTo === aiPrimary || dialedTo === aiBackup);
-
+    // This intentionally supersedes the old DID-based split (AI number → AI,
+    // dialer number → counsellor): every inbound now tries a human first and
+    // uses the AI as a safety net via /answer/inbound-ai.
     const istHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).match(/\d+/)?.[0] || "0", 10);
     const istDay  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
     const inBusinessHours = (istHour >= 9 && istHour < 20) && istDay !== "Sun";
 
-    if (!isAiInboundNumber && inBusinessHours && leadId && counsellorPhone) {
+    if (counsellorPhone) {
       const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
+      const holdMsg = inBusinessHours
+        ? "Connecting you to your counsellor. Please hold."
+        : "Connecting your call. Please hold.";
 
-      console.log(`[${callId}] Inbound to dialer DID ${dialedTo} → ringing counsellor ${counsellorName} (${counsellorPhone})`);
+      console.log(`[${callId}] Inbound → forwarding to counsellor ${counsellorName} (${counsellorPhone})${inBusinessHours ? "" : " [off-hours]"}`);
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
-  <Speak voice="Polly.Kajal">Connecting you to your counsellor. Please hold.</Speak>
+  <Speak voice="Polly.Kajal">${holdMsg}</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${aiUrl}" method="POST" timeout="20" hangupOnStar="true">
     <Number>${counsellorPhone}</Number>
   </Dial>
@@ -2227,7 +2530,8 @@ Deno.serve({ port: PORT }, async (req) => {
       return new Response(xml, { headers: { "Content-Type": "application/xml" } });
     }
 
-    // AI inbound DID, OR no counsellor assigned → straight to AI agent.
+    // No counsellor reachable (no intake pool configured, or nobody on file) →
+    // AI agent answers directly.
     const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -2235,8 +2539,7 @@ Deno.serve({ port: PORT }, async (req) => {
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    const reason = isAiInboundNumber ? "AI DID" : !inBusinessHours ? "outside business hours" : !counsellorPhone ? "no counsellor assigned" : "fallthrough";
-    console.log(`[${callId}] Inbound from ${callerPhone} to ${dialedTo || "?"} (${reason}, IST hour=${istHour}, day=${istDay}) → AI agent. lead: ${leadName || "unknown"}`);
+    console.log(`[${callId}] Inbound from ${callerPhone} (no counsellor reachable, IST hour=${istHour}, day=${istDay}) → AI agent. lead: ${leadName || "unknown"}`);
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
   }
 
@@ -2730,7 +3033,7 @@ Deno.serve({ port: PORT }, async (req) => {
 
               // Send WhatsApp if template was determined
               if (reconciliation.templateKey && reconciliation.phone) {
-                await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+                const recWaRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
                   body: JSON.stringify({
@@ -2741,7 +3044,12 @@ Deno.serve({ port: PORT }, async (req) => {
                     ...(reconciliation.buttonUrls ? { button_urls: reconciliation.buttonUrls } : {}),
                   }),
                 });
-                console.log(`[${callId}] Post-call WhatsApp: ${reconciliation.templateKey}`);
+                if (!recWaRes.ok) {
+                  const body = await recWaRes.text().catch(() => "");
+                  console.error(`[${callId}] Post-call WhatsApp send failed ${recWaRes.status}: ${body.slice(0, 300)}`);
+                } else {
+                  console.log(`[${callId}] Post-call WhatsApp: ${reconciliation.templateKey}`);
+                }
               }
 
               // Append reconciliation actions to call record summary
@@ -2758,6 +3066,38 @@ Deno.serve({ port: PORT }, async (req) => {
             }
           } catch (waErr: any) {
             console.error(`[${callId}] Post-call reconciliation failed:`, waErr.message);
+          }
+        }
+
+        // Post-call gap mining: catch cases where the AI verbally deferred to a
+        // senior counsellor ("senior counsellor se confirm karke...") but never
+        // called flag_knowledge_gap. Pair each deferral line with the nearest
+        // caller question and record it as a pending gap. Skipped entirely if
+        // the AI already flagged a gap explicitly this call.
+        if (plivoStatus === "completed" && leadId && callCtx) {
+          const alreadyFlagged = (callCtx.toolCallsMade || []).some((tc) => tc.name === "flag_knowledge_gap");
+          if (!alreadyFlagged) {
+            const aiLines = callCtx.aiTranscript || [];
+            const callerLines = callCtx.callerTranscript || [];
+            const deferRe = /senior counsellor (se confirm|batayengi|ko forward)|confirm kar(ke|wa)/i;
+            let mined = 0;
+            for (let i = 0; i < aiLines.length && mined < 3; i++) {
+              if (!deferRe.test(aiLines[i])) continue;
+              const question = callerLines[Math.min(i, callerLines.length - 1)] || aiLines[i];
+              mined++;
+              fetch(`${SUPABASE_URL}/rest/v1/voice_knowledge_gaps`, {
+                method: "POST",
+                headers: { ...dbHeaders, Prefer: "return=minimal" },
+                body: JSON.stringify({
+                  call_id: callLogId || null,
+                  lead_id: leadId,
+                  question_text: question,
+                  ai_answer_given: aiLines[i],
+                  transcript_snippet: [`Caller: ${question}`, `Navya: ${aiLines[i]}`].join("\n"),
+                }),
+              }).catch((e) => console.error(`[${callId}] Gap mining insert failed:`, e?.message));
+            }
+            if (mined > 0) console.log(`[${callId}] Post-call gap mining: ${mined} gap(s) recorded`);
           }
         }
       } catch (e: any) {
@@ -2791,9 +3131,7 @@ Deno.serve({ port: PORT }, async (req) => {
       );
     }
     console.log(`[transfer-bridge ${key}] Dialing ${bridge.name} at ${bridge.phone}`);
-    const callerId = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")
-      || Deno.env.get("PLIVO_PHONE_NUMBER")
-      || "";
+    const callerId = firstPlivoCallerIdFromEnv();
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Speak voice="Polly.Kajal" language="en-IN">Connecting you to ${xmlEsc(bridge.name)} now. Please hold.</Speak>
@@ -2815,10 +3153,11 @@ Deno.serve({ port: PORT }, async (req) => {
       leadName: ctx.leadName,
       courseName: ctx.courseName,
       campusName: ctx.campusName,
+      bridgeCallerId: normalizePlivoCallerId(ctx.dialerFrom) || firstPlivoCallerIdFromEnv(),
       callerTranscript: [],
       aiTranscript: [],
       // Store counsellor info for call_logs attribution
-      toolCallsMade: [{ name: "bridge_meta", args: { counsellorUserId: ctx.counsellorUserId, counsellorName: ctx.counsellorName }, result: null }],
+      toolCallsMade: [{ name: "bridge_meta", args: { counsellorUserId: ctx.counsellorUserId, counsellorName: ctx.counsellorName, dialerFrom: ctx.dialerFrom }, result: null }],
     });
     console.log(`[BRIDGE ${callId}] Context set: counsellor=${ctx.counsellorPhone} → student=${ctx.studentPhone}`);
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
@@ -2829,10 +3168,13 @@ Deno.serve({ port: PORT }, async (req) => {
   if (path.startsWith("/bridge-answer/")) {
     const callId = path.split("/bridge-answer/")[1];
     const studentPhone = url.searchParams.get("student") || "";
+    const callCtx = activeCallContexts.get(callId);
     // Cloud dialer number — what the student sees as caller-id when the
     // counsellor's leg bridges them in. Kept distinct from the AI agent's
     // number so inbound returns route to the right answer flow.
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER") || "";
+    const PLIVO_PHONE_NUMBER = normalizePlivoCallerId(url.searchParams.get("caller"))
+      || callCtx?.bridgeCallerId
+      || firstPlivoCallerIdFromEnv();
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const host = req.headers.get("host") || url.host;
     const statusUrl = `https://${host}/bridge-status/${callId}`;
@@ -2881,15 +3223,24 @@ Deno.serve({ port: PORT }, async (req) => {
     const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
 
     // CRITICAL: Persist the Plivo CallUUID on the FIRST webhook so manual-call-cancel
-    // has something to hang up with. Plivo's Make Call API returns "async api
-    // spawned" without request_uuid for our account, so this webhook is the
-    // earliest opportunity to capture the real CallUUID. Only patch if the row
-    // currently has no value to avoid overwriting an already-correct one.
-    if (plivoCallUUID && SUPABASE_URL) {
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&plivo_call_uuid=is.null`, {
+    // has something to hang up with. Some Plivo accounts return only
+    // "async api spawned" from Call.create, so this webhook may be the earliest
+    // opportunity to capture the real CallUUID. Do not mark status=in_progress
+    // here: this is only the counsellor A-leg. Student connection is owned by
+    // /bridge-b-status. Keep status='initiated' so LiveCallBar and stale
+    // reconciliation continue to treat the row as active until final outcome.
+    if (SUPABASE_URL) {
+      const patch: Record<string, unknown> = {};
+      if (plivoCallUUID) patch.plivo_call_uuid = plivoCallUUID;
+      if (callStatus === "ringing" || event === "ring") {
+        patch.summary = "Cloud Call: ringing counsellor";
+      } else if (callStatus === "in-progress" || callStatus === "in_progress" || callStatus === "answered" || event === "startapp") {
+        patch.summary = "Cloud Call: counsellor answered, dialing lead";
+      }
+      if (Object.keys(patch).length > 0) await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH",
         headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({ plivo_call_uuid: plivoCallUUID }),
+        body: JSON.stringify(patch),
       }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] plivo_call_uuid persist failed:`, e.message));
     }
 
@@ -3218,7 +3569,8 @@ Deno.serve({ port: PORT }, async (req) => {
       // events and never set plivoStreamId.
       const provider = getVoiceProviderSync();
       console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
-      if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
+      if (provider === "cartesia") handlePlivoStreamCartesia(socket, callId);
+      else if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
       else if (provider === "plivo") {
         // Plivo Voice AI Agents normally ingest at the answer-URL XML
         // stage (with their own Connect verb), not over our /ws handler.
@@ -3254,7 +3606,7 @@ Deno.serve({ port: PORT }, async (req) => {
 //              Scaffolded behind a feature flag — handler logs a warning
 //              and falls back to "gemini" until the integration is
 //              completed (see voice-agent/PLIVO_INTEGRATION.md).
-type VoiceProvider = "gemini" | "sarvam" | "plivo";
+type VoiceProvider = "gemini" | "sarvam" | "plivo" | "cartesia";
 let providerCache: VoiceProvider = "gemini";
 async function refreshProviderCache() {
   try {
@@ -3264,7 +3616,7 @@ async function refreshProviderCache() {
     );
     const rows = await res.json().catch(() => []);
     const v = rows?.[0]?.value;
-    if (v === "sarvam" || v === "gemini" || v === "plivo") providerCache = v;
+    if (v === "sarvam" || v === "gemini" || v === "plivo" || v === "cartesia") providerCache = v;
   } catch (e) {
     console.warn(`[provider] _app_config refresh failed:`, (e as Error).message);
   }
@@ -3308,6 +3660,10 @@ type VoiceSettings = {
   /** EL model — eleven_v3 = expressive multilingual, eleven_turbo_v2_5 = fast.
    *  v3 is slower (~30% more latency) but handles Hinglish prosody better. */
   elevenLabsModel: "eleven_turbo_v2_5" | "eleven_v3" | "eleven_multilingual_v2";
+  cartesiaVoiceId: string;
+  cartesiaModel: string;
+  cartesiaLanguage: string;
+  cartesiaFillerThresholdMs: number;
 };
 const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   geminiSilenceMs: 1500,
@@ -3327,7 +3683,24 @@ const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   elevenLabsStability: 0.45,
   elevenLabsSimilarity: 0.75,
   elevenLabsModel: "eleven_turbo_v2_5",
+  cartesiaVoiceId: "95d51f79-c397-46f9-b49a-23763d3eaa2d", // Arushi - Hinglish Speaker
+  cartesiaModel: "sonic-3.5",
+  cartesiaLanguage: "hi",
+  cartesiaFillerThresholdMs: 1200,
 };
+const SAFE_GEMINI_AUDIO_MODELS = new Set([
+  "gemini-2.5-flash-native-audio-latest",
+  "gemini-2.5-flash-native-audio-preview-09-2025",
+  "gemini-2.5-flash-native-audio-preview-12-2025",
+]);
+function normalizeGeminiAudioModel(raw: unknown): string {
+  const model = String(raw || "").trim();
+  if (SAFE_GEMINI_AUDIO_MODELS.has(model)) return model;
+  if (model) {
+    console.warn(`[voice-settings] refusing unsupported Gemini audio model "${model}", using safe default`);
+  }
+  return VOICE_SETTINGS_DEFAULT.geminiModel;
+}
 let voiceSettingsCache: VoiceSettings = { ...VOICE_SETTINGS_DEFAULT };
 async function refreshVoiceSettingsCache() {
   try {
@@ -3346,7 +3719,7 @@ async function refreshVoiceSettingsCache() {
       sarvamSpeaker:             String(parsed.sarvam_speaker             ?? VOICE_SETTINGS_DEFAULT.sarvamSpeaker),
       sarvamBulbulModel:         String(parsed.sarvam_bulbul_model        ?? VOICE_SETTINGS_DEFAULT.sarvamBulbulModel),
       geminiVoice:               String(parsed.gemini_voice               ?? VOICE_SETTINGS_DEFAULT.geminiVoice),
-      geminiModel:               String(parsed.gemini_model               ?? VOICE_SETTINGS_DEFAULT.geminiModel),
+      geminiModel:               normalizeGeminiAudioModel(parsed.gemini_model),
       geminiPrefixPaddingMs:     Number(parsed.gemini_prefix_padding_ms   ?? VOICE_SETTINGS_DEFAULT.geminiPrefixPaddingMs),
       cascadeMaxTokens:          Number(parsed.cascade_max_tokens         ?? VOICE_SETTINGS_DEFAULT.cascadeMaxTokens),
       cascadeTemperature:        Number(parsed.cascade_temperature        ?? VOICE_SETTINGS_DEFAULT.cascadeTemperature),
@@ -3359,6 +3732,10 @@ async function refreshVoiceSettingsCache() {
       elevenLabsModel:           (["eleven_turbo_v2_5","eleven_v3","eleven_multilingual_v2"].includes(parsed.elevenlabs_model)
                                     ? parsed.elevenlabs_model
                                     : VOICE_SETTINGS_DEFAULT.elevenLabsModel) as VoiceSettings["elevenLabsModel"],
+      cartesiaVoiceId:             String(parsed.cartesia_voice_id   ?? VOICE_SETTINGS_DEFAULT.cartesiaVoiceId),
+      cartesiaModel:               String(parsed.cartesia_model      ?? VOICE_SETTINGS_DEFAULT.cartesiaModel),
+      cartesiaLanguage:            String(parsed.cartesia_language    ?? VOICE_SETTINGS_DEFAULT.cartesiaLanguage),
+      cartesiaFillerThresholdMs:   Number(parsed.cartesia_filler_threshold_ms ?? VOICE_SETTINGS_DEFAULT.cartesiaFillerThresholdMs),
     };
   } catch (e) {
     console.warn(`[voice-settings] refresh failed, using defaults:`, (e as Error).message);
@@ -3381,6 +3758,7 @@ setInterval(refreshVoiceSettingsCache, 30_000);
 
 const SARVAM_API_KEY = Deno.env.get("SARVAM_API_KEY") || "";
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") || "";
+const CARTESIA_API_KEY = Deno.env.get("CARTESIA_API_KEY") || "";
 // Reuse the same key the Gemini Live path uses — Cloud Run env has it under
 // GOOGLE_AI_API_KEY, with GEMINI_API_KEY as a fallback for any environment
 // that named it that way.
@@ -3454,6 +3832,8 @@ function currentFillerSig(): string {
     s.sarvamSpeaker,
     s.sarvamPace,
     s.sarvamBulbulModel,
+    s.cartesiaVoiceId,
+    s.cartesiaModel,
   ].join("|");
 }
 async function warmFillerCache(): Promise<void> {
@@ -3469,33 +3849,54 @@ async function warmFillerCache(): Promise<void> {
   fillerWarming = true;
   try {
     const settings = getVoiceSettings();
-    const useElevenForFiller = settings.cascadeTtsProvider === "elevenlabs"
+    const provider = getVoiceProviderSync();
+    const useCartesiaForFiller = provider === "cartesia"
+      && !!CARTESIA_API_KEY
+      && !!settings.cartesiaVoiceId;
+    const useElevenForFiller = !useCartesiaForFiller
+      && settings.cascadeTtsProvider === "elevenlabs"
       && !!ELEVENLABS_API_KEY
       && !!settings.elevenLabsVoiceId;
     for (let i = 0; i < FILLER_TEXTS.length; i++) {
       if (fillerMulawCache[i]) continue;
-      const pcm = useElevenForFiller
-        ? await elevenLabsTTS({
-            apiKey: ELEVENLABS_API_KEY,
-            text: FILLER_TEXTS[i],
-            voiceId: settings.elevenLabsVoiceId,
-            model: settings.elevenLabsModel,
-            speed: settings.sarvamPace,
-            style: settings.elevenLabsStyle,
-            stability: settings.elevenLabsStability,
-            similarityBoost: settings.elevenLabsSimilarity,
-          })
-        : await sarvamTTS({
-            apiKey: SARVAM_API_KEY,
-            text: FILLER_TEXTS[i],
-            speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
-            languageCode: "hi-IN",
-            pace: settings.sarvamPace,
-            model: settings.sarvamBulbulModel,
-          });
-      if (pcm) {
-        fillerMulawCache[i] = pcm16ToMulawBase64(pcm);
-        console.log(`[sarvam-filler] cached "${FILLER_TEXTS[i]}" (${fillerMulawCache[i]!.length}b)`);
+      if (useCartesiaForFiller) {
+        // Cartesia outputs mulaw directly — no PCM intermediate
+        const mulaw = await cartesiaTTS({
+          apiKey: CARTESIA_API_KEY,
+          text: FILLER_TEXTS[i],
+          voiceId: settings.cartesiaVoiceId,
+          model: settings.cartesiaModel,
+          language: settings.cartesiaLanguage,
+          speed: settings.sarvamPace,
+        });
+        if (mulaw) {
+          fillerMulawCache[i] = mulaw;
+          console.log(`[cartesia-filler] cached "${FILLER_TEXTS[i]}" (${mulaw.length}b)`);
+        }
+      } else {
+        const pcm = useElevenForFiller
+          ? await elevenLabsTTS({
+              apiKey: ELEVENLABS_API_KEY,
+              text: FILLER_TEXTS[i],
+              voiceId: settings.elevenLabsVoiceId,
+              model: settings.elevenLabsModel,
+              speed: settings.sarvamPace,
+              style: settings.elevenLabsStyle,
+              stability: settings.elevenLabsStability,
+              similarityBoost: settings.elevenLabsSimilarity,
+            })
+          : await sarvamTTS({
+              apiKey: SARVAM_API_KEY,
+              text: FILLER_TEXTS[i],
+              speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+              languageCode: "hi-IN",
+              pace: settings.sarvamPace,
+              model: settings.sarvamBulbulModel,
+            });
+        if (pcm) {
+          fillerMulawCache[i] = pcm16ToMulawBase64(pcm);
+          console.log(`[sarvam-filler] cached "${FILLER_TEXTS[i]}" (${fillerMulawCache[i]!.length}b)`);
+        }
       }
     }
     fillerCacheSig = currentFillerSig();
@@ -3515,6 +3916,516 @@ function nextFiller(): string | null {
 }
 // Fire-and-forget at module init so the first call doesn't pay the cost.
 warmFillerCache();
+
+// ─── Cartesia streaming pipeline (Ink-2 WS → Gemini text → Sonic WS) ──
+//
+// Matches Cartesia's reference (Line) design: streaming STT transcribes
+// WHILE the caller speaks (finalize at end-of-turn returns the transcript
+// near-instantly), streaming TTS forwards mulaw chunks to Plivo as Sonic
+// generates them (~40-100ms TTFB), and barge-in cancels the in-flight
+// generation + flushes Plivo's buffer. No fillers needed on this path.
+// Everything stays mulaw 8kHz end-to-end — zero PCM conversion except a
+// cheap RMS decode for VAD.
+
+function handlePlivoStreamCartesia(plivoWs: WebSocket, callId: string) {
+  const callCtx = activeCallContexts.get(callId);
+  if (!callCtx) {
+    console.error(`[${callId}] No call context found for Cartesia handler`);
+    plivoWs.close();
+    return;
+  }
+
+  const history: GeminiContent[] = [];
+  let voiceFrames = 0;
+  let silenceFrames = 0;
+  let agentSpeaking = false;   // TTS chunks currently being forwarded to Plivo
+  let processingTurn = false;  // STT finalize → Gemini → TTS in flight
+  let lastUserText = "";
+  let bargeInFrames = 0;       // sustained-speech counter while agent talks
+  let currentTtsContext: string | null = null;
+  let utteranceBuffer: number[] = []; // primary utterance PCM (buffer path — non-English STT & English fallback)
+  let turnAborted = false;     // barge-in aborts the rest of the current model turn
+  // Adaptive VAD state (buffer path)
+  const preRoll: Int16Array[] = []; // last ~15 frames (~300ms) of decoded PCM to recover the syllable onset
+  let noiseFloor = 200;             // EMA of RMS energy on silence frames only
+  let voicedSampleCount = 0;        // voiced samples in the current utterance (min-utterance gate)
+
+  const settings = () => getVoiceSettings();
+
+  // Streaming connections — established on Plivo stream start.
+  const stt = new CartesiaSttStream({ apiKey: CARTESIA_API_KEY, language: settings().cartesiaLanguage });
+  const tts = new CartesiaTtsStream({ apiKey: CARTESIA_API_KEY });
+  let sttReady = false;
+  let ttsReady = false;
+
+  const connectStreams = async () => {
+    // Cartesia Ink streaming STT is only usable for English on 8kHz phone
+    // audio — its Hindi accuracy is unusable. For non-English we rely on the
+    // PCM buffer path + Sarvam Saarika batch STT (see processTurn), so skip
+    // connecting the streaming WS entirely.
+    if (settings().cartesiaLanguage === "en") {
+      try {
+        await stt.connect();
+        sttReady = true;
+        console.log(`[${callId}] Cartesia STT stream connected (ink-2, en)`);
+      } catch (e) {
+        console.error(`[${callId}] ⚠ Cartesia STT WS failed — falling back to batch STT:`, (e as Error).message);
+      }
+    } else {
+      console.log(`[${callId}] Non-English (${settings().cartesiaLanguage}) — Cartesia streaming STT skipped, using Sarvam Saarika batch`);
+    }
+    try {
+      await tts.connect();
+      ttsReady = true;
+      console.log(`[${callId}] Cartesia TTS stream connected (sonic)`);
+    } catch (e) {
+      console.error(`[${callId}] ⚠ Cartesia TTS WS failed — falling back to batch TTS:`, (e as Error).message);
+    }
+  };
+
+  // Garbage-transcript filter: Whisper-family models hallucinate repeated
+  // tokens on noise ("बब बब बब बब"). Drop those + ultra-short fragments.
+  const isGarbageTranscript = (text: string): boolean => {
+    if (text.length < 2) return true;
+    if (/(\S+)( \1){3,}/.test(text)) return true;
+    return false;
+  };
+
+  let bargedIn = false; // set by the barge-in detector to abort the playback hold
+
+  const sendTtsToPlivo = async (text: string) => {
+    agentSpeaking = true;
+    bargeInFrames = 0;
+    bargedIn = false;
+    const s = settings();
+    try {
+      if (ttsReady && tts.ready && s.cartesiaVoiceId) {
+        const contextId = crypto.randomUUID();
+        currentTtsContext = contextId;
+        let firstChunk = true;
+        let firstChunkAt = 0;
+        let totalRawBytes = 0;
+        await tts.speak({
+          text,
+          voiceId: s.cartesiaVoiceId,
+          model: s.cartesiaModel,
+          language: s.cartesiaLanguage,
+          speed: s.sarvamPace,
+          contextId,
+          onChunk: (b64) => {
+            if (plivoWs.readyState !== WebSocket.OPEN) return;
+            if (currentTtsContext !== contextId) return; // cancelled by barge-in
+            if (firstChunk) {
+              firstChunk = false;
+              firstChunkAt = Date.now();
+              if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
+              callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+              callCtx.agentTurnStartAtMsList.push(Date.now());
+            }
+            totalRawBytes += Math.floor(b64.length * 3 / 4);
+            plivoWs.send(JSON.stringify({
+              event: "playAudio",
+              media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: b64 },
+            }));
+          },
+        });
+        if (currentTtsContext === contextId) currentTtsContext = null;
+        // Generation finishes before playback: hold until Plivo has had
+        // time to play everything (1 byte = 1 sample @ 8kHz), abortable
+        // by barge-in which flushes the buffer anyway.
+        if (firstChunkAt && !bargedIn) {
+          const playbackEndsAt = firstChunkAt + (totalRawBytes / 8000) * 1000 + 300;
+          while (Date.now() < playbackEndsAt && !bargedIn) {
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
+        return;
+      }
+
+      // Fallback: batch Cartesia → Sarvam (streaming WS unavailable)
+      let mulawB64 = await cartesiaTTS({
+        apiKey: CARTESIA_API_KEY, text,
+        voiceId: s.cartesiaVoiceId, model: s.cartesiaModel,
+        language: s.cartesiaLanguage, speed: s.sarvamPace,
+      });
+      if (!mulawB64) {
+        console.warn(`[${callId}] Cartesia TTS failed → falling back to Sarvam`);
+        callCtx.voiceSwitchCount = (callCtx.voiceSwitchCount || 0) + 1;
+        const pcm = await sarvamTTS({
+          apiKey: SARVAM_API_KEY, text,
+          speaker: s.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+          languageCode: detectSarvamLanguageCode(text),
+          pace: s.sarvamPace, model: s.sarvamBulbulModel,
+        });
+        if (pcm) mulawB64 = pcm16ToMulawBase64(pcm);
+      }
+      if (!mulawB64 || plivoWs.readyState !== WebSocket.OPEN) return;
+      if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
+      callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+      callCtx.agentTurnStartAtMsList.push(Date.now());
+      plivoWs.send(JSON.stringify({
+        event: "playAudio",
+        media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: mulawB64 },
+      }));
+      // Batch path still needs the playback-duration hold
+      const rawBytes = mulawB64.length * 3 / 4;
+      await new Promise(r => setTimeout(r, Math.min(15000, (rawBytes / 8000) * 1000 + 600)));
+    } finally {
+      agentSpeaking = false;
+      bargeInFrames = 0;
+    }
+  };
+
+  // Gemini text-gen — reuse the same multi-model retry logic as Sarvam cascade
+  const callGemini = async (): Promise<any[]> => {
+    const cascadeAddendum = `
+
+CASCADED-PATH OUTPUT SCRIPT RULE (STRICT — affects pronunciation):
+Your written response is fed verbatim to a Hindi/English TTS engine. The
+engine picks pronunciation from the script you write in.
+- Any Hindi or Hinglish word MUST be written in Devanagari (देवनागरी), NOT in Latin transliteration.
+  ✗ Bad:  "Main Navya bol rahi hoon, NIMT se."
+  ✓ Good: "मैं नव्या बोल रही हूँ, N I M T से।"
+- Pure-English sentences stay in Latin script.
+- Mixed sentences keep English brand names / acronyms in Latin and Hindi words in Devanagari.
+  ✓ Good: "नमस्ते, आपने M B A के बारे में enquiry की थी।"
+
+ACRONYM AND COURSE-NAME FORMATTING (STRICT — Cartesia reads each spaced letter separately):
+1. Brand acronyms (NIMT, AICTE, UGC, NCTE, BCI, INC, AKTU):
+   ALWAYS write with spaces between letters: "N I M T", "A I C T E", "U G C"
+2. Course initialisms (MBA, BBA, BCA, GNM, PGDM):
+   Write with spaces: "M B A", "B B A", "G N M"
+3. Mixed course names (BSc, BTech, BEd, LLB):
+   "B Sc Nursing", "B Tech", "B Ed", "L L B"
+
+TOOL ARGUMENTS — IMPORTANT EXCEPTION:
+Pass PLAIN database-style names as tool arguments, with NO spaces or periods.
+  ✓ Good: get_course_info({ course_name: "BSc Nursing" })
+
+TOOL CALLS ARE SILENT (STRICT):
+Invoke tools ONLY through the function-calling mechanism. NEVER write tool calls,
+code, "tool_code", print(...), function syntax, template names, or any internal
+mechanics in your spoken text — the caller hears every word you write. Speak only
+natural conversation.
+
+NATURAL CADENCE:
+- Open replies occasionally with a short softener: "जी,", "हम्म,", "अच्छा,". Use ONE per turn.
+- Short replies are better. 2 sentences is the sweet spot. Never more than 3.
+
+NO FAKE SEARCHING (STRICT):
+Never say "मैं देखती हूँ", "ek second", "check कर रही हूँ", or any "let me look that up"
+phrase unless you are ACTUALLY calling a tool in this same turn. If you already know
+the answer, just say it directly.
+
+WHEN YOU DON'T KNOW (STRICT): Agar exact fact aapke paas nahi hai (hospital names, specific dates, koi bhi specific detail) — kabhi mat guess karo. Bolo: 'Yeh specific jaankari main senior counsellor se confirm karke aapko bhijwa deti hoon.' Phir flag_knowledge_gap call karo, aur agar caller chahe to request_human_callback bhi.
+
+ANSWER WHAT WAS ASKED (STRICT — phone STT is imperfect):
+- The caller's transcribed words may be garbled. If their last utterance is unclear
+  or doesn't parse, say "माफ़ कीजिएगा, एक बार फिर बोलिएगा?" and WAIT. Do NOT guess,
+  do NOT continue your script, do NOT move to the next question in the arc.
+- When the caller asks a question (fees, placement, hostel, eligibility — anything),
+  answer THAT question first. Never respond to a question with a different topic or
+  the next scripted step. Return to your flow only after their question is answered.
+
+REFUSAL = CLOSE (this rule OUTRANKS the qualification gate below):
+If the caller indicates disinterest or asks you to stop — "nahi chahiye", "interested
+nahi hoon", "not interested", "mat karo call", "time nahi hai" — do NOT ask another
+question and do NOT continue qualifying. Empathize in ONE short sentence, then
+immediately call set_call_disposition("not_interested") (or "call_back" with
+followup_date if they said they're busy right now), say a brief goodbye, and stop.
+
+QUALIFICATION GATE — DO NOT FORGET:
+After answering the caller's questions and they sound satisfied, you MUST ask:
+  "बहुत अच्छा। क्या आप course के लिए online apply करना चाहेंगे, या पहले हमारा campus visit करेंगे?"
+Never close the call without: schedule_visit, send_whatsapp_to_lead(apply_link), or request_human_callback.
+Then call set_call_disposition.`;
+    const systemPrompt = buildSystemInstruction(callCtx) + cascadeAddendum;
+    const cascadeSettings = settings();
+    const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: history,
+      tools: [{ functionDeclarations: VOICE_AGENT_TOOLS }],
+      generationConfig: {
+        temperature: cascadeSettings.cascadeTemperature,
+        maxOutputTokens: cascadeSettings.cascadeMaxTokens,
+      },
+    });
+    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+    const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+    const tryOnce = async (model: string) => {
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY_FOR_TEXT}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body },
+        );
+        return { status: r.status, res: r };
+      } catch (e) {
+        console.error(`[${callId}] Gemini ${model} fetch threw:`, (e as Error).message);
+        return null;
+      }
+    };
+    let attempt = 0;
+    for (const model of MODELS) {
+      for (let retry = 0; retry < 2; retry++) {
+        attempt++;
+        const result = await tryOnce(model);
+        if (!result) break;
+        if (result.res.ok) {
+          if (attempt > 1) console.log(`[${callId}] Gemini succeeded on attempt ${attempt} (${model})`);
+          const data = await result.res.json();
+          return data?.candidates?.[0]?.content?.parts || [];
+        }
+        const errBody = await result.res.text().catch(() => "");
+        console.error(`[${callId}] Gemini ${model} ${result.status}: ${errBody.slice(0, 200)}`);
+        if (!TRANSIENT.has(result.status)) return [];
+        if (retry === 0) await new Promise(r => setTimeout(r, 600));
+      }
+    }
+    return [];
+  };
+
+  // Gemini sometimes writes tool calls as TEXT (```tool_code ...```,
+  // print(default_api.foo(...))) instead of using function calling. Our
+  // pipeline speaks every text part verbatim — without this strip the
+  // caller hears "tool_code send_whatsapp_to_lead template equals..."
+  // read aloud. Remove code fences and tool-syntax spills; if nothing
+  // conversational remains, stay silent for that part.
+  const sanitizeSpoken = (t: string): string => t
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*$/g, " ")
+    .replace(/\btool_code\b[\s\S]*/gi, " ")
+    .replace(/\bprint\s*\([\s\S]*/gi, " ")
+    .replace(/\bdefault_api\.\w+\s*\([\s\S]*/gi, " ")
+    .replace(/\b\w+\s*\(\s*\{[\s\S]*/g, " ")
+    .replace(/\s+/g, " ").trim();
+
+  const runModelTurn = async () => {
+    turnAborted = false;
+    let safety = 0;
+    while (safety++ < 5) {
+      const parts = await callGemini();
+      if (!parts.length) return;
+      history.push({ role: "model", parts });
+
+      const rawSpoken = parts.filter((p: any) => typeof p.text === "string" && p.text.trim())
+        .map((p: any) => p.text).join(" ").trim();
+      const spokenText = sanitizeSpoken(rawSpoken);
+      if (rawSpoken && !spokenText) {
+        console.warn(`[${callId}] Suppressed textual tool-call spill: "${rawSpoken.slice(0, 120)}"`);
+      }
+      if (spokenText && !turnAborted) {
+        console.log(`[${callId}] AI said (cartesia): ${spokenText}`);
+        callCtx.aiTranscript.push(spokenText);
+        await sendTtsToPlivo(spokenText);
+      }
+
+      // Caller interrupted — stop the scripted flow, let their next
+      // utterance drive the conversation instead.
+      if (turnAborted) {
+        console.log(`[${callId}] Model turn aborted by barge-in`);
+        return;
+      }
+
+      const fnCalls = parts.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      if (!fnCalls.length) return;
+
+      console.log(`[${callId}] Tool calls (cartesia):`, fnCalls.map((fc: any) => fc.name));
+      const responses = await Promise.all(fnCalls.map(async (fc: any) => {
+        const result = await executeTool(fc.name, fc.args || {}, callCtx);
+        callCtx.toolCallsMade.push({ name: fc.name, args: fc.args, result });
+        return { name: fc.name, response: result };
+      }));
+
+      history.push({
+        role: "user",
+        parts: responses.map(r => ({ functionResponse: { name: r.name, response: r.response } })),
+      });
+
+      const dispositionCall = fnCalls.find((fc: any) => fc.name === "set_call_disposition");
+      if (dispositionCall && TERMINAL_DISPOSITIONS.has(dispositionCall.args?.disposition)) {
+        const delay = dispositionCall.args.disposition === "voicemail" ? 3000 : 5000;
+        console.log(`[${callId}] Terminal disposition "${dispositionCall.args.disposition}" — auto-hangup in ${delay / 1000}s`);
+        setTimeout(() => {
+          if (plivoWs.readyState === WebSocket.OPEN) plivoWs.close();
+        }, delay);
+        return;
+      }
+    }
+    console.warn(`[${callId}] Cartesia tool-loop hit safety cap (5 iterations)`);
+  };
+
+  // End-of-turn: STT stream has been transcribing while the caller spoke;
+  // finalize returns the assembled transcript near-instantly.
+  const processTurn = async () => {
+    if (processingTurn) return;
+    processingTurn = true;
+    voiceFrames = 0;
+    silenceFrames = 0;
+
+    callCtx.userTurnEndAtMsList = callCtx.userTurnEndAtMsList || [];
+    callCtx.userTurnEndAtMsList.push(Date.now());
+
+    try {
+      let userText: string;
+      if (stt.ready) {
+        // English streaming path — Ink has been transcribing live.
+        userText = (await stt.finalize()).trim();
+      } else {
+        // Buffer path (primary for non-English, fallback for English).
+        const voiced = voicedSampleCount;
+        const pcm = new Int16Array(utteranceBuffer);
+        utteranceBuffer = [];
+        voicedSampleCount = 0;
+        if (!pcm.length) return;
+        // Min-utterance gate: <300ms of voiced audio (< 2400 samples @ 8kHz)
+        // is a blip/noise — skip STT entirely.
+        if (voiced < 2400) {
+          console.log(`[${callId}] Utterance too short (${voiced} voiced samples) — skipping STT`);
+          return;
+        }
+        if (settings().cartesiaLanguage !== "en") {
+          // Sarvam Saarika batch is the proven Hindi telephony STT; Cartesia
+          // Ink's 8kHz Hindi accuracy is unusable. Fall back to Cartesia batch
+          // only if Sarvam returns nothing.
+          const res = await sarvamSTT({ apiKey: SARVAM_API_KEY, pcm, languageCode: "unknown" });
+          userText = (res?.transcript || "").trim();
+          if (!userText) {
+            const fb = await cartesiaSTT({ apiKey: CARTESIA_API_KEY, pcm, language: settings().cartesiaLanguage });
+            userText = (fb?.transcript || "").trim();
+          }
+        } else {
+          // English but streaming WS unavailable — batch fallback.
+          const res = await cartesiaSTT({ apiKey: CARTESIA_API_KEY, pcm, language: settings().cartesiaLanguage })
+            || await sarvamSTT({ apiKey: SARVAM_API_KEY, pcm, languageCode: "unknown" });
+          userText = (res?.transcript || "").trim();
+        }
+      }
+      if (!userText || userText === lastUserText) return;
+      if (isGarbageTranscript(userText)) {
+        console.log(`[${callId}] Dropped garbage transcript: "${userText.slice(0, 80)}"`);
+        return;
+      }
+      lastUserText = userText;
+
+      console.log(`[${callId}] Caller said (cartesia): ${userText}`);
+      callCtx.callerTranscript.push(userText);
+
+      history.push({ role: "user", parts: [{ text: userText }] });
+      await runModelTurn();
+    } finally {
+      processingTurn = false;
+    }
+  };
+
+  plivoWs.onopen = () => console.log(`[${callId}] Plivo WS open (cartesia)`);
+
+  plivoWs.onmessage = async (event) => {
+    try {
+      const msg = JSON.parse(event.data as string);
+      if (msg.event === "start") {
+        console.log(`[${callId}] Plivo stream started (cartesia streaming)`);
+        callCtx.callStartedAtMs = Date.now();
+        callCtx.agentProvider = "cartesia-cascade" as any;
+        callCtx.userTurnEndAtMsList = callCtx.userTurnEndAtMsList || [];
+        callCtx.agentTurnStartAtMsList = callCtx.agentTurnStartAtMsList || [];
+        await connectStreams();
+        // Guard with processingTurn so an early caller "hello" can't race
+        // a second greeting while the kickoff turn is still speaking.
+        processingTurn = true;
+        try {
+          history.push({ role: "user", parts: [{ text: "(call connected — greet me now)" }] });
+          await runModelTurn();
+        } finally {
+          processingTurn = false;
+        }
+        return;
+      }
+      if (msg.event !== "media" || !msg.media?.payload) return;
+
+      // Cheap RMS decode for VAD — the audio itself goes to Ink as mulaw
+      // (English) or accumulates in the utterance buffer (non-English).
+      const pcm = mulawBase64ToPcm16(msg.media.payload);
+      const energy = rmsEnergy(pcm);
+      // Adaptive threshold: track a noise floor from silence frames only and
+      // require voice to sit well above it. Clips fewer real syllables and
+      // rejects steady line noise better than the fixed RMS threshold.
+      const voiceThreshold = Math.max(400, noiseFloor * 3);
+      const isVoice = energy >= voiceThreshold;
+      if (!isVoice) noiseFloor = 0.95 * noiseFloor + 0.05 * energy;
+
+      // Feed STT continuously — INCLUDING while the agent speaks. If the
+      // caller talks over/during a pause in Navya's answer, their words must
+      // still be transcribed; the earlier echo-gate dropped those questions
+      // entirely and Navya carried on with her script. Telephony carriers do
+      // echo cancellation; the garbage filter + dedupe catch what leaks.
+      if (stt.ready) {
+        const bytes = Uint8Array.from(atob(msg.media.payload), c => c.charCodeAt(0));
+        stt.sendAudio(bytes);
+      } else {
+        // Buffer path — always accumulate PCM while the caller is speaking.
+        // On the first voiced frame of a new utterance, prepend the pre-roll
+        // ring so the syllable onset isn't clipped.
+        if (isVoice && voiceFrames === 0) {
+          for (const frame of preRoll) {
+            for (let i = 0; i < frame.length; i++) utteranceBuffer.push(frame[i]);
+          }
+        }
+        if (isVoice || voiceFrames > 0) {
+          for (let i = 0; i < pcm.length; i++) utteranceBuffer.push(pcm[i]);
+          if (isVoice) voicedSampleCount += pcm.length;
+        }
+      }
+      // Pre-roll ring: keep the last ~15 frames (~300ms) of prior PCM.
+      preRoll.push(pcm);
+      if (preRoll.length > 15) preRoll.shift();
+
+      if (isVoice) {
+        voiceFrames++;
+        silenceFrames = 0;
+      } else {
+        silenceFrames++;
+      }
+
+      if (agentSpeaking) {
+        // Barge-in: sustained caller speech while Navya talks → cancel TTS,
+        // flush Plivo's buffer, abort the rest of the model turn.
+        if (isVoice) {
+          bargeInFrames++;
+          if (bargeInFrames >= MIN_VOICE_FRAMES * 2) { // ~320ms sustained
+            console.log(`[${callId}] Barge-in detected — cancelling TTS + flushing Plivo buffer`);
+            bargedIn = true;
+            turnAborted = true;
+            if (currentTtsContext) tts.cancel(currentTtsContext);
+            currentTtsContext = null;
+            if (plivoWs.readyState === WebSocket.OPEN) {
+              plivoWs.send(JSON.stringify({ event: "clearAudio" }));
+            }
+            agentSpeaking = false;
+            bargeInFrames = 0;
+          }
+        } else {
+          bargeInFrames = 0;
+        }
+        return;
+      }
+
+      // End of caller turn → process. Also fires right after a model turn
+      // finishes when the caller spoke during it (voiceFrames survived).
+      if (voiceFrames >= MIN_VOICE_FRAMES && silenceFrames >= END_SILENCE_FRAMES && !processingTurn) {
+        await processTurn();
+      }
+    } catch (e) {
+      console.error(`[${callId}] Cartesia handler error:`, (e as Error).message);
+    }
+  };
+
+  plivoWs.onclose = () => {
+    console.log(`[${callId}] Plivo WS closed (cartesia) — turns: ${history.length}`);
+    stt.close();
+    tts.close();
+  };
+  plivoWs.onerror = (e) => console.error(`[${callId}] Plivo WS error (cartesia):`, e);
+}
 
 function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
   const callCtx = activeCallContexts.get(callId);

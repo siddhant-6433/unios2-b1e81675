@@ -1,10 +1,21 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { digits, sendWhatsAppText } from "../_shared/whatsapp-channel.ts";
+import {
+  digits,
+  sendWhatsAppText as rawSendWhatsAppText,
+  type WhatsAppChannelHint,
+  type WhatsAppSendResult,
+} from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
+import { createWhatsAppAgUiTrace } from "../_shared/copilotkit-agui.ts";
 import {
   conversationBusinessKey,
-  upsertConversationState,
 } from "../_shared/whatsapp-conversation-state.ts";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
+import {
+  FEE_STRUCTURE_URL,
+  loadVerifiedAdmissionsContext,
+} from "../_shared/nimt-admissions-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -58,7 +69,7 @@ GNM (General Nursing & Midwifery):
 - Campus: Greater Noida
 - UNIQUE: Open to Arts and Commerce students — Science NOT mandatory
 - Eligibility: 10+2 from ANY stream. Min 40%. Age 17-35.
-- Entrance: UPCNET / merit-based
+- Entrance: UP GNM Entrance Test (UPGET) / merit-based
 
 BPT (Bachelor of Physiotherapy):
 - Duration: 5 Years (4 academic years + 1-year compulsory internship)
@@ -122,7 +133,9 @@ D Pharma:
 - Entrance: JEECUP / merit-based. Pathway to B Pharma lateral entry.
 
 NIMT Beacon School (K-12):
-- CBSE affiliated, Nursery to Grade XII | Campus: Ghaziabad (Avantika / Avantika II)
+- CBSE affiliated | Campuses: Ghaziabad Arthala, Avantika / Avantika II
+- Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450
+- Arthala admission fee: Rs 0 for new and existing parents
 - Smart classrooms, science labs, computer labs, sports, transport
 - Day boarding with lunch: Rs 4,000/month. Boarding options available.
 - Admission: Age-appropriate interaction/assessment
@@ -134,6 +147,7 @@ Mirai Experiential School (IB World School):
 - Admission: Age-appropriate interaction
 
 FEE STRUCTURE (First Year / Annual Fee):
+Canonical fee page: https://nimt.ac.in/admissions/fees/
 - B.Sc Nursing: ₹1,53,000/year | Greater Noida campus
 - GNM: ₹1,18,000/year | Greater Noida campus
 - BPT (Physiotherapy): ₹92,000/year | Greater Noida campus
@@ -148,10 +162,10 @@ FEE STRUCTURE (First Year / Annual Fee):
 - D.Pharma: ₹95,000/year | Greater Noida campus
 - DPT (Diploma Physiotherapy): ₹62,000/year | Greater Noida campus
 - D.El.Ed: ₹45,000/year | Ghaziabad campus
-- OTT / D-OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus | ISCO Code 3259
+- OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total ₹1,85,000 across 5 semesters | Sem 1 ₹40,000, Sem 2 ₹40,000, Sem 3 ₹40,000, Sem 4 ₹40,000, Sem 5 ₹25,000 | Greater Noida campus | ISCO Code 3259
 - MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
 - MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
-Note: These are first-year fees. Subsequent years may vary. Scholarships available for merit/SC/ST/OBC. Contact admissions for complete fee breakup.
+Note: These are first-year fees. Full year-wise programme fees are published at https://nimt.ac.in/admissions/fees/. Merit scholarships, category scholarships and education loan support may reduce the payable amount.
 
 ADMISSIONS:
 - Apply online: https://uni.nimt.ac.in/apply/nimt (also: apply.nimt.ac.in)
@@ -177,7 +191,13 @@ FACILITIES:
 - Wi-Fi campus, transport facility
 	`;
 
-type SupabaseAdminClient = ReturnType<typeof createClient>;
+type SupabaseAdminClient = ReturnType<typeof createClient<Record<string, unknown>>>;
+const sendWhatsAppText = rawSendWhatsAppText as unknown as (
+  admin: SupabaseAdminClient,
+  hint: WhatsAppChannelHint,
+  to: string,
+  text: string,
+) => Promise<WhatsAppSendResult>;
 
 interface AdmissionCourseOption {
   number: string;
@@ -260,6 +280,17 @@ async function resolveCourseId(admin: SupabaseAdminClient, option: AdmissionCour
   return byName?.id || null;
 }
 
+async function loadCourseName(admin: SupabaseAdminClient, courseId: string | null): Promise<string | null> {
+  if (!courseId) return null;
+  const { data } = await admin
+    .from("courses")
+    .select("name, code")
+    .eq("id", courseId)
+    .maybeSingle();
+  const row = data as { name?: string | null; code?: string | null } | null;
+  return row?.name || row?.code || null;
+}
+
 interface CourseAdmissionBrief {
   short_name: string;
   positioning: string | null;
@@ -272,6 +303,19 @@ interface CourseAdmissionBrief {
   fee_summary: string | null;
   source_url: string | null;
   last_verified_at: string | null;
+}
+
+interface WhatsAppReplyExample {
+  id: string;
+  query_text: string;
+  reply_text: string;
+  course_id: string | null;
+  source_channel: string | null;
+  target_channels: string[] | null;
+  language: string | null;
+  tags: string[] | null;
+  quality_score: number | null;
+  score: number | null;
 }
 
 function formatList(label: string, values: string[] | null | undefined): string {
@@ -325,15 +369,135 @@ async function loadCourseAdmissionBrief(
   return formatCourseAdmissionBrief(brief);
 }
 
+function formatReplyExample(example: WhatsAppReplyExample, index: number): string {
+  return [
+    `Example ${index + 1}:`,
+    `Lead asked: ${example.query_text}`,
+    `Counsellor replied: ${example.reply_text}`,
+  ].join("\n");
+}
+
+async function loadReplyExamplesContext(
+  admin: SupabaseAdminClient,
+  query: string,
+  courseId: string | null,
+): Promise<string> {
+  if (!query || query.trim().length < 3) return "";
+  try {
+    const rpc = admin.rpc as (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+    const { data, error } = await rpc("match_admissions_ai_reply_examples", {
+      p_query: query,
+      p_course_id: courseId,
+      p_target_channel: "whatsapp",
+      p_limit: 3,
+    });
+    if (error) {
+      console.warn("Reply example lookup failed:", error.message);
+      return "";
+    }
+    const examples = ((data || []) as WhatsAppReplyExample[])
+      .filter((example) => (example.score ?? 0) >= 0.15)
+      .slice(0, 3);
+    return examples.length ? examples.map(formatReplyExample).join("\n\n") : "";
+  } catch (err) {
+    console.warn("Reply example lookup error:", err instanceof Error ? err.message : String(err));
+    return "";
+  }
+}
+
+async function loadGoldenAnswersContext(
+  admin: SupabaseAdminClient,
+  query: string,
+  _courseId: string | null,
+): Promise<string> {
+  if (!query || query.trim().length < 3) return "";
+  try {
+    const searchTerms = query
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .slice(0, 6)
+      .join(" & ");
+    if (!searchTerms) return "";
+
+    const { data } = await admin
+      .from("admissions_ai_reply_examples")
+      .select("query_text, reply_text")
+      .eq("status", "active")
+      .gte("quality_score", 0.85)
+      .or("tags.cs.{golden_answer},tags.cs.{knowledge_gap_answer},tags.cs.{admin_verified}")
+      .textSearch("query_text", searchTerms, { type: "plain" })
+      .limit(2);
+
+    if (!data?.length) return "";
+    return (data as { query_text: string; reply_text: string }[])
+      .map((g, i) => `Admin-verified answer ${i + 1}:\nQ: ${g.query_text}\nA: ${g.reply_text}`)
+      .join("\n\n");
+  } catch (err) {
+    console.warn("Golden answers lookup error:", err instanceof Error ? err.message : String(err));
+    return "";
+  }
+}
+
+const TOPIC_KEYWORDS: Record<string, string[]> = {
+  fees: ["fee", "fees", "cost", "price", "kitni", "paisa", "payment", "scholarship", "loan", "emi"],
+  hostel: ["hostel", "accommodation", "room", "boarding", "stay", "pg"],
+  eligibility: ["eligibility", "eligible", "qualification", "marks", "percentage", "cutoff", "entrance", "exam"],
+  placement: ["placement", "job", "package", "salary", "lpa", "recruiter", "company", "career"],
+  campus: ["campus", "location", "address", "facility", "lab", "library", "gym", "transport"],
+  admission: ["admission", "apply", "application", "seat", "deadline", "last date", "form"],
+  documents: ["document", "documents", "certificate", "marksheet", "photo", "aadhar", "id proof"],
+};
+
+function buildTopicContext(
+  recentMessages: { direction: string; content: string }[] | null,
+  courseInterest: string | null,
+): string {
+  if (!recentMessages?.length) return "";
+  const topics: string[] = [];
+  let lastCourse: string | null = null;
+
+  for (const msg of recentMessages) {
+    const text = (msg.content || "").toLowerCase();
+    for (const opt of ADMISSION_COURSE_OPTIONS) {
+      if (opt.aliases.some((a) => text.includes(a))) {
+        lastCourse = opt.label;
+        break;
+      }
+    }
+    for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+      if (keywords.some((kw) => text.includes(kw)) && !topics.includes(topic)) {
+        topics.push(topic);
+      }
+    }
+  }
+
+  const parts: string[] = [];
+  if (lastCourse || courseInterest) parts.push(`course: ${lastCourse || courseInterest}`);
+  if (topics.length) parts.push(`topics discussed: ${topics.join(", ")}`);
+  return parts.length ? `[Conversation context: ${parts.join("; ")}]` : "";
+}
+
 const COURSE_MENU = ADMISSION_COURSE_OPTIONS
   .map((option) => `${option.number}. ${option.label}`)
   .join("\n");
 
-function buildSystemPrompt(hasName: boolean, hasCourse: boolean, courseBriefContext: string): string {
+function buildSystemPrompt(
+  hasName: boolean,
+  hasCourse: boolean,
+  courseBriefContext: string,
+  replyExamplesContext: string,
+  verifiedAdmissionsContext: string,
+  goldenAnswersContext: string,
+  leadStage: string | null,
+): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
 ${!hasCourse ? `The student's course interest is not yet known. Ask them to choose from this numbered list and tell them they can reply like "Priya, 3":\n${COURSE_MENU}` : ""}
 CRITICAL RULE: If the user's message mentions or asks about a specific course (like "BPT", "MBA", "nursing", "BCA", etc.), IMMEDIATELY answer their question about that course using the knowledge base. Do NOT ask them which course they are interested in — they just told you. Extract the course name and provide the information.
+If Lead info includes a Course interest, use that course for follow-up questions about fees, yearly cost, eligibility, duration, campus, application steps, or pronouns like "it" / "this". Do NOT ask which course again when Course interest is present.
 If the user replies with a course option number, treat it as that course selection from the numbered list.
 Only ask for missing info (name or course) if the user's message does NOT contain any course reference or name. Never ask for something the user already provided in their message.
 When you detect name or course in the user's message, include at the END of your response:
@@ -362,16 +526,48 @@ If the student's message clearly indicates they are no longer interested in admi
   {"action": "mark_not_interested"}
 If they want to be completely removed from contact (e.g. "remove me", "block", "stop", "DNC", "do not contact"):
   {"action": "mark_dnc"}
-Only include the action JSON when you are highly confident about the student's intent.`;
+Only include the action JSON when you are highly confident about the student's intent.
 
-  return `You are an AI admissions assistant for NIMT Educational Institutions (National Institute of Management and Technology). You help prospective students and parents with questions about admissions, courses, fees, campus, eligibility and more.
+COUNSELLOR HANDOFF DETECTION:
+If you previously offered to arrange a call / connect the student with a counsellor, and the student replies affirmatively (e.g. "yes", "yess", "sure", "ok", "haan", "ji", "please", "yes please", "connect me", "call me", "I want to talk", "mujhe baat karni hai"), include:
+  {"action": "request_counsellor"}
+When you detect this action, write a SHORT acknowledgement (1-2 sentences) like "Great! Let me connect you with our admissions counsellor." — the system will automatically replace this with a personalised message containing the counsellor's name. Do NOT fabricate a counsellor name yourself.
+Also emit this action if the student proactively asks to speak to a person / counsellor / human, even without a prior offer.`;
 
-Use the knowledge base below to answer questions accurately. Be friendly, helpful, and concise — this is WhatsApp, so keep replies short (max 3-4 paragraphs) and use bullet points or line breaks for clarity. Avoid long walls of text.
+  const stageInstructions = leadStage ? `
 
-FORMATTING RULES (WhatsApp):
+LEAD STAGE BEHAVIOR (current stage: ${leadStage}):
+- new_lead / enquiry: Be welcoming and warm. Share 1-2 USPs about the course if known. Don't overwhelm with details — keep it conversational.
+- interested / qualified: They already know about NIMT. Answer their specific questions thoroughly. Proactively share proof points and placement stats.
+- campus_visit_scheduled / visited: They're warm — reinforce their decision. Share next steps (application link, documents needed). Create gentle urgency ("admissions are filling up").
+- applied / admitted: Congratulate them! Help with fee payment, hostel booking, documents. Be operational, not salesy.
+- Follow the behavior for the current stage. If stage is unknown, default to "new_lead" behavior.` : "";
+
+  return `You are the NIMT Admissions Assistant — a helpful, warm, and knowledgeable guide for students and parents exploring admissions at NIMT Educational Institutions (National Institute of Management and Technology).
+
+PERSONALITY:
+- Write like a friendly senior student who genuinely wants to help — not like a corporate brochure.
+- Be warm, encouraging, and practical. Show genuine interest in the student's goals.
+- Vary your openings — do NOT start every reply with "Thank you for your interest" or "Thank you for reaching out".
+- Avoid corporate jargon like "we would like to inform you", "we are pleased to", "kindly note that". Be natural.
+- Use the student's name when you know it. It makes the conversation personal.
+- One or two emojis per message is fine (not every message). Don't overdo it.
+
+TONE EXAMPLES (robotic → human):
+❌ "Thank you for your interest in NIMT. We would like to inform you that B.Sc Nursing is a 4-year programme."
+✅ "B.Sc Nursing at NIMT is a 4-year programme with a 6-month paid internship at the end — students actually earn ₹10,000/month during that internship! 🎓"
+
+❌ "Kindly note that the fee for BPT is ₹92,000 per year."
+✅ "BPT fees are ₹92,000/year — and we have merit scholarships that can bring that down. Want me to share the details?"
+
+❌ "For further queries, please contact our helpline."
+✅ "Feel free to ask anything else here, or call us at +91 9555192192 if you'd like to chat!"
+
+FORMATTING (WhatsApp):
 - Never use markdown links like [text](url). Just paste the plain URL directly.
 - Use *bold* with single asterisks for emphasis (WhatsApp format).
-- Use line breaks for readability. No HTML tags.
+- Keep paragraphs to 2-3 lines max. Use line breaks liberally. No HTML tags.
+- Max 3-4 short paragraphs per message. This is WhatsApp, not email.
 
 LANGUAGE RULES (follow strictly):
 - If the user writes in English → reply in English. This is the default.
@@ -379,14 +575,27 @@ LANGUAGE RULES (follow strictly):
 - If the user writes in Hinglish (Hindi words in English script) → reply in Hinglish.
 - When in doubt, lean towards English. English is the default language.
 - Match the user's language from their CURRENT message, not previous ones.
-- Keep the tone professional but warm regardless of language.
+${stageInstructions}
 
-Always end with a helpful call to action (e.g., visit portal, call helpline, or say a counsellor will contact them).
+End with a natural call to action — an offer to help further, a relevant link, or mention that a counsellor can call them.
 
-If you don't know something specific, say you'll have a counsellor share the details and provide the helpline number (+91 9555192192).
+UNCERTAINTY RULES:
+- If you are NOT confident you have the correct answer (e.g., the question is about a specific policy, date, or detail not in your knowledge base), say something like "Let me check on this — I'll have our admissions team get back to you. You can also call us at +91 9555192192."
+- NEVER guess or fabricate specific numbers for fees, deadlines, eligibility cutoffs, or scholarship amounts.
+- When you deflect to the counsellor, set confidence to 0.3 or lower.
+
+FEE ANSWER RULES (strict):
+- If the user asks about fee, fees, fee structure, cost, total fee, yearly fee, scholarship, loan, "kitni fees", or similar, answer with the fee facts available in the knowledge base instead of only saying "contact admissions".
+- If the course is known from lead context or the current message, include that course's first-year fee, campus if known, and mention that full year-wise programme fees are published here: ${FEE_STRUCTURE_URL}
+- If the course is unknown, give a compact sample list of popular first-year fees, share ${FEE_STRUCTURE_URL}, and ask which course/campus they want so you can send the exact breakdown.
+- Mention scholarships/loan support when relevant, but do not promise a waiver amount unless it is in the verified brief or knowledge base.
+- Never invent fee amounts. If a requested course fee is absent from the knowledge base, share ${FEE_STRUCTURE_URL} and say a counsellor will confirm the exact breakup.
 
 Do NOT make up information not present in the knowledge base.${introInstructions}${classificationInstructions}
-${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContext}` : ""}
+${goldenAnswersContext ? `\n\nADMIN-VERIFIED ANSWERS (HIGHEST PRIORITY):\nThese answers were provided by admins as the correct response. When a student asks a similar question, use these answers as your primary source — they override the general knowledge base and counsellor examples.\n${goldenAnswersContext}` : ""}
+${verifiedAdmissionsContext ? `\n\n${verifiedAdmissionsContext}` : ""}
+${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContext}\n\nCOURSE BRIEF USAGE:\n- First question about a course → weave the strongest USP into your answer naturally, don't list it.\n- "Why NIMT" or comparison questions → cite proof points as evidence.\n- First-time enquiry → use the bot_first_reply angle.\n- After answering → ask ONE relevant qualification question to qualify the lead.` : ""}
+${replyExamplesContext ? `\n\nORGANISATION REPLY EXAMPLES:\nUse these as examples of how NIMT counsellors answer similar WhatsApp queries. Do not copy personal details, phone numbers, emails, or promises from examples. Verified course brief and knowledge base override examples if they conflict.\n${replyExamplesContext}` : ""}
 
 KNOWLEDGE BASE:
 ${KNOWLEDGE_BASE}`;
@@ -504,10 +713,11 @@ Deno.serve(async (req) => {
     const existingLead = existingLeads?.[0] || null;
     let leadId = existingLead?.id || null;
     let existingCourseId = existingLead?.course_id || null;
+    let existingCourseName = await loadCourseName(admin, existingCourseId);
     let hasName = !isPlaceholderLeadName(existingLead?.name, normalizedPhone);
-    let hasCourse = !!(existingCourseId || course_interest);
     let leadNameForPrompt = lead_name || (hasName ? existingLead?.name || null : null);
-    let courseInterestForPrompt = course_interest || null;
+    let courseInterestForPrompt = course_interest || existingCourseName || null;
+    let hasCourse = !!(existingCourseId || courseInterestForPrompt);
 
     // ── Short-circuit: don't pitch admissions to job applicants / vendors ────
     // Send a single templated reply instead and let HR / procurement take over.
@@ -526,32 +736,28 @@ Deno.serve(async (req) => {
         }, phone, reply);
 
         if (sendResult.ok) {
-          await admin.from("whatsapp_messages").insert({
-            lead_id: leadId,
-            wa_message_id: sendResult.messageId,
-            direction: "outbound",
+          await recordOutboundConversationAction(admin, {
+            kind: "handoff",
             phone,
-            message_type: "text",
-            content: reply,
-            status: "sent",
-            is_read: true,
-            template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
-            provider: sendResult.provider,
-            business_phone_number_id: sendResult.businessPhoneNumberId,
-            business_phone_number: sendResult.businessNumber,
-          });
-          await upsertConversationState(admin, {
-            phone,
-            businessNumber: channelKey,
-            provider: sendResult.provider,
             leadId,
-            mode: "human",
-            state: role === "job_applicant" ? "job_handoff" : "vendor_handoff",
-            ownerUserId: existingLead?.counsellor_id || null,
-            escalationRole: role === "job_applicant" ? "hr" : "procurement",
-            handoffReason: `classified_${role}`,
-            priority: "normal",
-            lastIntent: role,
+            content: reply,
+            messageType: "text",
+            templateKey: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
+            status: "sent",
+            sendResult,
+            outboundKind: "system_notification",
+            expectedReplyType: "general",
+            responsePolicy: "human",
+            metadata: { role },
+            conversationState: {
+              mode: "human",
+              state: role === "job_applicant" ? "job_handoff" : "vendor_handoff",
+              ownerUserId: existingLead?.counsellor_id || null,
+              escalationRole: role === "job_applicant" ? "hr" : "procurement",
+              handoffReason: `classified_${role}`,
+              priority: "normal",
+              lastIntent: role,
+            },
           });
         } else {
           console.error("Job/vendor handoff send failed:", sendResult.raw || sendResult.error);
@@ -603,6 +809,8 @@ Deno.serve(async (req) => {
       if (courseId) {
         await admin.from("leads").update({ course_id: courseId }).eq("id", leadId);
         existingCourseId = courseId;
+        existingCourseName = await loadCourseName(admin, courseId);
+        courseInterestForPrompt = existingCourseName || courseInterestForPrompt;
       }
 
       await admin.from("lead_notes").insert({
@@ -612,37 +820,56 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Build conversation context
+    // Build conversation context (12 messages for better topic continuity)
     const contextParts: { role: string; parts: { text: string }[] }[] = [];
     if (recent_messages && recent_messages.length > 0) {
-      for (const msg of recent_messages.slice(-6)) {
+      for (const msg of recent_messages.slice(-12)) {
         contextParts.push({
           role: msg.direction === "inbound" ? "user" : "model",
           parts: [{ text: msg.content || "[media]" }],
         });
       }
     }
+    const topicContext = buildTopicContext(recent_messages, courseInterestForPrompt);
     const leadContext = leadNameForPrompt || courseInterestForPrompt || existingCourseId
-      ? `[Lead info: Name=${leadNameForPrompt || "not specified"}, Stage=${lead_stage || "unknown"}, Course interest=${courseInterestForPrompt || (existingCourseId ? "already selected in CRM" : "not specified")}]\n\n`
+      ? `[Lead info: Name=${leadNameForPrompt || "not specified"}, Stage=${lead_stage || "unknown"}, Course interest=${courseInterestForPrompt || (existingCourseId ? "selected in CRM" : "not specified")}]`
       : "";
-    contextParts.push({ role: "user", parts: [{ text: leadContext + message }] });
+    const contextPrefix = [topicContext, leadContext].filter(Boolean).join("\n");
+    contextParts.push({ role: "user", parts: [{ text: contextPrefix ? `${contextPrefix}\n\n${message}` : message }] });
 
-    const courseBriefContext = await loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt);
+    const [courseBriefContext, replyExamplesContext, verifiedAdmissionsContext, goldenAnswersContext] = await Promise.all([
+      loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt),
+      loadReplyExamplesContext(admin, message, existingCourseId),
+      loadVerifiedAdmissionsContext(admin, existingCourseId, courseInterestForPrompt),
+      loadGoldenAnswersContext(admin, message, existingCourseId),
+    ]);
 
     // Call Gemini with dynamic system prompt
-    const systemPrompt = buildSystemPrompt(hasName, hasCourse, courseBriefContext);
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${googleApiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: contextParts,
-          generationConfig: { temperature: 0.4, maxOutputTokens: 400, topP: 0.9 },
-        }),
-      }
+    const systemPrompt = buildSystemPrompt(
+      hasName,
+      hasCourse,
+      courseBriefContext,
+      replyExamplesContext,
+      verifiedAdmissionsContext,
+      goldenAnswersContext,
+      lead_stage,
     );
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`;
+    const geminiBody = JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: contextParts,
+      generationConfig: { temperature: 0.55, maxOutputTokens: 1000, topP: 0.9 },
+    });
+    const geminiHeaders = { "Content-Type": "application/json" };
+
+    let geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
+
+    // Retry once on transient errors (503 capacity, 429 rate limit)
+    if (!geminiRes.ok && (geminiRes.status === 503 || geminiRes.status === 429)) {
+      console.warn(`Gemini ${geminiRes.status}, retrying in 2s...`);
+      await new Promise((r) => setTimeout(r, 2000));
+      geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
+    }
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
@@ -710,11 +937,137 @@ Deno.serve(async (req) => {
       .trim();
 
     // ── Act on bot-detected signals ──────────────────────────────────────────
-    if (leadId && botAction === "mark_not_interested") {
-      await admin.from("leads").update({ stage: "not_interested" }).eq("id", leadId);
+    let finalReply = aiReply;
+    let counsellorHandoff = false;
+    let assignedCounsellorId: string | null = existingLead?.counsellor_id || null;
+    let assignedCounsellorName: string | null = null;
+    let assignedCounsellorPhone: string | null = null;
+    let assignedCounsellorUserId: string | null = null;
+
+    if (leadId && botAction === "request_counsellor") {
+      // ── Counsellor handoff: assign, personalise reply, notify counsellor ──
+      counsellorHandoff = true;
+
+      if (!assignedCounsellorId) {
+        try {
+          const { data: newCounsellorId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: leadId });
+          if (newCounsellorId) {
+            assignedCounsellorId = newCounsellorId as string;
+            console.log(`Counsellor handoff: assigned lead ${leadId} → ${assignedCounsellorId}`);
+          }
+        } catch (e) {
+          console.error("Counsellor handoff assignment failed:", (e as Error).message);
+        }
+      }
+
+      if (assignedCounsellorId) {
+        const { data: counsellorProfile } = await admin
+          .from("profiles")
+          .select("user_id, display_name, phone")
+          .eq("id", assignedCounsellorId)
+          .maybeSingle();
+        assignedCounsellorName = counsellorProfile?.display_name || null;
+        assignedCounsellorPhone = counsellorProfile?.phone || null;
+        assignedCounsellorUserId = counsellorProfile?.user_id || null;
+      }
+
+      const studentName = leadNameForPrompt || "there";
+      if (assignedCounsellorName) {
+        finalReply = `Great news, ${studentName}! Your enquiry has been assigned to *${assignedCounsellorName}*, our admissions counsellor. They will contact you shortly to help you with everything you need.\n\nIf you have any quick questions in the meantime, feel free to ask here or call our helpline: +91 9555192192`;
+      } else {
+        finalReply = `Thank you, ${studentName}! Your request has been noted. An admissions counsellor will contact you shortly to assist you.\n\nIn the meantime, feel free to ask any questions here or call our helpline: +91 9555192192`;
+      }
+
+      // Notify counsellor via in-app notification
+      if (assignedCounsellorUserId) {
+        const summaryParts: string[] = [];
+        if (recent_messages && recent_messages.length > 0) {
+          for (const msg of recent_messages.slice(-4)) {
+            const prefix = msg.direction === "inbound" ? "Student" : "Bot";
+            const snippet = (msg.content || "").substring(0, 120);
+            summaryParts.push(`${prefix}: ${snippet}`);
+          }
+        }
+        summaryParts.push(`Student: ${message.substring(0, 120)}`);
+        const conversationSummary = summaryParts.join("\n");
+
+        await admin.from("notifications").insert({
+          user_id: assignedCounsellorUserId,
+          type: "general",
+          title: `New WhatsApp lead: ${leadNameForPrompt || phone}${courseInterestForPrompt ? ` — ${courseInterestForPrompt}` : ""}`,
+          body: `Student wants to speak to a counsellor. Please call them immediately.\n\nConversation summary:\n${conversationSummary}`,
+          link: `/admissions/${leadId}`,
+          lead_id: leadId,
+        });
+      }
+
+      // Send WhatsApp to counsellor with conversation summary
+      if (assignedCounsellorPhone) {
+        const counsellorDigits = digits(assignedCounsellorPhone);
+        const summaryLines: string[] = [];
+        if (recent_messages && recent_messages.length > 0) {
+          for (const msg of recent_messages.slice(-4)) {
+            const prefix = msg.direction === "inbound" ? "👤" : "🤖";
+            summaryLines.push(`${prefix} ${(msg.content || "").substring(0, 150)}`);
+          }
+        }
+        summaryLines.push(`👤 ${message.substring(0, 150)}`);
+
+        const counsellorMsg = [
+          `🔔 *New Lead Assigned*`,
+          ``,
+          `*Student:* ${leadNameForPrompt || phone}`,
+          courseInterestForPrompt ? `*Course:* ${courseInterestForPrompt}` : null,
+          `*Phone:* +${normalizedPhone}`,
+          ``,
+          `*Conversation:*`,
+          ...summaryLines,
+          ``,
+          `Please call the student now to assist them.`,
+        ].filter(Boolean).join("\n");
+
+        try {
+          await sendWhatsAppText(admin, {
+            provider: sendProvider,
+            route: sendProvider === "plivo" ? "plivo_admissions" : "reply",
+            businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+            businessNumber: channelKey,
+          }, counsellorDigits, counsellorMsg);
+          console.log(`Counsellor WhatsApp notification sent to ${counsellorDigits}`);
+        } catch (e) {
+          console.error("Counsellor WhatsApp notification failed:", (e as Error).message);
+        }
+      }
+
+      // Flip AI mode to human so subsequent messages go to the counsellor
+      if (channelKey) {
+        await admin
+          .from("whatsapp_ai_mode")
+          .upsert(
+            {
+              phone: normalizedPhone,
+              business_number: channelKey,
+              mode: "human",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "phone,business_number" },
+          );
+      }
+    } else if (leadId && botAction === "mark_not_interested") {
+      await applyLeadTransition(admin, {
+        leadId,
+        command: "classifyNotInterested",
+        activityType: "whatsapp",
+        description: "Bot auto-marked Not Interested from WhatsApp reply",
+      });
       console.log("Bot auto-marked not_interested:", leadId);
     } else if (leadId && botAction === "mark_dnc") {
-      await admin.from("leads").update({ stage: "dnc" }).eq("id", leadId);
+      await applyLeadTransition(admin, {
+        leadId,
+        command: "markDnc",
+        activityType: "whatsapp",
+        description: "Bot auto-marked DNC from WhatsApp reply",
+      });
       console.log("Bot auto-marked dnc:", leadId);
     }
 
@@ -738,6 +1091,21 @@ Deno.serve(async (req) => {
         confidence_score: confidence,
         status: "pending",
       });
+
+      // Auto-escalate very low confidence to counsellor/admission_head
+      if (confidence < 0.4 && leadId) {
+        const escalateUserId = assignedCounsellorUserId || existingLead?.counsellor_id || null;
+        if (escalateUserId) {
+          await admin.from("notifications").insert({
+            user_id: escalateUserId,
+            type: "general",
+            title: `Low-confidence AI reply: ${leadNameForPrompt || phone}`,
+            body: `The AI wasn't confident answering this question. Please follow up.\n\nStudent asked: "${message.substring(0, 150)}"`,
+            link: `/admissions/${leadId}`,
+            lead_id: leadId,
+          });
+        }
+      }
     }
 
     // ── Send via WhatsApp API ───────────────────────────────────────────────
@@ -746,8 +1114,8 @@ Deno.serve(async (req) => {
       route: sendProvider === "plivo" ? "plivo_admissions" : "reply",
       businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
       businessNumber: channelKey,
-      requireAi: true,
-    }, phone, aiReply);
+      requireAi: !counsellorHandoff,
+    }, phone, finalReply);
 
     if (!sendResult.ok) {
       console.error("WhatsApp AI send failed:", sendResult.raw || sendResult.error);
@@ -767,56 +1135,77 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Log outbound AI reply
-    await admin.from("whatsapp_messages").insert({
-      lead_id: leadId,
-      wa_message_id: sendResult.messageId,
-      direction: "outbound",
-      phone: digits(phone),
-      message_type: "text",
-      content: aiReply,
-      status: "sent",
-      is_read: true,
-      template_key: "ai_auto_reply",
-      provider: sendResult.provider,
-      business_phone_number_id: sendResult.businessPhoneNumberId,
-      business_phone_number: sendResult.businessNumber,
-    });
-
-    await logWhatsAppAutomationEvent(admin, {
+    const agUiTrace = createWhatsAppAgUiTrace({
       phone,
       businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
       provider: sendResult.provider,
       leadId,
-      eventType: "ai_reply_sent",
-      decision: botAction,
-      reason: queryType,
+      userMessage: message,
+      assistantMessage: finalReply,
+      queryType,
       confidence,
-      metadata: { message_id: sendResult.messageId },
+      action: botAction,
     });
 
-    await upsertConversationState(admin, {
+    await recordOutboundConversationAction(admin, {
+      kind: counsellorHandoff ? "handoff" : "aiReply",
       phone,
-      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
-      provider: sendResult.provider,
       leadId,
-      mode: "ai",
-      state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai",
-      ownerUserId: existingLead?.counsellor_id || null,
-      escalationRole: confidence < 0.6 ? "admission_head" : null,
-      handoffReason: confidence < 0.6 ? "low_confidence" : null,
-      priority: confidence < 0.6 ? "high" : "normal",
-      lastIntent: queryType,
-      lastConfidence: confidence,
-      lastBotAction: botAction,
+      content: finalReply,
+      messageType: "text",
+      templateKey: counsellorHandoff ? "counsellor_handoff" : "ai_auto_reply",
+      status: "sent",
+      sendResult,
+      outboundKind: counsellorHandoff ? "system_notification" : "ai_reply",
+      expectedReplyType: counsellorHandoff ? "general" : "general",
+      responsePolicy: counsellorHandoff ? "human" : "engine",
+      automationEvent: {
+        eventType: counsellorHandoff ? "handoff_created" : "ai_reply_sent",
+        decision: botAction,
+        reason: counsellorHandoff ? "student_requested_counsellor" : queryType,
+        confidence,
+        metadata: {
+          message_id: sendResult.messageId,
+          copilotkit: agUiTrace,
+          ...(counsellorHandoff ? {
+            assigned_counsellor_id: assignedCounsellorId,
+            assigned_counsellor_name: assignedCounsellorName,
+          } : {}),
+        },
+      },
+      conversationState: counsellorHandoff
+        ? {
+            mode: "human",
+            state: "needs_counsellor",
+            ownerUserId: assignedCounsellorUserId || existingLead?.counsellor_id || null,
+            escalationRole: "counsellor",
+            handoffReason: "student_requested_counsellor",
+            priority: "high",
+            slaDueAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+            lastIntent: queryType,
+            lastConfidence: confidence,
+            lastBotAction: botAction,
+          }
+        : {
+            mode: "ai",
+            state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai",
+            ownerUserId: existingLead?.counsellor_id || null,
+            escalationRole: confidence < 0.6 ? "admission_head" : null,
+            handoffReason: confidence < 0.6 ? "low_confidence" : null,
+            priority: confidence < 0.6 ? "high" : "normal",
+            lastIntent: queryType,
+            lastConfidence: confidence,
+            lastBotAction: botAction,
+          },
     });
 
-    return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {
+    return new Response(JSON.stringify({ success: true, reply: finalReply, query_type: queryType, action: botAction }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("AI reply error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    const message = err instanceof Error ? err.message : "AI reply failed";
+    return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

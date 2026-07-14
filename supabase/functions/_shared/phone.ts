@@ -30,6 +30,44 @@ export function normalizePlivoVoiceNumber(value: string | null | undefined, defa
   return digits;
 }
 
+/**
+ * Parse one or more Plivo caller IDs from a secret.
+ *
+ * Use comma / semicolon / newline delimiters. Do not split on spaces because
+ * secrets are often written as "+91 95551 92192".
+ */
+export function normalizePlivoVoiceNumbers(value: string | null | undefined, defaultCountryCode = "91"): string[] {
+  const seen = new Set<string>();
+  const numbers: string[] = [];
+
+  for (const part of String(value || "").split(/[,;\n]+/)) {
+    const normalized = normalizePlivoVoiceNumber(part.trim(), defaultCountryCode);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    numbers.push(normalized);
+  }
+
+  return numbers;
+}
+
+export function normalizePlivoVoiceNumberPool(
+  values: Array<string | null | undefined>,
+  defaultCountryCode = "91",
+): string[] {
+  const seen = new Set<string>();
+  const numbers: string[] = [];
+
+  for (const value of values) {
+    for (const normalized of normalizePlivoVoiceNumbers(value, defaultCountryCode)) {
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      numbers.push(normalized);
+    }
+  }
+
+  return numbers;
+}
+
 export function maskPhoneForLog(value: string | null | undefined): string {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits.length <= 4) return digits ? "****" : "";

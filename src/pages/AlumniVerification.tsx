@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import {
   Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
   ScrollText, Award, BookOpen,
@@ -366,7 +367,18 @@ export default function AlumniVerification() {
   };
 
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { gateways: alumniGateways, loading: alumniGatewaysLoading } = useScopedPaymentGateways({
+    context: "alumni_service",
+  });
+
+  useEffect(() => {
+    if (alumniGatewaysLoading) return;
+    if (!selectedGateway || !alumniGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(alumniGateways));
+    }
+  }, [alumniGatewaysLoading, alumniGateways, selectedGateway]);
 
   const handlePayNow = async () => {
     if (!requestId) return;
@@ -380,9 +392,11 @@ export default function AlumniVerification() {
     // fall back to a same-tab redirect.
     const popup = window.open("about:blank", "alumni_payment", "width=600,height=720,scrollbars=yes");
 
-    const { data, error } = await supabase.functions.invoke("alumni-payment", {
+    const gateway = selectedGateway || alumniGateways[0]?.gateway || "easebuzz";
+    const functionName = gateway === "icici" ? "icici-payment" : "alumni-payment";
+    const { data, error } = await supabase.functions.invoke(functionName, {
       body: {
-        action: "initiate",
+        action: gateway === "icici" ? "initiate-alumni-payment" : "initiate",
         request_id: requestId,
         amount: currentService.fee,
         firstname: requestType === "verification" ? contactName : alumniName,
@@ -410,7 +424,7 @@ export default function AlumniVerification() {
 
     // Listen for postMessage from return page
     const msgHandler = (e: MessageEvent) => {
-      if (e.data?.alumni_payment === "success") {
+      if (e.data?.alumni_payment === "success" || e.data?.icici_payment === "success") {
         window.removeEventListener("message", msgHandler);
         if (pollRef.current) clearInterval(pollRef.current);
         setPaymentLoading(false);
@@ -585,10 +599,10 @@ export default function AlumniVerification() {
                       const svc = SERVICE_TYPES.find(s => s.key === (req.request_type || "verification"));
                       const statusCfg: Record<string, { label: string; color: string }> = {
                         pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
-                        paid: { label: "Under Review", color: "bg-blue-100 text-blue-700" },
-                        under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
-                        verified: { label: "Verified", color: "bg-emerald-100 text-emerald-700" },
-                        rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
+                        paid: { label: "Under Review", color: "bg-info/10 text-info-foreground" },
+                        under_review: { label: "Under Review", color: "bg-warning/10 text-warning-foreground" },
+                        verified: { label: "Verified", color: "bg-success/10 text-success" },
+                        rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
                       };
                       const st = statusCfg[req.status] || statusCfg.pending_payment;
                       const SvcIcon = svc?.icon || Shield;
@@ -866,8 +880,8 @@ export default function AlumniVerification() {
             {/* Step 4: Payment */}
             {step === "payment" && (
               <div className="space-y-6 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-900/30 mx-auto">
-                  <currentService.icon className="h-7 w-7 text-amber-600" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-warning/10 dark:bg-warning/80/30 mx-auto">
+                  <currentService.icon className="h-7 w-7 text-warning-foreground" />
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-foreground">Payment Required</h2>
@@ -881,12 +895,32 @@ export default function AlumniVerification() {
                 </div>
 
                 <div className="space-y-3">
+                  {!alumniGatewaysLoading && alumniGateways.length > 1 && (
+                    <div className="space-y-2 text-left">
+                      <p className="text-xs font-medium text-muted-foreground">Payment Gateway</p>
+                      <div className="flex flex-wrap gap-2">
+                        {alumniGateways.map((gateway) => (
+                          <button
+                            key={gateway.gateway}
+                            onClick={() => setSelectedGateway(gateway.gateway)}
+                            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                              selectedGateway === gateway.gateway
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:border-primary/40"
+                            }`}
+                          >
+                            {gateway.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <Button className="w-full gap-2 py-3 text-sm" onClick={handlePayNow} disabled={paymentLoading}>
                     {paymentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                     Pay &#8377; {currentService.fee.toLocaleString("en-IN")} via Secure Gateway
                   </Button>
                   <p className="text-[10px] text-muted-foreground">
-                    Powered by EaseBuzz. Supports UPI, Credit/Debit Cards, Net Banking, Wallets.
+                    Powered by {alumniGateways.find((g) => g.gateway === selectedGateway)?.display_name || "Secure Gateway"}.
                   </p>
                 </div>
 

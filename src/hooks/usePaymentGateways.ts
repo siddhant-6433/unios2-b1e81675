@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { comparePaymentGateways } from "@/lib/paymentGatewayResolver";
 
 export interface PaymentGateway {
   gateway: string;
   display_name: string;
   is_enabled_fee_collection: boolean;
   is_enabled_portal_payment: boolean;
+  supports_application_fee?: boolean;
+  supports_token_fee?: boolean;
+  supports_student_fee?: boolean;
+  supports_alumni_service?: boolean;
+  priority?: number;
 }
 
 export function usePaymentGateways() {
@@ -18,10 +24,10 @@ export function usePaymentGateways() {
     setError(null);
     const { data, error: qErr } = await (supabase as any)
       .from("payment_gateway_config")
-      .select("gateway, display_name, is_enabled_fee_collection, is_enabled_portal_payment")
+      .select("gateway, display_name, is_enabled_fee_collection, is_enabled_portal_payment, supports_application_fee, supports_token_fee, supports_student_fee, supports_alumni_service")
       .order("gateway");
     if (qErr) setError(qErr.message);
-    setGateways((data as PaymentGateway[]) || []);
+    setGateways([...(data as PaymentGateway[] || [])].sort(comparePaymentGateways));
     setLoading(false);
   };
 

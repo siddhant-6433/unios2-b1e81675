@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { CheckCircle2, Loader2, Upload } from "lucide-react";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 export interface CahetRegisterTarget {
   lead_id: string;
@@ -96,7 +97,7 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="cahet-reg-no">
-              CAHET registration no. <span className="text-rose-600">*</span>
+              CAHET registration no. <span className="text-destructive">*</span>
             </Label>
             <Input
               id="cahet-reg-no"
@@ -137,7 +138,7 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={saving} className="bg-rose-600 hover:bg-rose-700">
+          <Button onClick={submit} disabled={saving} className="bg-destructive hover:bg-destructive">
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
             ) : (
@@ -153,13 +154,5 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
 
 /** Client-side BPT/BMRIT detection by course name (avoids extra DB call in dialer). */
 export function isBptOrBmritCourse(courseName: string | null | undefined): boolean {
-  if (!courseName) return false;
-  const c = courseName.toLowerCase();
-  return (
-    c.includes("bpt") ||
-    c.includes("physiotherapy") ||
-    c.includes("bmrit") ||
-    (c.includes("radiology") && c.includes("b.sc")) ||
-    (c.includes("radiology") && c.includes("imaging"))
-  );
+  return isBptOrBmritCourseName(courseName);
 }

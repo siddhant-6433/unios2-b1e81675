@@ -8,24 +8,103 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
-  ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu,
+  ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
+  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
+import {
+  cahetDeadlineDescription,
+  cahetDeadlineMessage,
+} from "@/lib/deadlineRollover";
+import { resolveLeadTransitionCommand, type WorkflowLeadTransitionCommandName } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import {
+  inferWhatsAppTemplateCategory,
+  normalizeRenderedWhatsAppTemplate,
+  renderWhatsAppTemplate,
+  type RenderedWhatsAppTemplate,
+  type WhatsAppTemplateDefinition,
+} from "@/lib/whatsappTemplateRender";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
 
 const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
-  bpt_bmrit_cahet_deadline:
-    "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  lead_welcome:
+    "Hi {{student_name}}, thank you for your interest in {{course_name}} at NIMT Educational Institutions. Your inquiry was received from {{lead_source}}. Our admissions team will get in touch with you shortly.",
+  visit_confirmation:
+    "Hi {{student_name}}, your campus visit has been scheduled for {{visit_date}} at {{campus_name}}. We look forward to seeing you! Please carry a valid ID.",
+  visit_reminder_24hr:
+    "Hi {{student_name}}, this is a reminder that your campus visit is scheduled for {{visit_date}} at {{campus_name}}. We look forward to seeing you!",
+  application_received:
+    "Hi {{student_name}}, we have received your application (ID: {{application_id}}). Our admissions team will review it and get back to you shortly.",
+  fee_reminder:
+    "Hi {{student_name}}, this is a reminder that a fee payment of Rs.{{amount}} is due by {{due_date}}. Please complete the payment to avoid any delays.",
+  bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
+  cnet_not_qualified_bpt_bmrit:
+    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
     "Hi {{student_name}}, here are the details for {{course_name}} at NIMT Educational Institutions:\n\nDuration: {{duration}}\nEligibility: {{eligibility}}\nApproval: {{approval}}\nCourse video: {{video_url}}\n\nOpen the course page below for fees and application steps. Reply STOP to opt out.",
+  course_info_video_v2:
+    "Hi {{student_name}}, here are the details you requested for {{course_name}} at NIMT Educational Institutions:\n\nCourse information: {{course_url}}\nCampus locations: {{campus_url}}\nApplication portal: {{apply_url}}\n\nReply to this message if you have any questions - our admissions team will be glad to assist you.",
+  missed_call:
+    "Dear {{student_name}}, the admissions office at NIMT Educational Institutions attempted to reach you regarding {{course_name}}. We were unable to connect on the call. You may reach us by replying to this message or by calling the admissions office during working hours. A counsellor will attempt to contact you again.",
+  callback_scheduled:
+    "Dear {{student_name}}, thank you for your time regarding {{course_name}} at NIMT Educational Institutions. As per your request, a counsellor from the admissions office will reach out to you at a suitable time. If you need to reschedule or have any queries, please reply to this message. We are happy to assist you.",
+  apply_portal_login:
+    "Hi {{student_name}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly - no OTP needed. The link is valid until {{due_date}}, so please use it before it expires.",
+  student_welcome:
+    "Congratulations {{student_name}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{application_id}}\nCourse: {{course_name}}\nCampus: {{campus_name}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
+  application_submitted:
+    "Hi {{student_name}}, your application ({{application_id}}) has been received. Please pay the application fee to begin processing. The completed form PDF is attached for your records.",
+  app_fee_receipt:
+    "Hi {{student_name}}, we've received your application fee of Rs.{{amount}}. Application: {{application_id}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+  app_fee_receipt_pdf:
+    "Hi {{student_name}}, we've received your application fee of Rs.{{amount}}. Application: {{application_id}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+  offer_letter_issued:
+    "Congratulations {{student_name}}! You have been offered admission to {{course_name}}. Net fee: Rs.{{amount}}. Please accept by {{due_date}}. Tap below to view the offer letter and pay your token fee online.",
+  pan_nudge_balance:
+    "Hi {{student_name}}, your pre-admission number is {{application_id}}. Pay the balance of Rs.{{amount}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
+  payment_receipt:
+    "Dear {{student_name}}, payment of Rs.{{amount}} received. Receipt no: {{application_id}}. The receipt PDF is attached for your records.",
+  payment_receipt_pdf:
+    "Dear {{student_name}}, payment of Rs.{{amount}} received towards {{course_name}}. Receipt no: {{application_id}}. The receipt PDF is attached for your records.",
+  doc_rejected:
+    "Hi {{student_name}}, your uploaded document needs attention. Please re-upload a corrected version in the apply portal so your admission can proceed.",
+  application_rejected:
+    "Dear {{student_name}}, after review we are unable to proceed with your application {{application_id}}. Please contact our admissions office if you'd like to discuss alternatives.",
+  application_approved:
+    "Congratulations {{student_name}}! Your application {{application_id}} for {{course_name}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
+  applicant_welcome:
+    "Hi {{student_name}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{application_id}}\nCourse: {{course_name}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
+  ai_call_course_info:
+    "Hi {{student_name}}, thank you for speaking with us about {{course_name}} at NIMT Educational Institutions!\n\nCampus: {{campus_name}}\n\nCourse Details: {{course_url}}\nApply Now: {{apply_url}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
+  ai_call_post_summary:
+    "Hi {{student_name}}, as discussed on our call, here are the details for {{course_name}} at NIMT Educational Institutions:\n\nCampus: {{campus_name}}\nCourse details: {{course_url}}\nApply now: {{apply_url}}\nWatch course video: {{video_url}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
+  ai_missed_call_followup:
+    "Hi {{student_name}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{course_name}}.\n\nPlease feel free to call back at 9555192192 during 9 AM-8 PM IST.\n\nCourse information: {{course_url}}\nWatch course video: {{video_url}}\n\nLooking forward to assisting you with your admission journey.",
+  course_info_v1:
+    "Hi {{student_name}}, here are the details for {{course_name}} at NIMT:\n- Duration: {{duration}}\n- Eligibility: {{eligibility}}\n- Accreditation: {{approval}}\n\nWatch a short course video or view the full fees and syllabus on the course page. Reply STOP to opt out.",
+  visit_reminder_v2:
+    "Hi {{student_name}}, your campus visit for {{course_name}} is on {{visit_date}} at {{campus_name}}. Tap below for directions to the campus.",
+  offer_letter_acceptance:
+    "Congratulations {{student_name}}! NIMT has issued your offer letter for {{course_name}}. Net fee: Rs.{{amount}}. Please accept by {{due_date}}. Tap below to view your offer, accept it, and pay the token fee in one secure step.",
+  nimt_not_interested_ack:
+    "Hi {{student_name}}, thanks for speaking with us about {{course_name}}. We've marked your enquiry as not interested and won't reach out unless you'd like us to. Reply STOP to fully opt out.",
 };
 
 const TEMPLATE_PLACEHOLDER_RE = /^\s*(?:\[Campaign:[^\]]+\]\s*)?\[Template:\s*([^\]]+)\]\s*$/i;
@@ -36,6 +115,7 @@ interface Conversation {
   lead_name: string | null;
   lead_stage: string | null;
   lead_person_role: string | null;
+  lead_source: string | null;
   course_name: string | null;
   last_message: string | null;
   last_direction: string;
@@ -71,9 +151,78 @@ interface Message {
   media_url: string | null;
   created_at: string;
   sender_user_id?: string | null;
+  status_error?: any;
+  render_metadata?: RenderedWhatsAppTemplate | null;
+}
+
+const mergeMessageByIdentity = (messages: Message[], incoming: Message) => {
+  const incomingWaId = incoming.wa_message_id || null;
+  const existingIndex = messages.findIndex(message =>
+    message.id === incoming.id || (incomingWaId && message.wa_message_id === incomingWaId)
+  );
+  if (existingIndex === -1) return [...messages, incoming];
+  return messages.map((message, index) =>
+    index === existingIndex ? { ...message, ...incoming } : message
+  );
+};
+
+const DeliveryReceipt = ({ status }: { status: string | null | undefined }) => {
+  const normalized = (status || "sent").toLowerCase();
+  if (normalized === "failed") {
+    return (
+      <span title="Failed by Meta" aria-label="Failed by Meta" className="inline-flex items-center text-destructive animate-rs-shake">
+        <AlertOctagon className="h-3 w-3" />
+      </span>
+    );
+  }
+  if (normalized === "read") {
+    return (
+      <span title="Read" aria-label="Read" className="inline-flex items-center text-info transition-colors duration-240 ease-entrance">
+        <CheckCheck className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (normalized === "delivered") {
+    return (
+      <span title="Delivered" aria-label="Delivered" className="inline-flex items-center text-muted-foreground transition-colors duration-240 ease-entrance">
+        <CheckCheck className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (normalized === "sent") {
+    return (
+      <span title="Sent by Meta" aria-label="Sent by Meta" className="inline-flex items-center text-muted-foreground transition-colors duration-240 ease-entrance">
+        <Check className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (normalized === "accepted" || normalized === "submitted") {
+    return (
+      <span title="Accepted by Meta" aria-label="Accepted by Meta" className="inline-flex items-center text-success transition-colors duration-240 ease-entrance">
+        <CircleCheck className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return (
+    <span title="Sending" aria-label="Sending" className="inline-flex items-center text-muted-foreground/50">
+      <Clock className="h-3 w-3 animate-pulse" />
+    </span>
+  );
+};
+
+interface CopilotAssistResult {
+  summary: string;
+  intent: string;
+  draft_reply: string;
+  next_action_label: string;
+  next_action_reason: string;
+  confidence: number;
+  should_pause_ai: boolean;
+  model_unavailable?: boolean;
 }
 
 interface MessageConversationSeed {
+  id?: string | null;
   phone: string | null;
   lead_id: string | null;
   direction: string | null;
@@ -91,25 +240,15 @@ const STAGE_LABELS: Record<string, string> = {
   offer_sent: "Offer Sent", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)",
 };
 
-const QUICK_REPLIES = [
-  { label: "Greeting", text: "Hi! 👋 Welcome to NIMT Educational Institutions. How can I help you today?" },
-  { label: "Ask course", text: "Which course are you interested in? We offer Engineering, Management, Law, Pharmacy, Nursing, Education and more." },
-  { label: "Share portal", text: "You can apply online at our application portal:\nhttps://uni.nimt.ac.in/apply/nimt" },
-  { label: "Fee info", text: "Our fee structure varies by course and campus. Could you tell us which course you're interested in? A counsellor will share the detailed fee breakdown." },
-  { label: "Schedule visit", text: "We'd love to have you visit our campus! 🏫 Please share your preferred date and the campus you'd like to visit." },
-  { label: "Counsellor connect", text: "Our counsellor will connect with you shortly. Thank you for your patience!" },
-  { label: "Documents needed", text: "For admission, please keep these documents ready:\n📄 10th & 12th marksheets\n📄 Aadhaar card\n📄 Passport-size photo\n📄 Transfer certificate" },
-  { label: "Thank you", text: "Thank you for reaching out! 😊 Feel free to contact us anytime if you have more questions." },
-  { label: "Campus video", text: "🎥 Here's a look at our campus and facilities:\nhttps://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK" },
-];
+type QuickReply = { id: string; label: string; text: string; sort_order: number };
 
-const INBOX_TEMPLATES = [
+const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
   // ── Admission flow ────────────────────────────────────────────────────────
   {
     key: "lead_welcome",
     label: "Lead Welcome",
     description: "Welcome message with course info",
-    params: ["student_name", "course_name"],
+    params: ["student_name", "course_name", "lead_source"],
     preview: "Hi {{student_name}}, welcome to NIMT Educational Institutions! We're excited about your interest in {{course_name}}. Our counsellor will connect with you shortly to guide you through the admission process.",
   },
   {
@@ -123,7 +262,7 @@ const INBOX_TEMPLATES = [
     key: "visit_reminder_24hr",
     label: "Visit Reminder (24hr)",
     description: "Remind about upcoming visit",
-    params: ["student_name", "visit_date"],
+    params: ["student_name", "visit_date", "campus_name"],
     preview: "Hi {{student_name}}, this is a reminder that your campus visit is scheduled for {{visit_date}}. See you soon!",
   },
   {
@@ -141,11 +280,39 @@ const INBOX_TEMPLATES = [
     preview: "Hi {{student_name}}, this is a reminder that your fee of ₹{{amount}} is due by {{due_date}}. Please complete the payment to secure your seat.",
   },
   {
+    key: "nimt_followup_v2",
+    label: "Follow-up",
+    description: "Approved follow-up template for expired WhatsApp windows",
+    params: ["student_name", "followup_date"],
+    preview: "Hi {{student_name}}, this is a follow-up from NIMT Educational Institutions. Our counsellor will connect with you {{followup_date}}. Please reply here if you would like to continue the conversation.",
+  },
+  {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
-    description: "10 June 2026 application + CAHET registration deadline",
+    description: cahetDeadlineDescription(),
     params: [],
-    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+    preview: cahetDeadlineMessage(),
+  },
+  {
+    key: "cnet_not_qualified_bpt_bmrit",
+    label: "CNET Not Qualified → BPT/BMRIT",
+    description: "Bilingual CNET result follow-up with BPT/BMRIT and CAHET instructions",
+    params: ["student_name"],
+    preview: TEMPLATE_MESSAGE_TEXTS.cnet_not_qualified_bpt_bmrit,
+  },
+  {
+    key: "course_info_v4",
+    label: "Course Info",
+    description: "Auto-filled course duration, eligibility, approval and video",
+    params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"],
+    preview: TEMPLATE_MESSAGE_TEXTS.course_info_v4,
+  },
+  {
+    key: "course_info_video_v2",
+    label: "Course Links",
+    description: "Auto-filled course, campus and application links",
+    params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"],
+    preview: TEMPLATE_MESSAGE_TEXTS.course_info_video_v2,
   },
   // ── Knowledge Base Quick Replies ─────────────────────────────────────────
   {
@@ -202,7 +369,7 @@ const INBOX_TEMPLATES = [
     label: "💰 Fee Structure",
     description: "Fee information and how to get details",
     params: [],
-    preview: "💰 *NIMT Fee Structure*\n\nFee varies by course and campus. Here's a general guide:\n\n🏥 *Nursing (B.Sc / GNM):* Contact admissions for latest fee\n🦾 *BPT (Physiotherapy):* Contact admissions for latest fee\n🎓 *MBA / PGDM:* Contact admissions for latest fee\n⚖️ *LLB / BA LLB:* Contact admissions for latest fee\n📊 *BBA / BCA:* Contact admissions for latest fee\n\n✅ Application Fee: Rs 500–1,000 (varies by course)\n✅ Merit scholarships available to reduce fee burden\n✅ Education loan assistance available\n\nFor the exact fee structure for your course, call:\n📞 +91 9555192192\nOr apply online: https://uni.nimt.ac.in/apply/nimt",
+    preview: "💰 *NIMT Fee Structure 2026-27*\n\nDetailed year-wise fees are published here:\nhttps://nimt.ac.in/admissions/fees/\n\n*Popular first-year fees:*\n• B.Sc Nursing: ₹1,53,000/year\n• GNM: ₹1,18,000/year\n• BPT / BMRIT: ₹92,000/year\n• MBA: ₹1,30,000/year\n• PGDM: ₹2,25,000/year\n• BA LLB: ₹1,10,000/year\n• LLB: ₹44,250/year\n• BBA / BCA: ₹75,000/year\n• D.Pharma: ₹95,000/year\n\n✅ Merit scholarships available\n✅ Education loan support available\n✅ Application fee: Rs 500-1,000 depending on course\n\nPlease share your course and campus preference, and we can send the exact year-wise breakup.",
   },
   {
     key: "kb_course_details",
@@ -225,6 +392,11 @@ const HR_BUSINESS_PNID = "970526789470416";
 const HR_BUSINESS_NUMBER = "9599675267";
 const PLIVO_WHATSAPP_NUMBER = "919555192192";
 const PRIMARY_META_WHATSAPP_NUMBER = "919667691872";
+const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
+const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
+  "1075269918995469": "917428499849",
+  [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
+};
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
   { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
   { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", provider: "meta" },
@@ -286,6 +458,71 @@ const formatInboxLabel = (id: string, label?: string | null) => {
   return label || id;
 };
 
+const resolveInboxBusinessNumber = (id: string | null | undefined, label?: string | null) => {
+  const labelDigits = normalizeBusinessChannel(label);
+  if (isBusinessPhoneNumberChannel(labelDigits)) return labelDigits;
+  const idDigits = normalizeBusinessChannel(id);
+  if (isBusinessPhoneNumberChannel(idDigits)) return idDigits;
+  return id ? KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[id] || null : null;
+};
+
+const formatBusinessDisplayNumber = (value: string | null | undefined) => {
+  const digits = normalizeBusinessChannel(value);
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+  return value || "";
+};
+
+type InboxPickerOption = {
+  id: string;
+  label: string;
+  provider: string | null;
+  businessNumber: string | null;
+  count?: number;
+};
+
+const WhatsAppInboxIdentity = ({
+  option,
+  selected,
+  compact = false,
+}: {
+  option: InboxPickerOption;
+  selected?: boolean;
+  compact?: boolean;
+}) => {
+  const displayNumber = formatBusinessDisplayNumber(option.businessNumber);
+  const primaryLabel = option.id === "all" ? option.label : (displayNumber || option.label);
+
+  return (
+    <div className={`flex w-full items-center gap-3 ${compact ? "py-0.5" : "rounded-md p-2"}`}>
+      <Avatar className={compact ? "h-8 w-8 border bg-white" : "h-10 w-10 border bg-white"}>
+        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
+        <AvatarFallback className="bg-success/5 text-[10px] font-semibold text-success">NIMT</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className={`${compact ? "text-xs" : "text-sm"} truncate font-semibold text-foreground`}>{primaryLabel}</p>
+          {option.provider && (
+            <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px] capitalize">
+              {option.provider}
+            </Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span>{displayNumber ? "🇮🇳 India" : "Inbox route"}</span>
+          <span className="hidden sm:inline">•</span>
+          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
+          {!compact && <span>Name visible to customers</span>}
+          {!compact && typeof option.count === "number" && <span>{option.count.toLocaleString("en-IN")} chats</span>}
+        </div>
+      </div>
+      {selected && <Check className="h-4 w-4 shrink-0 text-success" />}
+    </div>
+  );
+};
+
 const STATE_LABELS: Record<string, string> = {
   new_unqualified: "New",
   awaiting_name: "Needs name",
@@ -311,7 +548,7 @@ const conversationBusinessKey = (conv?: Conversation | null) =>
     : (conv?.business_phone_number_id || conv?.business_phone_number || null);
 
 const CONVERSATION_SELECT_RICH = `
-  phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+  phone, lead_id, lead_name, lead_stage, lead_person_role, lead_source, course_name,
   last_message, last_direction, last_message_at, unread_count,
   counsellor_id, counsellor_name, has_inbound,
   provider, business_phone_number_id, business_phone_number,
@@ -339,6 +576,7 @@ const withConversationDefaults = (row: any): Conversation => ({
   provider: row.provider || null,
   conversation_mode: row.conversation_mode || null,
   conversation_state: row.conversation_state || null,
+  lead_source: row.lead_source || null,
   owner_user_id: row.owner_user_id || null,
   escalation_role: row.escalation_role || null,
   handoff_reason: row.handoff_reason || null,
@@ -349,10 +587,178 @@ const withConversationDefaults = (row: any): Conversation => ({
   last_bot_action: row.last_bot_action || null,
 });
 
-const WhatsAppInbox = () => {
+const createDemoConversation = (row: Partial<Conversation> & Pick<Conversation, "phone" | "last_message" | "last_message_at">): Conversation =>
+  withConversationDefaults({
+    lead_id: null,
+    lead_name: null,
+    lead_stage: "new_lead",
+    lead_person_role: "lead",
+    lead_source: "Meta campaign",
+    course_name: null,
+    last_direction: "inbound",
+    unread_count: 0,
+    counsellor_id: "demo-counsellor",
+    counsellor_name: "Ananya",
+    has_inbound: true,
+    provider: "meta",
+    business_phone_number_id: PRIMARY_META_WHATSAPP_NUMBER,
+    business_phone_number: PRIMARY_META_WHATSAPP_NUMBER,
+    conversation_mode: "ai",
+    conversation_state: "new_unqualified",
+    owner_user_id: "demo-counsellor",
+    escalation_role: null,
+    handoff_reason: null,
+    priority: "normal",
+    sla_due_at: null,
+    last_intent: null,
+    last_confidence: null,
+    last_bot_action: null,
+    lead_counsellor_ids: ["demo-counsellor"],
+    ...row,
+  });
+
+const DEMO_TEMPLATE_RENDER = renderWhatsAppTemplate(
+  INBOX_TEMPLATES.find(t => t.key === "course_info_v4")!,
+  {
+    student_name: "Riya",
+    course_name: "B.Sc Nursing",
+    duration: "4 years",
+    eligibility: "10+2 PCB with 45%",
+    approval: "Indian Nursing Council and U.P. State Medical Faculty",
+    video_url: "https://nimt.ac.in/nursing",
+  },
+  {},
+);
+
+const DEMO_CONVERSATIONS: Conversation[] = [
+  createDemoConversation({
+    phone: "919876543210",
+    lead_id: "demo-hot-lead",
+    lead_name: "Riya Sharma",
+    lead_stage: "new_lead",
+    lead_source: "Instagram lead ad",
+    course_name: "B.Sc Nursing",
+    last_message: "Fees kitni hai? Hostel bhi chahiye.",
+    last_message_at: "2026-06-29T06:45:00.000Z",
+    unread_count: 3,
+    priority: "urgent",
+    conversation_state: "needs_counsellor",
+    handoff_reason: "pricing_question",
+    last_intent: "fee_and_hostel",
+    last_confidence: 0.92,
+  }),
+  createDemoConversation({
+    phone: "918888777766",
+    lead_id: "demo-warm-lead",
+    lead_name: "Aman Verma",
+    lead_stage: "follow_up",
+    lead_source: "CollegeDunia",
+    course_name: "BPT",
+    last_message: "Can I visit campus tomorrow?",
+    last_message_at: "2026-06-29T05:20:00.000Z",
+    unread_count: 1,
+    priority: "high",
+    conversation_state: "qualified",
+    last_intent: "visit_booking",
+    last_confidence: 0.88,
+  }),
+  createDemoConversation({
+    phone: "917777666655",
+    lead_id: "demo-template",
+    lead_name: "Meera Khan",
+    lead_stage: "application_in_progress",
+    lead_source: "Website",
+    course_name: "D.Pharma",
+    last_message: "[Template: course_info_v4]",
+    last_direction: "outbound",
+    last_message_at: "2026-06-28T14:30:00.000Z",
+    unread_count: 0,
+    conversation_state: "template_sent",
+  }),
+  createDemoConversation({
+    phone: "916666555544",
+    lead_id: "demo-expired",
+    lead_name: "Kabir Singh",
+    lead_stage: "follow_up",
+    lead_source: "Facebook",
+    course_name: "MBA",
+    last_message: "Ok",
+    last_message_at: "2026-06-26T11:00:00.000Z",
+    unread_count: 0,
+    priority: "normal",
+    conversation_state: "window_expired",
+  }),
+  createDemoConversation({
+    phone: "915555444433",
+    lead_id: "demo-dnc",
+    lead_name: "Pooja Rawat",
+    lead_stage: "dnc",
+    lead_source: "Walk-in",
+    course_name: "BA LLB",
+    last_message: "Please do not contact again",
+    last_message_at: "2026-06-25T09:00:00.000Z",
+    unread_count: 0,
+    priority: "low",
+    conversation_state: "closed",
+  }),
+];
+
+const DEMO_MESSAGES: Record<string, Message[]> = {
+  "919876543210": [
+    { id: "demo-m1", direction: "inbound", content: "Hi, B.Sc Nursing admission open hai?", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-29T06:40:00.000Z" },
+    { id: "demo-m2", direction: "inbound", content: "Fees kitni hai?", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-29T06:42:00.000Z" },
+    { id: "demo-m3", direction: "inbound", content: "Hostel bhi chahiye.", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-29T06:45:00.000Z" },
+    { id: "demo-m4", direction: "outbound", content: "Hi Riya, yes admissions are open. I can share the fee structure and hostel details.", message_type: "text", status: "read", template_key: "ai_auto_reply", media_url: null, created_at: "2026-06-29T06:45:08.000Z", sender_user_id: "demo-ai" },
+  ],
+  "918888777766": [
+    { id: "demo-v1", direction: "inbound", content: "Can I visit campus tomorrow?", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-29T05:20:00.000Z" },
+  ],
+  "917777666655": [
+    { id: "demo-t1", direction: "outbound", content: "[Template: course_info_v4]", message_type: "template", status: "delivered", template_key: "course_info_v4", media_url: null, created_at: "2026-06-28T14:30:00.000Z", render_metadata: DEMO_TEMPLATE_RENDER },
+  ],
+  "916666555544": [
+    { id: "demo-e1", direction: "inbound", content: "Ok", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-26T11:00:00.000Z" },
+    { id: "demo-e2", direction: "outbound", content: "[Template: nimt_followup_v2]", message_type: "template", status: "failed", template_key: "nimt_followup_v2", media_url: null, created_at: "2026-06-29T06:00:00.000Z", status_error: { message: "24-hour customer care window expired. Use an approved template." } },
+  ],
+  "915555444433": [
+    { id: "demo-d1", direction: "inbound", content: "Please do not contact again", message_type: "text", status: "received", template_key: null, media_url: null, created_at: "2026-06-25T09:00:00.000Z" },
+  ],
+};
+
+const conversationIdentityKey = (c: Conversation) =>
+  `${c.phone}:${conversationBusinessKey(c) || ""}`;
+
+const mergeConversationRows = (primaryRows: Conversation[], fallbackRows: Conversation[]) => {
+  const merged = new Map<string, Conversation>();
+  for (const row of [...primaryRows, ...fallbackRows]) {
+    const key = conversationIdentityKey(row);
+    const existing = merged.get(key);
+    if (!existing || new Date(row.last_message_at).getTime() > new Date(existing.last_message_at).getTime()) {
+      merged.set(key, row);
+    }
+  }
+  return [...merged.values()]
+    .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+};
+
+const replyChannelPayload = (conv: Conversation | null | undefined) => {
+  const phoneNumberIdLooksLikeBusinessNumber =
+    conv?.provider === "meta" && isBusinessPhoneNumberChannel(conv.business_phone_number_id);
+  return {
+    provider: conv?.provider || null,
+    business_phone_number_id: phoneNumberIdLooksLikeBusinessNumber ? null : conv?.business_phone_number_id || null,
+    business_number: conv?.business_phone_number || (phoneNumberIdLooksLikeBusinessNumber ? conv?.business_phone_number_id || null : null),
+  };
+};
+
+const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, role, profile } = useAuth();
+  const { user, role: authRole, profile: authProfile } = useAuth();
+  const role = demoMode ? "super_admin" : authRole;
+  const profile = demoMode
+    ? { id: "demo-profile", display_name: "Meta QA", phone: null, avatar_url: null, campus: null, department: null, institution: null }
+    : authProfile;
   const [searchParams] = useSearchParams();
   const isOutboundMode = searchParams.get("mode") === "outbound";
   const phoneParam = searchParams.get("phone");
@@ -375,8 +781,16 @@ const WhatsAppInbox = () => {
   const [loading, setLoading] = useState(true);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateParamOverrides, setTemplateParamOverrides] = useState<Record<string, string>>({});
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [qrManagerOpen, setQrManagerOpen] = useState(false);
+  const [qrEditId, setQrEditId] = useState<string | null>(null);
+  const [qrEditLabel, setQrEditLabel] = useState("");
+  const [qrEditText, setQrEditText] = useState("");
+  const [qrSaving, setQrSaving] = useState(false);
   const [inboxTab, setInboxTab] = useState<"all" | "leads" | "staff" | "jobs" | "other">("all");
   // Multi-number inbox: which business number's conversations to show.
   // "primary" = the most-used phone_number_id + legacy NULL rows; any other
@@ -394,7 +808,7 @@ const WhatsAppInbox = () => {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
-  const [opsFilter, setOpsFilter] = useState<"all" | "handoff" | "sla" | "knowledge" | "unassigned">("all");
+  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned">("all");
 
   // Quick-action followup dialog
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -411,25 +825,100 @@ const WhatsAppInbox = () => {
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState<any>(null);
 
+  // Assign / reassign dialog
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferLeadIds, setTransferLeadIds] = useState<string[]>([]);
+  const [transferLeadNames, setTransferLeadNames] = useState<string[]>([]);
+
   // Per-conversation AI/human guard. 'human' means the bot stays silent and a
   // counsellor handles the chat (inbox or WhatsApp Business app). Read by the
   // whatsapp-ai-reply edge function before it auto-replies. Cast to `any` until
   // the generated Supabase types include whatsapp_ai_mode.
   const [aiMode, setAiMode] = useState<"ai" | "human" | null>(null);
   const [aiModeSaving, setAiModeSaving] = useState(false);
+  const [showCopilotPanel, setShowCopilotPanel] = useState(false);
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
+  const [copilotResult, setCopilotResult] = useState<CopilotAssistResult | null>(null);
+
+  useEffect(() => {
+    if (!demoMode) return;
+    setConversations(DEMO_CONVERSATIONS);
+    setDetectedInboxChannels([
+      { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", n: DEMO_CONVERSATIONS.length },
+      { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", n: 0 },
+    ]);
+    setCounsellorList([
+      { id: "demo-counsellor", name: "Ananya" },
+      { id: "demo-counsellor-2", name: "Rahul" },
+    ]);
+    setUnrepliedByCC([{ id: "demo-counsellor", name: "Ananya", count: 4 }]);
+    setStaffNames({ "919999000001": "Admissions Desk" });
+    setStaffConvs([]);
+    setHasMoreConversations(false);
+    setConversationCursor(null);
+    setLoading(false);
+    setSelectedPhone("919876543210");
+  }, [demoMode]);
+
+  // ── Load quick replies from DB ──────────────────────────────────────────
+  const fetchQuickReplies = async () => {
+    const { data } = await (supabase as any)
+      .from("whatsapp_quick_replies")
+      .select("id, label, text, sort_order")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+    if (data) setQuickReplies(data as QuickReply[]);
+  };
+  useEffect(() => { fetchQuickReplies(); }, []);
+
+  const saveQuickReply = async () => {
+    if (!qrEditLabel.trim() || !qrEditText.trim()) return;
+    setQrSaving(true);
+    try {
+      if (qrEditId) {
+        await (supabase as any).from("whatsapp_quick_replies").update({
+          label: qrEditLabel.trim(),
+          text: qrEditText.trim(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", qrEditId);
+      } else {
+        const maxOrder = quickReplies.reduce((m, q) => Math.max(m, q.sort_order), 0);
+        await (supabase as any).from("whatsapp_quick_replies").insert({
+          label: qrEditLabel.trim(),
+          text: qrEditText.trim(),
+          sort_order: maxOrder + 1,
+        });
+      }
+      await fetchQuickReplies();
+      setQrEditId(null);
+      setQrEditLabel("");
+      setQrEditText("");
+    } finally {
+      setQrSaving(false);
+    }
+  };
+
+  const deleteQuickReply = async (id: string) => {
+    await (supabase as any).from("whatsapp_quick_replies").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+    await fetchQuickReplies();
+  };
 
   const matchesActiveBusinessNumber = (c: Conversation) => {
+    if (demoMode) return true;
     if (isHrScope) {
       return isHrBusinessConversation(c)
           || c.lead_person_role === "job_applicant";
     }
     if (isHrBusinessConversation(c)) return false;
+    if (businessNumber === "all") return true;
     if (businessNumber !== "primary") return conversationMatchesBusinessChannel(c, businessNumber);
     return !c.business_phone_number_id
         || (primaryPnid ? c.business_phone_number_id === primaryPnid : !isKnownAdmissionsPhoneConversation(c));
   };
 
   useEffect(() => {
+    if (demoMode) { setAiMode("ai"); return; }
     const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
       || conversations.find(c => c.phone === selectedPhone);
     const channel = conversationBusinessKey(conv);
@@ -537,7 +1026,7 @@ const WhatsAppInbox = () => {
     const secondaryInboxes = sorted
       .filter(item => item.id !== primary)
       .filter(item => !primaryUsesMetaFallbackLabel || item.id !== primaryMetaFallback?.id)
-      .map(item => ({ id: item.id, label: item.label }));
+      .map(item => ({ id: item.id, label: item.label, n: item.n }));
     return {
       primaryPnid: primary as string | null,
       primaryInboxLabel: primaryMetaFallback?.label || primaryItem?.label || "Primary Inbox",
@@ -545,6 +1034,32 @@ const WhatsAppInbox = () => {
     };
   })();
   const hasOtherInbox = otherInboxes.length > 0;
+  const inboxPickerOptions: InboxPickerOption[] = [
+    {
+      id: "all",
+      label: "All WhatsApp numbers",
+      provider: null,
+      businessNumber: null,
+      count: conversations.length,
+    },
+    {
+      id: "primary",
+      label: primaryInboxLabel,
+      provider: "meta",
+      businessNumber: PRIMARY_META_WHATSAPP_NUMBER,
+    },
+    ...otherInboxes.map((inbox) => {
+      const known = findKnownAdmissionsChannel(inbox.id, inbox.label);
+      return {
+        id: inbox.id,
+        label: inbox.label,
+        provider: known?.provider || "meta",
+        businessNumber: resolveInboxBusinessNumber(inbox.id, inbox.label),
+        count: inbox.n,
+      };
+    }),
+  ];
+  const selectedInboxOption = inboxPickerOptions.find(option => option.id === businessNumber) || inboxPickerOptions[0];
 
   // Pre-fill backfill form when dialog opens, using detected pnids if any
   const openBackfill = () => {
@@ -583,6 +1098,7 @@ const WhatsAppInbox = () => {
   };
 
   const matchesInbox = (c: Conversation) => {
+    if (demoMode) return true;
     // HR scope: messages on the HR business number OR any job_applicant
     // conversation regardless of which number it landed on. The
     // business-number switcher doesn't apply here — the scope is fixed.
@@ -594,6 +1110,7 @@ const WhatsAppInbox = () => {
     // those live in the dedicated HR inbox.
     if (c.lead_person_role === "job_applicant") return false;
     if (isHrBusinessConversation(c)) return false;
+    if (businessNumber === "all") return true;
     if (businessNumber !== "primary") return conversationMatchesBusinessChannel(c, businessNumber);
     if (isKnownAdmissionsPhoneConversation(c)) return false;
     if (businessNumber === "primary") {
@@ -607,37 +1124,57 @@ const WhatsAppInbox = () => {
     const variants = businessChannelVariants(selectedBusinessNumber);
     if (variants.length === 0) return [];
 
+    const messageColumnsFull = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read";
+    const messageColumnsLegacy = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, is_read";
+
+    const applyChannelFilter = (query: any, includeBusinessNumber = true) => query.or(
+      (includeBusinessNumber
+        ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+        : variants.map(v => `business_phone_number_id.eq.${v}`))
+        .join(","),
+    );
+
     let seedRows: MessageConversationSeed[] = [];
     let lastMessageError: any = null;
     for (const includeBusinessNumber of [true, false]) {
-      let messageQuery = supabase
-        .from("whatsapp_messages" as any)
-        .select([
-          "phone",
-          "lead_id",
-          "direction",
-          "content",
-          "created_at",
-          "provider",
-          "business_phone_number_id",
-          includeBusinessNumber ? "business_phone_number" : null,
-          "is_read",
-        ].filter(Boolean).join(", "))
-        .order("created_at", { ascending: false })
-        .limit(CONVERSATION_PAGE_SIZE * 5);
+      const messageColumns = includeBusinessNumber ? messageColumnsFull : messageColumnsLegacy;
+      const recentMessagesQuery = applyChannelFilter(
+        supabase
+          .from("whatsapp_messages" as any)
+          .select(messageColumns)
+          .order("created_at", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE * 5),
+        includeBusinessNumber,
+      );
+      const inboundMessagesQuery = applyChannelFilter(
+        supabase
+          .from("whatsapp_messages" as any)
+          .select(messageColumns)
+          .eq("direction", "inbound")
+          .order("created_at", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE * 5),
+        includeBusinessNumber,
+      );
 
-      const filterParts = includeBusinessNumber
-        ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
-        : variants.map(v => `business_phone_number_id.eq.${v}`);
-      messageQuery = messageQuery.or(filterParts.join(","));
+      const [recentMessages, inboundMessages] = await Promise.all([
+        recentMessagesQuery,
+        inboundMessagesQuery,
+      ]);
 
-      const { data, error } = await messageQuery;
+      const error = recentMessages.error || inboundMessages.error;
       if (!error) {
         lastMessageError = null;
-        seedRows = ((data || []) as any[] as MessageConversationSeed[])
-          .filter(row => row.phone && row.created_at);
+        const seedById = new Map<string, MessageConversationSeed>();
+        for (const row of ([...(recentMessages.data || []), ...(inboundMessages.data || [])] as any[] as MessageConversationSeed[])) {
+          const key = row.id || `${row.phone}:${row.created_at}:${row.direction}:${row.content || ""}`;
+          if (!seedById.has(key)) seedById.set(key, row);
+        }
+        seedRows = [...seedById.values()]
+          .filter(row => row.phone && row.created_at)
+          .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
         break;
       }
+
       lastMessageError = error;
       if (!/business_phone_number/i.test(error.message || "")) break;
     }
@@ -653,7 +1190,7 @@ const WhatsAppInbox = () => {
     if (leadIds.length > 0) {
       const { data: leadsData, error: leadsError } = await supabase
         .from("leads" as any)
-        .select("id, name, stage, person_role, counsellor_id, course_id")
+        .select("id, name, stage, person_role, source, counsellor_id, course_id")
         .in("id", leadIds);
       if (leadsError) throw leadsError;
 
@@ -739,6 +1276,7 @@ const WhatsAppInbox = () => {
           lead_name: lead?.name || null,
           lead_stage: lead?.stage || null,
           lead_person_role: lead?.person_role || null,
+          lead_source: lead?.source || null,
           course_name: lead?.course_id ? courseById.get(lead.course_id) || null : null,
           last_message: latest.content,
           last_direction: latest.direction || "inbound",
@@ -819,18 +1357,12 @@ const WhatsAppInbox = () => {
       }
 
       if (reset && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
-        const messageRows = await fetchMessageBackedConversationRows(businessNumber).catch(error => {
-          if (!lastError) throw error;
+        const messageBackedRows = await fetchMessageBackedConversationRows(businessNumber).catch(error => {
+          if (!lastError && rows.length === 0) throw error;
           return [] as Conversation[];
         });
-        if (messageRows.length > 0) {
-          const merged = new Map<string, Conversation>();
-          for (const row of [...rows, ...messageRows]) {
-            merged.set(`${row.phone}:${conversationBusinessKey(row) || ""}`, row);
-          }
-          rows = [...merged.values()]
-            .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
-            .slice(0, CONVERSATION_PAGE_SIZE);
+        if (messageBackedRows.length > 0) {
+          rows = rows.length === 0 ? messageBackedRows : mergeConversationRows(rows, messageBackedRows);
           lastError = null;
         }
       }
@@ -838,8 +1370,8 @@ const WhatsAppInbox = () => {
 
       setConversations(prev => {
         if (reset) return rows;
-        const seen = new Set(prev.map(c => `${c.phone}:${conversationBusinessKey(c) || ""}`));
-        const nextRows = rows.filter(c => !seen.has(`${c.phone}:${conversationBusinessKey(c) || ""}`));
+        const seen = new Set(prev.map(conversationIdentityKey));
+        const nextRows = rows.filter(c => !seen.has(conversationIdentityKey(c)));
         return [...prev, ...nextRows];
       });
 
@@ -867,6 +1399,7 @@ const WhatsAppInbox = () => {
   // Fetch the first conversation page only. Additional pages load on scroll so
   // the inbox can paint quickly even when thousands of outbound rows exist.
   useEffect(() => {
+    if (demoMode) return;
     if (role === "counsellor" && !profile?.id) return;
     setConversations([]);
     setConversationCursor(null);
@@ -878,6 +1411,7 @@ const WhatsAppInbox = () => {
   // only loads the first page for speed, so the selector cannot depend on
   // whichever numbers happen to appear in that first page.
   useEffect(() => {
+    if (demoMode) return;
     if (role === "counsellor" && !profile?.id) return;
     let cancelled = false;
     (async () => {
@@ -932,6 +1466,7 @@ const WhatsAppInbox = () => {
 
   // Fetch staff/counsellor metadata off the critical path for the first paint.
   useEffect(() => {
+    if (demoMode) return;
     let cancelled = false;
     (async () => {
       const { data: staffProfiles } = await supabase
@@ -991,6 +1526,7 @@ const WhatsAppInbox = () => {
   }, []);
 
   useEffect(() => {
+    if (demoMode) return;
     if (!isAdminRole(role)) { setCounsellorList([]); return; }
     let cancelled = false;
     (async () => {
@@ -1023,6 +1559,7 @@ const WhatsAppInbox = () => {
 
   // Fetch unreplied breakdown for admins — separate unlimited query
   useEffect(() => {
+    if (demoMode) return;
     if (!isAdminRole(role) || counsellorList.length === 0) { setUnrepliedByCC([]); return; }
     (async () => {
       const { data } = await supabase
@@ -1051,10 +1588,30 @@ const WhatsAppInbox = () => {
     })();
   }, [role, counsellorList]);
 
+  // Honor an inbox channel from the URL (timeline "Go to conversation" deep-link).
+  // Messages store a Meta phone_number_id (e.g. "1075269918995469"); the tabs use
+  // the phone number, so resolve pnid → number before normalizing. Keyed on the
+  // param alone so it applies once and doesn't fight manual tab clicks.
+  const channelParam = searchParams.get("channel");
+  useEffect(() => {
+    if (!channelParam) return;
+    const mapped = KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[channelParam] || channelParam;
+    const resolved = normalizeBusinessChannel(mapped);
+    if (resolved) setBusinessNumber(resolved);
+  }, [channelParam]);
+
   // Auto-select conversation from URL param (notification deep-link)
   const phoneFromUrl = searchParams.get("phone");
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
   useEffect(() => {
+    if (demoMode) {
+      if (!phoneFromUrl) return;
+      const normalized = phoneFromUrl.replace(/\D/g, "");
+      const match = DEMO_CONVERSATIONS.find(c => c.phone === normalized || c.phone === phoneFromUrl);
+      if (match) setSelectedPhone(match.phone);
+      else setDeepLinkNotFound(true);
+      return;
+    }
     if (!phoneFromUrl || conversations.length === 0) return;
     let cancelled = false;
     setDeepLinkNotFound(false);
@@ -1107,6 +1664,11 @@ const WhatsAppInbox = () => {
 
   // Fetch messages for selected conversation
   useEffect(() => {
+    if (demoMode) {
+      if (!selectedPhone) { setMessages([]); return; }
+      setMessages(DEMO_MESSAGES[selectedPhone] || []);
+      return;
+    }
     if (!selectedPhone) { setMessages([]); return; }
     (async () => {
       // Pick the active business pnid for filtering. "primary" matches the
@@ -1121,6 +1683,7 @@ const WhatsAppInbox = () => {
           // scoped via matchesInbox.
           return query;
         }
+        if (businessNumber === "all") return query;
         if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
           const variants = businessChannelVariants(businessNumber);
           return query.or(
@@ -1147,10 +1710,21 @@ const WhatsAppInbox = () => {
         return applyBusinessNumberFilter(query, includeBusinessNumber);
       };
 
-      const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id";
-      const q = buildMessageQuery(`${messageColumns}, sender_user_id`);
+      const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id, status_error";
+      const messageColumnsWithRender = `${messageColumns}, render_metadata`;
+      let q = buildMessageQuery(`${messageColumnsWithRender}, sender_user_id`);
       let { data, error } = await q;
+      if (error && /render_metadata/i.test(error.message || "")) {
+        const fallback = await buildMessageQuery(`${messageColumns}, sender_user_id`);
+        data = fallback.data;
+        error = fallback.error;
+      }
       if (error && /sender_user_id/i.test(error.message || "")) {
+        const fallback = await buildMessageQuery(messageColumnsWithRender);
+        data = fallback.data;
+        error = fallback.error;
+      }
+      if (error && /render_metadata/i.test(error.message || "")) {
         const fallback = await buildMessageQuery(messageColumns);
         data = fallback.data;
         error = fallback.error;
@@ -1166,23 +1740,14 @@ const WhatsAppInbox = () => {
         setMessages(data as any);
       }
 
-      // Mark as read (scoped to the active inbox so the other inbox keeps its unread count)
-      const upd = supabase
-        .from("whatsapp_messages" as any)
-        .update({ is_read: true, read_at: new Date().toISOString() } as any)
-        .eq("phone", selectedPhone)
-        .eq("direction", "inbound")
-        .eq("is_read", false);
-      const readResult = await applyBusinessNumberFilter(upd);
-      if (readResult.error && /business_phone_number/i.test(readResult.error.message || "")) {
-        const legacyUpd = supabase
-          .from("whatsapp_messages" as any)
-          .update({ is_read: true, read_at: new Date().toISOString() } as any)
-          .eq("phone", selectedPhone)
-          .eq("direction", "inbound")
-          .eq("is_read", false);
-        await applyBusinessNumberFilter(legacyUpd, false);
-      }
+      const activeConversation = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+        || conversations.find(c => c.phone === selectedPhone);
+      await (supabase.rpc as any)("mark_whatsapp_conversation_read", {
+        p_phone: selectedPhone,
+        p_provider: businessNumber === "all" ? null : activeConversation?.provider || null,
+        p_business_phone_number_id: businessNumber === "all" ? null : activeConversation?.business_phone_number_id || null,
+        p_business_phone_number: businessNumber === "all" ? null : activeConversation?.business_phone_number || null,
+      });
 
       // Update local unread count
       setConversations(prev =>
@@ -1192,6 +1757,13 @@ const WhatsAppInbox = () => {
   }, [selectedPhone, businessNumber, primaryPnid]);
 
   useEffect(() => {
+    if (demoMode) {
+      setSenderNames(prev => {
+        if (prev["demo-ai"] === "Bot" && prev["demo-profile"] === "Meta QA") return prev;
+        return { ...prev, "demo-ai": "Bot", "demo-profile": "Meta QA" };
+      });
+      return;
+    }
     const userIds = Array.from(new Set(
       messages
         .map(m => m.sender_user_id)
@@ -1223,17 +1795,21 @@ const WhatsAppInbox = () => {
 
   // Realtime subscription
   useEffect(() => {
+    if (demoMode) return;
     const channel = supabase
       .channel("whatsapp-inbox")
       .on("postgres_changes", {
-        event: "INSERT",
+        event: "*",
         schema: "public",
         table: "whatsapp_messages",
       }, (payload: any) => {
         const msg = payload.new as Message & { phone: string; direction: string };
-        // Add to current thread if matching
+        if (!msg?.id) return;
+        const isInsert = payload.eventType === "INSERT";
+        // Add/update current thread if matching. Meta status webhooks update
+        // existing rows as sent -> delivered -> read -> failed.
         if (msg.phone === selectedPhone) {
-          setMessages(prev => [...prev, msg]);
+          setMessages(prev => mergeMessageByIdentity(prev, msg));
         }
         // Update conversation list
         setConversations(prev => {
@@ -1243,10 +1819,12 @@ const WhatsAppInbox = () => {
               c.phone === msg.phone
                 ? {
                     ...c,
-                    last_message: msg.content,
-                    last_direction: msg.direction,
-                    last_message_at: msg.created_at,
-                    unread_count: msg.direction === "inbound" && msg.phone !== selectedPhone
+                    ...(isInsert ? {
+                      last_message: msg.content,
+                      last_direction: msg.direction,
+                      last_message_at: msg.created_at,
+                    } : {}),
+                    unread_count: isInsert && msg.direction === "inbound" && msg.phone !== selectedPhone
                       ? c.unread_count + 1 : c.unread_count,
                   }
                 : c
@@ -1270,14 +1848,35 @@ const WhatsAppInbox = () => {
     const currentSenderName = profile?.display_name || user?.email || "You";
     const messageText = reply.trim();
     const localSenderSignature = `${selectedPhone}:${messageText}`;
-    const { data, error } = await invokeEdge<{ message_id?: string }>("whatsapp-reply", {
+    if (demoMode) {
+      const now = new Date().toISOString();
+      const localMessage: Message = {
+        id: `demo-local-${Date.now()}`,
+        direction: "outbound",
+        content: messageText,
+        message_type: "text",
+        status: "sent",
+        template_key: "manual_reply",
+        media_url: null,
+        created_at: now,
+        sender_user_id: "demo-profile",
+      };
+      setMessages(prev => [...prev, localMessage]);
+      setConversations(prev => prev.map(c => c.phone === selectedPhone
+        ? { ...c, last_message: messageText, last_direction: "outbound", last_message_at: now, unread_count: 0 }
+        : c
+      ));
+      setLocalSenderNamesBySignature(prev => ({ ...prev, [localSenderSignature]: currentSenderName }));
+      setReply("");
+      setSending(false);
+      return;
+    }
+    const { data, error } = await invokeEdge<{ message_id?: string; conversation_message_id?: string | null }>("whatsapp-reply", {
       body: {
         phone: selectedPhone,
         message: messageText,
         lead_id: conv?.lead_id || null,
-        provider: conv?.provider || null,
-        business_phone_number_id: conv?.business_phone_number_id || null,
-        business_number: conv?.business_phone_number || null,
+        ...replyChannelPayload(conv),
       },
     });
 
@@ -1291,6 +1890,14 @@ const WhatsAppInbox = () => {
       setLocalSenderNamesBySignature(prev => ({ ...prev, [localSenderSignature]: currentSenderName }));
       if (data?.message_id) {
         setLocalSenderNamesByWaId(prev => ({ ...prev, [data.message_id!]: currentSenderName }));
+      }
+      if (data?.conversation_message_id) {
+        void invokeEdge("whatsapp-reply-learning", {
+          body: {
+            action: "ingest_message",
+            message_id: data.conversation_message_id,
+          },
+        });
       }
       setReply("");
     }
@@ -1309,7 +1916,52 @@ const WhatsAppInbox = () => {
     const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
       || conversations.find(c => c.phone === selectedPhone);
     const leadName = conv?.lead_name || "Student";
-    const previewText = getTemplatePreview(selectedTemplate);
+    const render = selectedTemplateRender || (selectedTemplateDef
+      ? renderWhatsAppTemplate(selectedTemplateDef, templateRenderContext, templateParamOverrides)
+      : null);
+    const previewText = render?.body || getTemplatePreview(selectedTemplate);
+    const appendTemplateBubble = (status: "sent" | "failed", statusError?: any, waMessageId?: string | null) => {
+      const now = new Date().toISOString();
+      const localMessage: Message = {
+        id: waMessageId ? `local-template-${waMessageId}` : `local-template-${status}-${Date.now()}`,
+        wa_message_id: waMessageId || null,
+        direction: "outbound",
+        content: previewText,
+        message_type: "template",
+        status,
+        template_key: selectedTemplate,
+        media_url: null,
+        created_at: now,
+        sender_user_id: demoMode ? "demo-profile" : user?.id || null,
+        status_error: statusError || null,
+        render_metadata: render,
+      };
+      setMessages(prev => mergeMessageByIdentity(prev, localMessage));
+      setConversations(prev => prev.map(c => c.phone === selectedPhone
+        ? { ...c, last_message: previewText, last_direction: "outbound", last_message_at: now, unread_count: 0 }
+        : c
+      ));
+    };
+
+    if (render?.unresolved.length) {
+      toast({
+        title: "Template details missing",
+        description: `Fill ${render.unresolved.map(k => k.replace(/_/g, " ")).join(", ")} before sending.`,
+        variant: "destructive",
+      });
+      setSendingTemplate(false);
+      return;
+    }
+
+    if (demoMode) {
+      appendTemplateBubble("sent", null, `demo-template-${Date.now()}`);
+      setSelectedTemplate(null);
+      setShowTemplatePicker(false);
+      setTemplateParamOverrides({});
+      setTemplateSearch("");
+      setSendingTemplate(false);
+      return;
+    }
 
     // KB quick-reply templates → send as freeform text via whatsapp-reply
     // These only work within the 24-hour WhatsApp conversation window
@@ -1319,9 +1971,7 @@ const WhatsAppInbox = () => {
           phone: selectedPhone,
           message: previewText,
           lead_id: conv?.lead_id || null,
-          provider: conv?.provider || null,
-          business_phone_number_id: conv?.business_phone_number_id || null,
-          business_number: conv?.business_phone_number || null,
+          ...replyChannelPayload(conv),
         },
       });
       if (error) {
@@ -1337,6 +1987,8 @@ const WhatsAppInbox = () => {
         toast({ title: "Message sent" });
         setSelectedTemplate(null);
         setShowTemplatePicker(false);
+        setTemplateParamOverrides({});
+        setTemplateSearch("");
       }
       setSendingTemplate(false);
       return;
@@ -1360,19 +2012,30 @@ const WhatsAppInbox = () => {
     }
 
     // Meta-approved templates via whatsapp-send
-    let params: string[] = [];
+    let params: string[] = render?.params
+      .filter(param => param.required)
+      .map(param => param.value) || [];
     let buttonUrls: string[] | undefined;
     switch (selectedTemplate) {
-      case "lead_welcome": params = [leadName, courseName, leadSource]; break;
+      case "lead_welcome": params = params.length ? params : [leadName, courseName, leadSource]; break;
       case "visit_confirmation": params = [leadName, "the scheduled date", campusName]; buttonUrls = ["1820424915210710582"]; break;
       case "visit_reminder_24hr": params = [leadName, "tomorrow", campusName]; break;
       case "application_received": params = [leadName, "N/A"]; break;
       case "fee_reminder": params = [leadName, "the pending amount", "the due date"]; break;
       case "course_details": params = [leadName, courseName]; break;
+      case "nimt_followup_v2": params = [leadName, "soon"]; break;
     }
 
-    const { data, error } = await supabase.functions.invoke("whatsapp-send", {
-      body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null, ...(buttonUrls ? { button_urls: buttonUrls } : {}) },
+    const { data, error } = await invokeEdge<any>("whatsapp-send", {
+      body: {
+        template_key: selectedTemplate,
+        phone: selectedPhone,
+        params,
+        lead_id: conv?.lead_id || null,
+        clear_unread_after_send: true,
+        rendered_template: render,
+        ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+      },
     });
 
     if (error) {
@@ -1382,13 +2045,18 @@ const WhatsAppInbox = () => {
         detail = typeof errBody === "string" ? errBody : errBody?.error || errBody?.meta_error || errBody?.message || JSON.stringify(errBody);
       }
       console.error("whatsapp-send template error:", { error, errBody, data });
+      appendTemplateBubble("failed", { message: detail });
       toast({ title: "Failed to send template", description: detail, variant: "destructive" });
     } else if (data?.error) {
+      appendTemplateBubble("failed", { message: data.error });
       toast({ title: "Failed to send template", description: data.error, variant: "destructive" });
     } else {
+      appendTemplateBubble("sent", null, data?.message_id || null);
       toast({ title: "Template sent" });
       setSelectedTemplate(null);
       setShowTemplatePicker(false);
+      setTemplateParamOverrides({});
+      setTemplateSearch("");
     }
     setSendingTemplate(false);
   };
@@ -1397,27 +2065,102 @@ const WhatsAppInbox = () => {
   const getTemplatePreview = (templateKey: string): string => {
     const tmpl = INBOX_TEMPLATES.find(t => t.key === templateKey);
     if (!tmpl) return "";
-    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
-      || conversations.find(c => c.phone === selectedPhone);
-    const leadName = conv?.lead_name || "Student";
-
-    const values: Record<string, string> = {
-      student_name: leadName,
-      course_name: "your selected course",
-      visit_date: "your scheduled date",
-      campus_name: "our campus",
-      application_id: "N/A",
-      amount: "the pending amount",
-      due_date: "the due date",
-    };
-
-    return tmpl.preview.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
+    return renderWhatsAppTemplate(tmpl, templateRenderContext, templateParamOverrides).body;
   };
 
   const selectedConv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
     || conversations.find(c => c.phone === selectedPhone);
 
+  const selectedTemplateDef = selectedTemplate
+    ? INBOX_TEMPLATES.find(t => t.key === selectedTemplate) || null
+    : null;
+
+  const templateRenderContext = {
+    student_name: selectedCourseInfo?.student_name || selectedConv?.lead_name || null,
+    course_name: selectedCourseInfo?.course_name || selectedConv?.course_name || null,
+    course_label: selectedCourseInfo?.course_name || selectedConv?.course_name || null,
+    lead_source: selectedConv?.lead_source || "WhatsApp enquiry",
+    campus_name: selectedCourseInfo?.campus_name || "NIMT campus",
+    visit_date: "the scheduled date",
+    followup_date: "soon",
+    application_id: "N/A",
+    amount: "the pending amount",
+    due_date: "the due date",
+    duration: selectedCourseInfo?.duration || null,
+    eligibility: selectedCourseInfo?.eligibility || null,
+    approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
+    video_url: selectedCourseInfo?.video_url || null,
+    course_url: selectedCourseInfo?.course_url || "https://nimt.ac.in/courses",
+    campus_url: selectedCourseInfo?.campus_url || "https://nimt.ac.in/contact",
+    apply_url: selectedCourseInfo?.apply_url || "https://uni.nimt.ac.in/apply/nimt",
+  };
+
+  const selectedTemplateRender = selectedTemplateDef
+    ? renderWhatsAppTemplate(selectedTemplateDef, templateRenderContext, templateParamOverrides)
+    : null;
+
+  const visibleTemplates = INBOX_TEMPLATES
+    .filter(t => {
+      if (!templateSearch.trim()) return true;
+      const q = templateSearch.toLowerCase();
+      return [t.label, t.key, t.description, inferWhatsAppTemplateCategory(t.key)]
+        .some(value => value.toLowerCase().includes(q));
+    });
+
+  const templateGroups = visibleTemplates.reduce<Record<string, WhatsAppTemplateDefinition[]>>((groups, template) => {
+    const category = template.category || inferWhatsAppTemplateCategory(template.key);
+    if (!groups[category]) groups[category] = [];
+    groups[category].push(template);
+    return groups;
+  }, {});
+
   useEffect(() => {
+    setCopilotResult(null);
+    setCopilotError(null);
+    setShowCopilotPanel(false);
+  }, [selectedPhone, businessNumber, isHrScope]);
+
+  const runCopilotAssist = async () => {
+    if (!selectedPhone) return;
+    setShowCopilotPanel(true);
+    setCopilotLoading(true);
+    setCopilotError(null);
+
+    const { data, error } = await invokeEdge<CopilotAssistResult>("whatsapp-copilot-assist", {
+      body: {
+        phone: selectedPhone,
+        lead_id: selectedConv?.lead_id || null,
+        ...replyChannelPayload(selectedConv),
+      },
+    });
+
+    setCopilotLoading(false);
+    if (error) {
+      const message = error.sessionExpired ? "Session expired. Please sign in again." : error.message;
+      setCopilotError(message);
+      toast({ title: "Copilot unavailable", description: message, variant: "destructive" });
+      return;
+    }
+    if (data) setCopilotResult(data);
+  };
+
+  useEffect(() => {
+    if (demoMode) {
+      if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); return; }
+      setSelectedCourseInfo({
+        student_name: selectedConv.lead_name || "Student",
+        course_name: selectedConv.course_name || "B.Sc Nursing",
+        duration: selectedConv.course_name === "MBA" ? "2 years" : "4 years",
+        eligibility: "10+2 / graduation as per programme norms",
+        approval: "NIMT Educational Institutions",
+        campus_name: "Greater Noida campus",
+        video_url: "https://nimt.ac.in/courses",
+        course_url: "https://nimt.ac.in/courses",
+        campus_url: "https://nimt.ac.in/contact",
+        apply_url: "https://uni.nimt.ac.in/apply/nimt",
+      });
+      return;
+    }
     if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); return; }
     let cancelled = false;
     (async () => {
@@ -1429,27 +2172,91 @@ const WhatsAppInbox = () => {
     return () => { cancelled = true; };
   }, [selectedConv?.lead_id]);
 
+  const getTemplateDefinition = (templateKey: string): WhatsAppTemplateDefinition | null => {
+    const knownTemplate = INBOX_TEMPLATES.find(t => t.key === templateKey);
+    if (knownTemplate) return knownTemplate;
+    const preview = TEMPLATE_MESSAGE_TEXTS[templateKey];
+    if (!preview) return null;
+    return {
+      key: templateKey,
+      label: templateKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+      description: "Meta-approved WhatsApp template",
+      params: Array.from(new Set(
+        Array.from(preview.matchAll(/\{\{(\w+)\}\}/g))
+          .map(match => match[1])
+          .filter(key => !/^\d+$/.test(key))
+      )),
+      preview,
+      category: inferWhatsAppTemplateCategory(templateKey),
+      status: "approved",
+    };
+  };
+
   const renderStoredTemplate = (templateKey: string) => {
     const text = TEMPLATE_MESSAGE_TEXTS[templateKey];
     if (!text) return null;
     const values: Record<string, string> = {
       student_name: selectedCourseInfo?.student_name || selectedConv?.lead_name || "Student",
       course_name: selectedCourseInfo?.course_name || selectedConv?.course_name || "your selected course",
+      course_label: selectedCourseInfo?.course_name || selectedConv?.course_name || "your selected course",
+      lead_source: selectedConv?.lead_source || "WhatsApp enquiry",
+      campus_name: selectedCourseInfo?.campus_name || "NIMT campus",
+      visit_date: "the scheduled date",
+      followup_date: "soon",
+      application_id: "N/A",
+      amount: "the pending amount",
+      due_date: "the due date",
       duration: selectedCourseInfo?.duration || "course duration",
       eligibility: selectedCourseInfo?.eligibility || "eligibility criteria",
       approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
       video_url: selectedCourseInfo?.video_url || "course video link",
+      course_url: selectedCourseInfo?.course_url || "https://nimt.ac.in/courses",
+      campus_url: selectedCourseInfo?.campus_url || "https://nimt.ac.in/contact",
+      apply_url: selectedCourseInfo?.apply_url || "https://uni.nimt.ac.in/apply/nimt",
+      "1": selectedCourseInfo?.student_name || selectedConv?.lead_name || "Student",
+      "2": selectedCourseInfo?.course_name || selectedConv?.course_name || "your selected course",
+      "3": selectedCourseInfo?.course_url || selectedCourseInfo?.duration || "https://nimt.ac.in/courses",
+      "4": selectedCourseInfo?.campus_url || selectedCourseInfo?.eligibility || "https://nimt.ac.in/contact",
+      "5": selectedCourseInfo?.apply_url || selectedCourseInfo?.approval || "https://uni.nimt.ac.in/apply/nimt",
+      "6": selectedCourseInfo?.video_url || "course video link",
     };
     return text.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
   };
 
   const getMessageText = (m: Message) => {
+    const rendered = getRenderedMessageTemplate(m);
+    if (rendered?.body) return rendered.body;
     const fallback = m.content || `[${m.message_type}]`;
     if (!m.template_key) return fallback;
     const match = fallback.match(TEMPLATE_PLACEHOLDER_RE);
     if (!match) return fallback;
     const key = match[1].trim().replace(/\s+/g, "_");
     return renderStoredTemplate(m.template_key) || renderStoredTemplate(key) || fallback;
+  };
+
+  const getRenderedMessageTemplate = (m: Message): RenderedWhatsAppTemplate | null => {
+    const metadata = (m as any).render_metadata;
+    const normalizedMetadata = normalizeRenderedWhatsAppTemplate(metadata);
+    if (normalizedMetadata) return normalizedMetadata;
+    if (!m.template_key) return null;
+    const template = getTemplateDefinition(m.template_key);
+    if (!template) return null;
+    const placeholderOnly = Boolean(m.content?.match(TEMPLATE_PLACEHOLDER_RE));
+    const rendered = renderWhatsAppTemplate(template, templateRenderContext);
+    const body = rendered.body || (!placeholderOnly ? m.content : "") || renderStoredTemplate(m.template_key) || "";
+    if (!body) return null;
+    return {
+      key: template.key,
+      label: template.label,
+      language: template.language || "en",
+      category: template.category || inferWhatsAppTemplateCategory(template.key),
+      status: template.status || "approved",
+      body,
+      params: rendered.params,
+      unresolved: [],
+      buttons: template.buttons || [],
+      footer: template.footer,
+    };
   };
 
   const getConversationPreview = (c: Conversation) => {
@@ -1493,10 +2300,23 @@ const WhatsAppInbox = () => {
   };
 
   const markLeadStage = async (leadId: string, stage: string) => {
-    await supabase.from("leads").update({ stage: stage as any }).eq("id", leadId);
-    setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: stage } : c));
+    const commandByStage: Record<string, WorkflowLeadTransitionCommandName> = {
+      not_interested: "classifyNotInterested",
+      ineligible: "classifyIneligible",
+      new_lead: "classifyLead",
+      dnc: "markDnc",
+    };
+    const command = commandByStage[stage];
+    if (!command) return;
 
-    const message = STAGE_WA_MESSAGES[stage];
+    const currentStage = selectedConv?.lead_id === leadId ? selectedConv.lead_stage || "new_lead" : "new_lead";
+    const transition = resolveLeadTransitionCommand({ currentStage, command });
+    if (!transition.newStage) return;
+
+    await applyResolvedLeadTransition(supabase as any, { leadId, transition });
+    setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: transition.newStage } : c));
+
+    const message = STAGE_WA_MESSAGES[transition.newStage || stage];
     if (!message || !selectedPhone) {
       toast({ title: "Stage updated" });
       return;
@@ -1505,13 +2325,11 @@ const WhatsAppInbox = () => {
     const { error: replyErr } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-          message,
-          lead_id: leadId,
-          provider: selectedConv?.provider || null,
-          business_phone_number_id: selectedConv?.business_phone_number_id || null,
-          business_number: selectedConv?.business_phone_number || null,
-        },
-      });
+        message,
+        lead_id: leadId,
+        ...replyChannelPayload(selectedConv),
+      },
+    });
 
     if (replyErr) {
       toast({
@@ -1536,6 +2354,9 @@ const WhatsAppInbox = () => {
     // Fallback: first letters of major words
     return name.split(/\s+/).filter(w => w.length > 2 && w[0] === w[0].toUpperCase()).map(w => w[0]).join("").slice(0, 4) || name.slice(0, 6);
   };
+
+  const sourceLabel = (source: string | null) =>
+    source ? source.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : null;
 
   // Format phone: strip 91 prefix for Indian numbers, keep ISD for others
   const formatPhone = (phone: string) => {
@@ -1566,6 +2387,13 @@ const WhatsAppInbox = () => {
     c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
   const isUnassignedOps = (c: Conversation) =>
     !c.owner_user_id && !c.counsellor_id && c.has_inbound;
+  const isWithinMetaReplyWindow = (iso: string | null | undefined) =>
+    Boolean(iso && Date.now() - new Date(iso).getTime() < 24 * 60 * 60 * 1000);
+  const isReplyWindowConversation = (c: Conversation) =>
+    c.has_inbound
+    && c.last_direction === "inbound"
+    && c.lead_stage !== "dnc"
+    && isWithinMetaReplyWindow(c.last_message_at);
 
   // Apply mode filter (inbox vs outbound) to get the working set
   const modeFiltered = allConvs.filter(c => {
@@ -1576,6 +2404,7 @@ const WhatsAppInbox = () => {
   });
 
   const filtered = modeFiltered.filter(c => {
+    if (opsFilter === "reply_window" && !isReplyWindowConversation(c)) return false;
     if (opsFilter === "handoff" && !isHandoffConversation(c)) return false;
     if (opsFilter === "sla" && !isSlaBreached(c)) return false;
     if (opsFilter === "knowledge" && !isKnowledgeGap(c)) return false;
@@ -1598,7 +2427,13 @@ const WhatsAppInbox = () => {
       );
     }
     return true;
-  }).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+  }).sort((a, b) => {
+    const aReplyNow = isReplyWindowConversation(a) ? 1 : 0;
+    const bReplyNow = isReplyWindowConversation(b) ? 1 : 0;
+    if (aReplyNow !== bReplyNow) return bReplyNow - aReplyNow;
+    if (a.unread_count !== b.unread_count) return b.unread_count - a.unread_count;
+    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+  });
 
   const totalUnreadMsgs = modeFiltered.reduce((s, c) => s + c.unread_count, 0);
   const totalUnrepliedConvs = modeFiltered.filter(c => c.unread_count > 0).length;
@@ -1613,6 +2448,7 @@ const WhatsAppInbox = () => {
   const otherUnreplied = otherConvs.filter(c => c.unread_count > 0).length;
   const opsFilters = [
     { key: "all" as const, label: "All ops", count: modeFiltered.length },
+    { key: "reply_window" as const, label: "Reply now", count: modeFiltered.filter(isReplyWindowConversation).length },
     { key: "handoff" as const, label: "Handoff", count: modeFiltered.filter(isHandoffConversation).length },
     { key: "sla" as const, label: "SLA", count: modeFiltered.filter(isSlaBreached).length },
     { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
@@ -1671,11 +2507,20 @@ const WhatsAppInbox = () => {
     );
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return (
+    <div className="flex h-64 flex-col items-center justify-center gap-3">
+      <div className="flex gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
+      </div>
+      <span className="text-xs text-muted-foreground">Loading conversations...</span>
+    </div>
+  );
 
   return (
-    <div className="animate-fade-in">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="animate-fade-in overflow-hidden">
+      <div className="mb-3 hidden items-center justify-between gap-3 sm:flex">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
             {isOutboundMode
@@ -1690,19 +2535,31 @@ const WhatsAppInbox = () => {
                 : "All caught up"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {hasOtherInbox && !isHrScope && (
-            <select
-              value={businessNumber}
-              onChange={e => { setBusinessNumber(e.target.value); setSelectedPhone(null); }}
-              className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50"
-              title="Select inbox"
-            >
-              <option value="primary">{primaryInboxLabel}</option>
-              {otherInboxes.map(o => (
-                <option key={o.id} value={o.id}>{o.label}</option>
-              ))}
-            </select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex min-w-[260px] items-center gap-2 rounded-lg border border-input bg-background px-3 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  title="Select inbox"
+                >
+                  <WhatsAppInboxIdentity option={selectedInboxOption} compact />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[360px] p-1.5">
+                {inboxPickerOptions.map(option => (
+                  <DropdownMenuItem
+                    key={option.id}
+                    onSelect={() => { setBusinessNumber(option.id); setSelectedPhone(null); }}
+                    className="cursor-pointer p-0 focus:bg-muted"
+                  >
+                    <WhatsAppInboxIdentity option={option} selected={option.id === businessNumber} />
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {isAdminRole(role) && (
             <button
@@ -1734,18 +2591,18 @@ const WhatsAppInbox = () => {
         </div>
       </div>
 
-      <Card className="border-border/60 shadow-none overflow-hidden">
-        <div className="flex h-[calc(100vh-180px)]">
+      <Card className="overflow-hidden rounded-none border-border/70 bg-[#f0f2f5] shadow-sm sm:rounded-lg">
+        <div className="flex h-screen min-h-[620px] sm:h-[calc(100vh-168px)]">
           {/* Conversation list */}
-          <div className={`w-full sm:w-80 lg:w-96 border-r border-border flex flex-col ${selectedPhone ? "hidden sm:flex" : "flex"}`}>
+          <div className={`w-full bg-white sm:w-80 lg:w-96 border-r border-slate-200 flex flex-col ${selectedPhone ? "hidden sm:flex" : "flex"}`}>
             {/* Filter pills */}
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
                 { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnrepliedConvs, color: "bg-primary/10 text-primary border-primary/30" },
-                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-blue-50 text-blue-700 border-blue-200" },
-                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-violet-50 text-violet-700 border-violet-200" },
-                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-purple-50 text-purple-700 border-purple-200" },
-                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-amber-50 text-amber-700 border-amber-200" },
+                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-info/5 text-info-foreground border-info/20" },
+                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-warning/5 text-warning-foreground border-warning/20" },
               ]).map((t) => (
                 <button
                   key={t.key}
@@ -1755,7 +2612,7 @@ const WhatsAppInbox = () => {
                   }`}
                 >
                   {t.label} {t.count}{t.unreplied > 0 && (
-                    <span className="ml-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-green-500 px-0.5 text-[8px] font-bold text-white">{t.unreplied}</span>
+                    <span className="ml-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-success/50 px-0.5 text-[8px] font-bold text-white">{t.unreplied}</span>
                   )}
                 </button>
               ))}
@@ -1781,25 +2638,42 @@ const WhatsAppInbox = () => {
 
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
-              <div className="px-3 py-2 border-b border-border bg-muted/20">
-                <select
+              <div className="px-3 py-2 border-b border-border bg-muted/20 flex items-center gap-2">
+                <SelectField
                   value={counsellorFilter}
-                  onChange={(e) => { setCounsellorFilter(e.target.value); setUnrepliedOnly(false); }}
-                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20"
+                  onValueChange={(value) => { setCounsellorFilter(value); setUnrepliedOnly(false); }}
+                  options={[
+                    { value: "all", label: "All Counsellors" },
+                    { value: "unassigned", label: "Unassigned" },
+                    ...counsellorList.map((cc) => ({ value: cc.id, label: cc.name })),
+                  ]}
+                  allowEmpty={false}
+                  triggerClassName="h-8 w-full rounded-md border border-input bg-background px-2 py-1 text-xs focus:ring-1 focus:ring-ring/20"
+                  ariaLabel="Filter WhatsApp conversations by counsellor"
+                />
+                <button
+                  onClick={() => {
+                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    if (ids.length === 0) {
+                      toast({ title: "No leads", description: "No leads in the current view to assign.", variant: "destructive" });
+                      return;
+                    }
+                    setTransferLeadIds(ids);
+                    setTransferLeadNames([]);
+                    setTransferOpen(true);
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-primary/25 bg-primary/5 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                  title="Bulk assign/reassign all leads in current filtered view"
                 >
-                  <option value="all">All Counsellors</option>
-                  <option value="unassigned">Unassigned</option>
-                  {counsellorList.map((cc) => (
-                    <option key={cc.id} value={cc.id}>{cc.name}</option>
-                  ))}
-                </select>
+                  <UserPlus className="h-3 w-3" /> Bulk Assign
+                </button>
               </div>
             )}
 
             <div className="p-3 border-b border-border">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
+                <Input
                   type="text"
                   placeholder="Search conversations..."
                   value={search}
@@ -1811,10 +2685,10 @@ const WhatsAppInbox = () => {
 
             {/* Admin: unreplied breakdown panel */}
             {isAdminRole(role) && unrepliedByCC.length > 0 && (
-              <div className="border-b border-border bg-amber-50/60 dark:bg-amber-950/20">
+              <div className="border-b border-border bg-warning/5/60 dark:bg-warning/90/20">
                 <button
                   onClick={() => setUnrepliedPanelOpen(v => !v)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide hover:bg-amber-100/40 dark:hover:bg-amber-900/20 transition-colors"
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-warning-foreground dark:text-warning uppercase tracking-wide hover:bg-warning/10/40 dark:hover:bg-warning/80/20 transition-colors"
                 >
                   <span>Unreplied by Counsellor</span>
                   <ChevronDown className={`h-3 w-3 transition-transform ${unrepliedPanelOpen ? "rotate-180" : ""}`} />
@@ -1828,8 +2702,8 @@ const WhatsAppInbox = () => {
                         className={`rounded-full px-2 py-0.5 text-[10px] font-medium border transition-colors ${
                           (item.id === "__unassigned__" && counsellorFilter === "unassigned") ||
                           (item.id !== "__unassigned__" && counsellorFilter === item.id)
-                            ? "bg-amber-500 border-amber-500 text-white"
-                            : "bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800/40"
+                            ? "bg-warning/50 border-warning/35 text-white"
+                            : "bg-warning/10 dark:bg-warning/80/30 border-warning/30 dark:border-warning/50 text-warning-foreground dark:text-warning/70 hover:bg-warning/15 dark:hover:bg-warning/70/40"
                         }`}
                       >
                         {item.name}: {item.count}
@@ -1842,9 +2716,9 @@ const WhatsAppInbox = () => {
 
             {/* Unreplied-only active indicator */}
             {unrepliedOnly && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-amber-500/10 border-b border-amber-300/40">
-                <span className="text-[10px] font-medium text-amber-700">Showing unreplied only</span>
-                <button onClick={() => setUnrepliedOnly(false)} className="text-[10px] text-amber-700 hover:underline">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-warning/50/10 border-b border-warning/30/40">
+                <span className="text-[10px] font-medium text-warning-foreground">Showing unreplied only</span>
+                <button onClick={() => setUnrepliedOnly(false)} className="text-[10px] text-warning-foreground hover:underline">
                   Show all
                 </button>
               </div>
@@ -1873,49 +2747,60 @@ const WhatsAppInbox = () => {
                         <button
                           key={`${c.phone}:${c.business_phone_number_id || ""}`}
                           onClick={() => setSelectedPhone(c.phone)}
-                          className={`w-full text-left px-4 py-3 border-b border-border/40 hover:bg-muted/30 transition-colors ${selectedPhone === c.phone ? "bg-muted/50" : ""}`}
-                        >
+                            className={`w-full text-left px-3 py-2.5 border-b border-slate-100 transition-colors ${selectedPhone === c.phone ? "bg-[#f0f2f5]" : "hover:bg-[#f5f6f6]"}`}
+                          >
                           <div className="flex items-start justify-between gap-2">
+                            <Avatar className="mt-0.5 h-10 w-10 shrink-0 bg-slate-100">
+                              <AvatarFallback className="bg-success/10 text-xs font-semibold text-success">
+                                {getDisplayName(c).slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5">
                                 <span className={`text-sm truncate ${c.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>
                                   {getDisplayName(c)}
                                 </span>
                                 {isStaffConv(c) && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-violet-300 text-violet-600 dark:text-violet-400">Staff</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-primary/25 text-primary dark:text-primary/60">Staff</Badge>
                                 )}
                                 {c.lead_id && (!c.lead_person_role || c.lead_person_role === "lead" || c.lead_person_role === "applicant") && !isStaffConv(c) && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-blue-300 text-blue-600">Admission</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-info/30 text-info-foreground">Admission</Badge>
                                 )}
                                 {c.lead_person_role === "job_applicant" && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-purple-300 text-purple-600">Job</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-primary/25 text-primary">Job</Badge>
                                 )}
                                 {c.lead_person_role === "vendor" && (
-                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-amber-300 text-amber-600">Vendor</Badge>
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-warning/30 text-warning-foreground">Vendor</Badge>
                                 )}
                                 {c.lead_person_role === "other" && (
                                   <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-gray-300 text-gray-500">Other</Badge>
                                 )}
-                                {c.unread_count > 0 && (
-                                  <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-500 px-1 text-[9px] font-bold text-white">
-                                    {c.unread_count}
-                                  </span>
+                                {isReplyWindowConversation(c) && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-success/30 bg-success/5 text-success">24h</Badge>
                                 )}
                               </div>
                               <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                                 {formatPhone(c.phone)}
-                                {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                                {c.course_name && <span className="px-1 rounded bg-info/5 text-info-foreground text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                                {c.lead_source && <span className="px-1 rounded bg-success/5 text-success text-[8px] font-medium capitalize">{sourceLabel(c.lead_source)}</span>}
                                 {c.counsellor_name && !isStaffConv(c) && (
                                   <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
                                 )}
                               </p>
-                              <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground"}`}>
+                              <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-slate-800" : "text-slate-500"}`}>
                                 {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{getConversationPreview(c).replace(/\\n/g, " ")}
                               </p>
                             </div>
-                            <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-green-600 font-semibold" : "text-muted-foreground"}`}>
-                              {formatTime(c.last_message_at)}
-                            </span>
+                            <div className="flex shrink-0 flex-col items-end gap-1">
+                              <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-success font-semibold" : "text-muted-foreground"}`}>
+                                {formatTime(c.last_message_at)}
+                              </span>
+                              {c.unread_count > 0 && (
+                                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[10px] font-bold text-white">
+                                  {c.unread_count}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </button>
                       ))}
@@ -1959,145 +2844,194 @@ const WhatsAppInbox = () => {
             ) : (
               <>
                 {/* Thread header */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-[#f0f2f5] px-3 py-2.5 flex-wrap lg:flex-nowrap">
                   <Button variant="ghost" size="icon" className="sm:hidden h-8 w-8" onClick={() => setSelectedPhone(null)}>
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-                    <User className="h-4 w-4 text-primary" />
-                  </div>
+                  <Avatar className="h-10 w-10 bg-slate-200">
+                    <AvatarFallback className="bg-success/10 text-sm font-semibold text-success">
+                      {(selectedConv?.lead_name || selectedPhone || "WA").slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
-	                      {selectedConv?.counsellor_name && (
-	                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
-	                          <User className="h-2.5 w-2.5" />
-	                          {selectedConv.counsellor_name}
-	                        </span>
-	                      )}
                       {selectedConv?.conversation_state && (
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 whitespace-nowrap">
                           {stateLabel(selectedConv.conversation_state)}
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {selectedPhone ? formatPhone(selectedPhone) : ""}
                       {selectedConv?.course_name && (
                         <span
-                          className="px-1.5 py-0 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold cursor-pointer hover:bg-blue-200 transition-colors"
+                          className="inline-block max-w-[32rem] px-1.5 py-0 rounded bg-info/10 text-info-foreground text-[9px] font-semibold cursor-pointer hover:bg-info/15 transition-colors truncate"
                           title={`${selectedConv.course_name} — click to copy`}
                           onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
-                        >{courseAcronym(selectedConv.course_name)}</span>
+                        >Course: {selectedConv.course_name}</span>
+                      )}
+                      {selectedConv?.lead_source && (
+                        <span
+                          className="px-1.5 py-0 rounded bg-success/5 text-success text-[9px] font-semibold capitalize"
+                          title={`Lead source: ${sourceLabel(selectedConv.lead_source)}`}
+                        >Source: {sourceLabel(selectedConv.lead_source)}</span>
                       )}
                     </p>
                   </div>
-                  {conversationBusinessKey(selectedConv) && aiMode && (
+                  <div className="ml-auto flex min-w-0 basis-full items-center gap-2 overflow-x-auto pb-1 sm:basis-auto sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
+                    {selectedConv?.counsellor_name && (
+                      <button
+                        type="button"
+                        title={`${selectedConv.counsellor_name} — click to copy`}
+                        onClick={() => { navigator.clipboard.writeText(selectedConv.counsellor_name!); toast({ title: "Copied", description: selectedConv.counsellor_name }); }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 dark:bg-primary/80/30 border border-primary/20 dark:border-primary/50 px-2.5 py-1.5 text-xs font-medium text-primary dark:text-primary/50 whitespace-nowrap hover:bg-primary/15 dark:hover:bg-primary/80/50 transition-colors"
+                      >
+                        <User className="h-3 w-3" />
+                        {selectedConv.counsellor_name}
+                      </button>
+                    )}
+                    {isAdminRole(role) && selectedConv?.lead_id && (
+                      <button
+                        onClick={() => {
+                          setTransferLeadIds([selectedConv.lead_id!]);
+                          setTransferLeadNames([selectedConv.lead_name || selectedPhone || ""]);
+                          setTransferOpen(true);
+                        }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary/25 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                        title={selectedConv.counsellor_name ? "Reassign to a different counsellor" : "Assign a counsellor"}
+                      >
+                        <ArrowRightLeft className="h-3 w-3" />
+                        {selectedConv.counsellor_name ? "Reassign" : "Assign"}
+                      </button>
+                    )}
+                    {conversationBusinessKey(selectedConv) && aiMode && (
+                      <button
+                        onClick={toggleAiMode}
+                        disabled={aiModeSaving}
+                        title={aiMode === "human"
+                          ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
+                          : "AI auto-reply is on. Click to pause and handle this chat manually."}
+                        className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
+                          ? "border-warning/30 bg-warning/5 text-warning-foreground hover:bg-warning/10 dark:border-warning/50 dark:bg-warning/80/30 dark:text-warning/70"
+                          : "border-success/30 bg-success/5 text-success hover:bg-success/10 dark:border-success/50 dark:bg-success/80/30 dark:text-success/60"}`}
+                      >
+                        {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
+                      </button>
+                    )}
                     <button
-                      onClick={toggleAiMode}
-                      disabled={aiModeSaving}
-                      title={aiMode === "human"
-                        ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
-                        : "AI auto-reply is on. Click to pause and handle this chat manually."}
-                      className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
-                        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                        : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
-                    >
-                      {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
-                    </button>
-                  )}
-                  {selectedConv?.lead_id && (
-                    <button
-                      onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
-                      className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
-                    >
-                      View Lead <ExternalLink className="h-3 w-3" />
-                    </button>
-                  )}
-                  {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
-                    <Button
-                      variant="ghost" size="sm"
-                      className="gap-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={async () => {
-                        if (!selectedConv?.lead_id) return;
-                        // Mark DNC first; then send the farewell with bypass_dnc
-                        // so the edge function's own DNC guard doesn't swallow it.
-                        const dncLeadId = selectedConv.lead_id;
-                        await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", dncLeadId);
-                        const { error: replyErr } = await invokeEdge("whatsapp-reply", {
-                          body: {
-                            phone: selectedPhone,
-                            message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
-                            lead_id: dncLeadId,
-                            bypass_dnc: true,
-                            provider: selectedConv?.provider || null,
-                            business_phone_number_id: selectedConv?.business_phone_number_id || null,
-                            business_number: selectedConv?.business_phone_number || null,
-                          },
-                        });
-                        // Reflect new DNC status locally so composer disables immediately
-                        // without waiting for a view refetch.
-                        setConversations(prev => prev.map(c =>
-                          c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
-                        ));
-                        if (replyErr) {
-                          toast({
-                            title: "Lead marked DNC",
-                            description: replyErr.sessionExpired
-                              ? "Marked, but session expired — sign in again to send the farewell."
-                              : `Marked, but farewell send failed: ${replyErr.message || "unknown error"}`,
-                            variant: "destructive",
-                          });
+                      onClick={() => {
+                        if (copilotResult || copilotError) {
+                          setShowCopilotPanel(v => !v);
                         } else {
-                          toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                          void runCopilotAssist();
                         }
                       }}
+                      disabled={copilotLoading}
+                      className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${
+                        showCopilotPanel
+                          ? "border-primary/25 bg-primary/5 text-primary hover:bg-primary/10"
+                          : "border-input bg-background text-muted-foreground hover:bg-muted/50"
+                      }`}
                     >
-                      <Ban className="h-3 w-3" /> Mark DNC
-                    </Button>
-                  )}
-                  {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-2 py-1 rounded-md">
-                      <Ban className="h-3 w-3" /> DNC
-                    </span>
-                  )}
+                      {copilotLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
+                      Copilot
+                    </button>
+                    {selectedConv?.lead_id && (
+                      <button
+                        onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
+                        className="flex shrink-0 items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                      >
+                        View Lead <ExternalLink className="h-3 w-3" />
+                      </button>
+                    )}
+                    {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
+                      <Button
+                        variant="ghost" size="sm"
+                        className="shrink-0 gap-1 text-xs text-destructive hover:text-destructive hover:bg-destructive/5"
+                        onClick={async () => {
+                          if (!selectedConv?.lead_id) return;
+                          // Mark DNC first; then send the farewell with bypass_dnc
+                          // so the edge function's own DNC guard doesn't swallow it.
+                          const dncLeadId = selectedConv.lead_id;
+                          const transition = resolveLeadTransitionCommand({
+                            currentStage: selectedConv.lead_stage || "new_lead",
+                            command: "markDnc",
+                          });
+                          await applyResolvedLeadTransition(supabase as any, { leadId: dncLeadId, transition });
+                          const { error: replyErr } = await invokeEdge("whatsapp-reply", {
+                            body: {
+                              phone: selectedPhone,
+                              message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
+                              lead_id: dncLeadId,
+                              bypass_dnc: true,
+                              ...replyChannelPayload(selectedConv),
+                            },
+                          });
+                          // Reflect new DNC status locally so composer disables immediately
+                          // without waiting for a view refetch.
+                          setConversations(prev => prev.map(c =>
+                            c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
+                          ));
+                          if (replyErr) {
+                            toast({
+                              title: "Lead marked DNC",
+                              description: replyErr.sessionExpired
+                                ? "Marked, but session expired — sign in again to send the farewell."
+                                : `Marked, but farewell send failed: ${replyErr.message || "unknown error"}`,
+                              variant: "destructive",
+                            });
+                          } else {
+                            toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                          }
+                        }}
+                      >
+                        <Ban className="h-3 w-3" /> Mark DNC
+                      </Button>
+                    )}
+                    {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-destructive bg-destructive/5 dark:bg-destructive/90/40 border border-destructive/20 dark:border-destructive/50 px-2 py-1 rounded-md">
+                        <Ban className="h-3 w-3" /> DNC
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {/* Quick lead actions — only for lead conversations */}
                 {selectedConv?.lead_id && selectedConv?.lead_person_role !== "job_applicant" && selectedConv?.lead_person_role !== "vendor" && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-amber-50/40 dark:bg-amber-950/10 flex-wrap">
+                  <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5 border-b border-border bg-warning/5/40 dark:bg-warning/90/10 sm:flex-wrap">
                     <span className="text-[9px] text-muted-foreground mr-0.5 shrink-0">Quick:</span>
                     {selectedConv?.lead_stage !== "not_interested" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-[10px] font-medium hover:bg-red-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-destructive/20 bg-destructive/5 text-destructive text-[10px] font-medium hover:bg-destructive/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "not_interested")}
                       ><ThumbsDown className="h-3 w-3" /> Not Interested</button>
                     )}
                     {selectedConv?.lead_stage !== "ineligible" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-orange-200 bg-orange-50 text-orange-700 text-[10px] font-medium hover:bg-orange-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-warning/20 bg-warning/5 text-warning-foreground text-[10px] font-medium hover:bg-warning/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "ineligible")}
                       ><AlertOctagon className="h-3 w-3" /> Ineligible</button>
                     )}
                     {selectedConv?.lead_stage !== "new_lead" && selectedConv?.lead_stage !== "application_in_progress" && (
                       <button
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-green-200 bg-green-50 text-green-700 text-[10px] font-medium hover:bg-green-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-success/20 bg-success/5 text-success text-[10px] font-medium hover:bg-success/10 transition-colors"
                         onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "new_lead")}
                       ><ThumbsUp className="h-3 w-3" /> Interested</button>
                     )}
                     <button
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-[10px] font-medium hover:bg-blue-100 transition-colors"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-info/20 bg-info/5 text-info-foreground text-[10px] font-medium hover:bg-info/10 transition-colors"
                       onClick={() => { setFollowupDate(""); setFollowupNote(""); setFollowupOpen(true); }}
                     ><CalendarPlus className="h-3 w-3" /> Create Followup</button>
                   </div>
                 )}
 
                 {/* Category bar — visible for all conversations */}
-                <div className="flex items-center gap-1 px-3 py-1 border-b border-border bg-muted/20">
+                <div className="flex items-center gap-1 overflow-x-auto px-3 py-1 border-b border-border bg-muted/20">
                   <span className="text-[9px] text-muted-foreground mr-1 shrink-0">Mark as:</span>
                   {([
-                    { value: "lead", label: "Admission", color: "border-blue-300 bg-blue-50 text-blue-700", activeColor: "ring-2 ring-blue-400 bg-blue-100" },
-                    { value: "job_applicant", label: "Job Applicant", color: "border-purple-300 bg-purple-50 text-purple-700", activeColor: "ring-2 ring-purple-400 bg-purple-100" },
-                    { value: "vendor", label: "Vendor", color: "border-amber-300 bg-amber-50 text-amber-700", activeColor: "ring-2 ring-amber-400 bg-amber-100" },
+                    { value: "lead", label: "Admission", color: "border-info/30 bg-info/5 text-info-foreground", activeColor: "ring-2 ring-blue-400 bg-info/10" },
+                    { value: "job_applicant", label: "Job Applicant", color: "border-primary/25 bg-primary/5 text-primary", activeColor: "ring-2 ring-purple-400 bg-primary/10" },
+                    { value: "vendor", label: "Vendor", color: "border-warning/30 bg-warning/5 text-warning-foreground", activeColor: "ring-2 ring-amber-400 bg-warning/10" },
                     { value: "other", label: "Other", color: "border-gray-300 bg-gray-50 text-gray-600", activeColor: "ring-2 ring-gray-400 bg-gray-100" },
                   ] as const).map(cat => {
                     const currentRole = selectedConv?.lead_person_role || "lead";
@@ -2157,26 +3091,197 @@ const WhatsAppInbox = () => {
                   })}
                 </div>
 
+                {showCopilotPanel && (
+                  <div className="border-b border-border bg-primary/5/50 dark:bg-primary/90/20">
+                    <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-primary/10 dark:border-primary/60/50">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Bot className="h-4 w-4 shrink-0 text-primary dark:text-primary/50" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-primary dark:text-primary/40">Copilot</p>
+                          {copilotResult?.model_unavailable && (
+                            <p className="text-[10px] text-warning-foreground dark:text-warning/70">Model fallback response</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1.5 px-2 text-[10px]"
+                          disabled={copilotLoading}
+                          onClick={() => void runCopilotAssist()}
+                        >
+                          {copilotLoading && <div className="flex gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:100ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:200ms]" /></div>}
+                          Refresh
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setShowCopilotPanel(false)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="px-4 py-3">
+                      {copilotLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground animate-rs-slide-up">
+                          <div className="flex gap-1">
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
+                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
+                          </div>
+                          Thinking...
+                        </div>
+                      ) : copilotError ? (
+                        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive animate-rs-shake">
+                          {copilotError}
+                        </div>
+                      ) : copilotResult ? (
+                        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)]">
+                          <div className="space-y-2">
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-primary dark:text-primary/50">Summary</p>
+                              <p className="mt-0.5 text-xs leading-relaxed text-foreground">{copilotResult.summary}</p>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <div className="rounded-md border border-primary/10 bg-background/80 px-3 py-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Intent</p>
+                                <p className="mt-0.5 text-xs font-medium text-foreground">{copilotResult.intent}</p>
+                              </div>
+                              <div className="rounded-md border border-primary/10 bg-background/80 px-3 py-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Next Action</p>
+                                <p className="mt-0.5 text-xs font-medium text-foreground">{copilotResult.next_action_label}</p>
+                                <p className="mt-0.5 text-[10px] text-muted-foreground">{copilotResult.next_action_reason}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                              <span className="rounded-full border border-primary/20 bg-background/80 px-2 py-0.5">
+                                Confidence {Math.round(copilotResult.confidence * 100)}%
+                              </span>
+                              {copilotResult.should_pause_ai && (
+                                <span className="rounded-full border border-warning/20 bg-warning/5 px-2 py-0.5 text-warning-foreground">
+                                  Human review
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-md border border-primary/10 bg-background/90 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Draft Reply</p>
+                            <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                              {copilotResult.draft_reply}
+                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-8 gap-1.5 text-xs"
+                                disabled={selectedConv?.lead_stage === "dnc"}
+                                onClick={() => {
+                                  setReply(copilotResult.draft_reply);
+                                  toast({ title: "Draft added to composer" });
+                                }}
+                              >
+                                <Send className="h-3 w-3" />
+                                Use Draft
+                              </Button>
+                              {copilotResult.should_pause_ai && aiMode !== "human" && conversationBusinessKey(selectedConv) && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1.5 text-xs"
+                                  disabled={aiModeSaving}
+                                  onClick={() => void toggleAiMode()}
+                                >
+                                  <Ban className="h-3 w-3" />
+                                  Pause AI
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs"
+                          onClick={() => void runCopilotAssist()}
+                        >
+                          <Bot className="h-3.5 w-3.5" />
+                          Generate
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                <div
+                  className="flex-1 overflow-y-auto px-3 py-3 sm:px-6 space-y-1.5"
+                  style={{
+                    backgroundColor: "#efeae2",
+                    backgroundImage:
+                      "radial-gradient(circle at 1px 1px, rgba(17, 94, 89, 0.08) 1px, transparent 0)",
+                    backgroundSize: "18px 18px",
+                  }}
+                >
                   {messages.map((m, i) => {
                     const prevMsg = messages[i - 1];
                     const showDateChip = !prevMsg || getMsgDateLabel(m.created_at) !== getMsgDateLabel(prevMsg.created_at);
+                    const renderedTemplate = getRenderedMessageTemplate(m);
+                    const isOutbound = m.direction === "outbound";
+                    const failedMessage = m.status === "failed";
+                    const statusErrorText = typeof m.status_error?.error?.message === "string"
+                      ? m.status_error.error.message
+                      : typeof m.status_error?.meta_error === "string"
+                        ? m.status_error.meta_error
+                        : typeof m.status_error?.message === "string"
+                          ? m.status_error.message
+                          : null;
                     return (
                     <div key={m.id}>
                       {showDateChip && (
                         <div className="flex justify-center my-2">
-                          <span className="rounded-full bg-muted px-3 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
+                          <span className="rounded-md bg-white/80 px-3 py-1 text-[10px] font-medium text-slate-600 shadow-sm">
                             {getMsgDateLabel(m.created_at)}
                           </span>
                         </div>
                       )}
-                    <div className={`flex ${m.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${
-                        m.direction === "outbound"
-                          ? "bg-primary text-primary-foreground rounded-br-md"
-                          : "bg-muted text-foreground rounded-bl-md"
+                    <div className={`flex animate-rs-slide-up ${isOutbound ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[82%] rounded-lg px-3 py-2 text-slate-900 sm:max-w-[68%] transition-all duration-240 ease-entrance ${
+                        isOutbound
+                          ? failedMessage
+                            ? "bg-destructive/5 ring-1 ring-destructive/30 animate-rs-shake"
+                            : "bg-[#d9fdd3] rounded-tr-sm elevation-low"
+                          : "bg-white rounded-tl-sm elevation-low"
                       }`}>
+                        {renderedTemplate && (
+                          <div className="mb-2 rounded-md border border-success/20/80 bg-white/70 p-2">
+                            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                              <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success">
+                                Template
+                              </span>
+                              <span className="text-[10px] font-medium text-slate-700">{renderedTemplate.label}</span>
+                              <span className="text-[10px] text-slate-500">{renderedTemplate.language.toUpperCase()}</span>
+                            </div>
+                            {renderedTemplate.buttons.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {renderedTemplate.buttons.map(button => (
+                                  <span key={button} className="rounded border border-success/20 bg-success/5 px-2 py-0.5 text-[10px] font-medium text-success">
+                                    {button}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Media rendering */}
                         {m.media_url && m.message_type === "image" ? (
                           /^\d/.test(m.media_url) ? (
@@ -2207,10 +3312,30 @@ const WhatsAppInbox = () => {
                         ) : null}
                         {/* Text content / caption */}
                         {(m.content || (!m.media_url && m.message_type !== "text")) && (
-                          <p className="text-sm whitespace-pre-wrap">{getMessageText(m).replace(/\\n/g, "\n")}</p>
+                          <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{getMessageText(m).replace(/\\n/g, "\n")}</p>
+                        )}
+                        {failedMessage && (
+                          <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive animate-rs-error-pulse">
+                            <div className="flex items-start gap-2">
+                              <AlertOctagon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold">Message failed</p>
+                                {statusErrorText && <p className="mt-0.5 break-words">{statusErrorText}</p>}
+                              </div>
+                              {statusErrorText && (
+                                <button
+                                  type="button"
+                                  className="shrink-0 text-[10px] font-semibold underline"
+                                  onClick={() => navigator.clipboard.writeText(statusErrorText)}
+                                >
+                                  Copy
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
-                          {m.direction === "outbound" && (() => {
+                          {isOutbound && (() => {
                             const label = getOutboundSenderLabel(m);
                             if (label === "Bot") {
                               return <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Bot className="h-2.5 w-2.5" /> Bot</span>;
@@ -2223,8 +3348,8 @@ const WhatsAppInbox = () => {
                           <span className="text-[9px] opacity-60">
                             {new Date(m.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
                           </span>
-                          {m.direction === "outbound" && (
-                            <span className="text-[9px] opacity-50">{m.status === "read" ? "✓✓" : m.status === "delivered" ? "✓✓" : "✓"}</span>
+                          {isOutbound && (
+                            <DeliveryReceipt status={m.status} />
                           )}
                         </div>
                       </div>
@@ -2235,88 +3360,227 @@ const WhatsAppInbox = () => {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Template picker panel — hidden for DNC leads (composer
-                    section below renders the DNC banner instead) */}
-                {showTemplatePicker && selectedConv?.lead_stage !== "dnc" && (
-                  <div className="border-t border-border bg-muted/30">
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/40">
-                      <p className="text-xs font-semibold text-foreground">Send Template Message</p>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setShowTemplatePicker(false); setSelectedTemplate(null); }}>
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                    <div className="flex max-h-[280px]">
-                      {/* Template list */}
-                      <div className="w-48 sm:w-56 border-r border-border/40 overflow-y-auto">
-                        {INBOX_TEMPLATES.map((t) => (
-                          <button
-                            key={t.key}
-                            onClick={() => setSelectedTemplate(t.key)}
-                            className={`w-full text-left px-3 py-2.5 border-b border-border/20 transition-colors ${
-                              selectedTemplate === t.key ? "bg-primary/10" : "hover:bg-muted/50"
-                            }`}
-                          >
-                            <p className={`text-xs font-medium ${selectedTemplate === t.key ? "text-primary" : "text-foreground"}`}>{t.label}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{t.description}</p>
-                          </button>
-                        ))}
-                      </div>
-                      {/* Preview + send */}
-                      <div className="flex-1 p-3 flex flex-col">
-                        {selectedTemplate ? (
-                          <>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Preview</p>
-                            <div className="flex-1 overflow-y-auto">
-                              <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/40 p-3">
-                                <p className="text-xs text-green-900 dark:text-green-200 whitespace-pre-wrap leading-relaxed">
-                                  {getTemplatePreview(selectedTemplate)}
-                                </p>
+                <Dialog
+                  open={showTemplatePicker && selectedConv?.lead_stage !== "dnc"}
+                  onOpenChange={(open) => {
+                    setShowTemplatePicker(open);
+                    if (!open) {
+                      setSelectedTemplate(null);
+                      setTemplateSearch("");
+                      setTemplateParamOverrides({});
+                    }
+                  }}
+                >
+                  <DialogContent className="max-h-[86vh] max-w-5xl overflow-hidden p-0">
+                    <DialogHeader className="border-b px-4 py-3">
+                      <DialogTitle className="flex items-center gap-2 text-sm">
+                        <LayoutTemplate className="h-4 w-4 text-success" />
+                        Send WhatsApp Template
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="grid min-h-[620px] grid-cols-1 md:grid-cols-[300px_1fr]">
+                      <div className="border-r bg-slate-50/70">
+                        <div className="border-b p-3">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                              value={templateSearch}
+                              onChange={e => setTemplateSearch(e.target.value)}
+                              placeholder="Search templates"
+                              className="h-9 w-full rounded-full border border-input bg-white pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-[540px] overflow-y-auto p-2">
+                          {Object.entries(templateGroups).map(([category, templates]) => (
+                            <div key={category} className="mb-3">
+                              <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                {category.replace(/_/g, " ")}
+                              </p>
+                              <div className="space-y-1">
+                                {templates.map(t => (
+                                  <button
+                                    key={t.key}
+                                    onClick={() => {
+                                      setSelectedTemplate(t.key);
+                                      setTemplateParamOverrides({});
+                                    }}
+                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                                      selectedTemplate === t.key
+                                        ? "border-success/30 bg-success/5"
+                                        : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <p className="truncate text-xs font-semibold text-slate-900">{t.label}</p>
+                                      <span className="rounded bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-success">
+                                        {t.status || "approved"}
+                                      </span>
+                                    </div>
+                                    <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-slate-500">{t.description}</p>
+                                  </button>
+                                ))}
                               </div>
                             </div>
-                            <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
-                              <p className="text-[10px] text-muted-foreground">
-                                To: {selectedConv?.lead_name || selectedPhone}
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex min-h-0 flex-col">
+                        <div className="border-b px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-slate-900">
+                                {selectedTemplateRender?.label || "Select a template"}
                               </p>
-                              <Button
-                                size="sm"
-                                className="gap-1.5 h-8 text-xs"
-                                disabled={sendingTemplate}
-                                onClick={handleSendTemplate}
-                              >
-                                {sendingTemplate ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                                Send Template
-                              </Button>
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                To {selectedConv?.lead_name || selectedPhone} · {selectedInboxOption?.label || "WhatsApp"}
+                              </p>
                             </div>
-                          </>
-                        ) : (
-                          <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                            <p className="text-xs">Select a template to preview</p>
+                            {selectedTemplateRender && (
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-700">{selectedTemplateRender.language.toUpperCase()}</span>
+                                <span className="rounded bg-success/10 px-2 py-1 font-medium capitalize text-success">{selectedTemplateRender.category}</span>
+                                <span className="rounded bg-info/10 px-2 py-1 font-medium text-info-foreground">
+                                  {(() => {
+                                    const lastInbound = [...messages].reverse().find(m => m.direction === "inbound");
+                                    return lastInbound && Date.now() - new Date(lastInbound.created_at).getTime() < 24 * 60 * 60 * 1000
+                                      ? "Reply window open"
+                                      : "Template re-engagement";
+                                  })()}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
+
+                        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_260px]">
+                          <div
+                            className="min-h-[360px] overflow-y-auto p-5"
+                            style={{
+                              backgroundColor: "#efeae2",
+                              backgroundImage: "radial-gradient(circle at 1px 1px, rgba(17,94,89,.08) 1px, transparent 0)",
+                              backgroundSize: "18px 18px",
+                            }}
+                          >
+                            {selectedTemplateRender ? (
+                              <div className="ml-auto max-w-[86%] rounded-lg rounded-tr-sm bg-[#d9fdd3] px-3 py-2 text-slate-900 shadow-sm sm:max-w-[72%]">
+                                <div className="mb-2 rounded-md border border-success/20 bg-white/70 p-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success">
+                                      Template preview
+                                    </span>
+                                    <span className="text-[10px] font-medium text-slate-700">{selectedTemplateRender.label}</span>
+                                  </div>
+                                </div>
+                                <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{selectedTemplateRender.body}</p>
+                                {selectedTemplateRender.buttons.length > 0 && (
+                                  <div className="mt-3 space-y-1">
+                                    {selectedTemplateRender.buttons.map(button => (
+                                      <div key={button} className="rounded-md border border-success/20 bg-white/70 px-3 py-1.5 text-center text-xs font-semibold text-success">
+                                        {button}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div className="mt-1 flex justify-end gap-1 text-[9px] text-slate-500">
+                                  <span>{new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                                  <span className="text-sky-600">✓✓</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-center text-xs text-slate-500">
+                                Select a template to see the exact WhatsApp bubble before sending.
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="border-l bg-white p-3">
+                            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Template variables
+                            </p>
+                            {selectedTemplateRender ? (
+                              <div className="space-y-2">
+                                {selectedTemplateRender.params.length === 0 && (
+                                  <p className="rounded-md bg-slate-50 p-3 text-xs text-muted-foreground">No variables required.</p>
+                                )}
+                                {selectedTemplateRender.params.map(param => (
+                                  <label key={param.key} className="block">
+                                    <span className="mb-1 flex items-center justify-between text-[10px] font-medium text-slate-600">
+                                      {param.label}
+                                      {param.required && !param.resolved && <span className="text-destructive">Required</span>}
+                                    </span>
+                                    <input
+                                      value={templateParamOverrides[param.key] ?? param.value}
+                                      onChange={e => setTemplateParamOverrides(prev => ({ ...prev, [param.key]: e.target.value }))}
+                                      className={`h-8 w-full rounded-md border px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                                        param.required && !param.resolved ? "border-destructive/30 bg-destructive/5" : "border-input"
+                                      }`}
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="rounded-md bg-slate-50 p-3 text-xs text-muted-foreground">Choose a template from the list.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <DialogFooter className="border-t px-4 py-3">
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setShowTemplatePicker(false);
+                              setSelectedTemplate(null);
+                              setTemplateParamOverrides({});
+                            }}
+                            disabled={sendingTemplate}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            className="gap-1.5 bg-success hover:bg-success/90"
+                            disabled={!selectedTemplateRender || selectedTemplateRender.unresolved.length > 0 || sendingTemplate}
+                            onClick={handleSendTemplate}
+                          >
+                            {sendingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                            Send Template
+                          </Button>
+                        </DialogFooter>
                       </div>
                     </div>
-                  </div>
-                )}
+                  </DialogContent>
+                </Dialog>
 
                 {/* Quick replies panel — hidden for DNC leads */}
                 {showQuickReplies && selectedConv?.lead_stage !== "dnc" && (
                   <div className="border-t border-border bg-muted/20 px-4 py-2">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Quick Replies</p>
-                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowQuickReplies(false)}>
-                        <X className="h-3 w-3" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {isAdminRole(role) && (
+                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setQrManagerOpen(true)} title="Manage quick replies">
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowQuickReplies(false)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {QUICK_REPLIES.map((qr) => (
+                      {quickReplies.map((qr) => (
                         <button
-                          key={qr.label}
+                          key={qr.id}
                           onClick={() => { setReply(qr.text); setShowQuickReplies(false); }}
                           className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                         >
                           {qr.label}
                         </button>
                       ))}
+                      {quickReplies.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No quick replies yet. {isAdminRole(role) ? "Click the pencil icon to add some." : ""}</p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2332,9 +3596,9 @@ const WhatsAppInbox = () => {
                   if (isDnc) {
                     return (
                       <div className="px-4 py-3 border-t border-border">
-                        <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-3 py-2.5">
-                          <Ban className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
-                          <div className="text-xs text-red-800 dark:text-red-300">
+                        <div className="flex items-start gap-2 rounded-lg bg-destructive/5 dark:bg-destructive/90/40 border border-destructive/20 dark:border-destructive/50 px-3 py-2.5">
+                          <Ban className="h-4 w-4 text-destructive dark:text-destructive/80 mt-0.5 shrink-0" />
+                          <div className="text-xs text-destructive dark:text-destructive/60">
                             <strong>This lead is on the Do Not Contact list.</strong>
                             <p className="mt-0.5">No further messages can be sent — neither free-form replies nor templates. To resume contact, change the lead's stage from DNC.</p>
                           </div>
@@ -2344,7 +3608,7 @@ const WhatsAppInbox = () => {
                   }
 
                   return (
-                    <div className="px-4 py-3 border-t border-border">
+                    <div className="border-t border-slate-200 bg-[#f0f2f5] px-3 py-3">
                       {!withinWindow && !showTemplatePicker && (
                         <div className="flex items-start gap-2 rounded-lg bg-yellow-50 dark:bg-yellow-950/40 border border-yellow-200 dark:border-yellow-800 px-3 py-2 mb-2">
                           <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
@@ -2359,9 +3623,9 @@ const WhatsAppInbox = () => {
                       >
                         <Button
                           type="button"
-                          variant={showTemplatePicker ? "default" : "outline"}
+                          variant={showTemplatePicker ? "default" : "ghost"}
                           size="icon"
-                          className="rounded-xl h-10 w-10 shrink-0"
+                          className="h-10 w-10 shrink-0 rounded-full text-slate-600 hover:bg-slate-200"
                           onClick={() => { setShowTemplatePicker(!showTemplatePicker); setSelectedTemplate(null); }}
                           title="Send template message"
                         >
@@ -2369,9 +3633,9 @@ const WhatsAppInbox = () => {
                         </Button>
                         <Button
                           type="button"
-                          variant={showQuickReplies ? "default" : "outline"}
+                          variant={showQuickReplies ? "default" : "ghost"}
                           size="icon"
-                          className="rounded-xl h-10 w-10 shrink-0"
+                          className="h-10 w-10 shrink-0 rounded-full text-slate-600 hover:bg-slate-200"
                           onClick={() => setShowQuickReplies(!showQuickReplies)}
                           title="Quick replies"
                           disabled={!withinWindow}
@@ -2384,9 +3648,9 @@ const WhatsAppInbox = () => {
                           onChange={(e) => setReply(e.target.value)}
                           placeholder={withinWindow ? "Type a message..." : "Window expired — use template"}
                           disabled={!withinWindow}
-                          className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="h-11 flex-1 rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                         />
-                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="rounded-xl h-10 w-10">
+                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
                           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                       </form>
@@ -2506,7 +3770,7 @@ const WhatsAppInbox = () => {
             </div>
 
             {bfResult && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              <div className="rounded-lg border border-success/20 bg-success/5 p-3 text-xs text-success-foreground">
                 <div className="font-semibold mb-1">Done</div>
                 <div>Primary: {bfResult.primary_threads ?? 0} threads · {bfResult.primary_messages ?? 0} messages</div>
                 <div>Secondary: {bfResult.secondary_threads ?? 0} threads · {bfResult.secondary_messages ?? 0} messages</div>
@@ -2519,6 +3783,81 @@ const WhatsAppInbox = () => {
               {bfRunning && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Run Backfill
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <TransferLeadDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        leadIds={transferLeadIds}
+        leadNames={transferLeadNames}
+        onSuccess={() => {
+          void fetchConversationPage(true, null);
+        }}
+      />
+
+      {/* Quick Reply Manager dialog — admin only */}
+      <Dialog open={qrManagerOpen} onOpenChange={(open) => { setQrManagerOpen(open); if (!open) { setQrEditId(null); setQrEditLabel(""); setQrEditText(""); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-4 w-4" /> Manage Quick Replies
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            {quickReplies.map((qr) => (
+              <div key={qr.id} className="flex items-start gap-2 rounded-lg border p-2 group">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{qr.label}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{qr.text}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setQrEditId(qr.id); setQrEditLabel(qr.label); setQrEditText(qr.text); }}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteQuickReply(qr.id)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {quickReplies.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No quick replies yet. Add one below.</p>
+            )}
+          </div>
+          <div className="border-t pt-3 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {qrEditId ? "Edit Quick Reply" : "Add Quick Reply"}
+            </p>
+            <Input
+              placeholder="Label (e.g. Hostel info)"
+              value={qrEditLabel}
+              onChange={(e) => setQrEditLabel(e.target.value)}
+              className="text-sm"
+            />
+            <textarea
+              placeholder="Message text..."
+              value={qrEditText}
+              onChange={(e) => setQrEditText(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!qrEditLabel.trim() || !qrEditText.trim() || qrSaving}
+                onClick={saveQuickReply}
+              >
+                {qrSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
+                {qrEditId ? "Save" : "Add"}
+              </Button>
+              {qrEditId && (
+                <Button variant="ghost" size="sm" onClick={() => { setQrEditId(null); setQrEditLabel(""); setQrEditText(""); }}>
+                  Cancel
+                </Button>
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

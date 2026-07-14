@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -21,7 +22,12 @@ import {
   Collapsible, CollapsibleTrigger, CollapsibleContent,
 } from "@/components/ui/collapsible";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
+import { isBscNursingCourse } from "@/lib/bscNursing";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
+import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -73,12 +79,11 @@ interface DialerStats {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const CONNECTED_DISPOSITIONS = [
-  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50" },
-  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50" },
-  { value: "call_back", label: "Call Back", icon: Clock, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50" },
-  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50" },
-  { value: "cancelled", label: "Cancelled", icon: PhoneOff, color: "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-50" },
-  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50" },
+  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-success/10 text-success border-success/30 hover:bg-success/5" },
+  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/5" },
+  { value: "call_back", label: "Call Back", icon: Clock, color: "bg-info/10 text-info-foreground border-info/30 hover:bg-info/5" },
+  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-primary/10 text-primary border-primary/25 hover:bg-primary/5" },
+  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-warning/10 text-warning-foreground border-warning/30 hover:bg-warning/5" },
 ];
 
 const FOLLOWUP_GAPS = [4, 8, 48]; // hours: 4h, 8h, 2 days
@@ -108,6 +113,21 @@ const formatSlotLabel = (slot: string) => {
   const [h] = slot.split(":");
   const hr = parseInt(h);
   return hr >= 12 ? `${hr === 12 ? 12 : hr - 12} PM` : `${hr} AM`;
+};
+
+const indiaDayBoundsUtc = (date = new Date()) => {
+  const indiaOffsetMs = 330 * 60 * 1000;
+  const indiaDate = new Date(date.getTime() + indiaOffsetMs);
+  const startOfIndiaDayAsUtc = Date.UTC(
+    indiaDate.getUTCFullYear(),
+    indiaDate.getUTCMonth(),
+    indiaDate.getUTCDate(),
+  );
+
+  return {
+    start: new Date(startOfIndiaDayAsUtc - indiaOffsetMs).toISOString(),
+    end: new Date(startOfIndiaDayAsUtc + 86400000 - indiaOffsetMs).toISOString(),
+  };
 };
 
 // ── Course-specific script helpers ──────────────────────────────────────────
@@ -189,13 +209,13 @@ const getCourseNudges = (courseName: string): string[] => {
 
 // Bucket label (as returned by cloud_dialer_queue RPC) → UI metadata.
 const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string }> = {
-  "Priority Interested": { key: "priority",      color: "bg-violet-600", uiLabel: "Priority Interested" },
-  "Missed Callback":     { key: "missed",        color: "bg-red-600",    uiLabel: "Missed Callbacks" },
-  "Post-Visit":          { key: "post_visit",    color: "bg-amber-500",  uiLabel: "Post-Visit" },
-  "Visit Checkin":       { key: "visit_confirm", color: "bg-violet-500", uiLabel: "Visit Checkin" },
-  "Overdue":             { key: "overdue",       color: "bg-red-500",    uiLabel: "Overdue" },
-  "Today":               { key: "today",         color: "bg-blue-500",   uiLabel: "Today" },
-  "New Lead":            { key: "new",           color: "bg-orange-500", uiLabel: "New Leads" },
+  "Priority Interested": { key: "priority",      color: "bg-primary", uiLabel: "Priority Interested" },
+  "Missed Callback":     { key: "missed",        color: "bg-destructive",    uiLabel: "Missed Callbacks" },
+  "Post-Visit":          { key: "post_visit",    color: "bg-warning/50",  uiLabel: "Post-Visit" },
+  "Visit Checkin":       { key: "visit_confirm", color: "bg-primary/50", uiLabel: "Visit Checkin" },
+  "Overdue":             { key: "overdue",       color: "bg-destructive/50",    uiLabel: "Overdue" },
+  "Today":               { key: "today",         color: "bg-info/50",   uiLabel: "Today" },
+  "New Lead":            { key: "new",           color: "bg-warning", uiLabel: "New Leads" },
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -228,6 +248,9 @@ export default function CloudDialer() {
   const [visitTime, setVisitTime] = useState("10:00");
   const [futureSession, setFutureSession] = useState("2027-28");
   const [notIntCategory, setNotIntCategory] = useState<"lead" | "job_applicant" | "vendor" | "other">("lead");
+  const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
+  const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
+  const [allowPostDispositionFollowup, setAllowPostDispositionFollowup] = useState(true);
   const [stats, setStats] = useState<DialerStats>({ connected: 0, busy: 0, noAnswer: 0, voicemail: 0, interested: 0, totalTalkTime: 0 });
 
   // Call history for current lead
@@ -262,6 +285,16 @@ export default function CloudDialer() {
   const preDispositionRef = useRef<string | null>(null);
 
   const currentLead = queue[currentIdx] || null;
+  const asksCnetAppeared = !!currentLead && isBscNursingCourse(currentLead.course_name);
+  const asksCahetRegistered = !!currentLead && isBptOrBmritCourseName(currentLead.course_name);
+  const qualifierRequiredUnanswered =
+    (asksCnetAppeared && !cnetAppeared) ||
+    (asksCahetRegistered && !cahetRegistered);
+
+  useEffect(() => {
+    setCnetAppeared(null);
+    setCahetRegistered(null);
+  }, [currentLead?.id, currentLead?.course_name]);
 
   // Returns minutes until this lead is auto-reclaimed by the SLA cron, or null
   // if the lead isn't reclaim-eligible (already contacted, not in an early
@@ -386,7 +419,7 @@ export default function CloudDialer() {
       .map((bucket: any) => ({
         key: queueSource === "fresh" ? "new" : "all",
         label: bucket.label,
-        color: queueSource === "fresh" ? "bg-orange-500" : "bg-gray-500",
+        color: queueSource === "fresh" ? "bg-warning" : "bg-gray-500",
         count: bucket.count,
       }));
     setQueue(mapped);
@@ -532,10 +565,14 @@ export default function CloudDialer() {
             : prev
           );
         } else if (data.disposition) {
-          // Auto-disposed during ringing (busy/not_answered/cancelled)
-          // Student never connected — stop polling, show auto-followup with 15s timer
+          // Auto-disposed during ringing (busy/not_answered/voicemail).
+          // Cancelled is not a disposition and must not count as a call.
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          handleAutoDisposition(data.disposition);
+          if (data.disposition === "cancelled" || data.disposition === "cancelled_by_counsellor") {
+            handleCancelledCall();
+          } else {
+            handleAutoDisposition(data.disposition);
+          }
         } else {
           // Still ringing — but if we've been polling > 8 min, the call is stuck
           // (voice-agent context was lost, bridge-hangup never updated the record).
@@ -567,11 +604,16 @@ export default function CloudDialer() {
         }
         setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
       } else if (serverDisp) {
-        // Auto-disposed (busy/not_answered/voicemail/cancelled)
-        handleAutoDisposition(serverDisp);
+        // Auto-disposed (busy/not_answered/voicemail). Cancelled is not a
+        // disposition and must not count as a call.
+        if (serverDisp === "cancelled" || serverDisp === "cancelled_by_counsellor") {
+          handleCancelledCall();
+        } else {
+          handleAutoDisposition(serverDisp);
+        }
       } else {
-        // No student connection, no disposition — treat as cancelled
-        handleAutoDisposition("cancelled");
+        // No student connection and no disposition. Do not count this as a call.
+        handleCancelledCall();
       }
     };
     // Poll every 3 seconds
@@ -781,22 +823,102 @@ export default function CloudDialer() {
   // ── Pre-select disposition during connected call ─────────────────────────
 
   const preSelectDisposition = (disposition: string) => {
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      return;
+    }
     preDispositionRef.current = disposition;
     setCallState(prev => ({ ...prev, disposition }));
     toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
   };
 
-  const completePendingFollowupsForCurrentLead = async () => {
-    if (!currentLead) return;
+  const canClearPendingFollowupsForCurrentLead = async (disposition: string) => {
+    if (!currentLead) return false;
+    if (disposition === "cancelled") return false;
+    if (disposition !== "not_answered") return true;
+
+    const { start, end } = indiaDayBoundsUtc();
+    const { data, error } = await supabase
+      .from("call_logs")
+      .select("id")
+      .eq("lead_id", currentLead.id)
+      .eq("disposition", "not_answered")
+      .gte("called_at", start)
+      .lt("called_at", end)
+      .limit(2);
+
+    if (error) {
+      console.error("Failed to count same-day unanswered attempts:", error);
+      return false;
+    }
+
+    return (data || []).length >= 2;
+  };
+
+  const completePendingFollowupsForCurrentLead = async (disposition: string) => {
+    if (!currentLead) return false;
+    const canClear = await canClearPendingFollowupsForCurrentLead(disposition);
+    setAllowPostDispositionFollowup(canClear);
+    if (!canClear) return false;
+
     await supabase.from("lead_followups")
       .update({ status: "completed", completed_at: new Date().toISOString() } as any)
       .eq("lead_id", currentLead.id).eq("status", "pending");
+    return true;
+  };
+
+  const persistCnetAppearedForCurrentLead = async () => {
+    if (!currentLead || !asksCnetAppeared || !cnetAppeared) return;
+    await supabase
+      .from("leads")
+      .update({ cnet_appeared: cnetAppeared === "yes", updated_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id);
+  };
+
+  const persistCahetRegisteredForCurrentLead = async () => {
+    if (!currentLead || !asksCahetRegistered || !cahetRegistered) return;
+    await supabase
+      .from("leads")
+      .update({ cahet_registered: cahetRegistered === "yes", updated_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id);
+  };
+
+  const applyDispositionTransitionForCurrentLead = async (disposition: string) => {
+    if (!currentLead || !isLeadCallDisposition(disposition)) return;
+
+    const transition = resolveCallDispositionTransition({
+      currentStage: currentLead.stage,
+      disposition,
+    });
+    if (!transition.newStage) return;
+
+    await applyResolvedLeadTransition(supabase as any, {
+      leadId: currentLead.id,
+      transition,
+      extraPatch: transition.name === "recordDispositionNotInterested"
+        ? { person_role: notIntCategory }
+        : undefined,
+    });
   };
 
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
     if (!currentLead) return;
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      setCallState(prev => ({ ...prev, status: "ended" }));
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      setCallState(prev => ({ ...prev, status: "ended" }));
+      return;
+    }
 
     // Route through the merge RPC keyed on cloud_call_uuid so this manual
     // save lands on the same row as the voice-agent's bridge-hangup webhook
@@ -829,8 +951,12 @@ export default function CloudDialer() {
       });
     }
 
-    // Mark pending followups as completed (clears overdue status)
-    await completePendingFollowupsForCurrentLead();
+    await persistCnetAppearedForCurrentLead();
+    await persistCahetRegisteredForCurrentLead();
+
+    // Mark pending followups as completed only when this disposition is
+    // allowed to clear the queue. First same-day not_answered stays pending.
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
 
     // Log activity
     const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
@@ -843,11 +969,7 @@ export default function CloudDialer() {
     await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
       .eq("id", currentLead.id).is("first_contact_at", null);
 
-    if (disposition === "interested") {
-      await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
-    } else if (disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
-    }
+    await applyDispositionTransitionForCurrentLead(disposition);
 
     setStats(prev => ({
       ...prev,
@@ -855,13 +977,21 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, true);
+    await showFollowupAndAutoNext(disposition, true, followupCleared);
   };
 
   // ── Handle call end (counsellor marks disposition) ────────────────────────
 
   const markDisposition = async (disposition: string) => {
     if (!currentLead) return;
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      return;
+    }
 
     // Log to call_logs via the merge RPC — see finalizeDisposition for why.
     const callUuid = callIdRef.current;
@@ -891,8 +1021,12 @@ export default function CloudDialer() {
       });
     }
 
-    // Mark pending followups as completed (clears overdue status)
-    await completePendingFollowupsForCurrentLead();
+    await persistCnetAppearedForCurrentLead();
+    await persistCahetRegisteredForCurrentLead();
+
+    // Mark pending followups as completed only when this disposition is
+    // allowed to clear the queue. First same-day not_answered stays pending.
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
 
     // Log activity
     const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
@@ -905,12 +1039,7 @@ export default function CloudDialer() {
     await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
       .eq("id", currentLead.id).is("first_contact_at", null);
 
-    // Update lead stage based on disposition
-    if (disposition === "interested") {
-      await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
-    } else if (disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
-    }
+    await applyDispositionTransitionForCurrentLead(disposition);
 
     setStats(prev => ({
       ...prev,
@@ -920,7 +1049,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, false);
+    await showFollowupAndAutoNext(disposition, false, followupCleared);
   };
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
@@ -930,8 +1059,8 @@ export default function CloudDialer() {
   // plain local disposition, this must hang up the live Plivo call so both legs
   // (counsellor + student) drop — otherwise the call stays orphaned on Plivo.
   // Mirrors LeadDetail's onCancelCall: invoke manual-call-cancel, then drive the
-  // UI. The edge function records cancelled_by_counsellor, so we skip the local
-  // call-log write on success to avoid a conflicting row.
+  // UI. Cancellation is not a disposition and must not write call_logs or local
+  // metrics.
   const cancelCall = async () => {
     if (cancellingRef.current) return;
     cancellingRef.current = true;
@@ -953,7 +1082,7 @@ export default function CloudDialer() {
         toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
       }
     }
-    handleAutoDisposition("cancelled", hungUp);
+    handleCancelledCall(hungUp ? "Call cancelled" : "Call cancelled locally");
   };
 
   // ── End a connected Cloud Call ───────────────────────────────────────────
@@ -982,19 +1111,20 @@ export default function CloudDialer() {
   };
 
   const handleAutoDisposition = async (disposition: string, skipLog = false) => {
+    if (disposition === "cancelled" || disposition === "cancelled_by_counsellor") {
+      handleCancelledCall();
+      return;
+    }
+
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
-    await completePendingFollowupsForCurrentLead();
     // Write call log via dedupe RPC so this row merges with the auto path from
-    // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
-    // timeouts produce no call log at all.
-    // skipLog: when manual-call-cancel already recorded cancelled_by_counsellor,
-    // skip this write so we don't race a conflicting "cancelled" row (RPC is
-    // first-write-wins on cloud_call_uuid).
+    // bridge-hangup (if it already wrote one). Cancelled states are filtered
+    // before this point because they are not call outcomes.
     const callUuid = callIdRef.current;
     if (currentLead && !skipLog) {
-      (supabase as any).rpc("record_cloud_call_log", {
+      await (supabase as any).rpc("record_cloud_call_log", {
         p_call_uuid:     callUuid ?? crypto.randomUUID(),
         p_lead_id:       currentLead.id,
         p_user_id:       user?.id || null,
@@ -1006,19 +1136,45 @@ export default function CloudDialer() {
         p_call_source:   "cloud_dialer",
       });
     }
-    showFollowupAndAutoNext(disposition);
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
+    await showFollowupAndAutoNext(disposition, false, followupCleared);
+  };
+
+  const handleCancelledCall = (title = "Call cancelled") => {
+    setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
+    setAutoNextTimer(0);
+    preDispositionRef.current = null;
+    cancellingRef.current = false;
+    toast({ title, description: "No disposition recorded and no call metrics changed." });
   };
 
   // ── Show followup and start auto-next timer ───────────────────────────────
 
-  const showFollowupAndAutoNext = (disposition: string, wasConnected = false) => {
+  const showFollowupAndAutoNext = async (disposition: string, wasConnected = false, followupCanBeRescheduled = true) => {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
     const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
 
+    if (!followupCanBeRescheduled) {
+      setFollowupDate("");
+      setFollowupTime("");
+      setAutoNextTimer(10);
+      toast({
+        title: "Attempt logged",
+        description: disposition === "not_answered"
+          ? "First not answered attempt today. Existing pending follow-up remains open."
+          : "This disposition does not clear the pending follow-up.",
+      });
+      return;
+    }
+
     // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
     if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
-      supabase.from("leads").update({ stage: "inactive" as any }).eq("id", currentLead.id);
+      const transition = resolveLeadTransitionCommand({
+        currentStage: currentLead.stage,
+        command: "classifyInactive",
+      });
+      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
       setFollowupDate("");
       setFollowupTime("");
       setAutoNextTimer(10);
@@ -1087,7 +1243,7 @@ export default function CloudDialer() {
 
   const moveToNext = async () => {
     // Save followup if there's a date (skip for not_interested and inactive)
-    if (currentLead && followupDate && callState.disposition !== "not_interested") {
+    if (currentLead && followupDate && allowPostDispositionFollowup && callState.disposition !== "not_interested") {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
         lead_id: currentLead.id,
@@ -1107,7 +1263,11 @@ export default function CloudDialer() {
         status: "scheduled",
         notes: `Scheduled via Cloud Dialer`,
       });
-      await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", currentLead.id);
+      const transition = resolveLeadTransitionCommand({
+        currentStage: currentLead.stage,
+        command: "scheduleVisit",
+      });
+      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
     }
 
     // Save future session note for ineligible
@@ -1121,6 +1281,7 @@ export default function CloudDialer() {
 
     setAutoNextTimer(0);
     preDispositionRef.current = null;
+    setAllowPostDispositionFollowup(true);
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
     if (currentIdx < queue.length - 1) {
@@ -1138,6 +1299,7 @@ export default function CloudDialer() {
   const skipLead = () => {
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
     setAutoNextTimer(0);
+    setAllowPostDispositionFollowup(true);
     if (currentIdx < queue.length - 1) {
       setCurrentIdx(prev => prev + 1);
     }
@@ -1202,7 +1364,7 @@ export default function CloudDialer() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   // ── Mobile Call Mode ──────────────────────────────────────────────────────
   // A thumb-first layout for counsellors working their queue on a phone.
@@ -1221,13 +1383,13 @@ export default function CloudDialer() {
         {missedCount > 0 && (
           <button
             onClick={() => navigate("/missed-calls")}
-            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 text-left"
+            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-warning/5 dark:bg-warning/90/20 border-b border-warning/20 text-left"
           >
-            <PhoneMissed className="h-4 w-4 text-amber-600 shrink-0 animate-pulse" />
-            <span className="text-sm font-medium text-amber-800 dark:text-amber-300 flex-1 min-w-0 truncate">
+            <PhoneMissed className="h-4 w-4 text-warning-foreground shrink-0 animate-pulse" />
+            <span className="text-sm font-medium text-warning-foreground dark:text-warning/70 flex-1 min-w-0 truncate">
               {missedCount} missed call{missedCount > 1 ? "s" : ""} — tap to review
             </span>
-            <ChevronRight className="h-4 w-4 text-amber-600 shrink-0" />
+            <ChevronRight className="h-4 w-4 text-warning-foreground shrink-0" />
           </button>
         )}
 
@@ -1253,10 +1415,10 @@ export default function CloudDialer() {
                 </Badge>
                 <Badge className="text-[11px] border-0 bg-muted text-muted-foreground">{STAGE_LABELS[currentLead.stage] || currentLead.stage}</Badge>
                 {reclaimMins !== null && reclaimMins <= 0 && (
-                  <Badge className="text-[11px] border-0 bg-red-600 text-white animate-pulse">Reclaim now</Badge>
+                  <Badge className="text-[11px] border-0 bg-destructive text-white animate-pulse">Reclaim now</Badge>
                 )}
                 {reclaimMins !== null && reclaimMins > 0 && reclaimMins <= 30 && (
-                  <Badge className="text-[11px] border-0 bg-red-100 text-red-700">⚠ {reclaimMins}m to reclaim</Badge>
+                  <Badge className="text-[11px] border-0 bg-destructive/10 text-destructive">⚠ {reclaimMins}m to reclaim</Badge>
                 )}
               </div>
             </header>
@@ -1273,7 +1435,7 @@ export default function CloudDialer() {
                   )}
                   {currentLead.course_name !== "—" && (
                     <Collapsible>
-                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2.5 text-sm font-semibold text-blue-700 dark:text-blue-300 [&[data-state=open]>svg]:rotate-180">
+                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-info/5/60 dark:bg-info/90/20 px-3 py-2.5 text-sm font-semibold text-info-foreground dark:text-info/60 [&[data-state=open]>svg]:rotate-180">
                         <span className="flex items-center gap-1.5">💬 Pitch &amp; talking points</span>
                         <ChevronDown className="h-4 w-4 transition-transform" />
                       </CollapsibleTrigger>
@@ -1283,7 +1445,7 @@ export default function CloudDialer() {
                           NIMT. I see you enquired about <b>{currentLead.course_name}</b>. {getCourseScript(currentLead.course_name)}"
                         </p>
                         <div>
-                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Highlights</p>
+                          <p className="text-xs font-semibold text-info-foreground uppercase tracking-wide mb-1.5">Highlights</p>
                           <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
                             <li>• Est. 1987 — 37+ years, 5 campuses, AICTE/UGC approved</li>
                             <li>• Placements: ₹18.75 LPA highest, ₹5.40 LPA avg</li>
@@ -1291,7 +1453,7 @@ export default function CloudDialer() {
                           </ul>
                         </div>
                         <div>
-                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Nudge checklist</p>
+                          <p className="text-xs font-semibold text-info-foreground uppercase tracking-wide mb-1.5">Nudge checklist</p>
                           <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
                             {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
                             <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
@@ -1316,18 +1478,18 @@ export default function CloudDialer() {
                 <Collapsible>
                   <Card className="border-border/60 shadow-none">
                     <CardContent className="p-3">
-                      <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-semibold text-amber-700 dark:text-amber-400 [&[data-state=open]>svg]:rotate-180">
+                      <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-semibold text-warning-foreground dark:text-warning [&[data-state=open]>svg]:rotate-180">
                         <span className="flex items-center gap-1.5"><FileText className="h-4 w-4" />Previous call notes ({callHistory.length})</span>
                         <ChevronDown className="h-4 w-4 transition-transform" />
                       </CollapsibleTrigger>
                       <CollapsibleContent className="pt-2.5 space-y-2.5">
                         {callHistory.map(c => (
-                          <div key={c.id} className="border-l-2 border-amber-200 pl-2.5 py-0.5 text-sm">
+                          <div key={c.id} className="border-l-2 border-warning/20 pl-2.5 py-0.5 text-sm">
                             <div className="flex items-center gap-2 flex-wrap">
                               <Badge className={`text-[11px] border-0 ${
-                                c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
-                                c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
-                                c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
+                                c.disposition === "interested" ? "bg-success/10 text-success" :
+                                c.disposition === "not_interested" ? "bg-destructive/10 text-destructive" :
+                                c.disposition === "not_answered" ? "bg-warning/10 text-warning-foreground" :
                                 "bg-gray-100 text-gray-600"
                               }`}>{c.disposition?.replace("_", " ") || "—"}</Badge>
                               <span className="text-muted-foreground text-xs">
@@ -1349,11 +1511,11 @@ export default function CloudDialer() {
               {/* Live call status */}
               {(callState.status === "calling" || callState.status === "connected") && (
                 <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
-                  callState.status === "calling" ? "bg-cyan-50 dark:bg-cyan-950/20" : "bg-emerald-50 dark:bg-emerald-950/20"
+                  callState.status === "calling" ? "bg-cyan-50 dark:bg-cyan-950/20" : "bg-success/5 dark:bg-success/90/20"
                 }`}>
                   {callState.status === "calling"
                     ? <Loader2 className="h-4 w-4 animate-spin text-cyan-600 shrink-0" />
-                    : <Volume2 className="h-4 w-4 text-emerald-600 animate-pulse shrink-0" />}
+                    : <Volume2 className="h-4 w-4 text-success animate-pulse shrink-0" />}
                   <span className="text-sm font-semibold text-foreground flex-1 min-w-0">
                     {callState.status === "calling" ? "📞 Pick up your phone…" : "On call — connected"}
                   </span>
@@ -1367,12 +1529,60 @@ export default function CloudDialer() {
                   <p className="text-xs font-semibold text-primary uppercase tracking-wide">
                     {callState.status === "connected" ? "Mark during call" : "Mark outcome"}
                   </p>
+                  {asksCnetAppeared && (
+                    <div className="rounded-lg border border-info/20 bg-info/5/70 p-2 dark:border-info/60/50 dark:bg-info/90/20">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-info-foreground dark:text-info/40 mb-1.5">
+                        CNET appeared? <span className="text-destructive">*</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["yes", "no"] as const).map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCnetAppeared(value)}
+                            className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                              cnetAppeared === value
+                                ? "border-info/40 bg-info text-white"
+                                : "border-info/20 bg-background text-foreground hover:bg-info/5 dark:border-info/60"
+                            }`}
+                          >
+                            {value === "yes" ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {asksCahetRegistered && (
+                    <div className="rounded-lg border border-destructive/20 bg-destructive/5/70 p-2 dark:border-destructive/60/50 dark:bg-destructive/90/20">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-destructive dark:text-destructive/40 mb-1.5">
+                        Registered for CAHET? <span className="text-destructive">*</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["yes", "no"] as const).map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCahetRegistered(value)}
+                            className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                              cahetRegistered === value
+                                ? "border-destructive/40 bg-destructive text-white"
+                                : "border-destructive/20 bg-background text-foreground hover:bg-destructive/5 dark:border-destructive/60"
+                            }`}
+                          >
+                            {value === "yes" ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {CONNECTED_DISPOSITIONS.map(d => (
                       <button key={d.value} onClick={() => dispoOnClick(d.value)}
+                        disabled={qualifierRequiredUnanswered}
                         className={`flex items-center justify-center gap-1.5 min-h-[48px] px-3 rounded-xl border text-sm font-medium transition-colors ${
                           callState.status === "connected" && callState.disposition === d.value
                             ? "ring-2 ring-primary bg-primary/10 border-primary" : d.color
+                        } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                         }`}>
                         <d.icon className="h-4 w-4 shrink-0" />{d.label}
                       </button>
@@ -1419,7 +1629,7 @@ export default function CloudDialer() {
                   {isNonCallFollowup ? (
                     <div className="grid grid-cols-1 gap-2">
                       <Button onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}`, "_blank")}
-                        className="w-full min-h-[56px] text-base bg-emerald-600 hover:bg-emerald-700">
+                        className="w-full min-h-[56px] text-base bg-success hover:bg-success/90">
                         <MessageCircle className="h-5 w-5 mr-1.5" />
                         {currentLead.followup_type === "whatsapp" ? "Open WhatsApp" : `Handle ${currentLead.followup_type} follow-up`}
                       </Button>
@@ -1487,7 +1697,7 @@ export default function CloudDialer() {
                                   <p className="text-xs text-muted-foreground truncate">{lead.course_name} · {lead.phone.slice(-4)}</p>
                                 </div>
                                 <Badge className="text-[11px] border-0 bg-muted text-muted-foreground shrink-0">{lead.bucket}</Badge>
-                                {idx < currentIdx && <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />}
+                                {idx < currentIdx && <CheckCircle className="h-4 w-4 text-success shrink-0" />}
                               </button>
                             </SheetClose>
                           );
@@ -1528,18 +1738,18 @@ export default function CloudDialer() {
       {missedCount > 0 && (
         <button
           onClick={() => navigate("/missed-calls")}
-          className="flex items-center gap-3 px-6 py-2 bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 hover:bg-amber-100/70 transition-colors text-left"
+          className="flex items-center gap-3 px-6 py-2 bg-warning/5 dark:bg-warning/90/20 border-b border-warning/20 hover:bg-warning/10/70 transition-colors text-left"
         >
-          <PhoneMissed className="h-4 w-4 text-amber-600 shrink-0 animate-pulse" />
+          <PhoneMissed className="h-4 w-4 text-warning-foreground shrink-0 animate-pulse" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+            <p className="text-sm font-semibold text-warning-foreground dark:text-warning/30">
               {missedCount} missed callback{missedCount === 1 ? "" : "s"} pending — call these first
             </p>
-            <p className="text-[11px] text-amber-700 dark:text-amber-200/80">
+            <p className="text-[11px] text-warning-foreground dark:text-warning/40/80">
               Inbound calls received outside business hours. The lead is waiting.
             </p>
           </div>
-          <ArrowRight className="h-4 w-4 text-amber-600 shrink-0" />
+          <ArrowRight className="h-4 w-4 text-warning-foreground shrink-0" />
         </button>
       )}
 
@@ -1577,12 +1787,12 @@ export default function CloudDialer() {
           )}
           {dialLeadMatch && (
             <>
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-2 py-1 text-xs">
-                <CheckCircle className="h-3 w-3 text-emerald-600" />
-                <span className="font-medium text-emerald-900 dark:text-emerald-200">{dialLeadMatch.name}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/5 dark:bg-success/90/20 px-2 py-1 text-xs">
+                <CheckCircle className="h-3 w-3 text-success" />
+                <span className="font-medium text-success-foreground dark:text-success/40">{dialLeadMatch.name}</span>
               </span>
               {dialLeadMatch.isSelf === false && (
-                <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                <span className="text-[10px] text-warning-foreground dark:text-warning">
                   Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
                 </span>
               )}
@@ -1594,7 +1804,7 @@ export default function CloudDialer() {
           )}
           {dialNoMatch && (
             <>
-              <span className="text-[11px] text-amber-700 dark:text-amber-400">No lead found — add new:</span>
+              <span className="text-[11px] text-warning-foreground dark:text-warning">No lead found — add new:</span>
               <input
                 type="text"
                 value={dialNewName}
@@ -1636,7 +1846,7 @@ export default function CloudDialer() {
           {/* Live call timer in header */}
           {(callState.status === "calling" || callState.status === "connected") && (
             <Badge className={`text-xs font-mono tabular-nums border-0 ${
-              callState.status === "connected" ? "bg-emerald-100 text-emerald-700 animate-pulse" : "bg-cyan-100 text-cyan-700"
+              callState.status === "connected" ? "bg-success/10 text-success animate-pulse" : "bg-cyan-100 text-cyan-700"
             }`}>
               {callState.status === "connected" ? <Volume2 className="h-3 w-3 mr-1" /> : <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
               {formatTime(callState.elapsed)}
@@ -1655,19 +1865,19 @@ export default function CloudDialer() {
           </div>
           {lookupResult && (
             <a href={`/admissions/${lookupResult.id}`} target="_blank" rel="noreferrer"
-              className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-3 py-1.5 text-xs">
-              <span className="font-semibold text-emerald-700">{lookupResult.name}</span>
+              className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 dark:bg-success/90/20 px-3 py-1.5 text-xs">
+              <span className="font-semibold text-success">{lookupResult.name}</span>
               <span className="text-muted-foreground">{lookupResult.course_name}</span>
               <span className="text-primary hover:underline">Open →</span>
             </a>
           )}
-          {lookupNotFound && <span className="text-[10px] text-red-500">No lead found</span>}
+          {lookupNotFound && <span className="text-[10px] text-destructive">No lead found</span>}
           <Button variant="outline" size="sm" onClick={loadQueue} disabled={dialerActive}><Users className="h-3.5 w-3.5 mr-1.5" />Refresh</Button>
 
           {dialerActive ? (
             <>
               {paused ? (
-                <Button size="sm" onClick={() => setPaused(false)} className="bg-emerald-600 hover:bg-emerald-700">
+                <Button size="sm" onClick={() => setPaused(false)} className="bg-success hover:bg-success/90">
                   <Play className="h-3.5 w-3.5 mr-1.5" />Resume {pauseTime > 0 && `(${formatTime(pauseTime)})`}
                 </Button>
               ) : (
@@ -1729,33 +1939,33 @@ export default function CloudDialer() {
                 <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
                 <div className="flex items-center gap-1.5 mt-1">
                   <Badge className={`text-[9px] border-0 ${
-                    lead.bucket === "Post-Visit" ? "bg-amber-200 text-amber-800 animate-pulse" :
-                    lead.bucket === "Visit Checkin" ? "bg-violet-100 text-violet-700" :
-                    lead.bucket === "Overdue" ? "bg-red-100 text-red-700" :
-                    lead.bucket === "Today" ? "bg-blue-100 text-blue-700" :
-                    lead.bucket === "New Lead" ? "bg-orange-100 text-orange-700" :
+                    lead.bucket === "Post-Visit" ? "bg-warning/15 text-warning-foreground animate-pulse" :
+                    lead.bucket === "Visit Checkin" ? "bg-primary/10 text-primary" :
+                    lead.bucket === "Overdue" ? "bg-destructive/10 text-destructive" :
+                    lead.bucket === "Today" ? "bg-info/10 text-info-foreground" :
+                    lead.bucket === "New Lead" ? "bg-warning/10 text-warning-foreground" :
                     "bg-gray-100 text-gray-600"
                   }`}>{lead.bucket}</Badge>
                   {lead.followup_type && lead.followup_type !== "call" && (
                     <Badge className={`text-[9px] border-0 ${
-                      lead.followup_type === "whatsapp" ? "bg-emerald-100 text-emerald-700" :
+                      lead.followup_type === "whatsapp" ? "bg-success/10 text-success" :
                       lead.followup_type === "email" ? "bg-sky-100 text-sky-700" :
-                      "bg-violet-100 text-violet-700"
+                      "bg-primary/10 text-primary"
                     }`}>{lead.followup_type === "whatsapp" ? "WA" : lead.followup_type === "email" ? "Email" : "Visit"}</Badge>
                   )}
                   {(() => {
                     const mins = minutesToReclaim(lead);
                     if (mins === null) return null;
                     if (mins <= 0) {
-                      return <Badge className="text-[9px] border-0 bg-red-600 text-white animate-pulse">Reclaim now</Badge>;
+                      return <Badge className="text-[9px] border-0 bg-destructive text-white animate-pulse">Reclaim now</Badge>;
                     }
                     if (mins <= 30) {
-                      return <Badge className="text-[9px] border-0 bg-red-100 text-red-700">⚠ {mins}m to reclaim</Badge>;
+                      return <Badge className="text-[9px] border-0 bg-destructive/10 text-destructive">⚠ {mins}m to reclaim</Badge>;
                     }
                     return null;
                   })()}
                   {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">{lead.attempt_count}x</Badge>}
-                  {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
+                  {idx < currentIdx && <CheckCircle className="h-3 w-3 text-success ml-auto" />}
                 </div>
               </div>
               );
@@ -1779,13 +1989,13 @@ export default function CloudDialer() {
                 follow-up and a call isn't already in progress. */}
             {currentLead.followup_type && currentLead.followup_type !== "call" && callState.status === "idle" && (
               <div className={`shrink-0 px-5 py-2.5 border-b flex items-center gap-3 ${
-                currentLead.followup_type === "whatsapp" ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200" :
+                currentLead.followup_type === "whatsapp" ? "bg-success/5 dark:bg-success/90/20 border-success/20" :
                 currentLead.followup_type === "email" ? "bg-sky-50 dark:bg-sky-950/20 border-sky-200" :
-                "bg-violet-50 dark:bg-violet-950/20 border-violet-200"
+                "bg-primary/5 dark:bg-primary/90/20 border-primary/20"
               }`}>
-                {currentLead.followup_type === "whatsapp" && <FileText className="h-4 w-4 text-emerald-700 shrink-0" />}
+                {currentLead.followup_type === "whatsapp" && <FileText className="h-4 w-4 text-success shrink-0" />}
                 {currentLead.followup_type === "email" && <FileText className="h-4 w-4 text-sky-700 shrink-0" />}
-                {currentLead.followup_type === "visit" && <Calendar className="h-4 w-4 text-violet-700 shrink-0" />}
+                {currentLead.followup_type === "visit" && <Calendar className="h-4 w-4 text-primary shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground">
                     {currentLead.followup_type === "whatsapp" && "WhatsApp follow-up due"}
@@ -1811,7 +2021,7 @@ export default function CloudDialer() {
                     Open lead
                   </Button>
                 )}
-                <Button size="sm" onClick={completeFollowupAndAdvance} className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700">
+                <Button size="sm" onClick={completeFollowupAndAdvance} className="h-8 text-xs bg-success hover:bg-success/90">
                   <CheckCircle className="h-3.5 w-3.5 mr-1" /> Mark done
                 </Button>
               </div>
@@ -1823,17 +2033,17 @@ export default function CloudDialer() {
               {callState.status !== "idle" ? (
                 <div className={`rounded-xl border-2 p-4 space-y-3 ${
                   callState.status === "calling" ? "border-cyan-300 bg-cyan-50 dark:bg-cyan-950/20" :
-                  callState.status === "connected" ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20" :
+                  callState.status === "connected" ? "border-success/30 bg-success/5 dark:bg-success/90/20" :
                   callState.status === "ended" ? "border-primary/30 bg-primary/5" :
-                  callState.status === "auto-disposed" ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20" :
+                  callState.status === "auto-disposed" ? "border-warning/30 bg-warning/5 dark:bg-warning/90/20" :
                   "border-border bg-card"
                 }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {callState.status === "calling" && <Loader2 className="h-5 w-5 animate-spin text-cyan-600" />}
-                      {callState.status === "connected" && <Volume2 className="h-5 w-5 text-emerald-600 animate-pulse" />}
+                      {callState.status === "connected" && <Volume2 className="h-5 w-5 text-success animate-pulse" />}
                       {callState.status === "ended" && <Phone className="h-5 w-5 text-primary" />}
-                      {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-amber-600" />}
+                      {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-warning-foreground" />}
                       <div>
                         <p className="text-sm font-bold text-foreground">
                           {callState.status === "calling" && `Calling ${currentLead?.name || "lead"}…`}
@@ -1862,7 +2072,7 @@ export default function CloudDialer() {
                       )}
                       {/* Show pre-selected disposition badge during call */}
                       {callState.status === "connected" && callState.disposition && (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-0 text-xs">
+                        <Badge className="bg-success/10 text-success border-0 text-xs">
                           <CheckCircle className="h-3 w-3 mr-1" />{callState.disposition.replace("_", " ")}
                         </Badge>
                       )}
@@ -1870,7 +2080,7 @@ export default function CloudDialer() {
                   </div>
                   {(callState.status === "calling" || callState.status === "connected") && (
                     <div className="h-1.5 bg-white/50 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${callState.status === "connected" ? "bg-emerald-500" : "bg-cyan-500"}`}
+                      <div className={`h-full rounded-full transition-all ${callState.status === "connected" ? "bg-success/50" : "bg-cyan-500"}`}
                         style={{ width: `${Math.min(100, (callState.elapsed / 300) * 100)}%` }} />
                     </div>
                   )}
@@ -1895,14 +2105,62 @@ export default function CloudDialer() {
                           </div>
                         )}
                       </div>
+                      {asksCnetAppeared && (
+                        <div className="mb-2 rounded-lg border border-info/20 bg-info/5/70 p-2 dark:border-info/60/50 dark:bg-info/90/20">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-info-foreground dark:text-info/40 mb-1.5">
+                            CNET appeared? <span className="text-destructive">*</span>
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(["yes", "no"] as const).map(value => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setCnetAppeared(value)}
+                                className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                                  cnetAppeared === value
+                                    ? "border-info/40 bg-info text-white"
+                                    : "border-info/20 bg-background text-foreground hover:bg-info/5 dark:border-info/60"
+                                }`}
+                              >
+                                {value === "yes" ? "Yes" : "No"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {asksCahetRegistered && (
+                        <div className="mb-2 rounded-lg border border-destructive/20 bg-destructive/5/70 p-2 dark:border-destructive/60/50 dark:bg-destructive/90/20">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-destructive dark:text-destructive/40 mb-1.5">
+                            Registered for CAHET? <span className="text-destructive">*</span>
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(["yes", "no"] as const).map(value => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setCahetRegistered(value)}
+                                className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                                  cahetRegistered === value
+                                    ? "border-destructive/40 bg-destructive text-white"
+                                    : "border-destructive/20 bg-background text-foreground hover:bg-destructive/5 dark:border-destructive/60"
+                                }`}
+                              >
+                                {value === "yes" ? "Yes" : "No"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {CONNECTED_DISPOSITIONS.map(d => (
                           <button key={d.value}
                             onClick={() => callState.status === "connected" ? preSelectDisposition(d.value) : markDisposition(d.value)}
+                            disabled={qualifierRequiredUnanswered}
                             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                               callState.status === "connected" && callState.disposition === d.value
                                 ? "ring-2 ring-primary bg-primary/10 border-primary"
                                 : d.color
+                            } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                             }`}>
                             <d.icon className="h-3 w-3" />{d.label}
                           </button>
@@ -1917,7 +2175,7 @@ export default function CloudDialer() {
                           {callState.autoDisposition ? "Auto" : "Saved"}: <span className="font-semibold text-foreground">{callState.disposition?.replace("_"," ")}</span>
                           {" · "}Attempt {(currentLead?.attempt_count || 0) + 1}
                           {(currentLead?.attempt_count || 0) + 1 >= MAX_AUTO_ATTEMPTS && callState.autoDisposition && (
-                            <span className="ml-2 text-red-600 font-semibold">→ Marked Inactive</span>
+                            <span className="ml-2 text-destructive font-semibold">→ Marked Inactive</span>
                           )}
                         </p>
                         {autoNextTimer > 0 && (
@@ -1956,8 +2214,8 @@ export default function CloudDialer() {
 
                       {/* Visit scheduling for "interested" */}
                       {callState.disposition === "interested" && (
-                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/10 p-2.5 space-y-1.5">
-                          <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Schedule Campus Visit</p>
+                        <div className="rounded-lg border border-success/20 bg-success/5/50 dark:bg-success/90/10 p-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-success uppercase tracking-wide">Schedule Campus Visit</p>
                           <div className="flex items-center gap-2">
                             <input type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)}
                               min={new Date().toISOString().split("T")[0]}
@@ -1969,14 +2227,14 @@ export default function CloudDialer() {
                               ))}
                             </select>
                           </div>
-                          {visitDate && <p className="text-[10px] text-emerald-600">Visit: {formatFollowupDate(visitDate)} at {formatSlotLabel(visitTime)}</p>}
+                          {visitDate && <p className="text-[10px] text-success">Visit: {formatFollowupDate(visitDate)} at {formatSlotLabel(visitTime)}</p>}
                         </div>
                       )}
 
                       {/* Category selector for "not_interested" */}
                       {callState.disposition === "not_interested" && (
-                        <div className="rounded-lg border border-red-200 bg-red-50/50 dark:bg-red-950/10 p-2.5 space-y-1.5">
-                          <p className="text-[10px] font-semibold text-red-700 uppercase tracking-wide">Reason Category</p>
+                        <div className="rounded-lg border border-destructive/20 bg-destructive/5/50 dark:bg-destructive/90/10 p-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-destructive uppercase tracking-wide">Reason Category</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {([
                               { value: "lead", label: "Admission Enquiry" },
@@ -1987,7 +2245,7 @@ export default function CloudDialer() {
                               <button key={cat.value} onClick={() => setNotIntCategory(cat.value)}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                                   notIntCategory === cat.value
-                                    ? "bg-red-100 text-red-700 border-red-300 ring-1 ring-red-400"
+                                    ? "bg-destructive/10 text-destructive border-destructive/30 ring-1 ring-red-400"
                                     : "bg-background text-muted-foreground border-input hover:bg-muted/50"
                                 }`}>
                                 {cat.label}
@@ -1999,14 +2257,14 @@ export default function CloudDialer() {
 
                       {/* Future session selector for "ineligible" */}
                       {callState.disposition === "ineligible" && (
-                        <div className="rounded-lg border border-purple-200 bg-purple-50/50 dark:bg-purple-950/10 p-2.5 space-y-1.5">
-                          <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wide">Interested for Future Session?</p>
+                        <div className="rounded-lg border border-primary/20 bg-primary/5/50 dark:bg-primary/90/10 p-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-primary uppercase tracking-wide">Interested for Future Session?</p>
                           <div className="flex gap-1.5">
                             {FUTURE_SESSIONS.map(session => (
                               <button key={session} onClick={() => setFutureSession(session.split(" ")[0])}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                                   futureSession === session.split(" ")[0]
-                                    ? "bg-purple-100 text-purple-700 border-purple-300"
+                                    ? "bg-primary/10 text-primary border-primary/25"
                                     : "bg-background text-muted-foreground border-input hover:bg-muted/50"
                                 }`}>
                                 {session}
@@ -2028,9 +2286,9 @@ export default function CloudDialer() {
                       */}
                       {!nudgeDismissed && callState.disposition &&
                        !["wrong_number", "do_not_contact", "cancelled"].includes(callState.disposition) && (
-                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-2.5">
+                        <div className="rounded-lg border border-success/20 bg-success/5/60 dark:bg-success/90/20 dark:border-success/60 p-2.5">
                           <div className="flex items-center justify-between mb-1.5">
-                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-success-foreground dark:text-success/60">
                               <ArrowRight className="h-3 w-3" />
                               {callState.autoDisposition ? "Send a follow-up WhatsApp?" : "Send a WhatsApp?"}
                             </div>
@@ -2186,7 +2444,7 @@ export default function CloudDialer() {
                               <input type="text" value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
                                 className="text-base font-bold text-foreground leading-tight border border-input rounded-md px-1.5 py-0.5 w-40 outline-none focus:ring-1 focus:ring-primary"
                                 onKeyDown={e => { if (e.key === "Enter") saveLeadEdit("name", editValue); if (e.key === "Escape") setEditing(null); }} />
-                              <button onClick={() => saveLeadEdit("name", editValue)} className="text-emerald-600 hover:text-emerald-700"><Check className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => saveLeadEdit("name", editValue)} className="text-success hover:text-success"><Check className="h-3.5 w-3.5" /></button>
                               <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
                             </div>
                           ) : (
@@ -2198,6 +2456,12 @@ export default function CloudDialer() {
                           <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
                           <div className="mt-1">
                             <CahetPendingBadge
+                              leadId={currentLead.id}
+                              leadName={currentLead.name}
+                              phone={currentLead.phone}
+                              courseName={currentLead.course_name}
+                            />
+                            <UpdeledPendingBadge
                               leadId={currentLead.id}
                               leadName={currentLead.name}
                               phone={currentLead.phone}
@@ -2220,7 +2484,7 @@ export default function CloudDialer() {
                               <option value="">Select course...</option>
                               {courseOptions.map(c => <option key={c.id} value={c.id}>{c.name} — {c.campus}</option>)}
                             </select>
-                            <button onClick={() => saveLeadEdit("course", editValue)} className="text-emerald-600 hover:text-emerald-700"><Check className="h-3.5 w-3.5" /></button>
+                            <button onClick={() => saveLeadEdit("course", editValue)} className="text-success hover:text-success"><Check className="h-3.5 w-3.5" /></button>
                             <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
                           </div>
                         ) : (
@@ -2244,7 +2508,7 @@ export default function CloudDialer() {
                       </div>
                       <div>
                         <span className="text-muted-foreground">Attempts</span>
-                        <p className={`font-medium ${currentLead.attempt_count > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                        <p className={`font-medium ${currentLead.attempt_count > 0 ? "text-warning-foreground" : "text-success"}`}>
                           {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} previous` : "First call"}
                         </p>
                       </div>
@@ -2263,19 +2527,19 @@ export default function CloudDialer() {
                 {callHistory.length > 0 && (
                   <Card className="border-border/60 shadow-none">
                     <CardContent className="p-4">
-                      <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <p className="text-[10px] font-semibold text-warning-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
                         <FileText className="h-3 w-3" />Previous Call Notes ({callHistory.length})
                       </p>
                       <div className="space-y-2 max-h-[180px] overflow-y-auto">
                         {callHistory.map(c => (
-                          <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-amber-200 pl-2.5 py-1">
+                          <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-warning/20 pl-2.5 py-1">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <Badge className={`text-[9px] border-0 shrink-0 ${
-                                  c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
-                                  c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
-                                  c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
-                                  c.disposition === "busy" ? "bg-orange-100 text-orange-700" :
+                                  c.disposition === "interested" ? "bg-success/10 text-success" :
+                                  c.disposition === "not_interested" ? "bg-destructive/10 text-destructive" :
+                                  c.disposition === "not_answered" ? "bg-warning/10 text-warning-foreground" :
+                                  c.disposition === "busy" ? "bg-warning/10 text-warning-foreground" :
                                   "bg-gray-100 text-gray-600"
                                 }`}>{c.disposition?.replace("_", " ") || "—"}</Badge>
                                 <span className="text-muted-foreground text-[10px]">
@@ -2311,11 +2575,11 @@ export default function CloudDialer() {
                 </div>
 
               {/* Talking Points + NIMT Highlights + WhatsApp */}
-              <Card className="border-border/60 shadow-none bg-blue-50/30 dark:bg-blue-950/10">
+              <Card className="border-border/60 shadow-none bg-info/5/30 dark:bg-info/90/10">
                 <CardContent className="p-4">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
                     <div>
-                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">💬 Call Script</p>
+                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">💬 Call Script</p>
                       <div className="text-muted-foreground leading-relaxed space-y-2">
                         <p className="italic">
                           "Hello, am I speaking with <b>{currentLead.name.split(" ")[0]}</b>?
@@ -2325,7 +2589,7 @@ export default function CloudDialer() {
                             : " I'm calling regarding your enquiry. Could you tell me which course you're interested in?"}
                           "
                         </p>
-                        <p className="text-[9px] text-amber-600 font-semibold">⚠️ Confirm name and course before proceeding</p>
+                        <p className="text-[9px] text-warning-foreground font-semibold">⚠️ Confirm name and course before proceeding</p>
                         {currentLead.course_name !== "—" && (
                           <p className="italic">
                             "Great! Let me tell you about {currentLead.course_name} at our {currentLead.campus_name}.
@@ -2343,7 +2607,7 @@ export default function CloudDialer() {
                       </div>
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">🏛️ About NIMT</p>
+                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">🏛️ About NIMT</p>
                       <ul className="text-muted-foreground leading-relaxed space-y-1">
                         <li>• Est. 1987 — <b>37+ years</b> in education</li>
                         <li>• 5 campuses, 36+ programmes, 21 colleges</li>
@@ -2355,7 +2619,7 @@ export default function CloudDialer() {
                       </ul>
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">🎯 Nudge Checklist</p>
+                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">🎯 Nudge Checklist</p>
                       <ul className="text-muted-foreground leading-relaxed space-y-1">
                         {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
                         <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
@@ -2388,12 +2652,12 @@ export default function CloudDialer() {
       {dialerActive && (
         <div className="px-6 py-2.5 border-t border-border bg-card flex items-center gap-6 text-xs">
           <div className="flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5 text-muted-foreground" /><span className="font-semibold text-foreground">Session Stats</span></div>
-          <div className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-emerald-500" />{stats.connected} connected</div>
-          <div className="flex items-center gap-1.5"><PhoneMissed className="h-3 w-3 text-amber-500" />{stats.noAnswer} no answer</div>
-          <div className="flex items-center gap-1.5"><Phone className="h-3 w-3 text-orange-500" />{stats.busy} busy</div>
+          <div className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-success" />{stats.connected} connected</div>
+          <div className="flex items-center gap-1.5"><PhoneMissed className="h-3 w-3 text-warning" />{stats.noAnswer} no answer</div>
+          <div className="flex items-center gap-1.5"><Phone className="h-3 w-3 text-warning" />{stats.busy} busy</div>
           <div className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-cyan-500" />{stats.interested} interested</div>
           <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 text-muted-foreground" />Talk time: {formatTime(stats.totalTalkTime)}</div>
-          {paused && <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700 animate-pulse">PAUSED {formatTime(pauseTime)}</Badge>}
+          {paused && <Badge className="text-[9px] border-0 bg-warning/10 text-warning-foreground animate-pulse">PAUSED {formatTime(pauseTime)}</Badge>}
         </div>
       )}
     </div>

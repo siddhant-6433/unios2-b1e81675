@@ -6,6 +6,20 @@ export interface LeadInfo {
   name: string;
   mobile: string;
   course: string;
+  ga_client_id?: string;
+  ga_session_id?: string;
+  gclid?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
+  landing_page?: string;
+  referrer?: string;
+  origin_domain?: string;
+  fbc?: string;
+  fbp?: string;
+  portal_brand?: string;
 }
 
 export interface SessionPayload {
@@ -19,6 +33,7 @@ export interface ChatMessage {
   type: "text" | "voice";
   content: string;        // text content or base64 audio
   timestamp: string;
+  lang?: "en" | "hi";
 }
 
 export interface ServerMessage {

@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { ArrowRight, Loader2, AlertTriangle, CalendarIcon } from "lucide-react";
+import { ArrowRight, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
 import { getNationalityOptions, isIndianNationality, COUNTRIES } from "./countries";
@@ -20,59 +19,8 @@ interface Props {
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
 const NATIONALITIES = getNationalityOptions();
-
-function DobPicker({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-
-  // Parse ISO date string to Date object
-  const selected: Date | undefined = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(value + 'T00:00:00')
-    : undefined;
-
-  const displayValue = selected
-    ? selected.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '';
-
-  const today = new Date();
-  const fromYear = today.getFullYear() - 80;
-  const toYear = today.getFullYear() - 3;
-
-  return (
-    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          className={`${inputCls} flex items-center justify-between text-left ${!displayValue ? 'text-muted-foreground' : ''}`}
-        >
-          <span>{displayValue || 'Select date of birth'}</span>
-          <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <Calendar
-          mode="single"
-          selected={selected}
-          onSelect={(date) => {
-            if (date) {
-              const yyyy = date.getFullYear();
-              const mm = String(date.getMonth() + 1).padStart(2, '0');
-              const dd = String(date.getDate()).padStart(2, '0');
-              onChange(`${yyyy}-${mm}-${dd}`);
-            }
-            setOpen(false);
-          }}
-          defaultMonth={selected ?? new Date(toYear, 5, 1)}
-          captionLayout="dropdown-buttons"
-          fromYear={fromYear}
-          toYear={toYear}
-          disabled={(date) => date > today}
-          initialFocus
-        />
-      </PopoverContent>
-    </Popover>
-  );
-}
+const genderOptions = ["Male", "Female", "Other"].map((value) => ({ value, label: value }));
+const categoryOptions = ["General", "OBC", "SC", "ST", "EWS"].map((value) => ({ value, label: value }));
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN_RE = /^\d{6}$/;
@@ -81,6 +29,9 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
   const address = data.address || {};
   const isSchool = data.program_category === 'school';
   const isIndian = isIndianNationality(data.nationality);
+  const today = new Date();
+  const dobFromYear = today.getFullYear() - 80;
+  const dobToYear = today.getFullYear() - 3;
 
   const [showErrors, setShowErrors] = useState(false);
 
@@ -152,40 +103,46 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
     : null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">
         {isSchool ? 'Child Details' : 'Personal Details'}
       </h2>
 
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+        <TextField
+          label="Full Name"
+          required
+          value={data.full_name || ""}
+          onValueChange={(value) => onChange({ full_name: value })}
+          error={showErrors && missing.full_name ? "Full name is required." : undefined}
+          inputClassName={inputCls}
+        />
+        <SelectField
+          label="Gender"
+          required
+          value={data.gender || ""}
+          onValueChange={(value) => onChange({ gender: value })}
+          options={genderOptions}
+          placeholder="Select"
+          error={showErrors && missing.gender ? "Gender is required." : undefined}
+          triggerClassName={inputCls}
+        />
         <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.full_name ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Full Name <span className="text-destructive">*</span>
-          </label>
-          <input value={data.full_name} onChange={e => onChange({ full_name: e.target.value })}
-            className={`${inputCls} ${showErrors && missing.full_name ? 'border-destructive' : ''}`} />
-        </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.gender ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Gender <span className="text-destructive">*</span>
-          </label>
-          <select value={data.gender} onChange={e => onChange({ gender: e.target.value })}
-            className={`${inputCls} ${showErrors && missing.gender ? 'border-destructive' : ''}`}>
-            <option value="">Select</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.dob ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Date of Birth <span className="text-destructive">*</span>
-          </label>
-          <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} />
-          {showErrors && missing.dob && (
-            <p className="mt-1 text-[11px] text-destructive">Date of birth is required.</p>
-          )}
+          <DatePickerField
+            label="Date of Birth"
+            required
+            value={data.dob || ""}
+            onValueChange={(value) => onChange({ dob: value })}
+            disabled={readOnly}
+            error={showErrors && missing.dob ? "Date of birth is required." : undefined}
+            placeholder="Select date of birth"
+            fromYear={dobFromYear}
+            toYear={dobToYear}
+            maxDate={today}
+            defaultMonth={new Date(dobToYear, 5, 1)}
+            triggerClassName={inputCls}
+          />
           {dobWarning && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -193,162 +150,150 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
             </div>
           )}
         </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.nationality ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Nationality <span className="text-destructive">*</span>
-          </label>
-          <select
-            value={data.nationality || 'Indian'}
-            onChange={e => {
-              const nat = e.target.value;
+        <SelectField
+          label="Nationality"
+          required
+          value={data.nationality || "Indian"}
+          onValueChange={(nat) => {
               onChange({
                 nationality: nat,
-                // Clear the other field when switching
                 aadhaar: nat === 'Indian' ? data.aadhaar : '',
                 passport_number: nat !== 'Indian' ? data.passport_number : '',
               });
-            }}
-            className={`${inputCls} ${showErrors && missing.nationality ? 'border-destructive' : ''}`}
-          >
-            {NATIONALITIES.map(n => (
-              <option key={n.value} value={n.value}>{n.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.category ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Category <span className="text-destructive">*</span>
-          </label>
-          <select value={data.category} onChange={e => onChange({ category: e.target.value })}
-            className={`${inputCls} ${showErrors && missing.category ? 'border-destructive' : ''}`}>
-            <option value="">Select</option>
-            {["General", "OBC", "SC", "ST", "EWS"].map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
+          }}
+          options={NATIONALITIES}
+          error={showErrors && missing.nationality ? "Nationality is required." : undefined}
+          triggerClassName={inputCls}
+        />
+        <SelectField
+          label="Category"
+          required
+          value={data.category || ""}
+          onValueChange={(value) => onChange({ category: value })}
+          options={categoryOptions}
+          placeholder="Select"
+          error={showErrors && missing.category ? "Category is required." : undefined}
+          triggerClassName={inputCls}
+        />
         {/* Conditional: Aadhaar for Indian, Passport for others */}
         {isIndian ? (
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-              🇮🇳 Aadhaar No (optional)
-            </label>
-            <input
-              value={data.aadhaar}
-              onChange={e => onChange({ aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) })}
-              placeholder="12-digit number"
-              className={inputCls}
-            />
-          </div>
+          <TextField
+            label="🇮🇳 Aadhaar No (optional)"
+            value={data.aadhaar || ""}
+            onValueChange={(value) => onChange({ aadhaar: value.replace(/\D/g, '').slice(0, 12) })}
+            placeholder="12-digit number"
+            inputClassName={inputCls}
+          />
         ) : (
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-              🛂 Passport No (optional)
-            </label>
-            <input
-              value={data.passport_number}
-              onChange={e => onChange({ passport_number: e.target.value.toUpperCase().slice(0, 15) })}
-              placeholder="Passport number"
-              className={inputCls}
-            />
-          </div>
+          <TextField
+            label="🛂 Passport No (optional)"
+            value={data.passport_number || ""}
+            onValueChange={(value) => onChange({ passport_number: value.toUpperCase().slice(0, 15) })}
+            placeholder="Passport number"
+            inputClassName={inputCls}
+          />
         )}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone *</label>
           <PhoneInput value={data.phone} onChange={() => {}} disabled />
         </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.email ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Email <span className="text-destructive">*</span>
-          </label>
-          <input type="email" value={data.email} onChange={e => onChange({ email: e.target.value })}
-            className={`${inputCls} ${showErrors && missing.email ? 'border-destructive' : ''}`} />
-          {showErrors && missing.email && (
-            <p className="mt-1 text-[11px] text-destructive">A valid email address is required.</p>
-          )}
-        </div>
+        <TextField
+          label="Email"
+          required
+          type="email"
+          value={data.email || ""}
+          onValueChange={(value) => onChange({ email: value })}
+          error={showErrors && missing.email ? "A valid email address is required." : undefined}
+          inputClassName={inputCls}
+        />
       </div>
 
       {/* APAAR / PEN */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">APAAR ID (optional)</label>
-          <input value={data.apaar_id} onChange={e => onChange({ apaar_id: e.target.value.replace(/\D/g, '').slice(0, 12) })} placeholder="12-digit Academic Bank ID" className={inputCls} />
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5 mt-1">
+        <TextField
+          label="APAAR ID (optional)"
+          value={data.apaar_id || ""}
+          onValueChange={(value) => onChange({ apaar_id: value.replace(/\D/g, '').slice(0, 12) })}
+          placeholder="12-digit Academic Bank ID"
+          inputClassName={inputCls}
+        />
         {isSchool && (
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PEN Number (optional)</label>
-            <input value={data.pen_number} onChange={e => onChange({ pen_number: e.target.value })} className={inputCls} />
-          </div>
+          <TextField
+            label="PEN Number (optional)"
+            value={data.pen_number || ""}
+            onValueChange={(value) => onChange({ pen_number: value })}
+            inputClassName={inputCls}
+          />
         )}
       </div>
 
       {/* Address */}
-      <h3 className="text-sm font-semibold text-foreground mt-2">Address <span className="text-destructive">*</span></h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="sm:col-span-2">
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.line1 ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Address Line <span className="text-destructive">*</span>
-          </label>
-          <input value={address.line1 || ''} onChange={e => onChange({ address: { ...address, line1: e.target.value } })}
-            className={`${inputCls} ${showErrors && missing.line1 ? 'border-destructive' : ''}`} />
-        </div>
+      <h3 className="text-sm font-semibold text-foreground mt-6 pt-4 border-t border-border/40">Address <span className="text-destructive">*</span></h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-5">
+        <TextField
+          label="Address Line"
+          required
+          value={address.line1 || ""}
+          onValueChange={(value) => onChange({ address: { ...address, line1: value } })}
+          error={showErrors && missing.line1 ? "Address line is required." : undefined}
+          containerClassName="sm:col-span-2"
+          inputClassName={inputCls}
+        />
+        <TextField
+          label="City"
+          required
+          value={address.city || ""}
+          onValueChange={(value) => onChange({ address: { ...address, city: value } })}
+          error={showErrors && missing.city ? "City is required." : undefined}
+          inputClassName={inputCls}
+        />
         <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.city ? 'text-destructive' : 'text-muted-foreground'}`}>
-            City <span className="text-destructive">*</span>
-          </label>
-          <input value={address.city || ''} onChange={e => onChange({ address: { ...address, city: e.target.value } })}
-            className={`${inputCls} ${showErrors && missing.city ? 'border-destructive' : ''}`} />
-        </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.state ? 'text-destructive' : 'text-muted-foreground'}`}>
-            State <span className="text-destructive">*</span>
-          </label>
           {/* When country is India, restrict to the canonical 28+8 list. Falls back
               to a free-text input for other countries since province/state names
               vary widely. */}
           {(address.country || 'India') === 'India' ? (
-            <select
+            <SelectField
+              label="State"
+              required
               value={address.state || ''}
-              onChange={e => onChange({ address: { ...address, state: e.target.value } })}
-              className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`}
-            >
-              <option value="">Select state</option>
-              {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+              onValueChange={(value) => onChange({ address: { ...address, state: value } })}
+              options={INDIAN_STATES.map((state) => ({ value: state, label: state }))}
+              placeholder="Select state"
+              error={showErrors && missing.state ? "State is required." : undefined}
+              triggerClassName={inputCls}
+            />
           ) : (
-            <input
+            <TextField
+              label="State"
+              required
               value={address.state || ''}
-              onChange={e => onChange({ address: { ...address, state: e.target.value } })}
+              onValueChange={(value) => onChange({ address: { ...address, state: value } })}
               placeholder="State / Province / Region"
-              className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`}
+              error={showErrors && missing.state ? "State is required." : undefined}
+              inputClassName={inputCls}
             />
           )}
         </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.country ? 'text-destructive' : 'text-muted-foreground'}`}>
-            Country <span className="text-destructive">*</span>
-          </label>
-          <select
-            value={address.country || 'India'}
-            onChange={e => {
-              const newCountry = e.target.value;
+        <SelectField
+          label="Country"
+          required
+          value={address.country || 'India'}
+          onValueChange={(newCountry) => {
               // Reset state when switching country since the state list changes.
               onChange({ address: { ...address, country: newCountry, state: newCountry === address.country ? address.state : '' } });
-            }}
-            className={`${inputCls} ${showErrors && missing.country ? 'border-destructive' : ''}`}
-          >
-            {COUNTRIES.map(c => <option key={c.name} value={c.name}>{c.flag} {c.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.pin ? 'text-destructive' : 'text-muted-foreground'}`}>
-            PIN Code <span className="text-destructive">*</span>
-          </label>
-          <input value={address.pin_code || ''} onChange={e => onChange({ address: { ...address, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) } })}
-            className={`${inputCls} ${showErrors && missing.pin ? 'border-destructive' : ''}`} />
-          {showErrors && missing.pin && isIndian && (
-            <p className="mt-1 text-[11px] text-destructive">Enter a valid 6-digit PIN code.</p>
-          )}
-        </div>
+          }}
+          options={COUNTRIES.map((country) => ({ value: country.name, label: `${country.flag} ${country.name}` }))}
+          error={showErrors && missing.country ? "Country is required." : undefined}
+          triggerClassName={inputCls}
+        />
+        <TextField
+          label="PIN Code"
+          required
+          value={address.pin_code || ""}
+          onValueChange={(value) => onChange({ address: { ...address, pin_code: value.replace(/\D/g, '').slice(0, 6) } })}
+          error={showErrors && missing.pin ? (isIndian ? "Enter a valid 6-digit PIN code." : "PIN / ZIP code is required.") : undefined}
+          inputClassName={inputCls}
+        />
       </div>
 
       {showErrors && hasMissing && (

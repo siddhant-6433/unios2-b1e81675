@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Flame } from "lucide-react";
+import { ExternalLink, Flame } from "lucide-react";
+import { fetchCahetRegistration, type CahetRegistrationDetails } from "@/lib/cahet";
 import {
   CahetRegisterDialog,
   isBptOrBmritCourse,
@@ -36,7 +37,8 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
   // When the parent provides registeredOverride, we use it directly and skip
   // the per-row fetch. fetchedRegistered is only populated in the fallback path.
   const [fetchedRegistered, setFetchedRegistered] = useState<boolean | null>(null);
-  const registered = registeredOverride !== undefined ? registeredOverride : fetchedRegistered;
+  const [registration, setRegistration] = useState<CahetRegistrationDetails | null>(null);
+  const registered = registration ? true : (registeredOverride !== undefined ? registeredOverride : fetchedRegistered);
   const [open, setOpen] = useState<CahetRegisterTarget | null>(null);
 
   // Lazy course fetch when caller didn't pass it.
@@ -61,22 +63,42 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
     if (registeredOverride !== undefined) return;
     if (!eligible) return;
     let cancelled = false;
-    supabase
-      .from("cahet_registrations")
-      .select("id")
-      .eq("lead_id", leadId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled) setFetchedRegistered(!!data);
+    fetchCahetRegistration(supabase, leadId)
+      .then((row) => {
+        if (cancelled) return;
+        setRegistration(row);
+        setFetchedRegistered(!!row);
       });
     return () => { cancelled = true; };
   }, [registeredOverride, eligible, leadId]);
 
   if (!eligible) return null;
   if (registered) {
+    const documentUrl = registration?.document_signed_url || registration?.document_url || null;
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[10px] font-semibold">
-        <Flame className="h-3 w-3" /> CAHET ✓ registered
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success-foreground border border-success/30 px-2 py-0.5 text-[10px] font-semibold"
+        title={registration?.registration_no ? `CAHET registration no: ${registration.registration_no}` : "CAHET registered"}
+      >
+        <Flame className="h-3 w-3" />
+        CAHET
+        {registration?.registration_no ? (
+          <span className="font-mono">{registration.registration_no}</span>
+        ) : (
+          "✓ registered"
+        )}
+        {documentUrl && (
+          <a
+            href={documentUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-0.5 rounded-full p-0.5 hover:bg-success/15"
+            title="Open CAHET registration proof"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
       </span>
     );
   }
@@ -87,7 +109,7 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
       <button
         type="button"
         onClick={() => setOpen({ lead_id: leadId, lead_name: leadName, phone, course_name: courseName })}
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 px-2 py-0.5 text-[10px] font-semibold transition-colors"
+        className="inline-flex items-center gap-1 rounded-full bg-warning/10 text-warning-foreground border border-warning/30 hover:bg-warning/15 px-2 py-0.5 text-[10px] font-semibold transition-colors"
         title="Mark CAHET registration for this lead"
       >
         <Flame className="h-3 w-3" /> CAHET pending — register
@@ -97,7 +119,10 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, registe
         onClose={() => setOpen(null)}
         onSaved={() => {
           setOpen(null);
-          setRegistered(true);
+          fetchCahetRegistration(supabase, leadId).then((row) => {
+            setRegistration(row);
+            setFetchedRegistered(true);
+          });
           onRegistered?.();
         }}
       />

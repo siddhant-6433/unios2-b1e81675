@@ -7,6 +7,7 @@
 // the lead (person_role) so the existing job_applicants trigger fires.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,7 +46,7 @@ interface ClassifyResult {
 
 async function callGemini(content: string, apiKey: string): Promise<ClassifyResult> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -206,32 +207,19 @@ Deno.serve(async (req) => {
 
       if (leadRow && !leadRow.category_locked && leadRow.person_role === "lead") {
         const previousStage = leadRow.stage;
-        await admin
-          .from("leads")
-          .update({ person_role: personRoleTarget, stage: "not_interested" })
-          .eq("id", leadId)
-          .eq("person_role", "lead");
-
-        // Timeline note so counsellors and admins can see *why* the lead was
-        // closed without digging into the classifier queue. user_id is left
-        // null — this is an automated action, not a counsellor's. The
-        // PublisherPortal "Marked Not Interested by AI" filter keys off this
-        // row + person_role to surface AI-killed leads.
-        await admin
-          .from("lead_activities")
-          .insert({
-            lead_id: leadId,
-            user_id: null,
-            type: "ai_call",
-            description:
-              personRoleTarget === "job_applicant"
-                ? `AI classifier: identified as job applicant${
-                    result.role_inferred ? ` (${result.role_inferred})` : ""
-                  } → marked Not Interested`
-                : `AI classifier: identified as ${personRoleTarget} → marked Not Interested`,
-            old_stage: previousStage,
-            new_stage: "not_interested",
-          });
+        await applyLeadTransition(admin, {
+          leadId,
+          currentStage: previousStage,
+          command: "classifyNotInterested",
+          activityType: "ai_call",
+          extraPatch: { person_role: personRoleTarget },
+          description:
+            personRoleTarget === "job_applicant"
+              ? `AI classifier: identified as job applicant${
+                  result.role_inferred ? ` (${result.role_inferred})` : ""
+                } → marked Not Interested`
+              : `AI classifier: identified as ${personRoleTarget} → marked Not Interested`,
+        });
 
         // Enrich the job_applicants row with LLM provenance
         if (personRoleTarget === "job_applicant") {

@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TextField } from "@/components/ui/state-fields";
 import { Mail, Send, Loader2, Check } from "lucide-react";
 
 interface Template {
@@ -92,7 +93,7 @@ export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, de
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mail className="h-5 w-5 text-blue-600" />
+            <Mail className="h-5 w-5 text-info-foreground" />
             Send Email
           </DialogTitle>
           <p className="text-sm text-muted-foreground">{lead.name}</p>
@@ -107,18 +108,14 @@ export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, de
           </div>
         ) : (
           <div className="space-y-4">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                To <span className="text-destructive">*</span>
-              </label>
-              <input
-                type="email"
-                value={toEmail}
-                onChange={(e) => setToEmail(e.target.value)}
-                placeholder="email@example.com"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
-              />
-            </div>
+            <TextField
+              value={toEmail}
+              onValueChange={setToEmail}
+              label="To"
+              required
+              type="email"
+              placeholder="email@example.com"
+            />
 
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-2">Select Template</label>

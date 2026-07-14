@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { ReceiptDialog, type FeeLineItem, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
+import { useAuth } from "@/contexts/AuthContext";
+import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
-  ArrowRight, Download,
+  ArrowRight, Download, Home,
 } from "lucide-react";
 
 type Step = "verify" | "fees" | "paying" | "receipt";
@@ -23,50 +27,172 @@ interface StudentInfo {
   id: string;
   name: string;
   admission_no: string;
+  course_id: string | null;
+  campus_id: string | null;
   course_name: string;
   semester: string;
   campus_name: string;
   parent_phone: string;
+  brand: StudentBrand;
 }
 
+interface StudentPortalPaymentHandoff {
+  fromStudentPortal?: boolean;
+  student?: StudentInfo;
+  fees?: StudentFee[];
+}
+
+interface StudentFeeReceiptSnapshot {
+  amountPaid: number;
+  grossAmount: number;
+  concessionAmount: number;
+  paymentRef: string | null;
+  paymentGateway: string;
+  paidAt: string;
+  lineItems: FeeLineItem[];
+}
+
+const readFunctionErrorMessage = async (error: unknown) => {
+  const fallback = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+  const context = error && typeof error === "object" && "context" in error
+    ? (error as { context?: { text?: () => Promise<string> } }).context
+    : undefined;
+  const text = await context?.text?.().catch(() => "");
+  if (!text) return fallback;
+
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || fallback;
+  } catch {
+    return text.slice(0, 200) || fallback;
+  }
+};
+
 export default function PaymentPortal() {
+  const { user: authUser, loading: authLoading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const studentParam = params.get("student");
   const tokenParam   = params.get("token");
+  const feeParam     = params.get("fee");
+  const scopeParam   = params.get("scope");
+  const paymentScope = feeParam ? "fee" : scopeParam === "all" ? "all" : "due";
 
   const [step, setStep]         = useState<Step>("verify");
   const [phone, setPhone]       = useState("");
   const [otp, setOtp]           = useState("");
   const [otpSent, setOtpSent]   = useState(false);
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading]   = useState(!!studentParam);
   const [error, setError]       = useState<string | null>(null);
   const [student, setStudent]   = useState<StudentInfo | null>(null);
   const [fees, setFees]         = useState<StudentFee[]>([]);
+  // Consultant-managed fee hiding: the student-role fee_ledger SELECT returns
+  // zero rows for flagged students. In that mode we show a single due total
+  // (via the student_fee_due_summary RPC) and let the gateway compute the
+  // authoritative amount server-side (payment_scope='due', no fee_ids).
+  const [hiddenDueMode, setHiddenDueMode] = useState(false);
   const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
   const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
+  const [receiptSnapshot, setReceiptSnapshot] = useState<StudentFeeReceiptSnapshot | null>(null);
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
 
   const popupRef = useRef<Window | null>(null);
   const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { gateways: feeGateways, loading: gatewaysLoading } = useScopedPaymentGateways({
+    context: "student_fee",
+    studentId: student?.id,
+    courseId: student?.course_id,
+    campusId: student?.campus_id,
+    enabled: !!student,
+  });
+  const brand = student?.brand || NIMT_EDU_BRAND;
+  const isStudentPortalHandoff = tokenParam === "student_portal";
+  const paymentHandoff = location.state as StudentPortalPaymentHandoff | null;
 
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  // Listen for postMessage from Easebuzz popup
+  useEffect(() => {
+    if (gatewaysLoading) return;
+    if (!selectedGateway || !feeGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(feeGateways));
+    }
+  }, [gatewaysLoading, feeGateways, selectedGateway]);
+
+  // Listen for postMessage from popup gateways
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.eb_payment === "success") {
-        stopPolling();
-        checkFeesPaid();
+      if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
+        void checkFeesPaid();
+        if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
   }, [student?.id]);
 
-  // Direct link via token (skip OTP)
+  // Student portal handoff: use the active logged-in student session instead
+  // of asking for phone verification again. Public token links keep the
+  // existing direct-link behavior.
   useEffect(() => {
-    if (tokenParam && studentParam) verifyToken();
-  }, [tokenParam, studentParam]);
+    if (!studentParam) {
+      setLoading(false);
+      return;
+    }
+
+    if (tokenParam && tokenParam !== "student_portal") {
+      verifyToken();
+      return;
+    }
+
+    if (
+      isStudentPortalHandoff &&
+      paymentHandoff?.fromStudentPortal &&
+      paymentHandoff.student?.id === studentParam &&
+      Array.isArray(paymentHandoff.fees)
+    ) {
+      setStudent(paymentHandoff.student);
+      if (paymentHandoff.fees.length > 0) {
+        setFees(paymentHandoff.fees);
+        setStep("fees");
+        setLoading(false);
+      } else {
+        // Hidden-fee students hand off an empty list — resolve the due total
+        // through the hidden-mode fallback in fetchFees.
+        void (async () => {
+          await fetchFees(paymentHandoff.student!.id);
+          setStep("fees");
+          setLoading(false);
+        })();
+      }
+      return;
+    }
+
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
+    let cancelled = false;
+    const loadFromActiveSession = async () => {
+      setLoading(true);
+      setError(null);
+
+      if (!authUser?.id) {
+        if (tokenParam === "student_portal") {
+          setError("Open this payment from the student portal after signing in.");
+        }
+        setLoading(false);
+        return;
+      }
+
+      await loadStudentFromSession(authUser.id, () => cancelled);
+    };
+
+    loadFromActiveSession();
+    return () => { cancelled = true; };
+  }, [studentParam, tokenParam, scopeParam, feeParam, authLoading, authUser?.id, isStudentPortalHandoff, paymentHandoff]);
 
   function stopPolling() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -75,9 +201,9 @@ export default function PaymentPortal() {
   const verifyToken = async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await supabase
+    const { data, error: err } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("id", studentParam!)
       .single();
     if (err || !data) { setError("Invalid link. Contact the institution."); setLoading(false); return; }
@@ -87,15 +213,55 @@ export default function PaymentPortal() {
     setLoading(false);
   };
 
+  const loadStudentFromSession = async (userId: string, isCancelled: () => boolean = () => false) => {
+    setError(null);
+    const { data, error: err } = await (supabase as any)
+      .from("students")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .eq("id", studentParam!)
+      .maybeSingle();
+
+    if (isCancelled()) return;
+
+    if (err || !data) {
+      setError(`Could not open this student's payment page for the signed-in account (${userId.slice(0, 8)}). Please go back to the student portal and click Pay Now again.`);
+      setLoading(false);
+      return;
+    }
+
+    if (data.user_id && data.user_id !== userId) {
+      setError(`This payment link belongs to a different student login. Please sign out and log in as the student linked to this record.`);
+      setLoading(false);
+      return;
+    }
+
+    setStudent(toInfo(data));
+    await fetchFees(data.id);
+    if (isCancelled()) return;
+    setStep("fees");
+    setLoading(false);
+  };
+
   function toInfo(data: any): StudentInfo {
+    const course = data.courses;
+    const institution = course?.departments?.institutions;
     return {
       id: data.id,
       name: data.name,
       admission_no: data.admission_no || data.pre_admission_no || "",
-      course_name: data.courses?.name || "",
-      semester: data.semester || "",
+      course_id: data.course_id || null,
+      campus_id: data.campus_id || null,
+      course_name: course?.name || "",
+      semester: "",
       campus_name: data.campuses?.name || "",
       parent_phone: data.father_phone || data.mother_phone || data.guardian_phone || data.phone || "",
+      brand: brandForStudentOwner({
+        campusName: data.campuses?.name,
+        courseName: course?.name,
+        courseCode: course?.code,
+        institutionName: institution?.name,
+        institutionType: institution?.type,
+      }),
     };
   }
 
@@ -104,9 +270,9 @@ export default function PaymentPortal() {
     setLoading(true);
     setError(null);
 
-    const { data: studentData } = await supabase
+    const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .or([
         `phone.eq.${phone}`, `phone.eq.+91${phone}`,
         `father_phone.eq.${phone}`, `father_phone.eq.+91${phone}`,
@@ -165,25 +331,70 @@ export default function PaymentPortal() {
       .in("status", ["due", "overdue"])
       .order("due_date", { ascending: true });
 
-    setFees((data || []).map((f: any) => ({
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const mapped = (data || []).map((f: any) => ({
       id: f.id,
       fee_head: f.fee_codes?.name || "Fee",
       amount: Number(f.total_amount),
       balance: Number(f.balance || 0),
       status: f.status,
       due_date: f.due_date,
-    })));
+    })).filter((fee: StudentFee) => {
+      if (fee.balance <= 0) return false;
+      if (feeParam) return fee.id === feeParam;
+      if (paymentScope === "all") return true;
+      return fee.due_date <= todayKey;
+    });
+
+    // Hidden-fee fallback: no visible ledger rows can also mean the fee
+    // structure is consultant-managed and hidden from this student. The RPC
+    // returns just the due total (no structure); errors (e.g. unauthenticated
+    // OTP flow) leave the empty state untouched.
+    if (mapped.length === 0 && !feeParam) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentId });
+      const dueTotal = Number((summary as any)?.due_total || 0);
+      if (dueTotal > 0) {
+        setHiddenDueMode(true);
+        setFees([{
+          id: "hidden-due",
+          fee_head: "Fee due",
+          amount: dueTotal,
+          balance: dueTotal,
+          status: "due",
+          due_date: todayKey,
+        }]);
+        return;
+      }
+    }
+
+    setHiddenDueMode(false);
+    setFees(mapped);
   };
 
   const checkFeesPaid = async (): Promise<boolean> => {
     if (!student) return false;
+
+    // Hidden-fee mode: the student can't read fee_ledger rows, so settle-state
+    // comes from the due-summary RPC instead.
+    if (hiddenDueMode) {
+      const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: student.id });
+      const stillDue = Number((summary as any)?.due_total || 0);
+      if (stillDue > 0) return false;
+      setReceiptSnapshot((current) => current ?? buildReceiptSnapshot(paidTxnId, activeGateway));
+      setStep("receipt");
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      return true;
+    }
+
     const { data } = await supabase
       .from("fee_ledger")
       .select("id")
       .eq("student_id", student.id)
-      .in("status", ["due", "overdue"]);
+      .in("status", ["due", "overdue"])
+      .in("id", fees.map((fee) => fee.id));
 
     if (!data || data.length === 0) {
+      setReceiptSnapshot((current) => current ?? buildReceiptSnapshot(paidTxnId, activeGateway));
       setStep("receipt");
       if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       return true;
@@ -192,6 +403,33 @@ export default function PaymentPortal() {
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
+  // Only real ledger UUIDs go to the gateways; the hidden-mode synthetic row is
+  // excluded so the server falls back to computing the 'due' selection itself.
+  const realFeeIds = fees.map((fee) => fee.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  const waiverAmount = paymentScope === "all" ? Math.round(totalDue * 0.05) : 0;
+  const payableAmount = Math.max(totalDue - waiverAmount, 0);
+  const paymentTitle = paymentScope === "all"
+    ? "Annual Fee Payment"
+    : paymentScope === "fee"
+      ? "Future Fee Payment"
+      : "Due Fee Payment";
+  const activeGateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
+  const activeGatewayName =
+    feeGateways.find((gateway) => gateway.gateway === activeGateway)?.display_name ||
+    (activeGateway === "icici" ? "ICICI Bank PG" : activeGateway === "razorpay" ? "Razorpay" : "EaseBuzz");
+  const buildReceiptSnapshot = (
+    paymentRef: string | null = paidTxnId,
+    paymentGateway = activeGateway,
+  ): StudentFeeReceiptSnapshot => ({
+    amountPaid: payableAmount,
+    grossAmount: totalDue,
+    concessionAmount: waiverAmount,
+    paymentRef,
+    paymentGateway,
+    paidAt: new Date().toISOString(),
+    lineItems: fees.map((fee) => ({ fee_head: fee.fee_head, amount: fee.balance })),
+  });
+  const receiptAmountPaid = receiptSnapshot?.amountPaid ?? payableAmount;
 
   const handlePay = async () => {
     if (!student) return;
@@ -199,15 +437,42 @@ export default function PaymentPortal() {
     setLoading(true);
 
     try {
+      if (activeGateway === "razorpay") {
+        const result = await openRazorpayCheckout({
+          amountPaise: Math.round(payableAmount * 100),
+          receipt: buildRazorpayReceipt("fee", student.id),
+          context: "student_fee",
+          description: paymentTitle,
+          studentId: student.id,
+          paymentScope,
+          feeIds: paymentScope === "all" ? [] : realFeeIds,
+          waiverAmount,
+          customerName: student.name,
+          customerPhone: student.parent_phone || phone || "9999999999",
+          productInfo: "Fee Payment",
+        });
+        const snapshot = buildReceiptSnapshot(result.paymentId, "razorpay");
+        setPaidTxnId(result.paymentId);
+        setReceiptSnapshot(snapshot);
+        await fetchFees(student.id);
+        setStep("receipt");
+        setLoading(false);
+        return;
+      }
+
       const nameParts = student.name.trim().split(" ");
       const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
+      const functionName = activeGateway === "icici" ? "icici-payment" : "easebuzz-payment";
 
-      const { data: fnData, error: fnError } = await supabase.functions.invoke("easebuzz-payment", {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(functionName, {
         body: {
           action: "initiate-fee-payment",
           student_id: student.id,
           txnid,
           amount: totalDue,
+          payment_scope: paymentScope,
+          fee_ids: paymentScope === "all" ? [] : realFeeIds,
+          waiver_amount: waiverAmount,
           productinfo: "Fee Payment",
           firstname: nameParts[0],
           email: undefined,
@@ -215,11 +480,12 @@ export default function PaymentPortal() {
         },
       });
 
-      if (fnError) throw new Error(fnError.message);
+      if (fnError) throw new Error(await readFunctionErrorMessage(fnError));
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
-      setPaidTxnId(txnid);
+      const gatewayTxnId = fnData?.txnid || txnid;
+      setPaidTxnId(gatewayTxnId);
 
       popupRef.current = window.open(
         pay_url,
@@ -240,11 +506,23 @@ export default function PaymentPortal() {
           stopPolling();
           const alreadyPaid = await checkFeesPaid();
           if (!alreadyPaid) {
-            // DB not yet updated — ask EaseBuzz server to confirm, then re-check DB
-            const { data: verifyData } = await supabase.functions.invoke("easebuzz-payment", {
-              body: { action: "verify-payment", txnid, application_id: "" },
+            // DB not yet updated — ask the gateway server to confirm, then re-check DB
+            const { data: verifyData } = await supabase.functions.invoke(functionName, {
+              body: {
+                action: "verify-payment",
+                txnid: gatewayTxnId,
+                application_id: "",
+                student_id: student.id,
+                fee_ids: paymentScope === "all" ? [] : realFeeIds,
+                payment_scope: paymentScope,
+                waiver_amount: waiverAmount,
+              },
             });
-            if (verifyData?.status?.toLowerCase() === "success") {
+            const verified = verifyData?.status?.toLowerCase() === "success" ||
+              verifyData?.status === "SUC" ||
+              verifyData?.raw?.responseCode === "0000" ||
+              verifyData?.raw?.responseCode === "000";
+            if (verified) {
               // Server confirmed success — re-check DB to confirm ledger is updated
               const confirmedPaid = await checkFeesPaid();
               if (!confirmedPaid) {
@@ -260,8 +538,8 @@ export default function PaymentPortal() {
           await checkFeesPaid();
         }
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || "Something went wrong. Please try again.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setLoading(false);
     }
   };
@@ -269,11 +547,11 @@ export default function PaymentPortal() {
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col animate-fade-in">
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
-            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
-            <span className="text-sm font-semibold text-gray-900">NIMT University — Fee Payment</span>
+            <img src={student ? brand.logo : uniosLogo} alt={student ? brand.logoAlt : "UniOs"} className="h-8 max-w-[150px] object-contain" />
+            <span className="text-sm font-semibold text-gray-900 truncate">{brand.name} - Fee Payment</span>
           </div>
         </header>
 
@@ -284,8 +562,27 @@ export default function PaymentPortal() {
             </div>
           )}
 
+          {step === "verify" && !loading && isStudentPortalHandoff && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-4">
+                  <ShieldCheck className="h-7 w-7 text-primary" />
+                </div>
+                <h1 className="text-xl font-bold text-gray-900">Checking Student Session</h1>
+                <p className="text-sm text-gray-500 mt-1">Open fee payment from the signed-in student portal.</p>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
+                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Step 1: OTP */}
-          {step === "verify" && !loading && (
+          {step === "verify" && !loading && !isStudentPortalHandoff && (
             <div className="space-y-6">
               <div className="text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-4">
@@ -296,7 +593,7 @@ export default function PaymentPortal() {
               </div>
 
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -346,7 +643,7 @@ export default function PaymentPortal() {
           {step === "fees" && student && !loading && (
             <div className="space-y-4">
               {error && (
-                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-start gap-3 rounded-xl bg-destructive/5 border border-destructive/20 p-4 text-sm text-destructive">
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -370,7 +667,7 @@ export default function PaymentPortal() {
 
               {fees.length === 0 ? (
                 <div className="rounded-xl bg-white border border-gray-200 p-8 text-center">
-                  <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
+                  <CheckCircle className="h-10 w-10 text-success mx-auto mb-3" />
                   <h3 className="text-lg font-semibold text-gray-900">All fees paid!</h3>
                   <p className="text-sm text-gray-500 mt-1">No outstanding fees at this time.</p>
                 </div>
@@ -383,23 +680,58 @@ export default function PaymentPortal() {
                           <p className="text-sm font-medium text-gray-900">{fee.fee_head}</p>
                           <p className="text-xs text-gray-400">
                             Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                            {fee.status === "overdue" && <span className="ml-2 text-red-500 font-medium">Overdue</span>}
+                            {fee.status === "overdue" && <span className="ml-2 text-destructive font-medium">Overdue</span>}
                           </p>
                         </div>
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
                       </div>
                     ))}
-                    <div className="flex items-center justify-between p-4 bg-gray-50">
-                      <p className="text-sm font-bold text-gray-900">Total Due</p>
+                  <div className="flex items-center justify-between p-4 bg-gray-50">
+                      <p className="text-sm font-bold text-gray-900">{paymentTitle}</p>
                       <p className="text-lg font-bold text-gray-900">₹{totalDue.toLocaleString("en-IN")}</p>
                     </div>
+                    {waiverAmount > 0 && (
+                      <>
+                        <div className="flex items-center justify-between p-4 bg-success/5">
+                          <p className="text-sm font-semibold text-success">Pay All Waiver (5%)</p>
+                          <p className="text-sm font-bold text-success">-₹{waiverAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                        <div className="flex items-center justify-between p-4 bg-gray-50">
+                          <p className="text-sm font-bold text-gray-900">Payable Now</p>
+                          <p className="text-lg font-bold text-gray-900">₹{payableAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                      </>
+                    )}
                   </div>
+
+                  {!gatewaysLoading && feeGateways.length > 1 && (
+                    <div className="rounded-xl bg-white border border-gray-200 p-4 space-y-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Payment Gateway</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feeGateways.map((gateway) => (
+                          <button
+                            key={gateway.gateway}
+                            onClick={() => setSelectedGateway(gateway.gateway)}
+                            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                              selectedGateway === gateway.gateway
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-gray-200 text-gray-600 hover:border-primary/40"
+                            }`}
+                          >
+                            {gateway.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <button onClick={handlePay} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     <CreditCard className="h-4 w-4" />
-                    Pay ₹{totalDue.toLocaleString("en-IN")}
+                    Pay ₹{payableAmount.toLocaleString("en-IN")}
                   </button>
-                  <p className="text-[11px] text-gray-400 text-center">Secure payment powered by EaseBuzz. Your data is encrypted.</p>
+                  <p className="text-[11px] text-gray-400 text-center">
+                    Secure payment powered by {activeGatewayName}. Your data is encrypted.
+                  </p>
                 </>
               )}
             </div>
@@ -418,8 +750,8 @@ export default function PaymentPortal() {
           {step === "receipt" && student && (
             <div className="space-y-6 text-center">
               <div>
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 mx-auto mb-4">
-                  <CheckCircle className="h-8 w-8 text-green-600" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10 mx-auto mb-4">
+                  <CheckCircle className="h-8 w-8 text-success" />
                 </div>
                 <h2 className="text-xl font-bold text-gray-900">Payment Successful!</h2>
                 {paidTxnId && <p className="text-xs text-gray-400 mt-1 font-mono">{paidTxnId}</p>}
@@ -432,7 +764,7 @@ export default function PaymentPortal() {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Amount Paid</span>
-                  <span className="text-lg font-bold text-green-600">₹{totalDue.toLocaleString("en-IN")}</span>
+                  <span className="text-lg font-bold text-success">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Date</span>
@@ -442,23 +774,35 @@ export default function PaymentPortal() {
                 </div>
               </div>
 
-              <button
-                onClick={() => setReceipt({
-                  type: "student_fee",
-                  student_name: student.name,
-                  admission_no: student.admission_no,
-                  course_name: student.course_name,
-                  semester: student.semester,
-                  campus_name: student.campus_name,
-                  amount: totalDue,
-                  payment_date: new Date().toISOString(),
-                  payment_mode: "online",
-                  line_items: fees.map(f => ({ fee_head: f.fee_head, amount: f.balance })),
-                })}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-3 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
-              >
-                <Download className="h-4 w-4" /> Download Receipt
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={() => navigate("/student", { replace: true })}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                >
+                  <Home className="h-4 w-4" /> Back to Dashboard
+                </button>
+
+                <button
+                  onClick={() => setReceipt({
+                    type: "student_fee",
+                    student_name: student.name,
+                    admission_no: student.admission_no,
+                    course_name: student.course_name,
+                    semester: student.semester,
+                    campus_name: student.campus_name,
+                    amount: receiptSnapshot?.grossAmount ?? totalDue,
+                    concession_amount: receiptSnapshot?.concessionAmount ?? waiverAmount,
+                    payment_ref: receiptSnapshot?.paymentRef ?? paidTxnId,
+                    payment_gateway: receiptSnapshot?.paymentGateway ?? activeGateway,
+                    payment_date: receiptSnapshot?.paidAt ?? new Date().toISOString(),
+                    payment_mode: "online",
+                    line_items: receiptSnapshot?.lineItems ?? fees.map(f => ({ fee_head: f.fee_head, amount: f.balance })),
+                  })}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-3 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <Download className="h-4 w-4" /> Download Receipt
+                </button>
+              </div>
             </div>
           )}
         </main>

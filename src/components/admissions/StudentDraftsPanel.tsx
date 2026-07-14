@@ -60,14 +60,14 @@ export function StudentDraftsPanel({ refreshKey, onResume, adminRoles = ["super_
   if (drafts.length === 0 && !loading) return null;
 
   return (
-    <Card className="border-amber-200/70 bg-amber-50/50 dark:border-amber-800/40 dark:bg-amber-950/20">
+    <Card className="border-warning/20/70 bg-warning/5/50 dark:border-warning/60/40 dark:bg-warning/90/20">
       <CardContent className="p-3">
         <button
           className="w-full flex items-center justify-between gap-2"
           onClick={() => setExpanded(e => !e)}
         >
           <div className="flex items-center gap-2 text-sm">
-            <FileText className="h-4 w-4 text-amber-600" />
+            <FileText className="h-4 w-4 text-warning-foreground" />
             <span className="font-medium text-foreground">
               {drafts.length} unfinished {drafts.length === 1 ? "draft" : "drafts"}
               {isAdmin && drafts.length > 0 && <span className="text-muted-foreground font-normal"> (all users)</span>}
@@ -93,7 +93,7 @@ export function StudentDraftsPanel({ refreshKey, onResume, adminRoles = ["super_
                         Step {d.step + 1}/{STEP_LABELS.length} · {STEP_LABELS[d.step] || "?"}
                       </Badge>
                       {isAdmin && !isOwn && (
-                        <Badge variant="outline" className="text-[10px] shrink-0 border-blue-200 text-blue-700">other user</Badge>
+                        <Badge variant="outline" className="text-[10px] shrink-0 border-info/20 text-info-foreground">other user</Badge>
                       )}
                     </div>
                     <div className="text-[11px] text-muted-foreground mt-0.5 truncate">

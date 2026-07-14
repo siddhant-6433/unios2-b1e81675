@@ -189,7 +189,7 @@ const ReportTemplates = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -234,7 +234,7 @@ const ReportTemplates = () => {
                       variant={t.status === "active" ? "default" : "secondary"}
                       className={
                         t.status === "active"
-                          ? "bg-green-100 text-green-800 border-0"
+                          ? "bg-success/10 text-success-foreground border-0"
                           : "bg-gray-100 text-gray-600 border-0"
                       }
                     >

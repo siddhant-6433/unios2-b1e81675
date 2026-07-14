@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   PDFDocument, PDFImage, PDFName, PDFArray, PDFString, rgb, StandardFonts,
 } from "https://esm.sh/pdf-lib@1.17.1";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,6 +56,10 @@ const DOC_KEY_LABELS: Record<string, string> = {
   student_photo:          "Student Photograph",
   transfer_certificate:   "Transfer Certificate",
   aadhaar:                "Aadhaar Card",
+  father_aadhaar:         "Father Aadhaar Card",
+  mother_aadhaar:         "Mother Aadhaar Card",
+  guardian_aadhaar:       "Guardian Aadhaar Card",
+  parent_aadhaar:         "Parent / Guardian Aadhaar",
   medical_record:         "Medical Record",
   class_10_marksheet:     "Class 10 Marksheet",
   class_10_certificate:   "Class 10 Pass Certificate",
@@ -79,6 +84,12 @@ function docLabel(docKey: string): string {
   return docKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function docKeyForFileName(name: string): string {
+  if (name.startsWith("passport_photo.")) return "passport_photo";
+  const dashIdx = name.indexOf("-");
+  return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
+}
+
 // ── Eligibility mismatch detection ────────────────────────────────────────
 // Each mismatch is keyed by the section it should highlight in the PDF.
 type MismatchSection =
@@ -91,15 +102,39 @@ type MismatchSection =
   | "entrance";       // entrance exam missing
 interface Mismatch { section: MismatchSection; message: string }
 
-function ageInYears(dob?: string | null): number | null {
+function ageInYearsAtCutoff(dob: string | null | undefined, admissionYear: number, cutoffMonth: number, cutoffDay: number): number | null {
   if (!dob) return null;
   const d = new Date(dob);
   if (isNaN(d.getTime())) return null;
-  const now = new Date();
-  let years = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) years--;
-  return years;
+  const cutoff = new Date(admissionYear, cutoffMonth, cutoffDay);
+  const diffMs = cutoff.getTime() - d.getTime();
+  if (diffMs < 0) return 0;
+  const years = diffMs / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.round(years * 10) / 10;
+}
+
+function getAdmissionYear(app: any, sessionName?: string | null): number {
+  const sessionYear = sessionName?.match(/\b(20\d{2})\b/)?.[1];
+  if (sessionYear) return Number(sessionYear);
+
+  const submittedYear = app.submitted_at ? new Date(app.submitted_at).getFullYear() : NaN;
+  if (!isNaN(submittedYear)) return submittedYear;
+
+  return new Date().getFullYear();
+}
+
+function getAgeCutoff(app: any, admissionYear: number): { month: number; day: number; label: string } {
+  if (app.program_category === "school") {
+    const selections = Array.isArray(app.course_selections) ? app.course_selections : [];
+    const isMirai = selections.some((s: any) =>
+      `${s.campus_name || ""} ${s.course_name || ""}`.toLowerCase().includes("mirai")
+    );
+    return isMirai
+      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
+      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+  }
+
+  return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
 }
 
 function parseMarks(v: any): number | null {
@@ -112,7 +147,7 @@ function parseMarks(v: any): number | null {
   return n <= 10 ? n * 9.5 : n; // rough CGPA -> percent conversion
 }
 
-function computeMismatches(app: any, rules: any[]): Mismatch[] {
+function computeMismatches(app: any, rules: any[], sessionName?: string | null): Mismatch[] {
   const out: Mismatch[] = [];
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
   if (flags.has("custom_board")) {
@@ -133,7 +168,9 @@ function computeMismatches(app: any, rules: any[]): Mismatch[] {
   const ad = app.academic_details || {};
   const c12Marks = parseMarks(ad.class_12?.marks);
   const gradMarks = parseMarks(ad.graduation?.marks ?? ad.graduation?.cgpa_till_sem);
-  const candidateAge = ageInYears(app.dob);
+  const admissionYear = getAdmissionYear(app, sessionName);
+  const ageCutoff = getAgeCutoff(app, admissionYear);
+  const candidateAge = ageInYearsAtCutoff(app.dob, admissionYear, ageCutoff.month, ageCutoff.day);
   const exams: any[] = Array.isArray(ad.entrance_exams) ? ad.entrance_exams : [];
 
   // Aggregate per-course findings; surface the strictest one for each section.
@@ -145,10 +182,10 @@ function computeMismatches(app: any, rules: any[]): Mismatch[] {
   rules.forEach(r => {
     if (candidateAge != null) {
       if (r.min_age != null && candidateAge < r.min_age) {
-        ageWarnings.push(`Below minimum age (${candidateAge} < ${r.min_age}).`);
+        ageWarnings.push(`Below minimum age as of ${ageCutoff.label} (${candidateAge} < ${r.min_age}).`);
       }
       if (r.max_age != null && candidateAge > r.max_age) {
-        ageWarnings.push(`Above maximum age (${candidateAge} > ${r.max_age}).`);
+        ageWarnings.push(`Above maximum age as of ${ageCutoff.label} (${candidateAge} > ${r.max_age}).`);
       }
     }
     if (r.class_12_min_marks != null && c12Marks != null && c12Marks < Number(r.class_12_min_marks)) {
@@ -193,6 +230,18 @@ const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() |
 const norm  = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "-";
 const yesNo = (b?: any) => b ? "YES" : "NO";
 
+// pdf-lib's built-in StandardFonts use WinAnsi encoding. Applicant-entered
+// values can contain Unicode currency marks or smart punctuation, so normalize
+// those before measuring or drawing text.
+function pdfText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/₹/g, "Rs.")
+    .replace(/[–—]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\u00a0/g, " ");
+}
+
 interface Ctx {
   pdf: PDFDocument;
   page: any;
@@ -210,6 +259,10 @@ interface Ctx {
   // Repeating-header info: painted on every page above the body.
   appId?: string;
   sessionName?: string | null;
+  programCategory?: string | null;
+  applicationDate?: string | null;
+  usesProposalHeader?: boolean;
+  applicationHeaderBrand?: ApplicationHeaderBrand;
 }
 
 const COLORS = {
@@ -225,12 +278,246 @@ const COLORS = {
   link:      rgb(0.10, 0.30, 0.85),
 };
 
+const MM_TO_PT = 72 / 25.4;
+const PASSPORT_PHOTO_W = 35 * MM_TO_PT;
+const PASSPORT_PHOTO_H = 45 * MM_TO_PT;
+const SECTION_HEADER_H = 15;
+
+const BRAND_BY_SLUG: Record<string, string> = {
+  nimt:     "#0035C5",
+  nimt_grn: "#0035C5",
+  nimt_he:  "#0035C5",
+  beacon:   "#0044FF",
+  mirai:    "#77966D",
+};
+
+const APPLICATION_FORM_LOGO_BY_SLUG: Record<string, string> = {
+  nimt:     "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_grn: "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_he:  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  beacon:   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/beacon-logo.png",
+  mirai:    "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/mirai-logo.png",
+};
+
+type ApplicationHeaderBrand = "beacon" | "mirai" | null;
+
+function hexToRgb(hex: string) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  const n = m ? parseInt(m[1], 16) : 0x0035c5;
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+function fitHeaderText(text: string, font: any, size: number, maxWidth: number): string {
+  if (!text) return "";
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}...`;
+}
+
+function firstCourseSelection(app: any): any {
+  const selections = Array.isArray(app?.course_selections) ? app.course_selections : [];
+  return selections.find((s: any) => s && (s.campus_name || s.course_name || s.course_code)) || {};
+}
+
+function applicationSchoolBrand(app: any, branding: any): ApplicationHeaderBrand {
+  const firstChoice = firstCourseSelection(app);
+  const category = String(app?.program_category || "").toLowerCase();
+  const slug = String(branding?.slug || "").toLowerCase();
+  const name = String(branding?.name || "").toLowerCase();
+  const courseText = String(JSON.stringify(app?.course_selections || [])).toLowerCase();
+  const campus = String(firstChoice?.campus_name || "").toLowerCase();
+  const haystack = `${slug} ${name} ${campus} ${courseText}`;
+
+  if (
+    slug === "mirai" ||
+    name.includes("mirai") ||
+    /mirai|experiential|mes-|pyp|myp|eyp|montessori/.test(haystack) ||
+    (category === "school" && /campus\s*2|gz2/.test(haystack))
+  ) {
+    return "mirai";
+  }
+
+  if (
+    slug === "beacon" ||
+    name.includes("beacon") ||
+    name.includes("b school") ||
+    category === "school" ||
+    /campus\s*1|campus\s*3|arthala|avantika\s*ii|gz1|gz3|bsav|bsa\b/.test(haystack)
+  ) {
+    return "beacon";
+  }
+
+  return null;
+}
+
+function isSchoolApplication(app: any, branding: any): boolean {
+  return applicationSchoolBrand(app, branding) !== null;
+}
+
+function applicationFormHeaderName(ctx: Pick<Ctx, "branding" | "programCategory" | "applicationHeaderBrand">): string {
+  const slug = String(ctx.branding?.slug || "").toLowerCase();
+  const name = String(ctx.branding?.name || "");
+  const brand = ctx.applicationHeaderBrand || ctx.branding?._applicationHeaderBrand;
+  if (brand === "mirai") return "Mirai Experiential School";
+  if (brand === "beacon" || slug === "beacon" || /beacon|b school/i.test(name)) return "NIMT B School";
+  return name || "NIMT Educational Institutions";
+}
+
+function applicationFormLogoUrl(app: any, branding: any): string | null {
+  const schoolBrand = applicationSchoolBrand(app, branding);
+  if (schoolBrand) return APPLICATION_FORM_LOGO_BY_SLUG[schoolBrand];
+  const slug = String(branding?.slug || "nimt").toLowerCase();
+  return APPLICATION_FORM_LOGO_BY_SLUG[slug] || APPLICATION_FORM_LOGO_BY_SLUG.nimt;
+}
+
+function applicationHeaderCampusName(app: any): string {
+  return String(firstCourseSelection(app)?.campus_name || "");
+}
+
+function applicationHeaderAddress(app: any, branding: any): string {
+  const campus = applicationHeaderCampusName(app).toLowerCase();
+  if (/campus\s*3|avantika\s*ii|gz3|bsav/.test(campus)) {
+    return "Avantika Extension Colony, Ghaziabad";
+  }
+  if (/campus\s*1|arthala|gz1|bsa\b/.test(campus)) {
+    return "Near Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007";
+  }
+  if (/mirai|campus\s*2|avantika|gz2|mes/.test(campus)) {
+    return "Ansal Avantika Colony, Shastri Nagar, Ghaziabad 201015";
+  }
+  return String(branding?.address || "");
+}
+
+function drawProposalStyleHeader(ctx: Ctx): { topReserve: number; bottomReserve: number } {
+  const slug = String(ctx.applicationHeaderBrand || ctx.branding?._applicationHeaderBrand || ctx.branding?.slug || "nimt").toLowerCase();
+  const brandHex = BRAND_BY_SLUG[slug] || BRAND_BY_SLUG.nimt;
+  const brand = hexToRgb(brandHex);
+  const text = rgb(0.10, 0.11, 0.18);
+  const muted = rgb(0.58, 0.62, 0.69);
+  const subtle = rgb(0.40, 0.45, 0.53);
+
+  const margin = 40;
+  let y = ctx.height - 50;
+  const logoImg = ctx.branding?._applicationHeaderLogo as PDFImage | null;
+  const logoMaxH = 56;
+  const logoMaxW = 160;
+  let logoH = logoMaxH;
+  let logoW = logoMaxW;
+  let textLeftX = margin;
+  const brandName = applicationFormHeaderName(ctx);
+
+  if (logoImg) {
+    const aspect = logoImg.width / logoImg.height;
+    logoH = logoMaxH;
+    logoW = Math.min(logoMaxW, logoH * aspect);
+    if (logoW > logoMaxW) {
+      logoW = logoMaxW;
+      logoH = logoW / aspect;
+    }
+    ctx.page.drawImage(logoImg, { x: margin, y: y - logoH, width: logoW, height: logoH });
+    textLeftX = margin + logoW + 14;
+  } else {
+    const fallbackSize = 40;
+    ctx.page.drawRectangle({ x: margin, y: y - fallbackSize, width: fallbackSize, height: fallbackSize, color: brand });
+    const initial = brandName.trim().charAt(0).toUpperCase() || "N";
+    const initW = ctx.bold.widthOfTextAtSize(initial, 22);
+    ctx.page.drawText(initial, {
+      x: margin + (fallbackSize - initW) / 2,
+      y: y - fallbackSize + (fallbackSize - 22) / 2 + 4,
+      size: 22, font: ctx.bold, color: rgb(1, 1, 1),
+    });
+    textLeftX = margin + fallbackSize + 12;
+    logoH = fallbackSize;
+  }
+
+  const leftMaxW = ctx.width - margin * 2 - 220;
+  const displayName = fitHeaderText(brandName, ctx.bold, 13, leftMaxW);
+  ctx.page.drawText(displayName, {
+    x: textLeftX, y: y - 15, size: 13, font: ctx.bold, color: text,
+  });
+
+  const campusName = fitHeaderText(String(ctx.branding?._applicationHeaderCampusName || ctx.branding?.campus_name || ctx.branding?.campusName || ""), ctx.bold, 10, leftMaxW);
+  if (campusName) {
+    ctx.page.drawText(campusName, {
+      x: textLeftX, y: y - 30, size: 10, font: ctx.bold, color: subtle,
+    });
+  }
+
+  const address = fitHeaderText(String(ctx.branding?._applicationHeaderAddress || ctx.branding?.address || ""), ctx.font, 8.5, leftMaxW);
+  if (address) {
+    ctx.page.drawText(address, {
+      x: textLeftX, y: y - 44, size: 8.5, font: ctx.font, color: muted,
+    });
+  }
+  const dateText = `Date: ${fmtDate(ctx.applicationDate)}`;
+  ctx.page.drawText(dateText, {
+    x: textLeftX, y: y - 60, size: 8.5, font: ctx.font, color: muted,
+  });
+
+  const title = "APPLICATION FORM";
+  const titleW = ctx.bold.widthOfTextAtSize(title, 13);
+  ctx.page.drawText(title, {
+    x: ctx.width - margin - titleW, y: y - 14, size: 13, font: ctx.bold, color: brand,
+  });
+  if (ctx.appId) {
+    const label = "Application Form No";
+    const number = ctx.appId;
+    const labelSize = 7.5;
+    const numberSize = 12.5;
+    const padX = 10;
+    const labelW = ctx.bold.widthOfTextAtSize(label, labelSize);
+    const numberW = ctx.bold.widthOfTextAtSize(number, numberSize);
+    const badgeW = Math.max(106, Math.max(labelW, numberW) + padX * 2);
+    const badgeH = 38;
+    const radius = 8;
+    const badgeX = ctx.width - margin - badgeW;
+    const badgeTop = y - 23;
+    const badgeY = badgeTop - badgeH;
+    const badgeColor = rgb(0.20, 0.69, 0.39);
+
+    ctx.page.drawRectangle({
+      x: badgeX + radius, y: badgeY,
+      width: badgeW - radius * 2, height: badgeH,
+      color: badgeColor,
+    });
+    ctx.page.drawRectangle({
+      x: badgeX, y: badgeY + radius,
+      width: badgeW, height: badgeH - radius * 2,
+      color: badgeColor,
+    });
+    ctx.page.drawCircle({ x: badgeX + radius,          y: badgeTop - radius,          size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - radius, y: badgeTop - radius,          size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + radius,          y: badgeY + radius,            size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - radius, y: badgeY + radius,            size: radius, color: badgeColor });
+    ctx.page.drawText(label, {
+      x: badgeX + (badgeW - labelW) / 2,
+      y: badgeTop - 14,
+      size: labelSize, font: ctx.bold, color: rgb(1, 1, 1),
+    });
+    ctx.page.drawText(number, {
+      x: badgeX + (badgeW - numberW) / 2,
+      y: badgeTop - 30,
+      size: numberSize, font: ctx.bold, color: rgb(1, 1, 1),
+    });
+  }
+  y -= Math.max(84, logoH + 12);
+  ctx.page.drawRectangle({ x: margin, y, width: ctx.width - margin * 2, height: 2, color: brand });
+  return { topReserve: ctx.height - (y - 22), bottomReserve: 50 };
+}
+
 async function newPage(ctx: Ctx) {
   ctx.page = ctx.pdf.addPage([595, 842]);
   let topReserve = 90;
   let bottomReserve = 50;
 
-  if (ctx.hasLetterhead && ctx.branding?._lh) {
+  if (ctx.usesProposalHeader) {
+    const reserves = drawProposalStyleHeader(ctx);
+    topReserve = reserves.topReserve;
+    bottomReserve = reserves.bottomReserve;
+  } else if (ctx.hasLetterhead && ctx.branding?._lh) {
     const lh = ctx.branding._lh;
     const aspectHW = lh.height / lh.width;
 
@@ -280,7 +567,7 @@ async function newPage(ctx: Ctx) {
   //   Line 1: "Admission Application"          (bold, regular size)
   //   Line 2: <session name in caps>            (bold, regular size)
   //   Line 3: <Application No>                  (bold, large size)
-  if (ctx.appId) {
+  if (ctx.appId && !ctx.usesProposalHeader) {
     const line1 = "Admission Application";
     const line2 = (ctx.sessionName || "").toUpperCase();
     const line3 = ctx.appId;
@@ -363,17 +650,21 @@ function addLinkAnnotation(ctx: Ctx, x: number, y: number, w: number, h: number,
   annots.push(ann);
 }
 
-// Section title bar (dark, full-width, white text).
-function drawSection(ctx: Ctx, title: string, height = 18) {
-  ensureSpace(ctx, height + 4);
+// Section title bar (dark, white text).
+function drawSectionBox(ctx: Ctx, title: string, x: number, w: number, height = SECTION_HEADER_H) {
+  ensureSpace(ctx, height + 2);
   ctx.page.drawRectangle({
-    x: ctx.margin, y: ctx.y - height, width: ctx.width - ctx.margin*2, height,
+    x, y: ctx.y - height, width: w, height,
     color: COLORS.sectionBg,
   });
   ctx.page.drawText(title, {
-    x: ctx.margin + 8, y: ctx.y - height + 5, size: 9, font: ctx.bold, color: COLORS.sectionFg,
+    x: x + 8, y: ctx.y - height + 4, size: 8.5, font: ctx.bold, color: COLORS.sectionFg,
   });
-  ctx.y -= height + 2;
+  ctx.y -= height + 1;
+}
+
+function drawSection(ctx: Ctx, title: string, height = SECTION_HEADER_H) {
+  drawSectionBox(ctx, title, ctx.margin, ctx.width - ctx.margin*2, height);
 }
 
 // Word-wrap a string into N lines that fit a given pixel width at a given font/size.
@@ -381,6 +672,7 @@ function drawSection(ctx: Ctx, title: string, height = 18) {
 // ABHIJEETKUMAR153020@GMAIL.COM), it's split across multiple lines at
 // character boundaries instead of getting truncated with an ellipsis.
 function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 2): string[] {
+  text = pdfText(text);
   if (!text) return [""];
 
   const charWrap = (word: string): string[] => {
@@ -446,7 +738,7 @@ function drawCell(
   const bw        = opts.red ? 1.2 : 0.5;
   ctx.page.drawRectangle({ x, y: y - h, width: w, height: h, color: fillColor, borderColor: border, borderWidth: bw });
   if (label) {
-    ctx.page.drawText(label, { x: x + 4, y: y - 11, size: 6.5, font: ctx.font, color: COLORS.muted });
+    ctx.page.drawText(pdfText(label), { x: x + 4, y: y - 11, size: 6.5, font: ctx.font, color: COLORS.muted });
   }
   const valueSize = opts.valueSize ?? 8.5;
   const maxLines  = opts.maxLines  ?? (label ? 2 : 1);
@@ -469,7 +761,7 @@ function drawHeaderRow(ctx: Ctx, cols: { label: string; w: number }[], rowH = 16
   let xCur = ctx.margin;
   for (const c of cols) {
     ctx.page.drawRectangle({ x: xCur, y: ctx.y - rowH, width: c.w, height: rowH, color: COLORS.labelBg, borderColor: COLORS.border, borderWidth: 0.5 });
-    ctx.page.drawText(c.label, { x: xCur + 4, y: ctx.y - 11, size: 7.5, font: ctx.bold, color: COLORS.text });
+    ctx.page.drawText(pdfText(c.label), { x: xCur + 4, y: ctx.y - 11, size: 7.5, font: ctx.bold, color: COLORS.text });
     xCur += c.w;
   }
   ctx.y -= rowH;
@@ -494,40 +786,71 @@ function drawValueRow(ctx: Ctx, cols: { value: string; w: number; red?: boolean 
   ctx.y -= computedH;
 }
 
-// 4-column key/value grid. Splits the row width into 4 cells of equal width.
-// Auto-sizing 4-col grid: each row of 4 sizes to fit the longest wrapped value.
-function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], minCellH = 26) {
-  if (pairs.length === 0) return;
-  const totalW = ctx.width - ctx.margin*2;
-  const cellW = totalW / 4;
+function measureKVRowHeight(
+  ctx: Ctx,
+  slice: { label: string; value: string; red?: boolean }[],
+  columns: number,
+  width: number,
+  minCellH = 23,
+) {
+  const cellW = width / columns;
   const valueSize = 8.5;
   const lineH = valueSize + 2;
-  for (let i = 0; i < pairs.length; i += 4) {
-    const slice = pairs.slice(i, i + 4);
-    let maxLines = 1;
-    for (const p of slice) {
-      if (!p || !p.value || p.value === "-") continue;
-      const lines = wrapText(p.value, ctx.bold, valueSize, cellW - 8, 5);
-      if (lines.length > maxLines) maxLines = lines.length;
+  let maxLines = 1;
+  for (const p of slice) {
+    if (!p || !p.value || p.value === "-") continue;
+    const lines = wrapText(p.value, ctx.bold, valueSize, cellW - 8, 5);
+    if (lines.length > maxLines) maxLines = lines.length;
+  }
+  return Math.max(minCellH, 16 + maxLines * lineH);
+}
+
+function drawKVRowBox(
+  ctx: Ctx,
+  slice: { label: string; value: string; red?: boolean }[],
+  columns: number,
+  x: number,
+  width: number,
+  minCellH = 23,
+) {
+  const cellW = width / columns;
+  const cellH = measureKVRowHeight(ctx, slice, columns, width, minCellH);
+  ensureSpace(ctx, cellH);
+  let xCur = x;
+  for (let j = 0; j < columns; j++) {
+    const p = slice[j];
+    if (p) {
+      drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red, maxLines: 5 });
+    } else {
+      ctx.page.drawRectangle({ x: xCur, y: ctx.y - cellH, width: cellW, height: cellH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
     }
-    const cellH = Math.max(minCellH, 16 + maxLines * lineH);
-    ensureSpace(ctx, cellH);
-    let xCur = ctx.margin;
-    for (let j = 0; j < 4; j++) {
-      const p = slice[j];
-      if (p) {
-        drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red, maxLines: 5 });
-      } else {
-        ctx.page.drawRectangle({ x: xCur, y: ctx.y - cellH, width: cellW, height: cellH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
-      }
-      xCur += cellW;
-    }
-    ctx.y -= cellH;
+    xCur += cellW;
+  }
+  ctx.y -= cellH;
+}
+
+function drawKVGridBox(
+  ctx: Ctx,
+  pairs: { label: string; value: string; red?: boolean }[],
+  columns: number,
+  x: number,
+  width: number,
+  minCellH = 23,
+) {
+  if (pairs.length === 0) return;
+  for (let i = 0; i < pairs.length; i += columns) {
+    drawKVRowBox(ctx, pairs.slice(i, i + columns), columns, x, width, minCellH);
   }
 }
 
+// 4-column key/value grid. Splits the row width into 4 cells of equal width.
+// Auto-sizing 4-col grid: each row of 4 sizes to fit the longest wrapped value.
+function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], minCellH = 23) {
+  drawKVGridBox(ctx, pairs, 4, ctx.margin, ctx.width - ctx.margin*2, minCellH);
+}
+
 // 2-col layout for long values like address
-function drawWide(ctx: Ctx, label: string, value: string, h = 24, red = false) {
+function drawWide(ctx: Ctx, label: string, value: string, h = 21, red = false) {
   ensureSpace(ctx, h);
   drawCell(ctx, ctx.margin, ctx.y, ctx.width - ctx.margin*2, h, label, value, { red });
   ctx.y -= h;
@@ -542,6 +865,39 @@ function fmtAddress(addr: any): string {
 function fmtPersonName(p: any): string {
   if (!p || typeof p !== "object") return "-";
   return [p.title, p.first_name, p.middle_name, p.last_name, p.name].filter(Boolean).join(" ") || (p.name || "-");
+}
+
+function isBptOrBmritSelection(app: any): boolean {
+  const selections = Array.isArray(app?.course_selections) ? app.course_selections : [];
+  return selections.some((s: any) => {
+    const text = `${s?.course_name || ""} ${s?.course_code || ""}`.toLowerCase();
+    return text.includes("bpt") ||
+      text.includes("physiotherapy") ||
+      text.includes("bmrit") ||
+      (text.includes("radiology") && text.includes("imaging")) ||
+      (text.includes("radiology") && text.includes("b.sc"));
+  });
+}
+
+function withCahetEntranceExam(app: any, cahetRegistration: any | null): any {
+  if (!cahetRegistration || !isBptOrBmritSelection(app)) return app;
+  const academic = { ...(app.academic_details || {}) };
+  const exams: any[] = Array.isArray(academic.entrance_exams) ? [...academic.entrance_exams] : [];
+  const idx = exams.findIndex((e: any) => /cahet/i.test(e?.exam_name || ""));
+  const cahetExam = {
+    exam_name: "CAHET",
+    status: "registered",
+    registration_no: cahetRegistration.registration_no,
+    registered_name: app.full_name || "",
+    document_url: cahetRegistration.document_url || null,
+  };
+  if (idx >= 0) {
+    exams[idx] = { ...exams[idx], ...cahetExam };
+  } else {
+    exams.push(cahetExam);
+  }
+  academic.entrance_exams = exams;
+  return { ...app, academic_details: academic };
 }
 
 // ───────────────────────── builder ─────────────────────────
@@ -570,19 +926,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    let cahetRegistration: any = null;
+    if (app.lead_id) {
+      const { data: cahetRow } = await admin
+        .from("cahet_registrations")
+        .select("registration_no, document_url, notes, registered_at")
+        .eq("lead_id", app.lead_id)
+        .maybeSingle();
+      cahetRegistration = cahetRow || null;
+    }
+    const appForPdf = withCahetEntranceExam(app, cahetRegistration);
+
     const { data: branding } = await admin.rpc("lead_branding" as any, {
-      _lead_id: app.lead_id, _doc_type: "application_form",
+      _lead_id: appForPdf.lead_id, _doc_type: "application_form",
     });
 
     // Resolve session name for the header.
     let sessionName: string | null = null;
-    if (app.session_id) {
-      const { data: sess } = await admin.from("admission_sessions").select("name").eq("id", app.session_id).maybeSingle();
+    if (appForPdf.session_id) {
+      const { data: sess } = await admin.from("admission_sessions").select("name").eq("id", appForPdf.session_id).maybeSingle();
       sessionName = sess?.name || null;
     }
 
     // Eligibility rules for every selected course (for mismatch flags).
-    const courseIds = (app.course_selections || []).map((c: any) => c.course_id).filter(Boolean);
+    const courseIds = (appForPdf.course_selections || []).map((c: any) => c.course_id).filter(Boolean);
     let eligibilityRules: any[] = [];
     if (courseIds.length > 0) {
       const { data: rules } = await admin.from("eligibility_rules")
@@ -590,22 +957,50 @@ Deno.serve(async (req) => {
         .in("course_id", courseIds);
       eligibilityRules = rules || [];
     }
-    const mismatches = computeMismatches(app, eligibilityRules);
+    const mismatches = computeMismatches(appForPdf, eligibilityRules, sessionName);
 
-    // List uploaded files for this application from storage.
+    // List uploaded files for this application. New applicant uploads live in
+    // R2 with metadata in application_documents; older/internal files may still
+    // live in Supabase Storage, so keep a fallback for those.
     const documents: { name: string; url: string }[] = [];
     let photoUrl: string | null = null;
     try {
-      const { data: files } = await admin.storage.from("application-documents").list(app.application_id, {
+      const seenDocKeys = new Set<string>();
+      const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
+      const { data: metadataRows, error: metadataErr } = await admin
+        .from("application_documents")
+        .select("doc_key, file_name, file_url, uploaded_at")
+        .eq("application_id", appForPdf.application_id)
+        .order("uploaded_at", { ascending: true });
+      if (metadataErr) {
+        console.error("[application-form] metadata document list failed:", metadataErr.message);
+      } else {
+        for (const row of (metadataRows ?? []) as any[]) {
+          const docKey = row.doc_key || docKeyForFileName(row.file_name || "");
+          if (!docKey || seenDocKeys.has(docKey)) continue;
+          seenDocKeys.add(docKey);
+          const name = row.file_name || docKey;
+          if (!photoUrl && photoPattern.test(name)) {
+            photoUrl = row.file_url;
+          } else if (!photoPattern.test(name)) {
+            documents.push({ name: docLabel(docKey), url: row.file_url });
+          }
+        }
+      }
+
+      const { data: files } = await admin.storage.from("application-documents").list(appForPdf.application_id, {
         limit: 200, sortBy: { column: "name", order: "asc" },
       });
       // Photo conventions vary - PhotoUpload uses passport_photo.png; school
       // form uses student_photo-*.png; admins might upload applicant_photo*.
       // Pick the first file matching any of these patterns.
-      const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
       for (const f of (files ?? [])) {
         if (!f.name) continue;
-        const path = `${app.application_id}/${f.name}`;
+        const dashIdx = f.name.indexOf("-");
+        const docKey = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name.replace(/\.[^.]+$/, "");
+        if (seenDocKeys.has(docKey)) continue;
+        seenDocKeys.add(docKey);
+        const path = `${appForPdf.application_id}/${f.name}`;
         const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
         const url = pub?.publicUrl || path;
         if (!photoUrl && photoPattern.test(f.name)) {
@@ -615,8 +1010,6 @@ Deno.serve(async (req) => {
         } else {
           // File names are uploaded as `${docKey}-${original_filename}`. Pull
           // the docKey out of the prefix and resolve to the friendly label.
-          const dashIdx = f.name.indexOf("-");
-          const docKey = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name.replace(/\.[^.]+$/, "");
           documents.push({ name: docLabel(docKey), url });
         }
       }
@@ -627,11 +1020,11 @@ Deno.serve(async (req) => {
     // Look up the application-fee payment for this lead so we can render
     // the receipt details (ref, amount, paid-on timestamp) on the form.
     let appFeePayment: any = null;
-    if (app.lead_id) {
+    if (appForPdf.lead_id) {
       const { data: lp } = await admin
         .from("lead_payments")
         .select("amount, payment_mode, gateway, transaction_ref, receipt_no, payment_date, created_at, status")
-        .eq("lead_id", app.lead_id)
+        .eq("lead_id", appForPdf.lead_id)
         .eq("type", "application_fee")
         .eq("status", "confirmed")
         .order("created_at", { ascending: false })
@@ -641,39 +1034,30 @@ Deno.serve(async (req) => {
     }
     // Fall back to applications.payment_ref if no lead_payments row exists yet
     // (older flow stored the gateway ref directly on applications).
-    if (!appFeePayment && app.payment_status === "paid") {
+    if (!appFeePayment && appForPdf.payment_status === "paid") {
       appFeePayment = {
-        amount: app.fee_amount,
+        amount: appForPdf.fee_amount,
         payment_mode: "gateway",
         gateway: "easebuzz", // pre-ICICI applications were all routed through Easebuzz
-        transaction_ref: app.payment_ref,
+        transaction_ref: appForPdf.payment_ref,
         receipt_no: null,
-        payment_date: app.submitted_at || app.updated_at,
+        payment_date: appForPdf.submitted_at || appForPdf.updated_at,
         status: "confirmed",
       };
     }
 
-    // Build PDF (embeds letterhead/footer/photo/signature in the same doc).
+    // Build PDF (embeds letterhead/footer/photo in the same doc).
     const p = await PDFDocument.create();
     const f = await p.embedFont(StandardFonts.Helvetica);
     const b = await p.embedFont(StandardFonts.HelveticaBold);
     const lh    = await fetchImage(p, branding?.letterhead_url ?? null);
     const ftr   = await fetchImage(p, branding?.footer_url ?? null);
     const photo = await fetchImage(p, photoUrl);
-    const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName, mismatches);
+    const out = await buildApplicationPdfInline(p, f, b, appForPdf, branding, lh, ftr, photo, documents, appFeePayment, sessionName, mismatches);
 
-    const path = `applications/${app.application_id}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from("application-documents")
-      .upload(path, out, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });
-    if (upErr) {
-      return new Response(JSON.stringify({ error: upErr.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    const baseUrl = pub?.publicUrl || path;
+    const path = `application-pdfs/${app.application_id}.pdf`;
+    const uploaded = await uploadToR2({ key: path, body: out, contentType: "application/pdf" });
+    const baseUrl = uploaded.url;
     const formUrl = `${baseUrl}?v=${Date.now()}`;
     await admin.from("applications").update({ form_pdf_url: formUrl }).eq("id", app.id);
 
@@ -694,7 +1078,7 @@ async function buildApplicationPdfInline(
   pdf: PDFDocument, font: any, bold: any,
   app: any, branding: any,
   lhImg: PDFImage | null, footerImg: PDFImage | null,
-  photoImg: PDFImage | null, sigImg: PDFImage | null,
+  photoImg: PDFImage | null,
   documents: { name: string; url: string }[],
   appFeePayment: any = null,
   sessionName: string | null = null,
@@ -725,26 +1109,51 @@ async function buildApplicationPdfInline(
     ctx.y -= h + 4;
   };
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
+  const applicationHeaderBrand = applicationSchoolBrand(app, branding);
+  const usesProposalHeader = applicationHeaderBrand !== null;
+  const isSchoolForm = usesProposalHeader;
+  const applicationHeaderLogo = usesProposalHeader
+    ? await fetchImage(pdf, applicationFormLogoUrl(app, branding))
+    : null;
+  const headerCampusName = usesProposalHeader ? applicationHeaderCampusName(app) : "";
+  const headerAddress = usesProposalHeader ? applicationHeaderAddress(app, branding) : "";
   const ctx: Ctx = {
     pdf, page: null, font, bold,
     width: 595, height: 842, margin: 36, y: 0,
     contentStart: 0, contentEnd: 0,
-    branding: { ...(branding || {}), _lh: lhImg, _footer: footerImg },
-    hasLetterhead: !!lhImg,
+    branding: {
+      ...(branding || {}),
+      _lh: lhImg,
+      _footer: footerImg,
+      _applicationHeaderLogo: applicationHeaderLogo,
+      _applicationHeaderBrand: applicationHeaderBrand,
+      _applicationHeaderCampusName: headerCampusName,
+      _applicationHeaderAddress: headerAddress,
+    },
+    hasLetterhead: !!lhImg && !usesProposalHeader,
     flags,
     appId: app.application_id,
     sessionName,
+    programCategory: app.program_category,
+    applicationDate: app.submitted_at || app.updated_at || app.created_at,
+    usesProposalHeader,
+    applicationHeaderBrand,
   };
   await newPage(ctx);
 
   // ── COURSE PREFERENCES + PHOTO (split layout) ──
   const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
-  drawSection(ctx, "Course Preferences");
+  const programmeSectionTitle = isSchoolForm ? "Programme Details" : "Course Preferences";
+  const programmeItemLabel = isSchoolForm ? "Programme" : "Preference";
+  const programmeCategoryLabel = isSchoolForm ? "Programme Category" : "Course Category";
+  const programmeNameLabel = isSchoolForm ? "Programme Name" : "Course Name";
+  const additionalProgrammeLabel = isSchoolForm ? "Additional Programmes: Not Selected" : "Additional Course Preferences: Not Selected";
+  drawSection(ctx, programmeSectionTitle);
 
   // Photo takes its natural width, anchored to the right margin. Prefs fill
   // the rest of the row - no fixed-percentage column means no awkward gap.
-  const photoW = 110;
-  const photoH = Math.round(photoW * 1.3);
+  const photoW = PASSPORT_PHOTO_W;
+  const photoH = PASSPORT_PHOTO_H;
   const gutter = 12;
   const leftW  = ctx.width - ctx.margin*2 - photoW - gutter;
 
@@ -758,9 +1167,18 @@ async function buildApplicationPdfInline(
   if (photoImg) {
     ctx.page.drawImage(photoImg, { x: photoX + 1, y: photoY - photoH + 1, width: photoW - 2, height: photoH - 2 });
   } else {
-    ctx.page.drawText("Paste Your Recent", { x: photoX + 6, y: photoY - 26, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Passport Size",     { x: photoX + 6, y: photoY - 38, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 50, size: 7, font, color: COLORS.muted });
+    const helperLines = ["Paste Recent", "Passport Size", "Photograph"];
+    helperLines.forEach((line, i) => {
+      const size = 7;
+      const lineW = font.widthOfTextAtSize(line, size);
+      ctx.page.drawText(line, {
+        x: photoX + (photoW - lineW) / 2,
+        y: photoY - 45 - i * 11,
+        size,
+        font,
+        color: COLORS.muted,
+      });
+    });
   }
 
   // Render preferences confined to the left column.
@@ -810,11 +1228,11 @@ async function buildApplicationPdfInline(
     ctx.y -= 18;
   } else {
     validCourses.forEach((c, i) => {
-      drawPrefHeader(`Preference ${i + 1}`);
+      drawPrefHeader(`${programmeItemLabel} ${i + 1}`);
       drawPrefRow([
-        { label: "Course Category", value: norm(c.program_category), w: leftW * 0.22 },
-        { label: "Course Name",     value: norm(c.course_name),      w: leftW * 0.52 },
-        { label: "Campus",          value: norm(c.campus_name),      w: leftW * 0.26 },
+        { label: programmeCategoryLabel, value: norm(c.program_category), w: leftW * 0.22 },
+        { label: programmeNameLabel,     value: norm(c.course_name),      w: leftW * 0.52 },
+        { label: "Campus",               value: norm(c.campus_name),      w: leftW * 0.26 },
       ]);
     });
     // Closer row.
@@ -822,19 +1240,13 @@ async function buildApplicationPdfInline(
       x: ctx.margin, y: ctx.y - 18, width: leftW, height: 18,
       color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
     });
-    ctx.page.drawText("Additional Course Preferences: Not Selected", {
+    ctx.page.drawText(additionalProgrammeLabel, {
       x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.muted,
     });
     ctx.y -= 18;
   }
 
-  // Sync ctx.y to whichever column ended lower.
-  const photoBottom = photoY - photoH - 8;
-  if (photoBottom < ctx.y) ctx.y = photoBottom;
-
-  // ── PERSONAL DETAILS ───────────────────────────────────────────────
-  drawSection(ctx, "Personal Details");
-  drawKVGrid(ctx, [
+  const personalPairs = [
     { label: "Full Name",       value: norm(app.full_name) },
     { label: "Gender",          value: norm(app.gender) },
     { label: "Date of Birth",   value: fmtDate(app.dob) },
@@ -846,8 +1258,36 @@ async function buildApplicationPdfInline(
     { label: "PEN Number",      value: norm(app.pen_number) },
     { label: "Mobile (WhatsApp)", value: norm(app.phone) + (app.whatsapp_verified ? "  (Verified)" : "") },
     { label: "Email",           value: norm(app.email) },
-    { label: "",                value: "" },
-  ]);
+  ];
+
+  // Let Personal Details begin beside the passport photo when there is room.
+  // This removes the large blank band created by reserving the whole photo
+  // height before the next section can start.
+  const photoBottom = photoY - photoH - 4;
+  const firstPersonalRow = personalPairs.slice(0, 3);
+  const canStartPersonalBesidePhoto =
+    ctx.y - (SECTION_HEADER_H + 1) - measureKVRowHeight(ctx, firstPersonalRow, 3, leftW) >= photoBottom;
+
+  // ── PERSONAL DETAILS ───────────────────────────────────────────────
+  if (canStartPersonalBesidePhoto) {
+    drawSectionBox(ctx, "Personal Details", ctx.margin, leftW);
+    let consumedPersonal = 0;
+    while (consumedPersonal < personalPairs.length) {
+      const row = personalPairs.slice(consumedPersonal, consumedPersonal + 3);
+      const rowH = measureKVRowHeight(ctx, row, 3, leftW);
+      if (ctx.y - rowH < photoBottom) break;
+      drawKVRowBox(ctx, row, 3, ctx.margin, leftW);
+      consumedPersonal += row.length;
+    }
+    if (consumedPersonal < personalPairs.length) {
+      if (ctx.y > photoBottom) ctx.y = photoBottom;
+      drawKVGrid(ctx, personalPairs.slice(consumedPersonal));
+    }
+  } else {
+    if (photoBottom < ctx.y) ctx.y = photoBottom;
+    drawSection(ctx, "Personal Details");
+    drawKVGrid(ctx, personalPairs);
+  }
   renderMismatch(ctx, "personal");
 
   // ── ADDRESS ────────────────────────────────────────────────────────
@@ -1044,7 +1484,7 @@ async function buildApplicationPdfInline(
       const isCahet = /cahet/i.test(e.exam_name || "");
       drawValueRow(ctx, [
         { value: norm(e.exam_name), w: cols[0].w },
-        { value: isCahet && e.status === "registered" ? "registered" : norm(e.status), w: cols[1].w },
+        { value: isCahet && e.status === "registered" ? `REGISTERED${e.document_url ? " / PROOF YES" : ""}` : norm(e.status), w: cols[1].w },
         { value: isCahet ? norm(e.registration_no) : norm(e.score), w: cols[2].w },
         { value: isCahet ? norm(e.registered_name) : fmtDate(e.expected_date), w: cols[3].w },
       ], 22);
@@ -1245,8 +1685,10 @@ async function buildApplicationPdfInline(
   }
   ctx.y -= 32;
 
-  // ── STUDENT SIGNATURE ─────────────────────────────────────────────
-  drawSection(ctx, "Student Signature");
+  // ── SIGNATURE ─────────────────────────────────────────────────────
+  const signatureSectionTitle = isSchoolForm ? "Parent Name & Signature" : "Student Signature";
+  const signatureLineLabel = isSchoolForm ? "Signature of Parent / Guardian" : "Signature of Applicant";
+  drawSection(ctx, signatureSectionTitle);
   ensureSpace(ctx, 70);
   // Two boxes: signature space (left, larger) and date (right, smaller).
   const sigBoxW = totalW * 0.65;
@@ -1255,7 +1697,7 @@ async function buildApplicationPdfInline(
     x: ctx.margin, y: ctx.y - 60, width: sigBoxW, height: 60,
     color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
   });
-  ctx.page.drawText("Signature of Applicant", {
+  ctx.page.drawText(signatureLineLabel, {
     x: ctx.margin + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
   });
   ctx.page.drawLine({
@@ -1282,10 +1724,10 @@ async function buildApplicationPdfInline(
   drawSection(ctx, "Principal / Director Verification (For Office Use Only)");
   ensureSpace(ctx, 110);
 
-  // Two-row layout:
+  // Office verification layout:
   //   Row 1: Verified (checkbox space) | Name / Designation | Date
   //   Row 2: Remarks (full width)
-  //   Row 3: Signature (with signatory image if available, or empty space)
+  //   Row 3: Principal / Director signature and seal
 
   const verifyRowH = 32;
   const colA = totalW * 0.30;
@@ -1301,46 +1743,20 @@ async function buildApplicationPdfInline(
   drawCell(ctx, ctx.margin, ctx.y, totalW, 36, "Remarks", " ", { });
   ctx.y -= 36;
 
-  // Signature row — institute signature image on the right if present;
-  // signature line for principal/director on the left.
+  // Signature row - handwritten office signature only. Do not render the
+  // institution authorized-signatory image/name in application PDFs.
   const signRowH = 50;
   ctx.page.drawRectangle({
-    x: ctx.margin, y: ctx.y - signRowH, width: totalW * 0.55, height: signRowH,
+    x: ctx.margin, y: ctx.y - signRowH, width: totalW, height: signRowH,
     color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
   });
   ctx.page.drawText("Principal / Director Signature & Seal", {
     x: ctx.margin + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
   });
   ctx.page.drawLine({
-    start: { x: ctx.margin + 12,                      y: ctx.y - 38 },
-    end:   { x: ctx.margin + totalW * 0.55 - 12,       y: ctx.y - 38 },
+    start: { x: ctx.margin + 12,         y: ctx.y - 38 },
+    end:   { x: ctx.margin + totalW - 12, y: ctx.y - 38 },
     thickness: 0.4, color: COLORS.muted,
-  });
-
-  // Right-side authority signature block (uses branding signature image).
-  ctx.page.drawRectangle({
-    x: ctx.margin + totalW * 0.55, y: ctx.y - signRowH, width: totalW * 0.45, height: signRowH,
-    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
-  });
-  ctx.page.drawText("For the Institution", {
-    x: ctx.margin + totalW * 0.55 + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
-  });
-  if (sigImg) {
-    const sigW = 80, sigH = 28;
-    ctx.page.drawImage(sigImg, {
-      x: ctx.margin + totalW * 0.55 + 8,
-      y: ctx.y - signRowH + 12,
-      width: sigW, height: sigH,
-    });
-  } else {
-    ctx.page.drawLine({
-      start: { x: ctx.margin + totalW * 0.55 + 12, y: ctx.y - 38 },
-      end:   { x: ctx.margin + totalW - 12,         y: ctx.y - 38 },
-      thickness: 0.4, color: COLORS.muted,
-    });
-  }
-  ctx.page.drawText(norm(branding?.signatory_name) === "-" ? "AUTHORISED SIGNATORY" : norm(branding?.signatory_name), {
-    x: ctx.margin + totalW * 0.55 + 6, y: ctx.y - signRowH + 4, size: 7, font: bold, color: COLORS.text,
   });
   ctx.y -= signRowH + 4;
 

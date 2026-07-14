@@ -1,0 +1,37 @@
+{
+  "cli": {
+    "version": ">= 13.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "staff" }
+    },
+    "development-family": {
+      "extends": "development",
+      "env": { "APP_VARIANT": "family" }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "staff" }
+    },
+    "preview-family": {
+      "extends": "preview",
+      "env": { "APP_VARIANT": "family" }
+    },
+    "production-staff": {
+      "autoIncrement": true,
+      "env": { "APP_VARIANT": "staff" }
+    },
+    "production-family": {
+      "autoIncrement": true,
+      "env": { "APP_VARIANT": "family" }
+    }
+  },
+  "submit": {
+    "production-staff": {},
+    "production-family": {}
+  }
+}

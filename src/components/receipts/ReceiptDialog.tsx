@@ -31,11 +31,13 @@ export interface ReceiptData {
   course_name?: string;
   semester?: string;
   payment_mode?: string;
+  payment_gateway?: string | null;
   fee_description?: string;
   recorded_by?: string;
   line_items?: FeeLineItem[];
   // Common
   amount: number;
+  concession_amount?: number;
   payment_ref?: string | null;
   payment_date: string;
   institution_name?: string;
@@ -54,6 +56,49 @@ export interface ReceiptData {
   payment_id?: string | null;
 }
 
+const GATEWAY_LABELS: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  razorpay: "Razorpay",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+
+function formatGateway(gateway?: string | null) {
+  if (!gateway) return null;
+  const key = gateway.toLowerCase().trim();
+  return GATEWAY_LABELS[key] || gateway;
+}
+
+function inferGatewayFromPaymentRef(paymentRef?: string | null) {
+  const ref = (paymentRef || "").trim().toLowerCase();
+  if (!ref) return null;
+  if (ref.startsWith("pay_") || ref.startsWith("order_")) return "razorpay";
+  if (ref.startsWith("manual_")) return "manual";
+  if (ref.startsWith("cf_") || ref.includes("cashfree")) return "cashfree";
+  if (ref.startsWith("icici") || ref.startsWith("ic_") || ref.startsWith("lp-")) return "icici";
+  if (ref.startsWith("eb") || ref.includes("easepay")) return "easebuzz";
+  return null;
+}
+
+function fallbackGatewayFromPaymentMode(paymentMode?: string | null) {
+  const mode = (paymentMode || "").toLowerCase();
+  if (["cash", "cheque", "upi", "bank_transfer", "offline", "manual"].includes(mode)) {
+    return GATEWAY_LABELS.manual;
+  }
+  if (mode === "online" || mode === "gateway") return "Online Gateway";
+  return "Not Recorded";
+}
+
+function gatewayLabelFromReceipt(d: ReceiptData) {
+  return (
+    formatGateway(d.payment_gateway) ||
+    formatGateway(inferGatewayFromPaymentRef(d.payment_ref)) ||
+    fallbackGatewayFromPaymentMode(d.payment_mode)
+  );
+}
+
 // ── Printable receipt content ─────────────────────────────────────────────────
 
 function ReceiptContent({ d }: { d: ReceiptData }) {
@@ -64,6 +109,7 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const hasLineItems = d.line_items && d.line_items.length > 0;
+  const paymentGateway = gatewayLabelFromReceipt(d);
 
   return (
     <div
@@ -192,6 +238,10 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
             <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{d.payment_mode.replace("_", " ").toUpperCase()}</span>
           </div>
         )}
+        <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+          <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Payment Gateway</span>
+          <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{paymentGateway}</span>
+        </div>
         {d.payment_ref && (
           <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
             <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Transaction Ref</span>

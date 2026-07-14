@@ -4,20 +4,20 @@ const CONFIG = {
   hot: {
     icon: Flame,
     label: "Hot",
-    className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-    iconClass: "text-red-500",
+    className: "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80",
+    iconClass: "text-destructive",
   },
   warm: {
     icon: Sun,
     label: "Warm",
-    className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-    iconClass: "text-amber-500",
+    className: "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning",
+    iconClass: "text-warning",
   },
   cold: {
     icon: Snowflake,
     label: "Cold",
-    className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    iconClass: "text-blue-500",
+    className: "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80",
+    iconClass: "text-info",
   },
 } as const;
 

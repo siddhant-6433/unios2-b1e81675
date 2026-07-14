@@ -4,6 +4,9 @@ import {
   markWhatsAppInboundEvent,
   recordWhatsAppInboundEvent,
 } from "../_shared/whatsapp-inbound-events.ts";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { loadLatestOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
+import { handleExamRegistrationIntakeReply } from "../_shared/exam-registration-intake.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,6 +85,133 @@ function extractWhatsAppLoginCode(content: string | null | undefined): string | 
   return match?.[1]?.toUpperCase() || null;
 }
 
+// Handle Meta template lifecycle webhooks (status / quality / category).
+// Updates the whatsapp_templates mirror row and notifies the creator plus
+// every super-admin via the in-app notifications table (realtime → toast).
+async function handleTemplateStatusEvent(
+  admin: any,
+  field: string,
+  value: any,
+): Promise<void> {
+  try {
+    const metaId = value?.message_template_id ? String(value.message_template_id) : null;
+    const name = value?.message_template_name || null;
+    const language = value?.message_template_language || null;
+
+    const patch: Record<string, unknown> = { status_updated_at: new Date().toISOString() };
+    let title = "";
+    let notifyBody = "";
+
+    if (field === "message_template_status_update") {
+      const event = String(value?.event || "").toUpperCase(); // APPROVED / REJECTED / PAUSED / …
+      const reason = value?.reason && String(value.reason).toUpperCase() !== "NONE" ? String(value.reason) : null;
+      if (event) patch.status = event;
+      patch.reject_reason = event === "REJECTED" ? (reason || "Rejected by Meta") : null;
+      const label = event === "APPROVED" ? "approved" : event === "REJECTED" ? "rejected" : event.toLowerCase();
+      title = `Template ${label}: ${name || ""}`.trim();
+      notifyBody = event === "REJECTED" && reason ? `Reason: ${reason}` : `Status is now ${event}.`;
+    } else if (field === "message_template_quality_update") {
+      const q = String(value?.new_quality_score || "").toUpperCase();
+      if (q) patch.quality_score = q;
+      title = `Template quality changed: ${name || ""}`.trim();
+      notifyBody = `Quality score is now ${q || "unknown"}.`;
+    } else if (field === "template_category_update") {
+      const cat = String(value?.new_category || value?.correct_category || "").toUpperCase();
+      if (cat) patch.category = cat;
+      title = `Template category changed: ${name || ""}`.trim();
+      notifyBody = `Category is now ${cat || "unknown"}.`;
+    }
+
+    // Update the mirror row, matching by Meta id first, else name+language.
+    let row: { id: string; created_by: string | null; name: string } | null = null;
+    if (metaId) {
+      const { data } = await admin
+        .from("whatsapp_templates")
+        .update(patch)
+        .eq("meta_template_id", metaId)
+        .select("id, created_by, name")
+        .maybeSingle();
+      row = data as any;
+    }
+    if (!row && name) {
+      let q = admin.from("whatsapp_templates").update(patch).eq("name", name);
+      if (language) q = q.eq("language", language);
+      const { data } = await q.select("id, created_by, name").maybeSingle();
+      row = data as any;
+    }
+    if (!row) {
+      console.warn("template status event: no matching row", { metaId, name, language });
+      return;
+    }
+
+    // Notify creator + all super-admins (deduped).
+    const recipients = new Set<string>();
+    if (row.created_by) recipients.add(row.created_by);
+    const { data: admins } = await admin.from("user_roles").select("user_id").eq("role", "super_admin");
+    for (const a of admins || []) if (a?.user_id) recipients.add(a.user_id);
+
+    if (recipients.size > 0 && title) {
+      const notifRows = Array.from(recipients).map((uid) => ({
+        user_id: uid,
+        type: "template_status_update",
+        title,
+        body: notifyBody,
+        link: "/template-manager",
+      }));
+      await admin.from("notifications").insert(notifRows);
+    }
+  } catch (err) {
+    console.error("handleTemplateStatusEvent error:", err);
+  }
+}
+
+async function markCampaignRecipientEngagement(
+  admin: any,
+  args: {
+    phone: string;
+    businessNumber: string | null;
+    messageType: string;
+    content: string;
+    rawMessage: any;
+  },
+): Promise<void> {
+  try {
+    const outboundContext = await loadLatestOutboundContext(admin, args.phone, args.businessNumber);
+    const recipientId = typeof outboundContext?.campaign_recipient_id === "string"
+      ? outboundContext.campaign_recipient_id
+      : null;
+    if (!recipientId) return;
+
+    const buttonReply = args.rawMessage?.interactive?.button_reply || null;
+    const listReply = args.rawMessage?.interactive?.list_reply || null;
+    const legacyButton = args.rawMessage?.button || null;
+    const buttonPayload = buttonReply?.id || listReply?.id || legacyButton?.payload || null;
+    const buttonTitle = buttonReply?.title || listReply?.title || legacyButton?.text || null;
+    const referralUrl = args.rawMessage?.referral?.source_url || null;
+    const nowIso = new Date().toISOString();
+    const patch: Record<string, unknown> = {};
+
+    if (buttonPayload || buttonTitle || args.messageType === "interactive" || args.messageType === "button") {
+      patch.clicked_button_at = nowIso;
+      patch.clicked_button_payload = buttonPayload || args.content || null;
+      patch.clicked_button_title = buttonTitle || args.content || null;
+    }
+    if (referralUrl) {
+      patch.clicked_link_at = nowIso;
+      patch.clicked_url = referralUrl;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await admin
+        .from("whatsapp_campaign_recipients")
+        .update(patch)
+        .eq("id", recipientId);
+    }
+  } catch (err) {
+    console.error("markCampaignRecipientEngagement error:", err);
+  }
+}
+
 Deno.serve(async (req) => {
   // Meta webhook verification (GET)
   if (req.method === "GET") {
@@ -119,6 +249,20 @@ Deno.serve(async (req) => {
         // be filtered per-number (multiple WABAs / BSPs can fan out here).
         const businessPnId   = value?.metadata?.phone_number_id || null;
         const businessNumber = value?.metadata?.display_phone_number || null;
+
+        // ── Template status / quality / category updates ─────────────────
+        // Meta sends these when a submitted template is approved, rejected,
+        // paused, or its quality/category changes. They carry no `messages`
+        // array, so handle them here and `continue`. Mirrors the row in
+        // whatsapp_templates and notifies the creator + super-admins.
+        if (
+          change?.field === "message_template_status_update" ||
+          change?.field === "message_template_quality_update" ||
+          change?.field === "template_category_update"
+        ) {
+          await handleTemplateStatusEvent(admin, change.field, value);
+          continue;
+        }
 
         // Handle inbound messages
         const messages = value?.messages || [];
@@ -467,6 +611,21 @@ Deno.serve(async (req) => {
               console.error("Webhook auto-create lead failed:", leadInsertErr.message);
             }
             lead = newLead || null;
+
+            // Distribute brand-new WhatsApp leads across the same admin-maintained
+            // intake round-robin pool that inbound voice calls use (prefers
+            // online counsellors). No-op when no pool is configured.
+            if (lead?.id && !lead.counsellor_id) {
+              try {
+                const { data: assignedId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: lead.id });
+                if (assignedId) {
+                  lead.counsellor_id = assignedId as string;
+                  console.log(`WhatsApp intake round-robin assigned lead ${lead.id} → ${assignedId}`);
+                }
+              } catch (e) {
+                console.error("WhatsApp intake round-robin assign failed:", (e as Error).message);
+              }
+            }
           }
 
           // Skip all processing for DNC leads (except logging the message)
@@ -482,6 +641,13 @@ Deno.serve(async (req) => {
               business_phone_number_id: businessPnId,
               business_phone_number: businessNumber,
             }).select("id").single();
+            await markCampaignRecipientEngagement(admin, {
+              phone,
+              businessNumber: businessPnId || businessNumber || null,
+              messageType: msgType,
+              content,
+              rawMessage: msg,
+            });
             await markWhatsAppInboundEvent(admin, inboundEventId, {
               leadId: lead.id,
               messageId: dncMsg?.id || null,
@@ -524,6 +690,13 @@ Deno.serve(async (req) => {
             business_phone_number: businessNumber,
           }).select("id").single();
           const inboundMessageId: string | null = insertedMsg?.id || null;
+          await markCampaignRecipientEngagement(admin, {
+            phone,
+            businessNumber: businessPnId || businessNumber || null,
+            messageType: msgType,
+            content,
+            rawMessage: msg,
+          });
           await markWhatsAppInboundEvent(admin, inboundEventId, {
             leadId: lead?.id || null,
             messageId: inboundMessageId,
@@ -841,15 +1014,58 @@ Deno.serve(async (req) => {
             }
           }
 
+          // ── Entrance-exam registration check reply ─────────────────────────
+          // Handles replies to the automated `exam_registration_check` template:
+          // Yes/No quick-reply buttons, and the follow-up registration number.
+          // Runs before DNC/AI so a valid intake reply isn't misrouted.
+          if (!feedbackHandled && lead?.id) {
+            try {
+              const intake = await handleExamRegistrationIntakeReply(admin, {
+                leadId: lead.id,
+                buttonId: buttonReply?.id || null,
+                buttonTitle: buttonReply?.title || null,
+                text: msgType === "text" ? content : null,
+                messageType: msgType,
+              });
+              if (intake.handled) {
+                if (intake.reply) {
+                  const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(businessPnId);
+                  if (waToken && pnId) {
+                    const rgRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ messaging_product: "whatsapp", to: phone.replace(/[^0-9]/g, ""), type: "text", text: { body: intake.reply } }),
+                    });
+                    if (rgRes.ok) {
+                      const rgResult = await rgRes.json();
+                      await admin.from("whatsapp_messages").insert({
+                        lead_id: lead.id,
+                        wa_message_id: rgResult?.messages?.[0]?.id || null,
+                        direction: "outbound", phone,
+                        message_type: "text", content: intake.reply, status: "sent", is_read: true,
+                        business_phone_number_id: pnId,
+                        template_key: "exam_registration_intake_ack",
+                      });
+                    }
+                  }
+                }
+                feedbackHandled = true; // skip DNC/keyword/AI auto-replies
+              }
+            } catch (e) {
+              console.error("exam registration intake handling error:", e);
+            }
+          }
+
           // ── DNC detection: "stop", "not interested", etc. ──────────────────
           const DNC_PATTERNS = /\b(stop|unsubscribe|opt.?out|do not contact|dont contact|don'?t contact|not interested|nahi chahiye|mujhe nahi chahiye|remove me|block me|dnc|irritating|irritate|stop calling|stop messaging|stop whatsapp|band karo|chhodiye|chhodo|mat karo|pareshan|hata do|hatao)\b/i;
           if (!orchestratorOwnsReplyDecision && !feedbackHandled && msgType === "text" && content && DNC_PATTERNS.test(content.trim())) {
             // Mark lead as DNC if known
             if (lead?.id) {
-              await admin.from("leads").update({ stage: "dnc" }).eq("id", lead.id);
-              await admin.from("lead_activities").insert({
-                lead_id: lead.id,
-                type: "whatsapp",
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage ?? null,
+                command: "markDnc",
+                activityType: "whatsapp",
                 description: `Lead marked DNC via WhatsApp opt-out: "${content.substring(0, 100)}"`,
               });
               // Notify counsellor / admins
@@ -893,7 +1109,13 @@ Deno.serve(async (req) => {
           // ── Re-subscribe detection ───────────────────────────────────────
           if (!feedbackHandled && msgType === "text" && content && /^start$/i.test(content.trim())) {
             if (lead?.id) {
-              await admin.from("leads").update({ stage: "new_lead" }).eq("id", lead.id);
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage ?? null,
+                command: "restoreFromDnc",
+                activityType: "whatsapp",
+                description: "Lead replied START on WhatsApp and was restored from DNC",
+              });
             }
           }
 
@@ -1021,6 +1243,19 @@ Deno.serve(async (req) => {
           const waMessageId = status.id;
           const newStatus = status.status; // sent, delivered, read, failed
           if (waMessageId && newStatus) {
+            // Look up the prior state BEFORE updating so we can (a) attach a
+            // lead-timeline note on the first "failed" report and (b) skip it
+            // if Meta re-sends the same failed status.
+            let priorMsg: { status?: string; lead_id?: string; template_key?: string } | null = null;
+            if (newStatus === "failed") {
+              const { data } = await admin
+                .from("whatsapp_messages")
+                .select("status, lead_id, template_key")
+                .eq("wa_message_id", waMessageId)
+                .maybeSingle();
+              priorMsg = data as any;
+            }
+
             const updates: Record<string, unknown> = {
               status: newStatus,
               ...(businessPnId ? { business_phone_number_id: businessPnId } : {}),
@@ -1030,6 +1265,47 @@ Deno.serve(async (req) => {
               .from("whatsapp_messages")
               .update(updates)
               .eq("wa_message_id", waMessageId);
+
+            // On the first failed report for a message tied to a lead, drop a
+            // timeline activity + counsellor note. Fire-and-forget; never throw.
+            if (newStatus === "failed" && priorMsg?.lead_id && priorMsg.status !== "failed") {
+              const tmpl = priorMsg.template_key || "message";
+              const errTitle = String(status.errors?.[0]?.title || "").slice(0, 120);
+              const desc = `⚠️ WhatsApp delivery failed — ${tmpl}${errTitle ? ` (${errTitle})` : ""}`;
+              admin
+                .from("lead_activities")
+                .insert({ lead_id: priorMsg.lead_id, type: "system", description: desc })
+                .then(({ error }) => { if (error) console.error("failed-note lead_activities error:", error); });
+              admin
+                .from("lead_notes")
+                .insert({
+                  lead_id: priorMsg.lead_id,
+                  content: `${desc}\nCounsellor follow-up: send the details manually or from a different channel.`,
+                })
+                .then(({ error }) => { if (error) console.error("failed-note lead_notes error:", error); });
+            }
+
+            await admin
+              .from("whatsapp_otps")
+              .update({
+                wa_status: newStatus,
+                wa_status_error: status.errors || null,
+                wa_status_updated_at: new Date().toISOString(),
+              })
+              .eq("wa_message_id", waMessageId);
+
+            if (["sent", "delivered", "read", "failed"].includes(newStatus)) {
+              const recipientPatch: Record<string, unknown> = {
+                status: newStatus,
+              };
+              if (newStatus === "failed" && status.errors) {
+                recipientPatch.error_message = JSON.stringify(status.errors);
+              }
+              await admin
+                .from("whatsapp_campaign_recipients")
+                .update(recipientPatch)
+                .eq("message_id", waMessageId);
+            }
           }
         }
       }

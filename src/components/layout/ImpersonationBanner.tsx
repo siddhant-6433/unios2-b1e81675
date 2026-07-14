@@ -9,14 +9,14 @@ export function ImpersonationBanner() {
   const roleLabel = role ? role.replace(/_/g, " ") : "no role";
 
   return (
-    <div className="sticky top-0 z-50 flex items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-sm font-medium text-amber-950">
+    <div className="sticky top-0 z-50 flex items-center justify-center gap-3 bg-warning/50 px-4 py-2 text-sm font-medium text-warning-foreground">
       <Eye className="h-4 w-4 shrink-0" />
       <span>
         Viewing as <strong>{impersonatingName}</strong> ({roleLabel})
       </span>
       <button
         onClick={stopImpersonating}
-        className="ml-2 inline-flex items-center gap-1 rounded-md bg-amber-950/20 px-2.5 py-1 text-xs font-semibold text-amber-950 hover:bg-amber-950/30 transition-colors"
+        className="ml-2 inline-flex items-center gap-1 rounded-md bg-warning/90/20 px-2.5 py-1 text-xs font-semibold text-warning-foreground hover:bg-warning/90/30 transition-colors"
       >
         <X className="h-3 w-3" />
         Stop Impersonating

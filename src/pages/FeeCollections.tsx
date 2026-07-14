@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Search, IndianRupee, Plus, Loader2, Receipt, CheckCircle,
   Clock, AlertTriangle, Filter, Calendar,
@@ -9,20 +11,33 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 const modeBadge: Record<string, string> = {
-  online: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
+  online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
   upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
 };
+const gatewayLabels: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+const gatewayLabel = (gateway?: string | null) =>
+  gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 const FeeCollections = () => {
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
   const [modeFilter, setModeFilter] = useState("all");
   const [payments, setPayments] = useState<any[]>([]);
+  const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const { selectedCampusId } = useCampus();
+  const { can } = usePermissions();
+  const canCreateFinance = can("finance", "create");
 
   useEffect(() => {
     fetchPayments();
@@ -59,6 +74,19 @@ const FeeCollections = () => {
         students: { name: p.person_name, admission_no: p.admission_no, campus_id: p.campus_id },
         profiles: p.recorded_by ? { display_name: profMap[p.recorded_by] || null } : null,
       })));
+
+      // Cashier note: flag rows whose candidate's fee is consultant-managed.
+      const studentIds = [...new Set(raw.map((p) => p.student_id).filter(Boolean))];
+      if (studentIds.length > 0) {
+        const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
+          .select("student_id, effective_hidden")
+          .in("student_id", studentIds);
+        setConsultantManagedIds(new Set(
+          ((flags || []) as any[]).filter((f) => f.effective_hidden).map((f) => f.student_id),
+        ));
+      } else {
+        setConsultantManagedIds(new Set());
+      }
     }
     setLoading(false);
   };
@@ -99,39 +127,41 @@ const FeeCollections = () => {
               {isToday ? "Today's" : new Date(dateFilter).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} collections and receipts
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
-          </div>
+          {canCreateFinance && (
+            <div className="flex items-center gap-2">
+              <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
+            </div>
+          )}
         </div>
 
         {/* Stats row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-green mb-4">
                 <IndianRupee className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(todayTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">{isToday ? "Today's" : "Day's"} Collections</p>
+              <p className="text-xs font-medium text-muted-foreground">{isToday ? "Today's" : "Day's"} Collections</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(todayTotal / 1000).toFixed(1)}K</p>
               <p className="text-xs font-medium mt-1 text-primary">{filtered.length} transactions</p>
             </CardContent>
           </Card>
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-blue mb-4">
                 <Receipt className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(cashTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">Cash</p>
+              <p className="text-xs font-medium text-muted-foreground">Cash</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(cashTotal / 1000).toFixed(1)}K</p>
             </CardContent>
           </Card>
-          <Card className="border-border/60 shadow-none">
+          <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
             <CardContent className="p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-purple mb-4">
                 <CheckCircle className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-3xl font-bold text-foreground">₹{(onlineTotal / 1000).toFixed(1)}K</p>
-              <p className="text-sm text-muted-foreground mt-0.5">Online / UPI</p>
+              <p className="text-xs font-medium text-muted-foreground">Online / UPI</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(onlineTotal / 1000).toFixed(1)}K</p>
             </CardContent>
           </Card>
         </div>
@@ -149,29 +179,31 @@ const FeeCollections = () => {
           <div className="flex items-center gap-2">
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input
-                type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}
-                className="rounded-xl border border-input bg-card py-2.5 pl-10 pr-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-              />
+              <FieldShell hideLabel>
+                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10" />
+              </FieldShell>
             </div>
-            <select
-              value={modeFilter} onChange={(e) => setModeFilter(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              <option value="all">All Modes</option>
-              <option value="cash">Cash</option>
-              <option value="online">Online</option>
-              <option value="upi">UPI</option>
-              <option value="cheque">Cheque</option>
-              <option value="bank_transfer">Bank Transfer</option>
-            </select>
+            <SelectField
+              value={modeFilter}
+              onValueChange={setModeFilter}
+              options={[
+                { value: "all", label: "All Modes" },
+                { value: "cash", label: "Cash" },
+                { value: "online", label: "Online" },
+                { value: "upi", label: "UPI" },
+                { value: "cheque", label: "Cheque" },
+                { value: "bank_transfer", label: "Bank Transfer" },
+              ]}
+              hideLabel
+              placeholder="All Modes"
+            />
           </div>
         </div>
 
         {/* Table */}
         {loading ? (
           <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
           <Card className="border-border/60 shadow-none overflow-hidden">
@@ -183,6 +215,7 @@ const FeeCollections = () => {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gateway</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Time</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Action</th>
@@ -191,7 +224,7 @@ const FeeCollections = () => {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                         {isToday ? "No collections recorded today yet" : "No collections on this date"}
                       </td>
                     </tr>
@@ -200,6 +233,14 @@ const FeeCollections = () => {
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{p.students?.name || "—"}</div>
                         <div className="text-xs text-muted-foreground font-mono">{p.students?.admission_no || "—"}</div>
+                        {p.student_id && consultantManagedIds.has(p.student_id) && (
+                          <Badge
+                            className="mt-1 border-0 bg-warning/10 text-warning-foreground text-[10px]"
+                            title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
+                          >
+                            Consultant-managed fee
+                          </Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{p.fee_description || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
@@ -208,6 +249,7 @@ const FeeCollections = () => {
                           {(p.payment_mode || "").replace("_", " ")}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(p.paid_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
@@ -224,6 +266,7 @@ const FeeCollections = () => {
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: Number(p.amount),
                             payment_ref: p.transaction_ref,
+                            payment_gateway: p.gateway || null,
                             payment_date: p.paid_at,
                           })}
                           className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"

@@ -81,6 +81,195 @@ export type Database = {
         }
         Relationships: []
       }
+      academic_partner_assignments: {
+        Row: {
+          batch_id: string | null
+          course_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          partner_id: string
+          payout_percentage: number | null
+          updated_at: string
+        }
+        Insert: {
+          batch_id?: string | null
+          course_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          partner_id: string
+          payout_percentage?: number | null
+          updated_at?: string
+        }
+        Update: {
+          batch_id?: string | null
+          course_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          partner_id?: string
+          payout_percentage?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      academic_partner_payouts: {
+        Row: {
+          approved_by: string | null
+          batch_id: string | null
+          course_id: string | null
+          created_at: string
+          fee_paid: number
+          id: string
+          lead_id: string | null
+          lead_payment_id: string | null
+          notes: string | null
+          paid_at: string | null
+          partner_id: string
+          payout_amount: number
+          payout_percentage: number
+          status: string
+          student_id: string | null
+        }
+        Insert: {
+          approved_by?: string | null
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          fee_paid?: number
+          id?: string
+          lead_id?: string | null
+          lead_payment_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          partner_id: string
+          payout_amount?: number
+          payout_percentage?: number
+          status?: string
+          student_id?: string | null
+        }
+        Update: {
+          approved_by?: string | null
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          fee_paid?: number
+          id?: string
+          lead_id?: string | null
+          lead_payment_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          partner_id?: string
+          payout_amount?: number
+          payout_percentage?: number
+          status?: string
+          student_id?: string | null
+        }
+        Relationships: []
+      }
+      academic_partners: {
+        Row: {
+          authorised_signatory_contact: string | null
+          authorised_signatory_email: string | null
+          authorised_signatory_name: string | null
+          company_address: string | null
+          company_name: string | null
+          created_at: string
+          default_payout_percentage: number
+          email: string | null
+          gst_number: string | null
+          id: string
+          lock_in_start_date: string | null
+          lock_in_years: number
+          logo_file_path: string | null
+          logo_uploaded_at: string | null
+          logo_url: string | null
+          minimum_guarantee_year1: number
+          minimum_guarantee_year2: number
+          minimum_guarantee_year3: number
+          name: string
+          notes: string | null
+          onboarding_completed_at: string | null
+          onboarding_skipped_at: string | null
+          onboarding_status: string
+          onboarding_step: number
+          organization: string | null
+          pan_number: string | null
+          phone: string | null
+          status: string
+          tan_number: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          authorised_signatory_contact?: string | null
+          authorised_signatory_email?: string | null
+          authorised_signatory_name?: string | null
+          company_address?: string | null
+          company_name?: string | null
+          created_at?: string
+          default_payout_percentage?: number
+          email?: string | null
+          gst_number?: string | null
+          id?: string
+          lock_in_start_date?: string | null
+          lock_in_years?: number
+          logo_file_path?: string | null
+          logo_uploaded_at?: string | null
+          logo_url?: string | null
+          minimum_guarantee_year1?: number
+          minimum_guarantee_year2?: number
+          minimum_guarantee_year3?: number
+          name: string
+          notes?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: number
+          organization?: string | null
+          pan_number?: string | null
+          phone?: string | null
+          status?: string
+          tan_number?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          authorised_signatory_contact?: string | null
+          authorised_signatory_email?: string | null
+          authorised_signatory_name?: string | null
+          company_address?: string | null
+          company_name?: string | null
+          created_at?: string
+          default_payout_percentage?: number
+          email?: string | null
+          gst_number?: string | null
+          id?: string
+          lock_in_start_date?: string | null
+          lock_in_years?: number
+          logo_file_path?: string | null
+          logo_uploaded_at?: string | null
+          logo_url?: string | null
+          minimum_guarantee_year1?: number
+          minimum_guarantee_year2?: number
+          minimum_guarantee_year3?: number
+          name?: string
+          notes?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: number
+          organization?: string | null
+          pan_number?: string | null
+          phone?: string | null
+          status?: string
+          tan_number?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       ai_call_logs: {
         Row: {
           ai_transcript: string | null
@@ -5363,6 +5552,7 @@ export type Database = {
           created_by: string | null
           id: string
           is_active: boolean
+          is_intake_pool: boolean
           name: string
           priority: number
           round_robin_pool: string[] | null
@@ -5376,6 +5566,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_intake_pool?: boolean
           name: string
           priority?: number
           round_robin_pool?: string[] | null
@@ -5389,6 +5580,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_intake_pool?: boolean
           name?: string
           priority?: number
           round_robin_pool?: string[] | null
@@ -6090,6 +6282,69 @@ export type Database = {
           },
         ]
       }
+      lead_association_requests: {
+        Row: {
+          academic_partner_id: string | null
+          consultant_id: string | null
+          created_at: string
+          id: string
+          lead_id: string | null
+          proposed_campus_id: string | null
+          proposed_course_id: string | null
+          proposed_email: string | null
+          proposed_name: string
+          proposed_notes: string | null
+          requested_by: string | null
+          requested_phone: string
+          requester_type: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          academic_partner_id?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          proposed_campus_id?: string | null
+          proposed_course_id?: string | null
+          proposed_email?: string | null
+          proposed_name: string
+          proposed_notes?: string | null
+          requested_by?: string | null
+          requested_phone: string
+          requester_type: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          academic_partner_id?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          proposed_campus_id?: string | null
+          proposed_course_id?: string | null
+          proposed_email?: string | null
+          proposed_name?: string
+          proposed_notes?: string | null
+          requested_by?: string | null
+          requested_phone?: string
+          requester_type?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       leads: {
         Row: {
           admission_no: string | null
@@ -6103,21 +6358,29 @@ export type Database = {
           ai_transcript: string | null
           application_id: string | null
           application_progress: Json | null
+          academic_partner_id: string | null
           area: string | null
           assigned_at: string | null
           auto_returned_count: number
           campus_id: string | null
           category: string | null
+          cahet_registered: boolean | null
           city: string | null
+          cnet_appeared: boolean | null
           consultant_id: string | null
           counsellor_id: string | null
           course_id: string | null
           created_at: string
           email: string | null
           entrance_scores: Json | null
+          fbc: string | null
+          fbp: string | null
           first_contact_at: string | null
           future_eligible_session: string | null
           gap_years: number | null
+          ga_client_id: string | null
+          ga_session_id: string | null
+          gclid: string | null
           guardian_name: string | null
           guardian_phone: string | null
           id: string
@@ -6126,16 +6389,21 @@ export type Database = {
           is_mirror: boolean
           is_nri: boolean | null
           jd_category: string | null
+          landing_page: string | null
           lead_score: number | null
+          lead_institution_type: string
           lead_temperature: string | null
           mirror_lead_id: string | null
           name: string
           notes: string | null
           offer_amount: number | null
+          origin_domain: string | null
           person_role: string
           phone: string
+          portal_brand: string | null
           pre_admission_no: string | null
           qualifying_percent: number | null
+          referrer: string | null
           secondary_source: string | null
           skip_ai_call: boolean | null
           source: Database["public"]["Enums"]["lead_source"]
@@ -6147,6 +6415,11 @@ export type Database = {
           tertiary_source: string | null
           token_amount: number | null
           updated_at: string
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
           visit_date: string | null
         }
         Insert: {
@@ -6161,21 +6434,29 @@ export type Database = {
           ai_transcript?: string | null
           application_id?: string | null
           application_progress?: Json | null
+          academic_partner_id?: string | null
           area?: string | null
           assigned_at?: string | null
           auto_returned_count?: number
           campus_id?: string | null
           category?: string | null
+          cahet_registered?: boolean | null
           city?: string | null
+          cnet_appeared?: boolean | null
           consultant_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
           created_at?: string
           email?: string | null
           entrance_scores?: Json | null
+          fbc?: string | null
+          fbp?: string | null
           first_contact_at?: string | null
           future_eligible_session?: string | null
           gap_years?: number | null
+          ga_client_id?: string | null
+          ga_session_id?: string | null
+          gclid?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           id?: string
@@ -6184,16 +6465,21 @@ export type Database = {
           is_mirror?: boolean
           is_nri?: boolean | null
           jd_category?: string | null
+          landing_page?: string | null
           lead_score?: number | null
+          lead_institution_type?: string
           lead_temperature?: string | null
           mirror_lead_id?: string | null
           name: string
           notes?: string | null
           offer_amount?: number | null
+          origin_domain?: string | null
           person_role?: string
           phone: string
+          portal_brand?: string | null
           pre_admission_no?: string | null
           qualifying_percent?: number | null
+          referrer?: string | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -6205,6 +6491,11 @@ export type Database = {
           tertiary_source?: string | null
           token_amount?: number | null
           updated_at?: string
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
           visit_date?: string | null
         }
         Update: {
@@ -6219,21 +6510,29 @@ export type Database = {
           ai_transcript?: string | null
           application_id?: string | null
           application_progress?: Json | null
+          academic_partner_id?: string | null
           area?: string | null
           assigned_at?: string | null
           auto_returned_count?: number
           campus_id?: string | null
           category?: string | null
+          cahet_registered?: boolean | null
           city?: string | null
+          cnet_appeared?: boolean | null
           consultant_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
           created_at?: string
           email?: string | null
           entrance_scores?: Json | null
+          fbc?: string | null
+          fbp?: string | null
           first_contact_at?: string | null
           future_eligible_session?: string | null
           gap_years?: number | null
+          ga_client_id?: string | null
+          ga_session_id?: string | null
+          gclid?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           id?: string
@@ -6242,16 +6541,21 @@ export type Database = {
           is_mirror?: boolean
           is_nri?: boolean | null
           jd_category?: string | null
+          landing_page?: string | null
           lead_score?: number | null
+          lead_institution_type?: string
           lead_temperature?: string | null
           mirror_lead_id?: string | null
           name?: string
           notes?: string | null
           offer_amount?: number | null
+          origin_domain?: string | null
           person_role?: string
           phone?: string
+          portal_brand?: string | null
           pre_admission_no?: string | null
           qualifying_percent?: number | null
+          referrer?: string | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -6263,6 +6567,11 @@ export type Database = {
           tertiary_source?: string | null
           token_amount?: number | null
           updated_at?: string
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
           visit_date?: string | null
         }
         Relationships: [
@@ -7415,6 +7724,7 @@ export type Database = {
           school_email: string | null
           second_language: string | null
           section: string | null
+          semester: string | null
           session_id: string | null
           sports: string | null
           sr_number: string | null
@@ -7529,6 +7839,7 @@ export type Database = {
           school_email?: string | null
           second_language?: string | null
           section?: string | null
+          semester?: string | null
           session_id?: string | null
           sports?: string | null
           sr_number?: string | null
@@ -7643,6 +7954,7 @@ export type Database = {
           school_email?: string | null
           second_language?: string | null
           section?: string | null
+          semester?: string | null
           session_id?: string | null
           sports?: string | null
           sr_number?: string | null
@@ -8506,6 +8818,11 @@ export type Database = {
           id: string
           otp_hash: string
           phone: string
+          wa_message_id: string | null
+          wa_sent_at: string | null
+          wa_status: string | null
+          wa_status_error: Json | null
+          wa_status_updated_at: string | null
           verified: boolean
         }
         Insert: {
@@ -8514,6 +8831,11 @@ export type Database = {
           id?: string
           otp_hash: string
           phone: string
+          wa_message_id?: string | null
+          wa_sent_at?: string | null
+          wa_status?: string | null
+          wa_status_error?: Json | null
+          wa_status_updated_at?: string | null
           verified?: boolean
         }
         Update: {
@@ -8522,6 +8844,11 @@ export type Database = {
           id?: string
           otp_hash?: string
           phone?: string
+          wa_message_id?: string | null
+          wa_sent_at?: string | null
+          wa_status?: string | null
+          wa_status_error?: Json | null
+          wa_status_updated_at?: string | null
           verified?: boolean
         }
         Relationships: []
@@ -8582,6 +8909,45 @@ export type Database = {
           request_type?: string | null
           status?: string | null
           year_of_passing?: number | null
+        }
+        Relationships: []
+      }
+      academic_partner_assignment_summary: {
+        Row: {
+          batch_id: string | null
+          batch_name: string | null
+          candidates: number | null
+          course_id: string | null
+          course_name: string | null
+          effective_payout_percentage: number | null
+          fee_collected: number | null
+          id: string | null
+          is_active: boolean | null
+          partner_id: string | null
+          payout_percentage: number | null
+        }
+        Relationships: []
+      }
+      academic_partner_dashboard: {
+        Row: {
+          assigned_batches: number | null
+          assigned_courses: number | null
+          conversions: number | null
+          default_payout_percentage: number | null
+          email: string | null
+          organization: string | null
+          paid_payout: number | null
+          partner_id: string | null
+          partner_name: string | null
+          pending_payout: number | null
+          phone: string | null
+          pipeline: number | null
+          status: string | null
+          total_candidates: number | null
+          total_fee_collected: number | null
+          total_leads: number | null
+          total_payout: number | null
+          user_id: string | null
         }
         Relationships: []
       }
@@ -10038,6 +10404,14 @@ export type Database = {
         Returns: number
       }
       count_pending_approvals: { Args: never; Returns: number }
+      call_log_metrics: {
+        Args: {
+          p_counsellor_id?: string | null
+          p_from_date?: string | null
+          p_to_date?: string | null
+        }
+        Returns: Json
+      }
       find_lead_duplicates: {
         Args: {
           p_email?: string
@@ -10079,6 +10453,32 @@ export type Database = {
           stage: string
         }[]
       }
+      normalize_lead_phone: {
+        Args: { _phone: string }
+        Returns: string
+      }
+      review_lead_association_request: {
+        Args: {
+          _approved: boolean
+          _request_id: string
+          _review_notes?: string | null
+        }
+        Returns: Json
+      }
+      submit_lead_association_request: {
+        Args: {
+          _academic_partner_id?: string | null
+          _campus_id?: string | null
+          _consultant_id?: string | null
+          _course_id?: string | null
+          _email?: string | null
+          _name: string
+          _notes?: string | null
+          _phone: string
+          _requester_type: string
+        }
+        Returns: Json
+      }
       fn_cleanup_stale_ai_calls: { Args: never; Returns: undefined }
       fn_next_business_hour: {
         Args: { p_delay_minutes?: number }
@@ -10097,6 +10497,54 @@ export type Database = {
         Returns: {
           campus_id: string
           lead_id: string
+        }[]
+      }
+      academic_partner_issue_offer: {
+        Args: {
+          _acceptance_deadline: string
+          _admission_mode?: string
+          _application_id: string
+          _entrance_exam_name?: string | null
+          _net_fee: number
+          _partner_id?: string | null
+          _session_id: string
+          _token_fee_amount: number
+          _token_fee_user_edited?: boolean
+          _total_fee: number
+        }
+        Returns: Json
+      }
+      academic_partner_paid_applications: {
+        Args: {
+          _partner_id?: string | null
+        } | void
+        Returns: {
+          academic_partner_id: string | null
+          application_completed_sections: Json | null
+          application_created_at: string | null
+          application_fee_amount: number | null
+          application_form_pdf_url: string | null
+          application_id: string
+          application_payment_status: string | null
+          application_status: string | null
+          application_submitted_at: string | null
+          application_uuid: string
+          attribution_label: string
+          attribution_type: string
+          campus_id: string | null
+          campus_name: string | null
+          counsellor_id: string | null
+          course_id: string | null
+          course_name: string | null
+          email: string | null
+          has_offer: boolean
+          latest_offer_id: string | null
+          latest_offer_letter_url: string | null
+          lead_id: string
+          name: string
+          phone: string
+          source: string | null
+          stage: string
         }[]
       }
       get_unassigned_leads_bucket: {
@@ -10141,7 +10589,10 @@ export type Database = {
       }
       insert_lead: {
         Args: {
+          _cahet_registered?: boolean | null
           _campus_id?: string
+          _cnet_appeared?: boolean | null
+          _consultant_id?: string | null
           _counsellor_id?: string
           _course_id?: string
           _email?: string
@@ -10184,10 +10635,24 @@ export type Database = {
           _application_id?: string
           _campus_id?: string
           _course_id?: string
+          _fbc?: string
+          _fbp?: string
           _email?: string
+          _ga_client_id?: string
+          _ga_session_id?: string
+          _gclid?: string
+          _landing_page?: string
           _name: string
+          _origin_domain?: string
           _phone: string
+          _portal_brand?: string
+          _referrer?: string
           _source?: string
+          _utm_campaign?: string
+          _utm_content?: string
+          _utm_medium?: string
+          _utm_source?: string
+          _utm_term?: string
         }
         Returns: string
       }
@@ -10211,6 +10676,10 @@ export type Database = {
         | "ib_coordinator"
         | "office_admin"
         | "publisher"
+        | "video_editor"
+        | "academic_partner"
+        | "academic_partner_offer_letter"
+        | "librarian"
       ib_programme: "pyp" | "myp"
       lead_source:
         | "website"
@@ -10228,6 +10697,12 @@ export type Database = {
         | "mirai_website"
         | "salahlo"
         | "dialer"
+        | "direct_walkin"
+        | "website_chat"
+        | "whatsapp"
+        | "inbound_call"
+        | "school_outreach"
+        | "academic_partner"
       lead_stage:
         | "new_lead"
         | "application_in_progress"
@@ -10402,6 +10877,10 @@ export const Constants = {
         "ib_coordinator",
         "office_admin",
         "publisher",
+        "video_editor",
+        "academic_partner",
+        "academic_partner_offer_letter",
+        "librarian",
       ],
       ib_programme: ["pyp", "myp"],
       lead_source: [
@@ -10420,6 +10899,12 @@ export const Constants = {
         "mirai_website",
         "salahlo",
         "dialer",
+        "direct_walkin",
+        "website_chat",
+        "whatsapp",
+        "inbound_call",
+        "school_outreach",
+        "academic_partner",
       ],
       lead_stage: [
         "new_lead",

@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, CalendarDays } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePortal } from "@/components/apply/PortalContext";
+import {
+  applicationDeadlineHeadline,
+  effectiveApplicationDeadline,
+  INITIAL_APPLICATION_DEADLINE,
+} from "@/lib/deadlineRollover";
+import type { PortalId } from "@/components/apply/portalConfig";
 
-const DEFAULT_FEE_SUBMISSION_DEADLINE = "2026-06-10";
-const PUBLIC_APPLICATION_DEADLINE = "2026-06-10";
+const DEFAULT_FEE_SUBMISSION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
+const PUBLIC_APPLICATION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
+const UP_DELED_DEADLINE = "2026-07-09";
 
 const STAFF_ROLES = new Set([
   "super_admin",
@@ -53,15 +61,6 @@ function ordinal(value: number): string {
   }
 }
 
-function formatDate(dateString: string): string {
-  return endOfIstDay(dateString).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
 function formatLongDate(dateString: string): string {
   const date = endOfIstDay(dateString);
   const day = Number(
@@ -81,14 +80,46 @@ function formatLongDate(dateString: string): string {
   return `${ordinal(day)} ${month} ${year}`;
 }
 
+function usesUpDeledDeadline(audience: "staff" | "public", portalId: PortalId): boolean {
+  return audience === "staff" || portalId === "nimt";
+}
+
 interface ApplicantDeadlineTickerProps {
   audience?: "staff" | "public";
 }
 
-function PublicApplicationDeadlineHeader() {
+function PublicApplicationDeadlineHeader({
+  audience,
+  deadline,
+  portalId,
+  portalName,
+  portalPath,
+  portalPrimaryColor,
+  showCta,
+}: {
+  audience: "staff" | "public";
+  deadline: string;
+  portalId: PortalId;
+  portalName: string;
+  portalPath: string;
+  portalPrimaryColor: string;
+  showCta: boolean;
+}) {
   const [now, setNow] = useState(Date.now());
-  const deadlineLabel = formatLongDate(PUBLIC_APPLICATION_DEADLINE);
-  const countdown = countdownRemaining(PUBLIC_APPLICATION_DEADLINE, now);
+  const effectiveDeadline = effectiveApplicationDeadline(deadline, now);
+  const deadlineLabel = formatLongDate(effectiveDeadline);
+  const upDeledDeadlineLabel = formatLongDate(UP_DELED_DEADLINE);
+  const showUpDeledDeadline = usesUpDeledDeadline(audience, portalId);
+  const countdownDeadline = showUpDeledDeadline ? UP_DELED_DEADLINE : effectiveDeadline;
+  const countdown = countdownRemaining(countdownDeadline, now);
+  const headline = applicationDeadlineHeadline(portalId, now);
+  const scopeLabel = showUpDeledDeadline ? "UP-DELED" : portalName;
+  const capsuleText = showUpDeledDeadline ? "Deadline" : "Application deadline";
+  const capsuleDeadlineLabel = showUpDeledDeadline ? upDeledDeadlineLabel : deadlineLabel;
+  const backgroundColor = audience === "staff" ? "#0b1f4d" : portalPrimaryColor;
+  const headlineText = showUpDeledDeadline
+    ? `Application Deadline for all other courses: apply by ${deadlineLabel}`
+    : `${headline}: apply by ${deadlineLabel}`;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -96,37 +127,42 @@ function PublicApplicationDeadlineHeader() {
   }, []);
 
   return (
-    <div className="border-b border-white/10 bg-[#0b1f4d] px-4 py-2 text-white shadow-sm">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold sm:justify-between md:flex-nowrap md:text-left">
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 md:flex-nowrap md:justify-start">
-          <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+    <div className="border-b border-white/10 px-4 py-2 text-white shadow-sm" style={{ backgroundColor }}>
+      <div className="mx-auto flex w-full max-w-[112rem] flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold xl:flex-nowrap xl:justify-between xl:text-left">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 xl:flex-nowrap xl:justify-start">
+          <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
+            <span className="h-2 w-2 rounded-full bg-success/50" aria-hidden="true" />
             Admissions 2026-27
           </span>
-          <span className="text-sm font-bold text-white sm:text-base">
-            Round 1 deadline: apply by {deadlineLabel}
+          <span className="min-w-0 text-sm font-bold text-white sm:text-base xl:truncate">
+            {headlineText}
           </span>
         </div>
 
-        <div className="inline-flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white/90 md:flex-nowrap">
-          <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
-            BPT &amp; BMRIT
+        <div className="inline-flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white/90 xl:flex-nowrap">
+          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
+            {scopeLabel}
           </span>
-          <span className="hidden sm:inline">
-            CAHET registration on ABVMU due <strong className="text-white">{deadlineLabel}, 11:59 PM</strong>
-          </span>
-          <strong className="rounded-full bg-[#fffc4d] px-2 py-0.5 font-mono text-xs font-black text-black">
+          {showUpDeledDeadline && (
+            <span className="hidden whitespace-nowrap sm:inline">
+              {capsuleText} <strong className="text-white">{capsuleDeadlineLabel}, 11:59 PM</strong>
+            </span>
+          )}
+          <strong className="shrink-0 whitespace-nowrap rounded-full bg-[#fffc4d] px-2 py-0.5 font-mono text-xs font-black text-black">
             {countdown}
           </strong>
         </div>
 
-        <Link
-          to="/apply/nimt"
-          className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
-        >
-          Apply Now
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
+        {showCta && (
+          <Link
+            to={portalPath}
+            style={{ color: portalPrimaryColor }}
+            className="inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-info/10"
+          >
+            Apply Now
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -134,6 +170,7 @@ function PublicApplicationDeadlineHeader() {
 
 export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlineTickerProps) {
   const { role } = useAuth();
+  const portal = usePortal();
   const [deadline, setDeadline] = useState(
     audience === "public" ? PUBLIC_APPLICATION_DEADLINE : DEFAULT_FEE_SUBMISSION_DEADLINE,
   );
@@ -157,27 +194,21 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
 
   if (!eligible) return null;
 
-  const days = daysRemaining(deadline);
+  const displayDeadline = usesUpDeledDeadline(audience, portal.id)
+    ? UP_DELED_DEADLINE
+    : effectiveApplicationDeadline(deadline);
+  const days = daysRemaining(displayDeadline);
   if (days === 0) return null;
 
-  if (audience === "public") {
-    return <PublicApplicationDeadlineHeader />;
-  }
-
   return (
-    <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-950 sm:px-5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <CalendarDays className="h-3.5 w-3.5 flex-shrink-0 text-amber-700" />
-        <span className="font-semibold">{audience === "public" ? "Application deadline" : "All-course deadline"}</span>
-        <span className="text-amber-800">
-          {formatDate(deadline)} · {days} {days === 1 ? "day" : "days"} left
-        </span>
-        {audience === "staff" && role === "super_admin" && (
-          <Link to="/settings" className="ml-auto font-medium text-amber-900 underline-offset-2 hover:underline">
-            Edit
-          </Link>
-        )}
-      </div>
-    </div>
+    <PublicApplicationDeadlineHeader
+      audience={audience}
+      deadline={deadline}
+      portalId={portal.id}
+      portalName={portal.name}
+      portalPath={`/apply/${portal.id}`}
+      portalPrimaryColor={portal.primaryColor}
+      showCta={audience === "public"}
+    />
   );
 }

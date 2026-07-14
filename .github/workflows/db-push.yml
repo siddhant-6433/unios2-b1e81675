@@ -1,8 +1,7 @@
 name: Supabase DB push
 
 # Closes the gap that left ~15 migrations in git unapplied for weeks:
-# any PR that touches supabase/migrations gets a dry-run diff posted to the
-# PR; merges to main trigger an actual apply.
+# every PR gets a dry-run diff; every merge to main triggers an actual apply.
 #
 # The workflow uses the Supabase CLI's `db push` which compares local
 # migration files against the remote schema_migrations table and only runs
@@ -15,10 +14,9 @@ name: Supabase DB push
 #   SUPABASE_PROJECT_REF    — the project ref (deylhigsisuexszsmypq for UniOs)
 #   SUPABASE_DB_PASSWORD    — database password (project settings → database)
 #
-# Both jobs probe for the secrets at the top of the run and skip cleanly
-# (dry-run) or fail with a clear message (push) if they're missing — so the
-# PR that adds this workflow doesn't go red just because the secrets aren't
-# wired up yet.
+# Both jobs probe for the secrets at the top of the run and fail closed with
+# a clear message if they're missing. A green migration check must mean the
+# remote database was actually reachable.
 #
 # Safety:
 #   • On PRs we only run --dry-run. No write happens until a human merges.
@@ -29,10 +27,9 @@ name: Supabase DB push
 on:
   pull_request:
     branches: [main]
-    paths: ['supabase/migrations/**']
+  merge_group:
   push:
     branches: [main]
-    paths: ['supabase/migrations/**']
   workflow_dispatch:
 
 concurrency:
@@ -43,49 +40,63 @@ concurrency:
 jobs:
   dry-run:
     name: Dry-run migration diff
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    environment: production-db
     env:
-      # Hoist secrets to job level so every step (including the link CLI
-      # call) sees them without per-step duplication.
+      # Hoist secrets to job level so the migration health script can link to
+      # Supabase without per-step duplication.
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
       SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect migration changes
+        id: migration_changes
+        run: |
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.event.merge_group.head_sha }}"
+          else
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          if git diff --name-only "$BASE" "$HEAD" | grep -q '^supabase/migrations/.*\.sql$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Migration files changed; running Supabase dry-run."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No migration files changed; skipping live Supabase dry-run for this PR."
+          fi
 
       - name: Check secrets
-        id: gate
+        if: steps.migration_changes.outputs.changed == 'true'
         run: |
           missing=()
           [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
           [ -z "$SUPABASE_PROJECT_REF" ]  && missing+=(SUPABASE_PROJECT_REF)
           [ -z "$SUPABASE_DB_PASSWORD" ]  && missing+=(SUPABASE_DB_PASSWORD)
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::notice title=Supabase secrets not configured::Missing ${missing[*]}. Add them under Settings → Secrets and variables → Actions (or under the production-db Environment) to enable the db push dry-run. See docs/db-deploy-audit.md for the full list."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::error title=Supabase secrets missing::Cannot validate migrations: ${missing[*]} are not set. Add them under Settings → Secrets and variables → Actions. See docs/db-deploy-audit.md for the full list."
+            exit 1
           fi
 
       - uses: supabase/setup-cli@v1
-        if: steps.gate.outputs.skip != 'true'
+        if: steps.migration_changes.outputs.changed == 'true'
         with:
           version: latest
 
-      - name: Link to Supabase project
-        if: steps.gate.outputs.skip != 'true'
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
-      - name: Show pending migrations (dry-run)
-        if: steps.gate.outputs.skip != 'true'
+      - name: Validate migration push
+        if: steps.migration_changes.outputs.changed == 'true'
         # --dry-run already fails non-zero on drift (remote-only versions,
         # local versions inserted before the last remote, duplicate-key
-        # collisions). We just need this step to NOT swallow the failure —
-        # the default `runs.shell: bash -e` does that. Once branch
-        # protection requires the `Dry-run migration diff` check, broken
-        # migrations can no longer reach main.
-        run: supabase db push --dry-run
+        # collisions). Pending branch migrations are OK on PRs as long as
+        # Supabase can apply them after merge.
+        run: npm run db:migrations:check
 
   push:
     name: Apply migrations to production
@@ -111,8 +122,31 @@ jobs:
       SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect migration changes
+        id: migration_changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run requested; applying/verifying migrations."
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^supabase/migrations/.*\.sql$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Migration files changed on main; applying migrations."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No migration files changed on main; skipping production DB push."
+          fi
+
+      - name: Refuse branch manual production push
+        if: steps.migration_changes.outputs.changed == 'true' && github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error title=Manual db push must run from main::This workflow applies migrations to production. Re-run it from the main branch so branch-only migration files cannot be recorded in production before they exist on main."
+          exit 1
 
       - name: Verify secrets
+        if: steps.migration_changes.outputs.changed == 'true'
         # For the push path we WANT to fail loudly: a missing secret means
         # nothing got applied, which is silent data drift waiting to happen.
         run: |
@@ -126,11 +160,21 @@ jobs:
           fi
 
       - uses: supabase/setup-cli@v1
+        if: steps.migration_changes.outputs.changed == 'true'
         with:
           version: latest
 
-      - name: Link to Supabase project
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
       - name: Apply pending migrations
-        run: supabase db push
+        if: steps.migration_changes.outputs.changed == 'true'
+        # The script first rejects duplicate local migration versions, then
+        # uses --include-all so a PR that was valid when reviewed still applies
+        # if another migration reached main first.
+        run: npm run db:migrations:apply
+
+      - name: Deploy application deletion function
+        if: steps.migration_changes.outputs.changed == 'true'
+        run: supabase functions deploy delete-application --no-verify-jwt
+
+      - name: Verify production has no pending migrations
+        if: steps.migration_changes.outputs.changed == 'true'
+        run: npm run db:migrations:clean

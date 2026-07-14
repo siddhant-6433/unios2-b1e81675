@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -28,7 +29,7 @@ interface UserOverride {
 const ROLES = [
   "campus_admin", "principal", "admission_head", "counsellor", "accountant",
   "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden",
-  "ib_coordinator", "consultant", "student", "parent",
+  "ib_coordinator", "librarian", "consultant", "academic_partner", "academic_partner_offer_letter", "student", "parent",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -36,6 +37,9 @@ const ROLE_LABELS: Record<string, string> = {
   counsellor: "Counsellor", accountant: "Accountant", faculty: "Faculty",
   teacher: "Teacher", data_entry: "Data Entry", office_admin: "Office Admin", office_assistant: "Office Asst.",
   hostel_warden: "Hostel", ib_coordinator: "IB Coord.", consultant: "Consultant",
+  librarian: "Librarian",
+  academic_partner: "Acad. Partner",
+  academic_partner_offer_letter: "Partner + Offers",
   student: "Student", parent: "Parent",
 };
 
@@ -44,12 +48,14 @@ const MODULE_LABELS: Record<string, string> = {
   exams: "Exams", finance: "Finance", reports: "Reports", leads: "Leads",
   whatsapp: "WhatsApp", performance: "Performance", lead_buckets: "Lead Buckets",
   lead_allocation: "Lead Allocation", automation: "Automation", consultants: "Consultants",
+  academic_partners: "Academic Partners", academic_partner_portal: "Academic Partner Portal",
+  academic_partner_offer_letters: "Partner Offer Letters",
   templates: "Templates", courses_fees: "Courses & Fees", consultant_portal: "Consultant Portal",
   analytics: "Analytics", ib_poi: "IB POI", ib_units: "IB Units", ib_gradebook: "IB Gradebook",
   ib_portfolios: "IB Portfolios", ib_action: "IB Action", ib_reports: "IB Reports",
   ib_exhibition: "IB Exhibition", ib_projects: "IB Projects", ib_idu: "IB IDU",
   campuses_courses: "Campuses", documents: "Documents", alumni_verification: "Alumni Verification",
-  user_management: "User Mgmt", permissions: "Permissions",
+  user_management: "User Mgmt", permissions: "Permissions", library: "Library",
 };
 
 export function PermissionMatrixPanel() {
@@ -135,7 +141,7 @@ export function PermissionMatrixPanel() {
     }
   };
 
-  if (loading) return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">
@@ -215,7 +221,7 @@ export function PermissionMatrixPanel() {
                             onClick={() => togglePermission(r, p)}
                             disabled={saving === key}
                             className={`h-4 w-4 rounded-sm border inline-flex items-center justify-center transition-colors ${
-                              granted ? "bg-emerald-500 border-emerald-500 text-white" : "border-border/60 hover:border-emerald-400"
+                              granted ? "bg-success/50 border-success/35 text-white" : "border-border/60 hover:border-success/30"
                             }`}
                           >
                             {saving === key ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : granted ? <Check className="h-2.5 w-2.5" /> : null}

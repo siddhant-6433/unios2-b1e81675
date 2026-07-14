@@ -1,19 +1,29 @@
 import { useState, useEffect, useCallback } from "react";
 import uniosLogo from "@/assets/unios-logo.png";
+
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
+
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
-  ClipboardCheck, Settings, LogOut,
+  ClipboardCheck, Settings, LogOut, CreditCard,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
+  Megaphone,
+  Library, Barcode, DoorOpen,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
+import { canSeePolicyItem, isAcademicPartnerPortalRole, type AccessState } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -26,10 +36,20 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
-  | "ib_coordinator" | "video_editor";
+  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "academic_partner_offer_letter" | "student" | "parent"
+  | "ib_coordinator" | "video_editor" | "librarian";
 
-type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; badge?: number; hideForSuperAdmin?: boolean };
+type MenuItem = {
+  title: string;
+  url: string;
+  icon: any;
+  permission?: string;
+  anyPermission?: string[];
+  roles?: AppRole[];
+  blockedRoles?: AppRole[];
+  badge?: number;
+  hideForSuperAdmin?: boolean;
+};
 
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
@@ -45,32 +65,63 @@ const mainMenu: MenuItem[] = [
   { title: "My Videos", url: "/video-editor", icon: Video, permission: "video_editor:view", hideForSuperAdmin: true },
 ];
 
+const academicPartnerMenu: MenuItem[] = [
+  { title: "Overview", url: "/academic-partner-portal", icon: LayoutDashboard, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Inbox", url: "/academic-partner-portal?tab=requests", icon: Inbox, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Leads", url: "/academic-partner-portal?tab=leads", icon: GraduationCap, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Applications", url: "/academic-partner-portal?tab=applications", icon: FileText, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Students", url: "/academic-partner-portal?tab=students", icon: Users, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Finance", url: "/academic-partner-portal?tab=fees", icon: IndianRupee, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Collections", url: "/academic-partner-portal?tab=fees", icon: Receipt, roles: ["academic_partner", "academic_partner_offer_letter"] },
+];
+
 const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
-  { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
+  { title: "Applications", url: "/applications", icon: FileText, permission: "students:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
   { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
+  { title: "UPDELED Sprint", url: "/updeled-sprint", icon: GraduationCap, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
-  { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
-  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
+  { title: "WhatsApp", url: "/whatsapp-inbox", icon: WhatsAppIcon, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
+  { title: "Lead Assignments", url: "/lead-assignments", icon: UserCheck, permission: "leads:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
-  { title: "Lists & Campaigns", url: "/lists", icon: ListPlus, permission: "leads:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
+  { title: "Visit Center", url: "/visit-center", icon: DoorOpen, permission: "leads:view" },
   { title: "Visit Monitor", url: "/visit-monitor", icon: Footprints, permission: "leads:view" },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
-  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
+  { title: "Academic Partners", url: "/academic-partners", icon: School, permission: "academic_partners:view" },
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
+  { title: "My Batches", url: "/academic-partner-portal", icon: School, permission: "academic_partner_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "Publisher Analytics", url: "/publisher-analytics", icon: PieChart, permission: "user_management:view" },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
+];
+
+const marketingSubMenu: MenuItem[] = [
+  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+];
+
+const academicsSubMenu: MenuItem[] = [
+  { title: "Library Dashboard", url: "/library?tab=dashboard", icon: Library, permission: "library:view" },
+  { title: "Catalog", url: "/library?tab=catalog", icon: BookOpen, permission: "library:view" },
+  { title: "Issue / Return", url: "/library?tab=circulation", icon: Shuffle, permission: "library:circulate" },
+  { title: "Inventory", url: "/library?tab=inventory", icon: ClipboardCheck, permission: "library:inventory" },
+  { title: "Digitization Queue", url: "/library?tab=digitization", icon: Barcode, permission: "library:digitize" },
+  { title: "Members", url: "/library?tab=members", icon: Users, permission: "library:view" },
+  { title: "Reports", url: "/library?tab=reports", icon: BarChart3, permission: "library:export" },
+  { title: "Settings", url: "/library?tab=settings", icon: Settings, permission: "library:manage_settings" },
 ];
 
 const ibAcademicsSubMenu: MenuItem[] = [
@@ -88,7 +139,7 @@ const ibAcademicsSubMenu: MenuItem[] = [
 const hrSubMenu: MenuItem[] = [
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
   { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
-  { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: MessageSquare, permission: "hr:view" },
+  { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
@@ -105,6 +156,13 @@ const managementMenu: MenuItem[] = [
     icon: ShieldCheck,
     anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"],
   },
+  {
+    title: "ID Card Center",
+    url: "/id-card-center",
+    icon: CreditCard,
+    roles: ["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"],
+    anyPermission: ["hr:view"],
+  },
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
@@ -117,8 +175,12 @@ const roleLabels: Record<string, string> = {
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  consultant: "Consultant",
+  academic_partner: "Academic Partner",
+  academic_partner_offer_letter: "Academic Partner + Offers",
   ib_coordinator: "IB Coordinator",
   video_editor: "Video Editor",
+  librarian: "Librarian",
 };
 
 export function AppSidebar() {
@@ -136,27 +198,23 @@ export function AppSidebar() {
   const roleLabel = role ? (roleLabels[role] || role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
-  const { can } = usePermissions();
-  const canSee = (item: MenuItem) => {
-    // When impersonating, always show User Management so admin can navigate back
-    if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
-    // Role-specific portals: hide from super_admin when not impersonating
-    if (item.hideForSuperAdmin && realRole === "super_admin" && !isImpersonating) return false;
-    // anyPermission: show if the user has at least one of the listed perms.
-    // Used by consolidated entries like "Admin Panel" that fold multiple
-    // tabs (course-campus / user-management / permissions) into a single
-    // sidebar link, where accountants might have only user_management
-    // and counsellors might have only campuses_courses.
-    if (item.anyPermission && item.anyPermission.length > 0) {
-      return item.anyPermission.some(p => {
-        const [mod, act] = p.split(":");
-        return can(mod, act);
-      });
-    }
-    if (!item.permission) return true;
-    const [mod, act] = item.permission.split(":");
-    return can(mod, act);
+  const { permissions } = usePermissions();
+  const accessState: AccessState = {
+    isAuthenticated: !!user,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
   };
+  const canSee = (item: MenuItem) => {
+    return canSeePolicyItem(accessState, item);
+  };
+  const canViewSettings = canSeePolicyItem(accessState, {
+    title: "Settings",
+    url: "/settings",
+    icon: Settings,
+    permission: "user_management:view",
+  });
 
   // WhatsApp unread count
   const [waUnread, setWaUnread] = useState(0);
@@ -176,6 +234,7 @@ export function AppSidebar() {
   const hasPersonalDocs = role === "super_admin";
 
   const fetchAdmissionBadges = useCallback(async () => {
+    if (isAcademicPartnerPortalRole(role)) return;
     if (role === "counsellor" && !profile?.id) return;
 
     const { data, error } = await (supabase as any).rpc("action_badge_counts", {
@@ -207,6 +266,17 @@ export function AppSidebar() {
   }, [role]);
 
   useEffect(() => {
+    if (isAcademicPartnerPortalRole(role)) {
+      setWaUnread(0);
+      setNewLeadCount(0);
+      setTatDefaults(0);
+      setPendingFollowupCount(0);
+      setMissedCallbackCount(0);
+      setPriorityInterestedCount(0);
+      setPendingApprovals(0);
+      return;
+    }
+
     fetchAdmissionBadges();
     fetchPendingApprovals();
 
@@ -238,12 +308,14 @@ export function AppSidebar() {
   }, [fetchAdmissionBadges, fetchPendingApprovals]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
-  const visibleMain = mainMenu.filter(canSee).map(item => {
+  const isPartnerPortalRole = isAcademicPartnerPortalRole(role);
+  const visibleMainSource = isPartnerPortalRole ? academicPartnerMenu : mainMenu;
+  const visibleMain = visibleMainSource.filter(canSee).map(item => {
     if (item.url === "/" && pendingApprovals > 0) return { ...item, badge: pendingApprovals };
     if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
     return item;
   });
-  const visibleAdmission = admissionSubMenu.filter(canSee).map(item => {
+  const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter(canSee)).map(item => {
     if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
@@ -253,10 +325,14 @@ export function AppSidebar() {
     return item;
   }
   );
+  const visibleMarketing = isPartnerPortalRole ? [] : marketingSubMenu.filter(canSee);
+  const visibleAcademics = academicsSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
-  const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
+  const isAdmissionActive = !isPartnerPortalRole && admissionSubMenu.some(item => isActive(item.url));
+  const isMarketingActive = !isPartnerPortalRole && marketingSubMenu.some(item => isActive(item.url));
+  const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
   const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
 
@@ -266,16 +342,16 @@ export function AppSidebar() {
   // Reference-inspired sidebar items: soft hover background, active item
   // becomes a white pill with a subtle shadow that pops against the tinted
   // sidebar canvas. No DOM/structure change — just className tuning.
-  const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
-  const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(220_13%_46%/0.08)]";
-  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(214_32%_12%/0.08)]";
+  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarContent className="bg-sidebar pt-4">
         {/* Logo */}
-        <div className="px-4 pb-2">
-          <div className="flex items-center gap-3">
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-primary/5 to-transparent px-3 py-2.5">
             <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
             {!collapsed && (
               <div className="flex flex-col">
@@ -286,7 +362,7 @@ export function AppSidebar() {
         </div>
 
         {/* Campus Selector */}
-        {!collapsed && campuses.length > 0 && (
+        {!collapsed && !isPartnerPortalRole && campuses.length > 0 && (
           <div className="px-3 pb-3">
             <select
               value={selectedCampusId}
@@ -316,7 +392,7 @@ export function AppSidebar() {
                         <span className="flex-1">{item.title}</span>
                       )}
                       {!collapsed && item.badge && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground px-1">
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground px-1 animate-rs-scale-in">
                           {item.badge}
                         </span>
                       )}
@@ -344,17 +420,21 @@ export function AppSidebar() {
                       <SidebarMenuSub>
                         {visibleAdmission.map((item) => {
                           const isCloudDialer = item.url === "/cloud-dialer";
-                          // CAHET Sprint gets a rose/urgent treatment to
-                          // signal the deadline pressure — matches the
-                          // ticker, leaderboard, and register-button colour.
+                          // Sprint routes get deadline-pressure treatment that
+                          // matches their ticker and register-button colours.
                           const isCahetSprint = item.url === "/cahet-sprint";
+                          const isUpdeledSprint = item.url === "/updeled-sprint";
                           const itemActiveClass = isCahetSprint
-                            ? "!bg-rose-100 dark:!bg-rose-900/30 !text-rose-700 dark:!text-rose-300 font-semibold"
+                            ? "!bg-destructive/10 dark:!bg-destructive/80/30 !text-destructive dark:!text-destructive/50 font-semibold"
+                            : isUpdeledSprint
+                            ? "!bg-primary/10 dark:!bg-primary/80/30 !text-primary dark:!text-primary/50 font-semibold"
                             : isCloudDialer
                             ? "!bg-cyan-100 dark:!bg-cyan-900/30 !text-cyan-700 dark:!text-cyan-300 font-semibold"
                             : activeClass;
                           const itemBaseClass = isCahetSprint
-                            ? `${subLinkClass} text-rose-700 dark:text-rose-400 font-semibold`
+                            ? `${subLinkClass} text-destructive dark:text-destructive/70 font-semibold`
+                            : isUpdeledSprint
+                            ? `${subLinkClass} text-primary dark:text-primary/60 font-semibold`
                             : isCloudDialer
                             ? `${subLinkClass} text-cyan-700 dark:text-cyan-400`
                             : subLinkClass;
@@ -366,8 +446,8 @@ export function AppSidebar() {
                                 <span className="flex-1">{item.title}</span>
                                 {item.badge ? (
                                   <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white px-1 ${
-                                    item.url === "/whatsapp-inbox" ? "bg-green-500"
-                                    : item.url === "/missed-calls" ? "bg-red-500"
+                                    item.url === "/whatsapp-inbox" ? "bg-success/50"
+                                    : item.url === "/missed-calls" ? "bg-destructive/50"
                                     : "bg-primary"
                                   }`}>
                                     {item.badge > 99 ? "99+" : item.badge}
@@ -378,6 +458,72 @@ export function AppSidebar() {
                           </SidebarMenuSubItem>
                           );
                         })}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Marketing */}
+              {visibleMarketing.length > 0 && (
+                <Collapsible defaultOpen={isMarketingActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isMarketingActive}>
+                        <span className="flex items-center gap-3">
+                          <Megaphone className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>Marketing Hub</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleMarketing.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Library */}
+              {visibleAcademics.length > 0 && (
+                <Collapsible defaultOpen={isAcademicsActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isAcademicsActive}>
+                        <span className="flex items-center gap-3">
+                          <Library className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>Library</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleAcademics.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url) || (item.url.startsWith("/library") && location.pathname === "/library" && !location.search && item.url.includes("dashboard"))}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </SidebarMenuItem>
@@ -476,7 +622,7 @@ export function AppSidebar() {
         {visibleMgmt.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
-              Management
+              Administrative
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
@@ -497,7 +643,7 @@ export function AppSidebar() {
 
         {/* Bottom: Settings + Account */}
         <div className="mt-auto">
-          {can("user_management", "view") && (
+          {canViewSettings && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
               Settings

@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, AlertCircle, UserCheck, UserPlus,
@@ -17,7 +19,9 @@ interface AppTransaction {
   fee_amount: number;
   payment_status: string;
   payment_ref: string | null;
+  pending_txnid?: string | null;
   fee_receipt_url?: string | null;
+  gateway?: string | null;
   updated_at: string;
   created_at: string;
   flags: string[];
@@ -36,6 +40,7 @@ interface StudentPayment {
   id: string;
   amount: number;
   payment_mode: string;
+  gateway: string | null;
   transaction_ref: string | null;
   receipt_no: string | null;
   paid_at: string;
@@ -64,6 +69,10 @@ function fmtAmount(n: number) {
   return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function downloadCSV(rows: string[][], filename: string) {
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -76,18 +85,50 @@ function downloadCSV(rows: string[][], filename: string) {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  paid:    "bg-green-100 text-green-700",
+  paid:    "bg-success/10 text-success",
   pending: "bg-yellow-100 text-yellow-700",
-  failed:  "bg-red-100  text-red-700",
+  failed:  "bg-destructive/10  text-destructive",
 };
 
 const MODE_COLORS: Record<string, string> = {
-  online:        "bg-blue-100  text-blue-700",
-  cash:          "bg-green-100 text-green-700",
-  cheque:        "bg-purple-100 text-purple-700",
-  upi:           "bg-orange-100 text-orange-700",
+  online:        "bg-info/10  text-info-foreground",
+  gateway:       "bg-info/10  text-info-foreground",
+  cash:          "bg-success/10 text-success",
+  cheque:        "bg-primary/10 text-primary",
+  upi:           "bg-warning/10 text-warning-foreground",
   bank_transfer: "bg-cyan-100  text-cyan-700",
 };
+
+const GATEWAY_LABELS: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  razorpay: "Razorpay",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+
+function appIdFromNotes(notes?: unknown): string | null {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+}
+
+function inferGatewayLabel(txn: {
+  gateway?: string | null;
+  payment_ref?: string | null;
+  transaction_ref?: string | null;
+  pending_txnid?: string | null;
+  payment_mode?: string | null;
+}) {
+  if (txn.gateway) return GATEWAY_LABELS[txn.gateway] || txn.gateway;
+  const ref = `${txn.payment_ref || ""} ${txn.transaction_ref || ""} ${txn.pending_txnid || ""}`.toLowerCase();
+  if (ref.includes("manual_")) return GATEWAY_LABELS.offline;
+  if (ref.includes("pay_") || ref.includes("order_")) return GATEWAY_LABELS.razorpay;
+  if (ref.includes("icici")) return GATEWAY_LABELS.icici;
+  if (ref.startsWith("eb") || ref.includes("easepay")) return GATEWAY_LABELS.easebuzz;
+  if (txn.payment_mode === "gateway" || txn.payment_mode === "online" || txn.pending_txnid) return "Unknown gateway";
+  return "—";
+}
 
 // ── Summary card ─────────────────────────────────────────────────────────────
 
@@ -114,7 +155,10 @@ export default function TransactionHistoryPanel() {
   const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
   const [togglingId, setTogglingId]       = useState<string | null>(null);
   const [reconciling, setReconciling]     = useState(false);
+  const [iciciVerifyingId, setIciciVerifyingId] = useState<string | null>(null);
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
+  // Admission numbers of students whose fee is consultant-managed (cashier note).
+  const [consultantManagedNos, setConsultantManagedNos] = useState<Set<string>>(new Set());
 
   const { selectedCampusId } = useCampus();
 
@@ -138,12 +182,12 @@ export default function TransactionHistoryPanel() {
   const fetchAppTxns = async () => {
     setLoadingApp(true);
     setErrorApp(null);
-    const [appsRes, lpRes] = await Promise.all([
+    const [appsRes, appPaymentsRes, lpRes] = await Promise.all([
       (supabase as any)
         .from("applications")
         .select(`
           application_id, full_name, phone, email,
-          fee_amount, payment_status, payment_ref, fee_receipt_url,
+          fee_amount, payment_status, payment_ref, pending_txnid, fee_receipt_url,
           updated_at, created_at,
           flags, program_category, applicant_type, lead_id,
           leads ( admission_no, pre_admission_no, campus_id )
@@ -152,8 +196,15 @@ export default function TransactionHistoryPanel() {
         .limit(1000),
       (supabase as any)
         .from("lead_payments")
+        .select("id, application_id, notes, gateway, transaction_ref, receipt_url, payment_date, created_at")
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(2000),
+      (supabase as any)
+        .from("lead_payments")
         .select(`
-          id, lead_id, type, amount, status, transaction_ref, receipt_no,
+          id, lead_id, type, amount, status, gateway, transaction_ref, receipt_no,
           payment_mode, payment_date, created_at, notes, receipt_url,
           leads ( name, phone, email, admission_no, pre_admission_no, campus_id )
         `)
@@ -163,12 +214,28 @@ export default function TransactionHistoryPanel() {
     ]);
 
     if (appsRes.error) { setErrorApp(appsRes.error.message); setLoadingApp(false); return; }
+    if (appPaymentsRes.error) { setErrorApp(appPaymentsRes.error.message); setLoadingApp(false); return; }
     if (lpRes.error)   { setErrorApp(lpRes.error.message);   setLoadingApp(false); return; }
+
+    const appPaymentByAppId = new Map<string, any>();
+    (appPaymentsRes.data || []).forEach((p: any) => {
+      const appId = p.application_id || appIdFromNotes(p.notes);
+      if (appId && !appPaymentByAppId.has(appId)) appPaymentByAppId.set(appId, p);
+    });
 
     // Filter applications: only keep pre-admission (no admission_no on lead).
     const apps: AppTransaction[] = (appsRes.data || [])
       .filter((a: any) => !a.leads?.admission_no)
-      .map((a: any) => ({ ...a, fee_type: "application_fee" as const, source: "application" as const }));
+      .map((a: any) => {
+        const payment = appPaymentByAppId.get(a.application_id);
+        return {
+          ...a,
+          gateway: payment?.gateway || null,
+          fee_receipt_url: a.fee_receipt_url || payment?.receipt_url || null,
+          fee_type: "application_fee" as const,
+          source: "application" as const,
+        };
+      });
 
     // Filter lead_payments: only pre-admission, normalise to AppTransaction shape.
     const lps: AppTransaction[] = (lpRes.data || [])
@@ -181,6 +248,7 @@ export default function TransactionHistoryPanel() {
         fee_amount:     Number(lp.amount || 0),
         payment_status: lp.status === "confirmed" ? "paid" : (lp.status || "pending"),
         payment_ref:    lp.transaction_ref,
+        gateway:        lp.gateway || null,
         // Pre-generated receipt PDF for the lead_payment, populated by
         // generate-payment-receipt when the payment confirmed. Shown by the
         // Receipt action.
@@ -228,7 +296,7 @@ export default function TransactionHistoryPanel() {
       (supabase as any)
         .from("lead_payments")
         .select(`
-          id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no,
+          id, lead_id, type, amount, payment_mode, gateway, transaction_ref, receipt_no,
           payment_date, created_at, notes, status,
           leads ( name, admission_no, pre_admission_no, phone, email, campus_id )
         `)
@@ -241,7 +309,10 @@ export default function TransactionHistoryPanel() {
     if (lpRes.error)       { setErrorStudent(lpRes.error.message);       setLoadingStudent(false); return; }
 
     // Native student-fee payments. Always shown.
-    const native: StudentPayment[] = (paymentsRes.data || []) as any;
+    const native: StudentPayment[] = (paymentsRes.data || []).map((p: any) => ({
+      ...p,
+      gateway: null,
+    }));
 
     // lead_payments graduate into student-fee view once the lead has an
     // admission_no. Tag with type so the row label distinguishes them from
@@ -252,6 +323,7 @@ export default function TransactionHistoryPanel() {
         id: `lp-${lp.id}`,
         amount: Number(lp.amount || 0),
         payment_mode: lp.payment_mode || "gateway",
+        gateway: lp.gateway || null,
         transaction_ref: lp.transaction_ref,
         receipt_no: lp.receipt_no,
         paid_at: lp.payment_date || lp.created_at,
@@ -272,6 +344,31 @@ export default function TransactionHistoryPanel() {
     );
     setStudentPmts(merged);
     setLoadingStudent(false);
+
+    // Cashier note: resolve consultant-managed students → their admission /
+    // pre-admission numbers (rows here don't carry student_id uniformly).
+    try {
+      const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
+        .select("student_id, effective_hidden");
+      const flaggedIds = ((flags || []) as any[])
+        .filter((f) => f.effective_hidden)
+        .map((f) => f.student_id);
+      if (flaggedIds.length > 0) {
+        const { data: studs } = await (supabase.from("students") as any)
+          .select("id, admission_no, pre_admission_no")
+          .in("id", flaggedIds);
+        const nos = new Set<string>();
+        ((studs || []) as any[]).forEach((s) => {
+          if (s.admission_no) nos.add(s.admission_no);
+          if (s.pre_admission_no) nos.add(s.pre_admission_no);
+        });
+        setConsultantManagedNos(nos);
+      } else {
+        setConsultantManagedNos(new Set());
+      }
+    } catch {
+      // Non-critical decoration; ignore lookup failures.
+    }
   };
 
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
@@ -341,6 +438,92 @@ export default function TransactionHistoryPanel() {
     }
   };
 
+  const reconcilePendingIcici = async () => {
+    setReconciling(true);
+    setReconcileResult(null);
+    let updated = 0;
+    let skipped = 0;
+    const pending = appTxns.filter((t) =>
+      t.payment_status === "pending" &&
+      t.fee_amount > 0 &&
+      t.source !== "lead_payment" &&
+      !!t.pending_txnid,
+    );
+
+    for (const txn of pending) {
+      try {
+        const { data } = await supabase.functions.invoke("icici-payment", {
+          body: {
+            action: "verify-payment",
+            txnid: txn.pending_txnid,
+            application_id: txn.application_id,
+          },
+        });
+        const responseCode = data?.raw?.responseCode;
+        if (data?.status === "SUC" || responseCode === "000" || responseCode === "0000") updated++;
+        else skipped++;
+      } catch (_) {
+        skipped++;
+      }
+    }
+
+    let sweepSummary = "";
+    try {
+      const { data, error } = await supabase.functions.invoke("icici-payment", {
+        body: { action: "reconcile-pending" },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      sweepSummary = ` · lead-payment sweep: ${data?.confirmed || 0} confirmed, ${data?.failed || 0} failed, ${data?.still_pending || 0} still pending`;
+    } catch (e) {
+      sweepSummary = ` · lead-payment sweep failed: ${errorMessage(e)}`;
+    }
+
+    const missing = appTxns.filter((t) =>
+      t.payment_status === "pending" &&
+      t.fee_amount > 0 &&
+      t.source !== "lead_payment" &&
+      !t.pending_txnid,
+    ).length;
+    setReconcileResult(
+      `ICICI reconciled ${updated} of ${pending.length} stored pending payments${skipped ? ` (${skipped} not settled)` : ""}${missing ? ` · ${missing} pending rows need row-level txn id` : ""}${sweepSummary}`,
+    );
+    fetchAppTxns();
+    setReconciling(false);
+  };
+
+  const verifyIciciTxn = async (txn: AppTransaction) => {
+    const txnid = window.prompt(
+      `Enter ICICI merchant transaction number for ${txn.application_id}:`,
+      txn.pending_txnid || "",
+    );
+    if (!txnid) return;
+    setIciciVerifyingId(txn.application_id);
+    setReconcileResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("icici-payment", {
+        body: {
+          action: "verify-payment",
+          txnid: txnid.trim(),
+          application_id: txn.application_id,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      const responseCode = data?.raw?.responseCode;
+      if (data?.status === "SUC" || responseCode === "000" || responseCode === "0000") {
+        setReconcileResult(`ICICI verified ${txn.application_id} · ref ${data?.raw?.txnID || txnid}`);
+        fetchAppTxns();
+      } else {
+        setReconcileResult(`ICICI did not confirm ${txn.application_id}: ${data?.raw_text || data?.raw?.respDescription || data?.status || "not settled"}`);
+      }
+    } catch (e) {
+      setReconcileResult(`ICICI verify failed for ${txn.application_id}: ${errorMessage(e)}`);
+    } finally {
+      setIciciVerifyingId(null);
+    }
+  };
+
   // ── Manual mark-paid by UTR / PhonePe txn ID ────────────────────────────────
   // Last-resort reconciliation for UPI-intent payments where EaseBuzz's API
   // can't return the txn (the popup-based surl callback also doesn't fire
@@ -407,6 +590,7 @@ export default function TransactionHistoryPanel() {
           t.full_name.toLowerCase().includes(q) ||
           (t.phone || "").toLowerCase().includes(q) ||
           (t.payment_ref || "").toLowerCase().includes(q) ||
+          inferGatewayLabel(t).toLowerCase().includes(q) ||
           admNo.includes(q) ||
           preAdmNo.includes(q)
         );
@@ -433,7 +617,8 @@ export default function TransactionHistoryPanel() {
           pre.includes(q) ||
           phone.includes(q) ||
           (p.receipt_no || "").toLowerCase().includes(q) ||
-          (p.transaction_ref || "").toLowerCase().includes(q)
+          (p.transaction_ref || "").toLowerCase().includes(q) ||
+          inferGatewayLabel(p).toLowerCase().includes(q)
         );
       }
       return true;
@@ -464,7 +649,7 @@ export default function TransactionHistoryPanel() {
 
   const exportAppCSV = () => {
     const headers = ["Date", "Application ID", "Applicant Name", "Phone", "Email",
-      "Amount", "Status", "Payment Ref", "Admission No", "Pre-Admission No"];
+      "Amount", "Status", "Payment Gateway", "Payment Ref", "Admission No", "Pre-Admission No"];
     const rows = filteredApps.map((t) => [
       fmtDate(t.updated_at),
       t.application_id,
@@ -473,6 +658,7 @@ export default function TransactionHistoryPanel() {
       t.email || "",
       t.fee_amount?.toFixed(2) || "0.00",
       t.payment_status,
+      inferGatewayLabel(t),
       t.payment_ref || "",
       t.leads?.admission_no || "",
       t.leads?.pre_admission_no || "",
@@ -482,7 +668,7 @@ export default function TransactionHistoryPanel() {
 
   const exportStudentCSV = () => {
     const headers = ["Date", "Receipt No", "Student Name", "Phone", "Amount",
-      "Mode", "Transaction Ref", "Admission No", "Pre-Admission No", "Recorded By", "Notes"];
+      "Mode", "Payment Gateway", "Transaction Ref", "Admission No", "Pre-Admission No", "Recorded By", "Notes"];
     const rows = filteredStudents.map((p) => [
       fmtDate(p.paid_at),
       p.receipt_no || "",
@@ -490,6 +676,7 @@ export default function TransactionHistoryPanel() {
       p.students?.phone || "",
       p.amount?.toFixed(2) || "0.00",
       p.payment_mode,
+      inferGatewayLabel(p),
       p.transaction_ref || "",
       p.students?.admission_no || "",
       p.students?.pre_admission_no || "",
@@ -522,7 +709,7 @@ export default function TransactionHistoryPanel() {
           label="App Fees Collected"
           value={fmtAmount(appStats.total)}
           sub={`${appStats.paidCount} transactions`}
-          color="text-green-600"
+          color="text-success"
         />
         <StatCard
           label="App Fees Pending"
@@ -534,7 +721,7 @@ export default function TransactionHistoryPanel() {
           label="Student Payments"
           value={fmtAmount(studentStats.total)}
           sub={`${studentStats.count} transactions`}
-          color="text-blue-600"
+          color="text-info-foreground"
         />
         <StatCard
           label="Total Collected"
@@ -580,45 +767,39 @@ export default function TransactionHistoryPanel() {
         </div>
 
         {tab === "applications" ? (
-          <select
+          <SelectField
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            <option value="all">All Statuses</option>
-            <option value="paid">Paid</option>
-            <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
-          </select>
+            onValueChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All Statuses" },
+              { value: "paid", label: "Paid" },
+              { value: "pending", label: "Pending" },
+              { value: "failed", label: "Failed" },
+            ]}
+            hideLabel
+            placeholder="All Statuses"
+          />
         ) : (
-          <select
+          <SelectField
             value={modeFilter}
-            onChange={(e) => setModeFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            <option value="all">All Modes</option>
-            <option value="online">Online</option>
-            <option value="cash">Cash</option>
-            <option value="upi">UPI</option>
-            <option value="cheque">Cheque</option>
-            <option value="bank_transfer">Bank Transfer</option>
-          </select>
+            onValueChange={setModeFilter}
+            options={[
+              { value: "all", label: "All Modes" },
+              { value: "online", label: "Online" },
+              { value: "cash", label: "Cash" },
+              { value: "upi", label: "UPI" },
+              { value: "cheque", label: "Cheque" },
+              { value: "bank_transfer", label: "Bank Transfer" },
+            ]}
+            hideLabel
+            placeholder="All Modes"
+          />
         )}
 
         <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          />
+          <FieldShell hideLabel><Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></FieldShell>
           <span className="text-muted-foreground text-xs">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          />
+          <FieldShell hideLabel><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></FieldShell>
         </div>
 
         <button
@@ -649,11 +830,20 @@ export default function TransactionHistoryPanel() {
             <button
               onClick={reconcileByUdf1}
               disabled={reconciling}
-              className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl border border-info/20 bg-info/5 px-3 py-2 text-sm font-medium text-info-foreground hover:bg-info/10 transition-colors disabled:opacity-50"
               title="Pull EaseBuzz transactions by date range and match to applications via UDF1 — recovers UPI-Intent webhook misses"
             >
               {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Reconcile via EaseBuzz (UDF1)
+            </button>
+            <button
+              onClick={reconcilePendingIcici}
+              disabled={reconciling}
+              className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-50"
+              title="Verify stored ICICI merchant transaction IDs and sweep stale ICICI lead-payment intents"
+            >
+              {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Reconcile ICICI
             </button>
           </>
         )}
@@ -667,7 +857,7 @@ export default function TransactionHistoryPanel() {
       </div>
 
       {reconcileResult && (
-        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2 border border-green-200">
+        <div className="flex items-center gap-2 text-sm text-success bg-success/5 rounded-xl px-4 py-2 border border-success/20">
           <CheckCircle2 className="h-4 w-4" />
           {reconcileResult}
         </div>
@@ -678,7 +868,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingApp ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : errorApp ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">
@@ -702,6 +892,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right whitespace-nowrap">Amount</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Gateway</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Pre-Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Student Type</th>
@@ -721,9 +912,9 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
-                          t.fee_type === "application_fee" ? "bg-blue-50 text-blue-700" :
-                          t.fee_type === "token_fee"       ? "bg-purple-50 text-purple-700" :
-                          t.fee_type === "registration_fee"? "bg-indigo-50 text-indigo-700" :
+                          t.fee_type === "application_fee" ? "bg-info/5 text-info-foreground" :
+                          t.fee_type === "token_fee"       ? "bg-primary/5 text-primary" :
+                          t.fee_type === "registration_fee"? "bg-primary/5 text-primary" :
                                                              "bg-gray-100 text-gray-700"
                         }`}>
                           {(t.fee_type || "application_fee").replace(/_/g, " ")}
@@ -744,6 +935,9 @@ export default function TransactionHistoryPanel() {
                           {t.payment_status}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {inferGatewayLabel(t)}
+                      </td>
                       <td className="px-4 py-3">
                         {t.payment_ref
                           ? <span className="font-mono text-xs text-muted-foreground">{t.payment_ref}</span>
@@ -751,7 +945,7 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         {t.leads?.pre_admission_no
-                          ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
+                          ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3">
@@ -762,8 +956,8 @@ export default function TransactionHistoryPanel() {
                             title={`Click to mark as ${t.applicant_type === "existing" ? "New" : "Existing"} parent`}
                             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold border transition-colors ${
                               t.applicant_type === "existing"
-                                ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
-                                : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                ? "bg-warning/5 text-warning-foreground border-warning/20 hover:bg-warning/10"
+                                : "bg-info/5 text-info-foreground border-info/20 hover:bg-info/10"
                             }`}
                           >
                             {togglingId === t.application_id
@@ -800,7 +994,9 @@ export default function TransactionHistoryPanel() {
                                 phone: t.phone,
                                 email: t.email || undefined,
                                 amount: t.fee_amount,
+                                payment_mode: "online",
                                 payment_ref: t.payment_ref,
+                                payment_gateway: t.gateway || inferGatewayLabel(t),
                                 payment_date: t.updated_at,
                                 receipt_url: t.fee_receipt_url || null,
                               })}
@@ -810,22 +1006,30 @@ export default function TransactionHistoryPanel() {
                             </button>
                           )
                         ) : t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment" ? (
-                          // Mark-Paid-by-UTR only makes sense for applications-table
-                          // rows (their reconcile chain flips payment_status + writes
-                          // a mirror to lead_payments). Lead_payments are intent rows
-                          // owned by the offer flow and shouldn't be force-confirmed
-                          // through this admin path.
-                          <button
-                            onClick={() => markPaidByUtr(t.application_id)}
-                            disabled={markingPaidId === t.application_id}
-                            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
-                            title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
-                          >
-                            {markingPaidId === t.application_id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <CheckCircle2 className="h-3.5 w-3.5" />}
-                            Mark Paid by UTR
-                          </button>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              onClick={() => verifyIciciTxn(t)}
+                              disabled={iciciVerifyingId === t.application_id}
+                              className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-60"
+                              title="Verify this pending application against ICICI STATUS using the stored or pasted merchant transaction number"
+                            >
+                              {iciciVerifyingId === t.application_id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle2 className="h-3.5 w-3.5" />}
+                              Verify ICICI
+                            </button>
+                            <button
+                              onClick={() => markPaidByUtr(t.application_id)}
+                              disabled={markingPaidId === t.application_id}
+                              className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-1 text-[11px] font-medium text-warning-foreground hover:bg-warning/10 transition-colors disabled:opacity-60"
+                              title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
+                            >
+                              {markingPaidId === t.application_id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle2 className="h-3.5 w-3.5" />}
+                              Mark Paid by UTR
+                            </button>
+                          </div>
                         ) : <span className="text-muted-foreground">—</span>}
                       </td>
                     </tr>
@@ -852,7 +1056,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingStudent ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : errorStudent ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">
@@ -875,6 +1079,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Mode</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Gateway</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Transaction Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Recorded By</th>
@@ -895,6 +1100,15 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground">{p.students?.name || "—"}</p>
                         {p.students?.email && <p className="text-xs text-muted-foreground">{p.students.email}</p>}
+                        {((p.students?.admission_no && consultantManagedNos.has(p.students.admission_no)) ||
+                          (p.students?.pre_admission_no && consultantManagedNos.has(p.students.pre_admission_no))) && (
+                          <span
+                            className="mt-1 inline-flex rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning-foreground"
+                            title="Fee for this candidate is managed via consultant login / consultant-sent payment links."
+                          >
+                            Consultant-managed fee
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{p.students?.phone || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground whitespace-nowrap">
@@ -905,6 +1119,9 @@ export default function TransactionHistoryPanel() {
                           {p.payment_mode.replace("_", " ")}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {inferGatewayLabel(p)}
+                      </td>
                       <td className="px-4 py-3">
                         {p.transaction_ref
                           ? <span className="font-mono text-xs text-muted-foreground">{p.transaction_ref}</span>
@@ -912,9 +1129,9 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         {p.students?.admission_no
-                          ? <span className="font-mono text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{p.students.admission_no}</span>
+                          ? <span className="font-mono text-xs bg-info/5 text-info-foreground px-2 py-0.5 rounded-md">{p.students.admission_no}</span>
                           : p.students?.pre_admission_no
-                          ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{p.students.pre_admission_no}</span>
+                          ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-0.5 rounded-md">{p.students.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -928,6 +1145,7 @@ export default function TransactionHistoryPanel() {
                             student_name: p.students?.name || undefined,
                             admission_no: p.students?.admission_no || p.students?.pre_admission_no || undefined,
                             payment_mode: p.payment_mode,
+                            payment_gateway: p.gateway || inferGatewayLabel(p),
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: p.amount,
                             payment_ref: p.transaction_ref,

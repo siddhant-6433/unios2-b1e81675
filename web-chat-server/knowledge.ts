@@ -211,7 +211,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
   },
   "OTT": {
     highlights: [
-      "2-year diploma in Anaesthesia and Operation Theatre Technology",
+      "2.5-year diploma in Anaesthesia and Operation Theatre Technology",
       "ISCO Code 3259",
       "Training for operation theatre and anaesthesia support roles",
       "Clinical training at NIMT hospital and affiliated facilities",
@@ -221,9 +221,9 @@ export const COURSE_KNOWLEDGE: Record<string, {
     whyNimt: "Hospital-based practical exposure, affordable diploma pathway, and training aligned to operation theatre support roles.",
     eligibility: "10+2 with Operation Theatre relevant subjects. ISCO Code 3259.",
     entrance: "Merit-based / as per current admission rules",
-    duration: "2 Years",
+    duration: "2.5 Years (5 semesters)",
     campus: "Greater Noida",
-    fee: "Rs 62,000 per year (first year fee)",
+    fee: "Stetho Batch total fee Rs 1,85,000 across 5 semesters: Sem 1 Rs 40,000, Sem 2 Rs 40,000, Sem 3 Rs 40,000, Sem 4 Rs 40,000, Sem 5 Rs 25,000.",
   },
   "D Pharma": {
     highlights: [
@@ -243,6 +243,8 @@ export const COURSE_KNOWLEDGE: Record<string, {
   "Grade": {
     highlights: [
       "NIMT Beacon School — CBSE affiliated, Nursery to Grade XII",
+      "NIMT Beacon School Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450",
+      "No admission fee at Arthala for new or existing parents",
       "Smart classrooms with interactive boards",
       "Day boarding with after-school activities and lunch (Rs 4,000/month)",
       "Transport in 3 zones based on distance",
@@ -255,7 +257,8 @@ export const COURSE_KNOWLEDGE: Record<string, {
     eligibility: "Age-appropriate admission.",
     entrance: "Interaction and age-appropriate assessment",
     duration: "Academic year",
-    campus: "Ghaziabad (Avantika / Avantika II)",
+    campus: "Ghaziabad (Arthala / Avantika / Avantika II)",
+    fee: "Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450. No admission fee for new or existing parents.",
   },
   "MIR": {
     highlights: [
@@ -305,8 +308,9 @@ BBA: Rs 75,000/year (Greater Noida & Ghaziabad)
 BMRIT: Rs 92,000/year (Greater Noida)
 D.Pharma: Rs 95,000/year (Greater Noida)
 DPT (Diploma Physiotherapy): Rs 62,000/year (Greater Noida)
-OTT / D-OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida), ISCO Code 3259
+OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total fee Rs 1,85,000 across 5 semesters (Greater Noida), ISCO Code 3259
 D.El.Ed: Rs 45,000/year (Ghaziabad)
+NIMT Beacon School Arthala: monthly tuition Nursery-Class I Rs 800 | Class II-V Rs 950 | Class VI-VIII Rs 1,150 | Class IX-X Rs 1,450 | No admission fee for new or existing parents
 MPT: Rs 89,000/year (Greater Noida)
 MMRIT: Rs 89,000/year (Greater Noida)
 Note: These are first-year fees. Scholarships available for merit, SC/ST/OBC categories.`;

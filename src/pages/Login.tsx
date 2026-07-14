@@ -1,15 +1,26 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+
+const RazorSense = lazy(() =>
+  import("@razorpay/blade/components").then(m => ({ default: (m as any).RazorSense }))
+);
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
+import { Mail, Loader2, ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput, parsePhone } from "@/components/ui/phone-input";
 import { COUNTRIES } from "@/components/apply/countries";
 import uniosLogo from "@/assets/unios-logo.png";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
-type LoginMethod = "google" | "email_otp" | "whatsapp_sign_in" | "whatsapp_otp" | "dev_password";
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+  </svg>
+);
+
+
+type LoginMethod = "google" | "email_otp" | "whatsapp_sign_in" | "whatsapp_otp" | "dev_password" | "student_password";
 type WhatsAppSignInState = "idle" | "waiting" | "verified" | "expired" | "failed" | "no_account";
 
 const NO_ACCOUNT_PATTERN = /no.+account.+linked/i;
@@ -43,23 +54,36 @@ const readFunctionErrorMessage = async (error: unknown) => {
   return msg;
 };
 
+const isEmailLike = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
+
 const Login = () => {
   const { session, loading, role, roleLoaded } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  const forceStudentLogin = searchParams.get("student") === "1";
+  const clearedForcedSessionRef = useRef(false);
 
   useEffect(() => {
+    if (forceStudentLogin && session && !clearedForcedSessionRef.current) {
+      clearedForcedSessionRef.current = true;
+      sessionStorage.removeItem("unios_impersonation");
+      supabase.auth.signOut();
+      return;
+    }
     if (loading || !session || !roleLoaded) return;
     if (role === "student") navigate("/student", { replace: true });
     else if (role === "parent") navigate("/parent", { replace: true });
     else if (role === null) navigate("/my-applications", { replace: true });
     else if (role === "counsellor") navigate("/cloud-dialer", { replace: true });
     else navigate("/", { replace: true });
-  }, [session, loading, role, roleLoaded, navigate]);
+  }, [session, loading, role, roleLoaded, navigate, forceStudentLogin]);
 
   const [method, setMethod] = useState<LoginMethod>("whatsapp_sign_in");
   const [devEmail, setDevEmail] = useState("");
   const [devPassword, setDevPassword] = useState("");
+  const [studentUsername, setStudentUsername] = useState("");
+  const [studentPassword, setStudentPassword] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -72,6 +96,13 @@ const Login = () => {
   const [waDeepLink, setWaDeepLink] = useState<string | null>(null);
   const [waSignInState, setWaSignInState] = useState<WhatsAppSignInState>("idle");
   const [waExpiresAt, setWaExpiresAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forceStudentLogin) {
+      sessionStorage.removeItem("unios_impersonation");
+      setMethod("student_password");
+    }
+  }, [forceStudentLogin]);
 
   useEffect(() => {
     if (!otpSent || !otpSentAt) return;
@@ -109,6 +140,32 @@ const Login = () => {
       if (error) throw error;
     } catch (error: unknown) {
       toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    if (!("PublicKeyCredential" in window)) {
+      toast({
+        title: "Passkeys unavailable",
+        description: "This browser or device does not support passkey sign-in.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) throw error;
+      navigate("/");
+    } catch (error: unknown) {
+      toast({
+        title: "Could not sign in with passkey",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -327,25 +384,72 @@ const Login = () => {
     }
   };
 
+  const handleStudentPasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const username = studentUsername.trim();
+    if (!username || !studentPassword) {
+      toast({ title: "Enter username and password", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      if (isEmailLike(username)) {
+        sessionStorage.removeItem("unios_impersonation");
+        const { error } = await supabase.auth.signInWithPassword({
+          email: username,
+          password: studentPassword,
+        });
+        if (error) throw error;
+        navigate("/");
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke("student-password-login", {
+        body: {
+          username,
+          password: studentPassword,
+        },
+      });
+      if (error) throw new Error(await readFunctionErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      if (!data?.session?.access_token || !data?.session?.refresh_token) {
+        throw new Error("Invalid login response");
+      }
+
+      sessionStorage.removeItem("unios_impersonation");
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+      if (sessionError) throw sessionError;
+      window.location.assign("/student");
+    } catch (error: unknown) {
+      toast({ title: "Login failed", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const resetState = () => {
     setOtpSent(false);
     setOtp("");
     setEmail("");
     setPhone("");
+    setStudentUsername("");
+    setStudentPassword("");
     setOtpSentAt(null);
     resetWhatsAppSignIn();
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Left panel */}
+    <div className="min-h-screen flex bg-background animate-fade-in">
+      {/* Left panel — clean brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
-        {/* NIMT logo — top left */}
         <div className="absolute top-6 left-6">
-          <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
+          <img src={nimtLogo} alt="NIMT" width="64" height="32" className="h-8 w-auto brightness-0 invert opacity-80" />
         </div>
         <div className="max-w-md text-center">
-          <img src={uniosLogo} alt="UniOs" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
+          <img src={uniosLogo} alt="UniOs" width="128" height="128" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
           <h1 className="text-3xl font-bold text-primary-foreground mb-3">NIMT UniOs</h1>
           <p className="text-primary-foreground/70 text-base leading-relaxed">
             Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
@@ -354,16 +458,16 @@ const Login = () => {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-6 relative">
+      <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
         {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
         <div className="lg:hidden absolute top-5 right-5">
-          <img src={nimtLogo} alt="NIMT" className="h-7 w-auto opacity-60" />
+          <img src={nimtLogo} alt="NIMT" width="56" height="28" className="h-7 w-auto opacity-60" />
         </div>
 
-        <div className="w-full max-w-sm space-y-6">
+        <div className="w-full max-w-sm space-y-6 relative z-10">
           {/* Mobile logo */}
           <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
-            <img src={uniosLogo} alt="UniOs" className="h-16 w-16 object-contain" />
+            <img src={uniosLogo} alt="UniOs" width="64" height="64" className="h-16 w-16 object-contain" />
             <span className="text-lg font-bold text-foreground">NIMT UniOs</span>
           </div>
 
@@ -379,16 +483,19 @@ const Login = () => {
                 onClick={() => { resetState(); setMethod(method === "dev_password" ? "whatsapp_sign_in" : "dev_password"); }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
-                <ShieldCheck className="h-3.5 w-3.5 text-orange-500" />
+                <ShieldCheck className="h-3.5 w-3.5 text-warning" />
                 {method === "dev_password" ? "Standard sign in" : "Dev sign in"}
               </button>
             </div>
           )}
 
+          {/* Login method forms — keyed for RazorSense entrance animation */}
+          <div key={method + (otpSent ? "-otp" : "")} className="animate-rs-slide-up">
+
           {/* Dev Password Login (localhost only) */}
           {method === "dev_password" && import.meta.env.DEV && (
             <form onSubmit={handleDevPasswordLogin} className="space-y-4">
-              <div className="rounded-xl bg-orange-500/10 border border-orange-500/20 px-4 py-2 text-xs text-orange-700 dark:text-orange-400 font-medium">
+              <div className="rounded-xl bg-warning/10 border border-warning/35/20 px-4 py-2 text-xs text-warning-foreground dark:text-warning font-medium">
                 Dev mode — not visible in production
               </div>
               <input
@@ -410,7 +517,7 @@ const Login = () => {
               <button
                 type="submit"
                 disabled={submitting || !devEmail || !devPassword}
-                className="w-full rounded-xl bg-orange-500 py-3 text-sm font-medium text-white hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full rounded-xl bg-warning py-3 text-sm font-medium text-white hover:bg-warning transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In (Dev)"}
               </button>
@@ -421,7 +528,7 @@ const Login = () => {
           {method === "whatsapp_sign_in" && (
             <div className="space-y-4">
               {waSignInState === "no_account" ? (
-                <div className="rounded-xl bg-amber-500/5 border border-amber-500/30 p-5">
+                <div className="rounded-xl bg-warning/50/5 border border-warning/35/30 p-5">
                   <p className="text-sm font-medium text-foreground">No UniOs account on this WhatsApp number</p>
                   <p className="text-xs text-muted-foreground mt-1.5">
                     Sign-in is for existing students, parents, and staff. New applicants should start an application instead.
@@ -444,8 +551,8 @@ const Login = () => {
                   </div>
                 </div>
               ) : waSignInState === "waiting" ? (
-                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-5 text-center">
-                  <Loader2 className="h-7 w-7 text-emerald-600 mx-auto mb-3 animate-spin" />
+                <div className="rounded-xl bg-success/50/5 border border-success/35/20 p-5 text-center">
+                  <Loader2 className="h-7 w-7 text-success mx-auto mb-3 animate-spin" />
                   <p className="text-sm font-medium text-foreground">Waiting for WhatsApp</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Send the prefilled message from WhatsApp to finish signing in.
@@ -461,9 +568,9 @@ const Login = () => {
                   type="button"
                   onClick={handleWhatsAppSignIn}
                   disabled={submitting}
-                  className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full rounded-xl bg-success py-3 text-sm font-medium text-white hover:bg-success/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
                   Continue with WhatsApp
                 </button>
               )}
@@ -471,9 +578,17 @@ const Login = () => {
               <button
                 type="button"
                 onClick={() => { resetState(); setMethod("whatsapp_otp"); }}
-                className="w-full rounded-xl border border-emerald-600/25 bg-emerald-50 py-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                className="w-full rounded-xl border border-success/40/25 bg-success/5 py-2.5 text-xs font-medium text-success hover:bg-success/10 transition-colors"
               >
                 Use WhatsApp OTP instead
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { resetState(); setMethod("student_password"); }}
+                className="w-full rounded-xl border border-input bg-card py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Sign in with username and password
               </button>
 
               {waSignInState === "waiting" && waDeepLink && (
@@ -483,7 +598,7 @@ const Login = () => {
                   rel="noreferrer"
                   className="w-full rounded-xl border border-input py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-2"
                 >
-                  <MessageCircle className="h-3.5 w-3.5" />
+                  <WhatsAppIcon className="h-3.5 w-3.5" />
                   Open WhatsApp again
                 </a>
               )}
@@ -526,7 +641,67 @@ const Login = () => {
                   </svg>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={handlePasskeyLogin}
+                disabled={submitting}
+                className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 flex items-center justify-between gap-3"
+              >
+                <span className="flex min-w-0 flex-col items-start text-left">
+                  <span className="truncate">Sign in with passkey</span>
+                  <span className="text-xs font-normal text-muted-foreground">Face ID, fingerprint, or security key</span>
+                </span>
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4 shrink-0 text-primary" />
+                )}
+              </button>
             </div>
+          )}
+
+          {/* Temporary student username/password login */}
+          {method === "student_password" && (
+            <form onSubmit={handleStudentPasswordLogin} className="space-y-4">
+              <button
+                type="button"
+                onClick={() => { resetState(); setMethod("whatsapp_sign_in"); }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to WhatsApp sign-in
+              </button>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Username or email</label>
+                <input
+                  value={studentUsername}
+                  onChange={(e) => setStudentUsername(e.target.value)}
+                  autoComplete="username"
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Password</label>
+                <input
+                  type="password"
+                  value={studentPassword}
+                  onChange={(e) => setStudentPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={submitting || !studentUsername.trim() || !studentPassword}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Sign in
+              </button>
+            </form>
           )}
 
           {/* Google */}
@@ -678,6 +853,8 @@ const Login = () => {
             </div>
           )}
 
+          </div>{/* end keyed animation wrapper */}
+
           <p className="text-center text-[11px] text-muted-foreground">
             By signing in, you agree to our{" "}
             <a href="/terms" className="underline hover:text-foreground transition-colors">Terms of Service</a>
@@ -685,12 +862,35 @@ const Login = () => {
             <a href="/privacy" className="underline hover:text-foreground transition-colors">Privacy Policy</a>.
           </p>
 
-          <div className="text-center pt-2">
-            <a href="/publisher-login" className="text-[11px] text-muted-foreground/70 hover:text-primary transition-colors">
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <a href="/about" className="text-[11px] text-muted-foreground hover:text-primary transition-colors">
+              About UniOs
+            </a>
+            <span className="text-[11px] text-muted-foreground/40">·</span>
+            <a href="/publisher-login" className="text-[11px] text-muted-foreground hover:text-primary transition-colors">
               Publisher Portal →
             </a>
           </div>
         </div>
+
+        {/* RzpGlass — 12x scaled, UniOS primary blue tint */}
+        <Suspense fallback={null}>
+          <RazorSense
+            preset="default"
+            width="400%"
+            height="400%"
+            gradientMapSrc="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
+            gradientMap2Src="https://cdn.jsdelivr.net/npm/@razorpay/blade@latest/assets/spark/colorama-gradient-map-blue.jpg"
+            style={{
+              position: 'absolute',
+              top: '-150%',
+              left: '-150%',
+              zIndex: 0,
+              opacity: 0.35,
+              pointerEvents: 'none',
+            }}
+          />
+        </Suspense>
       </div>
     </div>
   );

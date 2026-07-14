@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,20 +10,20 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail, Trash2,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
-  paid: { label: "Pending Review", color: "bg-blue-100 text-blue-700" },
-  under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
-  verified: { label: "Completed", color: "bg-emerald-100 text-emerald-700" },
+  paid: { label: "Pending Review", color: "bg-info/10 text-info-foreground" },
+  under_review: { label: "Under Review", color: "bg-warning/10 text-warning-foreground" },
+  verified: { label: "Completed", color: "bg-success/10 text-success" },
 };
 
 const RESULT_LABELS: Record<string, { label: string; color: string }> = {
-  confirmed: { label: "Confirmed", color: "bg-emerald-100 text-emerald-700" },
-  discrepancy_marks: { label: "Discrepancy", color: "bg-amber-100 text-amber-700" },
-  not_found: { label: "Not Found", color: "bg-red-100 text-red-700" },
+  confirmed: { label: "Confirmed", color: "bg-success/10 text-success" },
+  discrepancy_marks: { label: "Discrepancy", color: "bg-warning/10 text-warning-foreground" },
+  not_found: { label: "Not Found", color: "bg-destructive/10 text-destructive" },
 };
 
 const RESULT_OPTIONS = [
@@ -64,25 +65,42 @@ export default function AlumniVerifications() {
   const [emailBody, setEmailBody] = useState("");
   const [emailSending, setEmailSending] = useState(false);
 
-  const handleDelete = async () => {
-    if (!selectedReq || !isSuperAdmin) return;
-    if (!confirm(`Delete request ${selectedReq.request_number}? This cannot be undone.`)) return;
+  const handleDelete = async (requestToDelete = selectedReq) => {
+    if (!requestToDelete || !isSuperAdmin) return;
+    if (!window.confirm(`Delete request ${requestToDelete.request_number}? This cannot be undone.`)) return;
     setDeleting(true);
-    // Delete storage files
-    const paths = [
-      selectedReq.diploma_certificate_url,
-      selectedReq.employee_review_doc_url,
-      ...(selectedReq.marksheet_urls || []),
-      ...(selectedReq.additional_doc_urls || []),
-    ].filter(Boolean);
-    if (paths.length > 0) {
-      await supabase.storage.from("alumni-verification-docs").remove(paths);
+
+    try {
+      // Delete storage files
+      const paths = [
+        requestToDelete.diploma_certificate_url,
+        requestToDelete.employee_review_doc_url,
+        ...(requestToDelete.marksheet_urls || []),
+        ...(requestToDelete.additional_doc_urls || []),
+      ].filter(Boolean);
+      if (paths.length > 0) {
+        await supabase.storage.from("alumni-verification-docs").remove(paths);
+      }
+
+      const { error } = await supabase
+        .from("alumni_verification_requests" as any)
+        .delete()
+        .eq("id", requestToDelete.id);
+
+      if (error) throw error;
+
+      toast({ title: "Request deleted" });
+      if (selectedReq?.id === requestToDelete.id) setSelectedReq(null);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to delete request",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
     }
-    await supabase.from("alumni_verification_requests" as any).delete().eq("id", selectedReq.id);
-    toast({ title: "Request deleted" });
-    setDeleting(false);
-    setSelectedReq(null);
-    fetchRequests();
   };
 
   const fetchRequests = async () => {
@@ -386,7 +404,7 @@ registrar@nimt.ac.in`,
   // Reset page on filter change
   useEffect(() => { setPage(1); }, [statusFilter]);
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <PageLoader />;
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
@@ -399,7 +417,7 @@ registrar@nimt.ac.in`,
         </div>
         <div className="flex items-center gap-3">
           {paidPending > 0 && (
-            <Badge className="bg-red-100 text-red-700 border-0 text-sm font-bold gap-1">
+            <Badge className="bg-destructive/10 text-destructive border-0 text-sm font-bold gap-1">
               <Clock className="h-3.5 w-3.5" /> {paidPending} Pending
             </Badge>
           )}
@@ -467,7 +485,7 @@ registrar@nimt.ac.in`,
                     const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
                     const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
                     return (
-                      <tr key={req.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}
+                      <tr key={req.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${isOverdue ? "bg-destructive/5/50 dark:bg-destructive/90/10" : ""}`}
                         onClick={() => openDetail(req)}>
                         <td className="px-4 py-3 font-mono font-bold text-primary text-xs">{req.request_number}</td>
                         <td className="px-3 py-3 text-center">
@@ -490,22 +508,43 @@ registrar@nimt.ac.in`,
                         </td>
                         <td className="px-3 py-3 text-center text-xs">
                           {req.status === "verified" && req.reviewed_at ? (
-                            <span className="text-emerald-600 font-medium">{new Date(req.reviewed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                            <span className="text-success font-medium">{new Date(req.reviewed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
                           ) : req.due_date ? (
                             <span>{new Date(req.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
                           ) : "—"}
                         </td>
                         <td className="px-3 py-3 text-center">
                           {daysLeft !== null && ["paid", "under_review"].includes(req.status) ? (
-                            <span className={`text-[10px] font-bold ${isOverdue ? "text-red-600" : daysLeft <= 2 ? "text-amber-600" : "text-emerald-600"}`}>
+                            <span className={`text-[10px] font-bold ${isOverdue ? "text-destructive" : daysLeft <= 2 ? "text-warning-foreground" : "text-success"}`}>
                               {isOverdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`}
                             </span>
                           ) : req.status === "verified" ? (
-                            <span className="text-[10px] text-emerald-600 font-medium">Done</span>
+                            <span className="text-[10px] text-success font-medium">Done</span>
                           ) : "—"}
                         </td>
                         <td className="px-3 py-3 text-center">
-                          <Button variant="ghost" size="sm" className="gap-1 text-xs"><Eye className="h-3 w-3" /> View</Button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1 text-xs"
+                              onClick={(e) => { e.stopPropagation(); openDetail(req); }}
+                            >
+                              <Eye className="h-3 w-3" /> View
+                            </Button>
+                            {isSuperAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={(e) => { e.stopPropagation(); handleDelete(req); }}
+                                disabled={deleting}
+                              >
+                                {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                                Delete
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -526,7 +565,7 @@ registrar@nimt.ac.in`,
               {selectedReq?.request_number}
               {selectedReq?.due_date && ["paid", "under_review"].includes(selectedReq?.status) && (
                 <Badge className={`ml-2 border-0 text-[10px] ${
-                  new Date(selectedReq.due_date) < new Date() ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                  new Date(selectedReq.due_date) < new Date() ? "bg-destructive/10 text-destructive" : "bg-info/10 text-info-foreground"
                 }`}>
                   Due: {new Date(selectedReq.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                 </Badge>
@@ -582,7 +621,7 @@ registrar@nimt.ac.in`,
                     </button>
                   ))}
                   {selectedReq.employee_review_doc_url && (
-                    <button onClick={() => getDocUrl(selectedReq.employee_review_doc_url)} className="flex items-center gap-2 text-sm text-emerald-600 hover:underline">
+                    <button onClick={() => getDocUrl(selectedReq.employee_review_doc_url)} className="flex items-center gap-2 text-sm text-success hover:underline">
                       <FileText className="h-3.5 w-3.5" /> Review Document <ExternalLink className="h-3 w-3" />
                     </button>
                   )}
@@ -594,15 +633,15 @@ registrar@nimt.ac.in`,
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase">Payment</p>
                 <div className="flex items-center justify-between text-sm">
                   <span>&#8377;{selectedReq.fee_amount} · {selectedReq.payment_method || "—"}</span>
-                  {selectedReq.paid_at ? <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
+                  {selectedReq.paid_at ? <Badge className="bg-success/10 text-success border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
                 </div>
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
               </div>
 
               {/* Employee review status */}
               {selectedReq.employee_reviewed_at && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-1">
-                  <p className="text-[10px] font-semibold text-emerald-700 uppercase">Employee Review</p>
+                <div className="rounded-xl border border-success/20 bg-success/5 dark:bg-success/90/20 p-3 space-y-1">
+                  <p className="text-[10px] font-semibold text-success uppercase">Employee Review</p>
                   <p className="text-sm"><span className="font-medium capitalize">{(selectedReq.employee_review_result || "").replace("_", " ")}</span></p>
                   {selectedReq.employee_review_notes && <p className="text-xs text-muted-foreground">{selectedReq.employee_review_notes}</p>}
                   <p className="text-[10px] text-muted-foreground">Reviewed: {new Date(selectedReq.employee_reviewed_at).toLocaleDateString("en-IN")}</p>
@@ -612,9 +651,9 @@ registrar@nimt.ac.in`,
               {/* Completed verification result */}
               {selectedReq.status === "verified" && selectedReq.verification_result && (
                 <div className={`rounded-xl border p-3 space-y-2 ${
-                  selectedReq.verification_result === "confirmed" ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20" :
-                  selectedReq.verification_result === "discrepancy_marks" ? "border-amber-200 bg-amber-50 dark:bg-amber-950/20" :
-                  "border-red-200 bg-red-50 dark:bg-red-950/20"
+                  selectedReq.verification_result === "confirmed" ? "border-success/20 bg-success/5 dark:bg-success/90/20" :
+                  selectedReq.verification_result === "discrepancy_marks" ? "border-warning/20 bg-warning/5 dark:bg-warning/90/20" :
+                  "border-destructive/20 bg-destructive/5 dark:bg-destructive/90/20"
                 }`}>
                   <p className="text-[10px] font-semibold uppercase text-foreground">Verification Result</p>
                   <div className="flex items-center gap-2">
@@ -655,11 +694,11 @@ registrar@nimt.ac.in`,
 
               {/* Final sent email */}
               {selectedReq.sent_email_body ? (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
-                  <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase bg-emerald-50/50 dark:bg-emerald-950/20 flex items-center gap-1.5">
+                <div className="rounded-xl border border-success/20 dark:border-success/60/40 overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-success uppercase bg-success/5/50 dark:bg-success/90/20 flex items-center gap-1.5">
                     <Mail className="h-3 w-3" /> Final Email Sent
                   </div>
-                  <div className="px-3 py-2 bg-emerald-50/30 dark:bg-emerald-950/10 border-t border-emerald-200 dark:border-emerald-800/40">
+                  <div className="px-3 py-2 bg-success/5/30 dark:bg-success/90/10 border-t border-success/20 dark:border-success/60/40">
                     <p className="text-[10px] text-muted-foreground mb-1">Subject: <span className="font-medium text-foreground">{selectedReq.sent_email_subject}</span></p>
                     <pre className="text-[10px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto">
                       {selectedReq.sent_email_body}
@@ -667,11 +706,11 @@ registrar@nimt.ac.in`,
                   </div>
                 </div>
               ) : selectedReq.status === "verified" && selectedReq.review_notes && (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
-                  <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase bg-emerald-50/50 dark:bg-emerald-950/20 flex items-center gap-1.5">
+                <div className="rounded-xl border border-success/20 dark:border-success/60/40 overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-success uppercase bg-success/5/50 dark:bg-success/90/20 flex items-center gap-1.5">
                     <Mail className="h-3 w-3" /> Review Notes / Email Record
                   </div>
-                  <pre className="px-3 py-2 text-[10px] text-foreground bg-emerald-50/30 dark:bg-emerald-950/10 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-emerald-200">
+                  <pre className="px-3 py-2 text-[10px] text-foreground bg-success/5/30 dark:bg-success/90/10 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-success/20">
                     {selectedReq.review_notes}
                   </pre>
                 </div>
@@ -746,7 +785,7 @@ registrar@nimt.ac.in`,
               {isSuperAdmin && (
                 <div className="pt-3 border-t border-border">
                   <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 w-full"
-                    onClick={handleDelete} disabled={deleting}>
+                    onClick={() => handleDelete()} disabled={deleting}>
                     {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
                     Delete Request
                   </Button>
@@ -786,7 +825,7 @@ registrar@nimt.ac.in`,
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Cancel</Button>
-            <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-success hover:bg-success/90">
               {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
               Approve & Send Email
             </Button>

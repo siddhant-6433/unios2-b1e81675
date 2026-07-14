@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationData } from "./types";
 import { usePortal } from "@/components/apply/PortalContext";
 import { supabase } from "@/integrations/supabase/client";
+import { displayValue } from "@/lib/displayValue";
 
 interface Props {
   data: ApplicationData;
@@ -22,12 +23,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value }: { label: string; value?: string }) {
-  if (!value) return null;
+function Row({ label, value }: { label: unknown; value?: unknown }) {
+  const labelText = displayValue(label);
+  const text = displayValue(value);
+  if (!labelText || !text) return null;
   return (
     <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium">{value}</span>
+      <span className="text-muted-foreground">{labelText}</span>
+      <span className="text-foreground font-medium text-right">{text}</span>
     </div>
   );
 }
@@ -36,6 +39,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
   const [agreed, setAgreed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const addr = data.address || {};
@@ -44,6 +48,10 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
   useEffect(() => {
     if (data.passport_photo_path) {
+      if (/^https?:\/\//i.test(data.passport_photo_path)) {
+        setPhotoUrl(data.passport_photo_path);
+        return;
+      }
       const { data: urlData } = supabase.storage
         .from('application-documents')
         .getPublicUrl(data.passport_photo_path);
@@ -52,6 +60,10 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
   }, [data.passport_photo_path]);
 
   const handleSubmit = async () => {
+    if (!agreed) {
+      setShowErrors(true);
+      return;
+    }
     await onSubmit();
     setSubmitted(true);
   };
@@ -140,7 +152,9 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
             {data.course_selections.map((cs, i) => (
               <div key={i} className="flex justify-between">
                 <span className="text-muted-foreground">Preference {cs.preference_order}</span>
-                <span className="text-foreground font-medium">{cs.course_name} — {cs.campus_name}</span>
+                <span className="text-foreground font-medium text-right">
+                  {[displayValue(cs.course_name), displayValue(cs.campus_name)].filter(Boolean).join(" - ")}
+                </span>
               </div>
             ))}
           </Section>
@@ -210,11 +224,11 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
           <Section title="Academic Details">
             {data.program_category === 'school' ? (
               <>
-                <Row label="Previous Class" value={(academic as any).previous_class} />
+                <Row label="Previous Class" value={(academic as any).previous_class ?? (academic as any).previous_school?.last_class} />
                 <Row label="Previous School" value={(academic as any).previous_school} />
-                <Row label="Board" value={(academic as any).previous_board} />
-                <Row label="Marks" value={(academic as any).previous_marks} />
-                <Row label="Year" value={(academic as any).previous_year} />
+                <Row label="Board" value={(academic as any).previous_board ?? (academic as any).previous_school?.board} />
+                <Row label="Marks" value={(academic as any).previous_marks ?? (academic as any).previous_school?.percentage} />
+                <Row label="Year" value={(academic as any).previous_year ?? (academic as any).previous_school?.academic_year} />
               </>
             ) : (
               <>
@@ -254,7 +268,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
           {/* Other board alerts */}
           {((academic as any).class_12?.board === 'Other' || (academic as any).class_10?.board === 'Other' || (academic as any).graduation?.university === 'Other') && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+            <div className="p-3 rounded-xl bg-warning/5 border border-warning/20 text-warning-foreground text-xs">
               ⚠️ <strong>Note:</strong> One or more boards/universities marked as "Other" — please verify eligibility with the admissions team.
             </div>
           )}
@@ -267,6 +281,8 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
                     ex.status === 'registered' ? `Registered${ex.registration_no ? `: ${ex.registration_no}` : ''}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
                     : ex.exam_name?.toLowerCase?.().includes('cahet') && ex.registration_no ? `Registration No: ${ex.registration_no}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
                     : ex.exam_name?.toLowerCase?.().includes('cahet') ? 'Not registered yet'
+                    : /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(ex.exam_name || '') && ex.registration_no ? `Registration No: ${ex.registration_no}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
+                    : /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(ex.exam_name || '') ? 'Not registered yet'
                     :
                     ex.status === 'declared' ? `Score: ${ex.score || 'N/A'}`
                     : ex.status === 'not_declared' ? `Result pending${ex.expected_date ? ` (Expected: ${ex.expected_date})` : ''}`
@@ -298,7 +314,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
       {!submitted && (
         <>
-          <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-card">
+          <div className={`flex items-start gap-3 p-4 rounded-xl border bg-card ${showErrors && !agreed ? 'border-destructive ring-1 ring-destructive/30 bg-destructive/5' : 'border-border'}`}>
             <Checkbox id="declaration" checked={agreed} onCheckedChange={v => setAgreed(v === true)} />
             <label htmlFor="declaration" className="text-xs text-muted-foreground leading-relaxed cursor-pointer">
               I hereby declare that all information provided in this application is true and correct to the best of my knowledge. 
@@ -312,7 +328,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
                 <ArrowLeft className="h-4 w-4" /> Back
               </Button>
             ) : <div />}
-            <Button onClick={handleSubmit} disabled={!agreed || saving} className="gap-2">
+            <Button onClick={handleSubmit} disabled={saving} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Submit Application
             </Button>

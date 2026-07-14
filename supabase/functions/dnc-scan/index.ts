@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -139,13 +140,11 @@ Deno.serve(async (req) => {
     let ackSent = 0;
     if (apply && toMark.length > 0) {
       for (const m of toMark) {
-        await admin.from("leads").update({ stage: "dnc" as any }).eq("id", m.lead_id!);
-        await admin.from("lead_activities").insert({
-          lead_id: m.lead_id,
-          type: "stage_change",
+        await applyLeadTransition(admin, {
+          leadId: m.lead_id!,
+          currentStage: m.current_stage,
+          command: "markDnc",
           description: `Auto-marked DNC by bulk scan. Trigger message: "${m.message.substring(0, 100)}"`,
-          old_stage: m.current_stage as any,
-          new_stage: "dnc" as any,
         });
         marked++;
         const sent = await sendDncAck(m.phone, m.lead_id);

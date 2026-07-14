@@ -18,6 +18,16 @@ export interface CallContext {
   lastOutboundCallAt?: string;
   /** Display name of the counsellor assigned to this lead, for concrete close commitments. */
   assignedCounsellorName?: string;
+  /**
+   * Channel-neutral admissions memory examples supplied by UniOs. These are
+   * retrieved from approved prior admissions interactions and should guide
+   * phrasing/objection handling, not override verified course facts.
+   */
+  admissionsMemoryExamples?: {
+    leadAsked?: string;
+    counsellorReplied?: string;
+    sourceChannel?: string | null;
+  }[];
 }
 
 /** Convert a timestamp to a natural-language phrase like "a few minutes" or "a couple of hours". */
@@ -65,6 +75,26 @@ function isPlaceholderName(name?: string): boolean {
   return false;
 }
 
+function formatAdmissionsMemoryExamples(ctx: CallContext): string {
+  const examples = (ctx.admissionsMemoryExamples || [])
+    .filter((example) => example.leadAsked && example.counsellorReplied)
+    .slice(0, 3);
+  if (examples.length === 0) return "";
+
+  const lines = examples.map((example, index) => [
+    `Example ${index + 1}${example.sourceChannel ? ` (${example.sourceChannel})` : ""}:`,
+    `Caller asked: ${example.leadAsked}`,
+    `Counsellor answered: ${example.counsellorReplied}`,
+  ].join("\n"));
+
+  return `
+ADMISSIONS MEMORY EXAMPLES:
+Use these as examples of how NIMT counsellors answer similar admissions questions. Adapt the substance and tone naturally for a live phone call.
+Do NOT copy personal details, exact phone numbers, emails, timestamps, or promises from examples.
+Verified course knowledge, get_course_info, and live caller answers override these examples if they conflict.
+${lines.join("\n\n")}`;
+}
+
 export function buildSystemInstruction(ctx: CallContext): string {
   const isOutbound = ctx.direction === "outbound";
   const institution = detectInstitution(ctx.courseCode, ctx.campusName);
@@ -91,6 +121,7 @@ export function buildSystemInstruction(ctx: CallContext): string {
   const ck = ctx.courseName ? getCourseKnowledge(ctx.courseName) : null;
   const isPlaceholder = isPlaceholderName(ctx.leadName);
   const hasCourse = !!ctx.courseName;
+  const admissionsMemoryBlock = formatAdmissionsMemoryExamples(ctx);
 
   // Tone discipline. The model defaults to a chirpy/excited register on
   // phone calls if not told otherwise — readers reported it sounding
@@ -144,6 +175,7 @@ STYLE: Short turns — 2 sentences max. Acknowledge once per turn ("ji,"/"haan,"
 
 NIMT: Est 1987 (39 yrs). 5 campuses (Greater Noida, Ghaziabad, Kotputli). AICTE/UGC/BCI/INC/NCTE. Last placement avg 5.40 LPA / highest 18.75 LPA. 25k+ alumni.
 ${courseBlock}
+${admissionsMemoryBlock}
 ACCURACY: get_course_info BEFORE any course-specific number. Don't know → "${seniorCounsellor} aapko exact figure batayengi."
 
 OBJECTION HANDLING (adapt, don't read):
@@ -166,6 +198,7 @@ TOOLS:
 - request_human_callback → human at LATER time
 - transfer_to_human_agent → human RIGHT NOW (rare)
 - set_call_disposition → MANDATORY at end. Without this, no followup gets created — call is wasted.
+- flag_knowledge_gap → jab exact jaankari na ho. Kabhi guess mat karo — bolo 'yeh main senior counsellor se confirm karwa ke bhijwa deti hoon' aur yeh tool call karo.
 
 CALLBACK ROUTING:
 - "abhi busy"/"in 2 hours"/clock time → set_call_disposition("call_back", followup_date REQUIRED, ISO +05:30)
@@ -401,6 +434,20 @@ export const VOICE_AGENT_TOOLS = [
         },
       },
       required: ["disposition", "notes"],
+    },
+  },
+  {
+    name: "flag_knowledge_gap",
+    description:
+      "Call this when you CANNOT answer the caller's question confidently or completely — missing facts, specifics not in your knowledge (hospital names, exact dates, specific approvals, anything you'd have to guess). Tell the caller you will forward their query to a senior counsellor who will confirm the exact details. Do NOT guess or make up an answer.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The caller's question, verbatim." },
+        answer_given: { type: "string", description: "What you told them, if anything." },
+        context: { type: "string", description: "Course/topic context for the question." },
+      },
+      required: ["question"],
     },
   },
 ];

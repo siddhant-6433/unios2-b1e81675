@@ -39,7 +39,13 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.easebuzz-webhook]
+verify_jwt = false
+
 [functions.icici-payment]
+verify_jwt = false
+
+[functions.razorpay-payment]
 verify_jwt = false
 
 [functions.generate-payment-receipt]
@@ -84,6 +90,21 @@ verify_jwt = false
 [functions.whatsapp-route-health]
 verify_jwt = false
 
+[functions.whatsapp-copilot-assist]
+verify_jwt = false
+
+[functions.whatsapp-reply-learning]
+verify_jwt = false
+
+[functions.counsellor-call-miner]
+verify_jwt = false
+
+[functions.navya-visit-digest]
+verify_jwt = false
+
+[functions.whatsapp-buffer-worker]
+verify_jwt = false
+
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 
@@ -102,7 +123,13 @@ verify_jwt = false
 [functions.delete-user]
 verify_jwt = false
 
+[functions.delete-application]
+verify_jwt = false
+
 [functions.whatsapp-templates]
+verify_jwt = false
+
+[functions.whatsapp-template-media-upload]
 verify_jwt = false
 
 [functions.test-dispositions]
@@ -112,6 +139,28 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.provision-student-fees]
+verify_jwt = false
+
+[functions.student-password-login]
+verify_jwt = false
+
+[functions.apply-portal-password-login]
+verify_jwt = false
+
+# Anonymous applicants list their already-uploaded docs from the apply portal.
+# The function authorizes by application identity, so gateway JWT verification
+# would only reject valid users carrying stale browser sessions.
+[functions.list-app-docs]
+verify_jwt = false
+
+# Anonymous academic-partner on-behalf applicants write audit events through
+# a scoped token. The function validates that token itself.
+[functions.academic-partner-on-behalf-audit]
+verify_jwt = false
+
+# Academic partners complete applications from a magic-link token, not from a
+# Supabase browser session. The function validates the token and partner scope.
+[functions.academic-partner-application-action]
 verify_jwt = false
 
 # Public endpoint hit by anonymous applicants opening a magic link.
@@ -127,8 +176,18 @@ verify_jwt = false
 [functions.personal-doc-reminder-cron]
 verify_jwt = false
 
+# Entrance-exam registration check — sends exam_registration_check to unknown
+# leads. Intended daily via pg_cron; kept UNSCHEDULED until the Meta templates
+# are approved. Supports POST { dry_run: true } for a no-send preview.
+[functions.exam-registration-check-cron]
+verify_jwt = false
+
 # Called by pg_cron every 30 min during business hours IST.
 [functions.lead-bucket-backlog-cron]
+verify_jwt = false
+
+# Called by pg_cron at 12:01 AM IST.
+[functions.daily-lead-summary-email]
 verify_jwt = false
 
 # Called both by signed-in users (from /my-docs) and by whatsapp-webhook
@@ -143,4 +202,7 @@ verify_jwt = false
 # its own identity check by matching (application_id, phone) against the
 # applications row, so JWT verification at the gateway is redundant.
 [functions.apply-portal-upload-doc]
+verify_jwt = false
+
+[functions.pay-link]
 verify_jwt = false

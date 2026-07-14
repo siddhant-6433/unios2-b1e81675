@@ -141,15 +141,48 @@ function normalisePhone(phone: string): string {
   return `+${digits}`;
 }
 
+const ATTRIBUTION_FIELDS = [
+  "ga_client_id",
+  "ga_session_id",
+  "gclid",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "landing_page",
+  "referrer",
+  "origin_domain",
+  "fbc",
+  "fbp",
+  "portal_brand",
+] as const;
+
+function cleanOptionalText(value: unknown, max = 500): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function leadAttribution(lead: LeadInfo): Record<string, string> {
+  const attribution: Record<string, string> = {};
+  for (const field of ATTRIBUTION_FIELDS) {
+    const value = cleanOptionalText(lead[field]);
+    if (value) attribution[field] = value;
+  }
+  return attribution;
+}
+
 async function createLead(lead: LeadInfo): Promise<string | null> {
   try {
     const courseId = COURSE_ID_MAP[lead.course] || null;
     const normPhone = normalisePhone(lead.mobile);
     const newSource = "website_chat";
+    const attribution = leadAttribution(lead);
 
     // Check for existing lead by phone
     const existingRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/leads?phone=eq.${encodeURIComponent(normPhone)}&select=id,source,secondary_source,tertiary_source,source_history&limit=1`,
+      `${SUPABASE_URL}/rest/v1/leads?phone=eq.${encodeURIComponent(normPhone)}&select=id,source,secondary_source,tertiary_source,source_history,${ATTRIBUTION_FIELDS.join(",")}&limit=1`,
       { headers: supabaseHeaders },
     );
 
@@ -159,10 +192,18 @@ async function createLead(lead: LeadInfo): Promise<string | null> {
         const existing = existingData[0];
 
         // Update source tracking if website_chat is a new source for this lead
+        const updates: Record<string, unknown> = {};
+        for (const field of ATTRIBUTION_FIELDS) {
+          if (!existing[field] && attribution[field]) updates[field] = attribution[field];
+        }
+
         if (existing.source !== newSource && existing.secondary_source !== newSource && existing.tertiary_source !== newSource) {
-          const updates: Record<string, unknown> = {};
           const history = Array.isArray(existing.source_history) ? existing.source_history : [];
-          history.push({ source: newSource, timestamp: new Date().toISOString(), data: `Chat about ${lead.course}` });
+          history.push({
+            source: newSource,
+            timestamp: new Date().toISOString(),
+            data: attribution.landing_page ? `Chat about ${lead.course} from ${attribution.landing_page}` : `Chat about ${lead.course}`,
+          });
           updates.source_history = history;
 
           if (!existing.secondary_source) {
@@ -170,13 +211,17 @@ async function createLead(lead: LeadInfo): Promise<string | null> {
           } else if (!existing.tertiary_source) {
             updates.tertiary_source = newSource;
           }
+        }
 
+        if (Object.keys(updates).length > 0) {
           await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${existing.id}`, {
             method: "PATCH",
             headers: { ...supabaseHeaders, Prefer: "return=minimal" },
             body: JSON.stringify(updates),
           });
+        }
 
+        if (existing.source !== newSource && existing.secondary_source !== newSource && existing.tertiary_source !== newSource) {
           // Log activity
           await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
             method: "POST",
@@ -201,6 +246,7 @@ async function createLead(lead: LeadInfo): Promise<string | null> {
       source: newSource,
       stage: "new_lead",
       skip_ai_call: true,
+      ...attribution,
     };
     if (courseId) body.course_id = courseId;
 
@@ -512,7 +558,7 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
       activeSession.lastActivity = Date.now();
 
       // Update language if client sends it
-      const msgLang = (msg as any).lang;
+      const msgLang = msg.lang;
       if (msgLang && (msgLang === "en" || msgLang === "hi") && msgLang !== currentLang) {
         currentLang = msgLang;
         systemPrompt = buildSystemPrompt(knowledge, currentLang);
@@ -732,7 +778,16 @@ async function handler(req: Request): Promise<Response> {
       // Sanitize inputs (prevent prompt injection in lead data)
       const sanitizedName = name.trim().slice(0, 100).replace(/[^\w\s.'-]/g, "");
       const sanitizedCourse = course.trim().slice(0, 100);
-      const lead: LeadInfo = { name: sanitizedName, mobile: mobile.trim(), course: sanitizedCourse };
+      const requestLead = body as LeadInfo;
+      const lead: LeadInfo = {
+        name: sanitizedName,
+        mobile: mobile.trim(),
+        course: sanitizedCourse,
+      };
+      for (const field of ATTRIBUTION_FIELDS) {
+        const value = cleanOptionalText(requestLead[field]);
+        if (value) lead[field] = value;
+      }
 
       // Create lead in CRM
       const leadId = await createLead(lead);

@@ -23,6 +23,7 @@ import {
   Phone, PhoneMissed, CheckCircle2, Loader2, ExternalLink,
   Clock, MessageSquare, RefreshCw, User, UserPlus, X,
 } from "lucide-react";
+import { SelectField } from "@/components/ui/state-fields";
 import { Checkbox } from "@/components/ui/checkbox";
 import { recordCallDisposition } from "@/lib/callDisposition";
 import { type CallDispositionData, type DialogCallStatus } from "@/components/admissions/CallDispositionDialog";
@@ -407,7 +408,7 @@ export default function MissedCalls() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <PhoneMissed className="h-6 w-6 text-amber-600" />Missed Calls
+            <PhoneMissed className="h-6 w-6 text-warning-foreground" />Missed Calls
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Inbound calls received outside business hours (9 AM–8 PM IST, Mon-Sat).
@@ -416,19 +417,17 @@ export default function MissedCalls() {
         </div>
         <div className="flex items-center gap-2">
           {canViewAll && (counsellorOptions.length > 0 || allCalls.some(c => !c.lead_counsellor_id)) && (
-            <select
+            <SelectField
               value={counsellorFilter}
-              onChange={e => setCounsellorFilter(e.target.value)}
-              className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring/20"
-            >
-              <option value="all">All Counsellors</option>
-              {allCalls.some(c => !c.lead_counsellor_id) && (
-                <option value="unassigned">Unassigned</option>
-              )}
-              {counsellorOptions.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onValueChange={setCounsellorFilter}
+              options={[
+                { value: "all", label: "All Counsellors" },
+                ...(allCalls.some(c => !c.lead_counsellor_id) ? [{ value: "unassigned", label: "Unassigned" }] : []),
+                ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+              ]}
+              hideLabel
+              placeholder="All Counsellors"
+            />
           )}
           <Button size="sm" variant="outline" onClick={refresh} className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />Refresh
@@ -438,7 +437,7 @@ export default function MissedCalls() {
 
       {/* Summary banner */}
       {!loading && calls.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 flex items-start gap-3">
+        <div className="rounded-xl border border-warning/20 bg-warning/5/50 dark:bg-warning/90/20 px-4 py-3 flex items-start gap-3">
           {canViewAll ? (
             <div className="mt-0.5">
               <Checkbox
@@ -448,14 +447,14 @@ export default function MissedCalls() {
               />
             </div>
           ) : (
-            <PhoneMissed className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <PhoneMissed className="h-5 w-5 text-warning-foreground shrink-0 mt-0.5" />
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+            <p className="text-sm font-semibold text-warning-foreground dark:text-warning/30">
               {calls.length} pending callback{calls.length === 1 ? "" : "s"}
               {isCounsellor ? " assigned to you" : canViewAll ? " across the team" : ""}
             </p>
-            <p className="text-[11px] text-amber-700 dark:text-amber-200/80">
+            <p className="text-[11px] text-warning-foreground dark:text-warning/40/80">
               Sorted oldest first — the lead waiting longest is at the top.
               Tap <span className="font-semibold">Cloud Call</span> to place a Plivo call right here. The disposition picker opens
               automatically when the call connects — the entry is cleared from the queue only after you save a disposition.
@@ -470,12 +469,12 @@ export default function MissedCalls() {
       {/* List */}
       {loading ? (
         <div className="p-12 flex items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : calls.length === 0 ? (
         <Card>
           <CardContent className="p-12 text-center">
-            <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
+            <CheckCircle2 className="h-10 w-10 text-success mx-auto mb-3" />
             <p className="text-sm font-medium text-foreground">No pending callbacks</p>
             <p className="text-xs text-muted-foreground mt-1">
               When inbound calls land outside business hours, they'll show up here for you to follow up.
@@ -515,14 +514,14 @@ export default function MissedCalls() {
                         </button>
                         <a
                           href={`tel:${mc.lead_phone}`}
-                          className="text-sm font-mono font-semibold text-emerald-700 hover:underline shrink-0"
+                          className="text-sm font-mono font-semibold text-success hover:underline shrink-0"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {mc.lead_phone}
                         </a>
                       </div>
                       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 px-2 py-0.5 text-xs font-semibold">
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-warning/10 dark:bg-warning/80/40 text-warning-foreground dark:text-warning/30 px-2 py-0.5 text-xs font-semibold">
                           <Clock className="h-3.5 w-3.5" />Missed at {formatTime(created)}
                         </span>
                         <span className="text-xs text-muted-foreground">({relativeTime(created)})</span>
@@ -530,13 +529,13 @@ export default function MissedCalls() {
                       <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
                         {mc.course_name && <span>{mc.course_name}</span>}
                         {canViewAll && (
-                          <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 font-medium">
+                          <span className="inline-flex items-center gap-1 text-primary dark:text-primary/60 font-medium">
                             <User className="h-3 w-3" />{mc.counsellor_name}
                           </span>
                         )}
                       </div>
                       {mc.followup_reason && (
-                        <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 italic">
+                        <p className="text-[11px] text-warning-foreground dark:text-warning/70 mt-1 italic">
                           {mc.followup_reason}
                         </p>
                       )}
@@ -638,9 +637,9 @@ export default function MissedCalls() {
             callEnded={dispositionEnded}
             onManualConnect={() => setDispositionStatus("connected")}
             onCancelCall={activeCallUuid ? async () => {
-              // Hang up the live Plivo bridge (counsellor + student legs) and
-              // mark the call cancelled_by_counsellor. The dialog closes
-              // either way so the counsellor isn't trapped on a broken state.
+              // Hang up the live Plivo bridge without recording a call
+              // disposition or call metric. The dialog closes either way so
+              // the counsellor isn't trapped on a broken state.
               try {
                 const { error } = await supabase.functions.invoke("manual-call-cancel", {
                   body: { call_id: activeCallUuid, caller_user_id: user?.id },

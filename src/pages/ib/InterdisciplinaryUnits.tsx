@@ -70,8 +70,8 @@ interface IDUTeacher {
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   planning: { label: "Planning", color: "bg-gray-100 text-gray-700" },
-  active: { label: "Active", color: "bg-blue-100 text-blue-800" },
-  completed: { label: "Completed", color: "bg-green-100 text-green-800" },
+  active: { label: "Active", color: "bg-info/10 text-info-foreground" },
+  completed: { label: "Completed", color: "bg-success/10 text-success-foreground" },
 };
 
 const InterdisciplinaryUnits = () => {
@@ -349,7 +349,7 @@ const InterdisciplinaryUnits = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -392,7 +392,7 @@ const InterdisciplinaryUnits = () => {
                   <div className="border-t border-border p-4 space-y-5">
                     {expandLoading ? (
                       <div className="flex h-20 items-center justify-center">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
                       </div>
                     ) : (
                       <>

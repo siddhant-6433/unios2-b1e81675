@@ -13,6 +13,10 @@ async function sha512(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function easebuzzAmount(txn: any): number {
+  return Number(txn?.amount ?? txn?.total_debit_amount ?? txn?.net_debit_amount ?? 0);
+}
+
 function returnPage(title: string, message: string, isSuccess: boolean): Response {
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -46,6 +50,158 @@ function returnPage(title: string, message: string, isSuccess: boolean): Respons
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
+}
+
+type FeeRow = {
+  id: string;
+  total_amount: number | string;
+  paid_amount?: number | string;
+  concession?: number | string;
+  balance?: number | string;
+};
+
+function todayInIndia(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function normalizeFeeSelection(selection?: string | null): string {
+  const cleaned = String(selection || "due").trim();
+  if (cleaned === "all" || cleaned === "due") return cleaned;
+  const ids = cleaned
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  return ids.length ? ids.join(",") : "due";
+}
+
+function feeSelectionFromBody(scope: unknown, feeIds: unknown): string {
+  const ids = Array.isArray(feeIds)
+    ? feeIds.map((id) => String(id)).filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+    : [];
+  if (ids.length > 0) return ids.join(",");
+  return normalizeFeeSelection(scope === "all" ? "all" : "due");
+}
+
+async function fetchStudentFeeRows(admin: any, studentId: string, selection: string): Promise<{ rows: FeeRow[]; error?: string }> {
+  let query = admin
+    .from("fee_ledger")
+    .select("id, total_amount, paid_amount, concession, balance, due_date")
+    .eq("student_id", studentId)
+    .in("status", ["due", "overdue"])
+    .gt("balance", 0);
+
+  const normalized = normalizeFeeSelection(selection);
+  if (normalized === "due") {
+    query = query.lte("due_date", todayInIndia());
+  } else if (normalized !== "all") {
+    query = query.in("id", normalized.split(","));
+  }
+
+  const { data, error } = await query.order("due_date", { ascending: true });
+  if (error) return { rows: [], error: error.message };
+  return { rows: data || [] };
+}
+
+async function settleStudentFeePayment(
+  admin: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  studentId: string,
+  paidAmount: number,
+  paymentRef: string | null,
+  selection: string,
+  waiverAmount: number,
+  gateway: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const { rows, error } = await fetchStudentFeeRows(admin, studentId, selection);
+  if (error) return { ok: false, message: error };
+  if (!rows.length) return { ok: true };
+
+  const grossTotal = rows.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
+  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
+  const expectedPaid = grossTotal - waiver;
+  if (Math.abs(paidAmount - expectedPaid) > 1) {
+    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
+  }
+
+  let remainingWaiver = Math.round(waiver * 100) / 100;
+  const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const balance = Number(row.balance ?? 0);
+    const concessionPart = i === rows.length - 1
+      ? remainingWaiver
+      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
+    remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
+    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
+    const newConcession = Number(row.concession || 0) + concessionPart;
+    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
+
+    const { error: updateErr } = await admin
+      .from("fee_ledger")
+      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
+      .eq("id", row.id);
+    if (updateErr) return { ok: false, message: updateErr.message };
+
+    ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
+  }
+
+  const { data: stu } = await admin
+    .from("students")
+    .select("lead_id")
+    .eq("id", studentId)
+    .maybeSingle();
+
+  if (stu?.lead_id) {
+    let paymentId: string | null = null;
+    if (paymentRef) {
+      const { data: existing } = await admin
+        .from("lead_payments")
+        .select("id")
+        .eq("transaction_ref", paymentRef)
+        .maybeSingle();
+      paymentId = existing?.id || null;
+    }
+    if (!paymentId) {
+      const { data: lpIns, error: lpErr } = await admin
+        .from("lead_payments")
+        .insert({
+          lead_id: stu.lead_id,
+          type: "other",
+          amount: paidAmount,
+          concession_amount: waiver,
+          payment_mode: "gateway",
+          gateway,
+          transaction_ref: paymentRef,
+          status: "confirmed",
+          applied_to_ledger: true,
+          notes: waiver > 0 ? "Course-fee payment with 5% annual Pay All waiver" : "Course-fee instalment via gateway",
+        })
+        .select("id")
+        .maybeSingle();
+      if (lpErr) return { ok: false, message: lpErr.message };
+      paymentId = lpIns?.id || null;
+    }
+
+    if (paymentId) {
+      await admin.from("fee_ledger_payments").insert(
+        ledgerSplits.map((split) => ({
+          fee_ledger_id: split.id,
+          lead_payment_id: paymentId,
+          amount: split.amount,
+          concession_amount: split.concession,
+          notes: "Student portal gateway payment",
+        })),
+      );
+      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ event: "payment_received", lead_id: stu.lead_id, context: { payment_id: paymentId } }),
+      }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
+    }
+  }
+
+  return { ok: true };
 }
 
 Deno.serve(async (req) => {
@@ -127,66 +283,12 @@ Deno.serve(async (req) => {
           }
 
           const paidAmount = parseFloat(amount || "0");
-
-          const { data: ledgerRows } = await admin
-            .from("fee_ledger")
-            .select("id, total_amount, balance")
-            .eq("student_id", udf4)
-            .in("status", ["due", "overdue"]);
-
-          const expectedTotal = (ledgerRows || []).reduce((s: number, r: any) => s + Number(r.balance ?? r.total_amount), 0);
-
-          // SECURITY: reject if paid amount doesn't match outstanding balance (tolerance ₹1)
-          if (Math.abs(paidAmount - expectedTotal) > 1) {
-            console.error("[easebuzz] fee_payment amount mismatch: paid", paidAmount, "expected", expectedTotal, "student", udf4);
-            return returnPage("Payment Error", `Amount mismatch (received ₹${paidAmount}, expected ₹${expectedTotal}). Transaction ID: ${easepayid || txnid}. Please contact support.`, false);
+          const settled = await settleStudentFeePayment(admin, supabaseUrl, serviceKey, udf4, paidAmount, paymentRef, udf5, Number(udf6 || 0), "easebuzz");
+          if (!settled.ok) {
+            console.error("[easebuzz] fee_payment settlement failed:", settled.message);
+            return returnPage("Payment Error", `${settled.message}. Transaction ID: ${easepayid || txnid}. Please contact support.`, false);
           }
-
-          for (const row of ledgerRows || []) {
-            await admin
-              .from("fee_ledger")
-              .update({ paid_amount: row.total_amount, balance: 0, status: "paid" })
-              .eq("id", row.id);
-          }
-          console.log("[easebuzz] fee_payment: marked", ledgerRows?.length ?? 0, "entries paid for student", udf4);
-
-          // Also write a lead_payments row so the receipt, audit trail, and
-          // candidate notification all flow through the unified pipeline.
-          // applied_to_ledger=true tells provision_student_fees to skip this
-          // row (we already updated fee_ledger above).
-          const { data: stu } = await admin
-            .from("students")
-            .select("lead_id")
-            .eq("id", udf4)
-            .maybeSingle();
-          if (stu?.lead_id) {
-            const { data: lpIns } = await admin
-              .from("lead_payments")
-              .insert({
-                lead_id: stu.lead_id,
-                type: "other",
-                amount: paidAmount,
-                payment_mode: "gateway",
-                gateway: "easebuzz",
-                transaction_ref: paymentRef,
-                status: "confirmed",
-                applied_to_ledger: true,
-                notes: "Course-fee instalment via Easebuzz",
-              })
-              .select("id")
-              .maybeSingle();
-            if (lpIns?.id) {
-              fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-                body: JSON.stringify({
-                  event: "payment_received",
-                  lead_id: stu.lead_id,
-                  context: { payment_id: lpIns.id },
-                }),
-              }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
-            }
-          }
+          console.log("[easebuzz] fee_payment: settled selected entries for student", udf4);
         }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
@@ -358,7 +460,7 @@ Deno.serve(async (req) => {
 
     // ── Initiate student fee payment ──────────────────────────────────────────
     if (action === "initiate-fee-payment") {
-      const { student_id, txnid, productinfo, firstname, email, phone } = body;
+      const { student_id, txnid, productinfo, firstname, email, phone, payment_scope, fee_ids, waiver_amount } = body;
       // amount is intentionally NOT taken from the client — computed from DB to prevent underpayment attacks
 
       if (!student_id || !txnid || !firstname || !phone) {
@@ -370,11 +472,9 @@ Deno.serve(async (req) => {
 
       // Fetch actual outstanding balance from DB — never trust client-supplied amount
       const adminInit = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-      const { data: dueRows, error: dueErr } = await adminInit
-        .from("fee_ledger")
-        .select("balance")
-        .eq("student_id", student_id)
-        .in("status", ["due", "overdue"]);
+      const feeSelection = feeSelectionFromBody(payment_scope, fee_ids);
+      const waiver = Math.max(0, Number(waiver_amount || 0));
+      const { rows: dueRows, error: dueErr } = await fetchStudentFeeRows(adminInit, student_id, feeSelection);
 
       if (dueErr || !dueRows?.length) {
         return new Response(
@@ -384,14 +484,15 @@ Deno.serve(async (req) => {
       }
 
       const totalDue   = dueRows.reduce((s: number, r: any) => s + Number(r.balance), 0);
-      const amountStr  = totalDue.toFixed(2);
+      const amountStr  = Math.max(totalDue - Math.min(waiver, totalDue), 0).toFixed(2);
+      const waiverStr  = String(Math.min(waiver, totalDue).toFixed(2));
       const emailStr   = email || "noreply@nimteducation.com";
       const productStr = productinfo || "Fee Payment";
       const selfUrl    = `${supabaseUrl}/functions/v1/easebuzz-payment`;
 
-      // udf3=fee_payment, udf4=student_id — surl handler routes on these
+      // udf3=fee_payment, udf4=student_id, udf5=fee selection, udf6=waiver
       // Hash: key|txnid|amount|productinfo|firstname|email|udf1..udf10|salt
-      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|||fee_payment|${student_id}|||||||${merchantSalt}`;
+      const hashInput = [merchantKey, txnid, amountStr, productStr, firstname, emailStr, "", "", "fee_payment", student_id, feeSelection, waiverStr, "", "", "", "", merchantSalt].join("|");
       const hash = await sha512(hashInput);
 
       const formData = new URLSearchParams({
@@ -403,7 +504,7 @@ Deno.serve(async (req) => {
         email:       emailStr,
         phone:       phone.replace(/\D/g, "").slice(-10),
         hash,
-        udf1: "", udf2: "", udf3: "fee_payment", udf4: student_id, udf5: "",
+        udf1: "", udf2: "", udf3: "fee_payment", udf4: student_id, udf5: feeSelection, udf6: waiverStr,
         surl: selfUrl,
         furl: selfUrl,
       });
@@ -424,7 +525,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      console.log("[easebuzz] initiate-fee-payment: txnid", txnid, "student", student_id, "amount", amountStr);
+      console.log("[easebuzz] initiate-fee-payment: txnid", txnid, "student", student_id, "amount", amountStr, "selection", feeSelection);
 
       return new Response(
         JSON.stringify({ txnid, pay_url: `${baseUrl}/pay/${data.data}` }),
@@ -531,7 +632,7 @@ Deno.serve(async (req) => {
     // over a caller-supplied / reconstructed value, since the latter is
     // missing the Date.now() suffix and always 404s against EaseBuzz.
     if (action === "verify-payment") {
-      const { txnid: callerTxnid, application_id } = body;
+      const { txnid: callerTxnid, application_id, student_id, payment_scope, fee_ids, waiver_amount } = body;
 
       let txnid = callerTxnid;
       if (application_id) {
@@ -579,10 +680,27 @@ Deno.serve(async (req) => {
       // If payment is confirmed as success, update the DB directly
       // (covers cases where surl callback was missed — popup closed early, etc.)
       if (txn?.status?.toLowerCase() === "success") {
-        const appId = application_id || txn?.udf1 || "";
+        const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
         const paymentRef = txn?.easepayid || txnid;
+        const feeStudentId = txn?.udf3 === "fee_payment" ? txn?.udf4 : student_id;
+        if (feeStudentId && /^[0-9a-f-]{36}$/i.test(feeStudentId)) {
+          const feeSelection = txn?.udf5 || feeSelectionFromBody(payment_scope, fee_ids);
+          const feeWaiver = Number(txn?.udf6 || waiver_amount || 0);
+          const settled = await settleStudentFeePayment(
+            admin,
+            supabaseUrl,
+            serviceKey,
+            feeStudentId,
+            easebuzzAmount(txn),
+            paymentRef,
+            feeSelection,
+            feeWaiver,
+            "easebuzz",
+          );
+          if (!settled.ok) console.error("[easebuzz] verify-payment fee settlement failed:", settled.message);
+        }
+        const appId = application_id || txn?.udf1 || "";
         if (appId) {
-          const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
           const { error: dbErr } = await admin
             .from("applications")
             .update({ payment_status: "paid", payment_ref: paymentRef })
@@ -596,7 +714,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
+        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: easebuzzAmount(txn), easepayid: txn?.easepayid }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -841,7 +959,7 @@ Deno.serve(async (req) => {
         const match = byUdf1.get(String(app.application_id));
         if (!match) { skipped.push({ application_id: app.application_id, reason: "no_match" }); continue; }
         const expected = Number(app.fee_amount || 0);
-        const got      = Number(match?.amount || 0);
+        const got      = easebuzzAmount(match);
         // 0.01 tolerance for paise rounding drift.
         if (expected > 0 && Math.abs(expected - got) > 0.01) {
           skipped.push({ application_id: app.application_id, reason: "amount_mismatch", expected, got });
@@ -950,7 +1068,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const got       = Number(txn.amount || 0);
+        const got       = easebuzzAmount(txn);
         const expected  = Number(app.fee_amount || 0);
         if (expected > 0 && Math.abs(expected - got) > 0.01) {
           skipped.push({ application_id: app.application_id, reason: "amount_mismatch_fallback", expected, got });
@@ -1006,7 +1124,7 @@ Deno.serve(async (req) => {
         udf1,
         txnid: t?.txnid,
         easepayid: t?.easepayid || t?.mihpayid,
-        amount: Number(t?.amount ?? 0),
+        amount: easebuzzAmount(t),
         status: t?.status,
         firstname: t?.firstname,
         email: t?.email,

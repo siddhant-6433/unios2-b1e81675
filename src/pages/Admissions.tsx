@@ -1,6 +1,7 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAdmissionsOverview, useAdmissionsStats } from "@/hooks/useAdmissionsData";
+import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,16 +11,17 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
-  Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
+  Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus
+  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
-import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { ExamPendingBadge } from "@/components/leads/ExamPendingBadge";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
 import { type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
@@ -35,6 +37,17 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
+import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
+import type { DatePreset } from "@/lib/datePresets";
+import {
+  ADMISSIONS_LEAD_LIST_SELECT,
+  applyAdmissionsLeadEnrichment,
+  applyAdmissionsLeadCursor,
+  applyAdmissionsLeadSort,
+  applyAdmissionsListQueryFilters,
+  hasActiveAdmissionsListFilters,
+  type AdmissionsListFilterModel,
+} from "@/lib/admissionsListRead";
 
 const AddLeadDialog = lazy(() =>
   import("@/components/admissions/AddLeadDialog").then((m) => ({ default: m.AddLeadDialog })));
@@ -116,6 +129,50 @@ const stageIcons: Record<string, typeof Users> = {
 // Lead sources imported from @/config/leadSources
 
 type LeadInstitutionType = "all" | "school" | "college";
+type FilterMode = "include" | "exclude";
+type LeadSortOrder = "newest" | "oldest";
+type ApplicationStageFilter =
+  | "pre_application"
+  | "no_application"
+  | "application_in_progress"
+  | "application_fee_paid"
+  | "application_submitted"
+  | "token_fee_paid";
+type ApplicationStageLeadScope = { mode: "include" | "exclude"; ids: Set<string> };
+type NewLeadAssignmentFilter = "assigned" | "unassigned";
+
+const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string; description: string }[] = [
+  {
+    value: "pre_application",
+    label: "Not submitted / paid",
+    description: "No submitted application, application fee, or token fee",
+  },
+  {
+    value: "no_application",
+    label: "No application",
+    description: "No associated application yet",
+  },
+  {
+    value: "application_in_progress",
+    label: "Application in progress",
+    description: "Draft application, no fee or submission yet",
+  },
+  {
+    value: "application_fee_paid",
+    label: "Application fee paid",
+    description: "Fee paid, not submitted or token-paid",
+  },
+  {
+    value: "application_submitted",
+    label: "Application submitted",
+    description: "Submitted or under review, not token-paid",
+  },
+  {
+    value: "token_fee_paid",
+    label: "Token fee paid",
+    description: "Token fee paid or later admission stage",
+  },
+];
 
 const PERSON_ROLE_COLORS: Record<string, string> = {
   lead: "bg-pastel-yellow text-foreground/80",
@@ -139,8 +196,10 @@ interface Lead {
   course_id: string | null;
   campus_id: string | null;
   counsellor_id: string | null;
+  is_mirror: boolean;
   lead_score: number;
   lead_temperature: "hot" | "warm" | "cold";
+  lead_institution_type: "school" | "college" | null;
   ai_called?: boolean;
   course_name?: string;
   campus_name?: string;
@@ -161,11 +220,11 @@ interface ExistingList {
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
   const color = pct === 100
-    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
     : pct >= 50
-    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+    ? "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
     : pct > 0
-    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    ? "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
     : "bg-muted text-muted-foreground";
   const label = paymentStatus === "paid" && pct < 100 ? `${pct}% · 💳 Paid` : `${pct}%`;
   return (
@@ -177,7 +236,7 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 }
 
 function DeferredBlock({ className = "h-24" }: { className?: string }) {
-  return <div className={`rounded-2xl border border-border/40 bg-muted/20 animate-pulse ${className}`} />;
+  return <div className={`rounded-2xl border border-border/40 bg-muted/20 flutes ${className}`} />;
 }
 
 const Admissions = () => {
@@ -194,12 +253,18 @@ const Admissions = () => {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [leadInstitutionType, setLeadInstitutionType] = useState<LeadInstitutionType>("all");
   const [courseFilter, setCourseFilter] = useState<string[]>([]);
+  const [courseFilterMode, setCourseFilterMode] = useState<FilterMode>("include");
   const [debouncedCourseFilter, setDebouncedCourseFilter] = useState<string[]>([]);
   const [courseOptions, setCourseOptions] = useState<(CourseLike & { id: string; name: string })[]>([]);
   const [courseSearch, setCourseSearch] = useState("");
   const [coursePopoverOpen, setCoursePopoverOpen] = useState(false);
+  const [applicationStageFilter, setApplicationStageFilter] = useState<ApplicationStageFilter[]>([]);
+  const [applicationStageLeadScope, setApplicationStageLeadScope] = useState<ApplicationStageLeadScope | null>(null);
+  const [applicationStageResolving, setApplicationStageResolving] = useState(false);
+  const [applicationStagePopoverOpen, setApplicationStagePopoverOpen] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
@@ -217,6 +282,7 @@ const Admissions = () => {
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
   const [actionLeadIds, setActionLeadIds] = useState<Set<string> | null>(null);
   const [actionBucketLabel, setActionBucketLabel] = useState<string>("");
+  const [newLeadAssignmentFilter, setNewLeadAssignmentFilter] = useState<NewLeadAssignmentFilter | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const [leadPageCursors, setLeadPageCursors] = useState<Record<number, { created_at: string; id: string }>>({});
@@ -248,6 +314,7 @@ const Admissions = () => {
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
   const [showAddToList, setShowAddToList] = useState(false);
   const [listMode, setListMode] = useState<"new" | "existing">("new");
+  const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
   const [newListName, setNewListName] = useState("");
   const [existingListId, setExistingListId] = useState("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
@@ -257,16 +324,20 @@ const Admissions = () => {
   const [deleteReason, setDeleteReason] = useState<string>("duplicate");
   const [deleteCustomMsg, setDeleteCustomMsg] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
+  const canExportLeads = isSuperAdmin || role === "principal";
   const { myDefaults } = useTatDefaults();
   const canTransfer = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "campus_admin" || role === "principal";
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
+  const [leadSortOrder, setLeadSortOrder] = useState<LeadSortOrder>("newest");
 
   // Read URL params on mount — store in ref to survive re-renders.
   // Supports drill-down from external dashboards (e.g. Publisher Analytics):
@@ -377,9 +448,208 @@ const Admissions = () => {
   const effectiveCourseFilterIds = useMemo(() => {
     if (leadInstitutionType === "all") return debouncedCourseFilter;
     const categorySet = new Set(categoryCourseIds);
-    if (debouncedCourseFilter.length === 0) return categoryCourseIds;
     return debouncedCourseFilter.filter((id) => categorySet.has(id));
   }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
+
+  const scopedSelectedCourseFilterIds = useMemo(() => {
+    if (leadInstitutionType === "all") return debouncedCourseFilter;
+    const categorySet = new Set(categoryCourseIds);
+    return debouncedCourseFilter.filter((id) => categorySet.has(id));
+  }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
+
+  const admissionsListFilter = useMemo<AdmissionsListFilterModel>(() => ({
+    role,
+    profileId: profile?.id,
+    selectedCampusId,
+    counsellorFilter,
+    stageFilter,
+    sourceFilter,
+    sourceFilterMode,
+    leadInstitutionType,
+    courseFilterMode,
+    debouncedCourseFilter,
+    scopedSelectedCourseFilterIds,
+    applicationStageFilterCount: applicationStageFilter.length,
+    applicationStageLeadScope,
+    roleFilter,
+    tempFilter,
+    debouncedSearch,
+    fromDate,
+    toDate,
+    newLeadAssignmentFilter,
+    inactiveIds,
+    followupLeadIds,
+    visitLeadIds,
+    actionLeadIds,
+    notCalledIds,
+  }), [
+    role,
+    profile?.id,
+    selectedCampusId,
+    counsellorFilter,
+    stageFilter,
+    sourceFilter,
+    sourceFilterMode,
+    leadInstitutionType,
+    courseFilterMode,
+    debouncedCourseFilter,
+    scopedSelectedCourseFilterIds,
+    applicationStageFilter.length,
+    applicationStageLeadScope,
+    roleFilter,
+    tempFilter,
+    debouncedSearch,
+    fromDate,
+    toDate,
+    newLeadAssignmentFilter,
+    inactiveIds,
+    followupLeadIds,
+    visitLeadIds,
+    actionLeadIds,
+    notCalledIds,
+  ]);
+
+  const applicationStageFilterLabel = useMemo(() => {
+    if (applicationStageFilter.length === 0) return "All Application Stages";
+    if (applicationStageFilter.length === 1) {
+      return APPLICATION_STAGE_OPTIONS.find((o) => o.value === applicationStageFilter[0])?.label || "1 stage";
+    }
+    return `${applicationStageFilter.length} application stages`;
+  }, [applicationStageFilter]);
+
+  const fetchAllIdOrderedRows = async <T extends { id: string }>(
+    makeQuery: (cursorId: string | null, pageSize: number) => any,
+  ) => {
+    const rows: T[] = [];
+    const pageSize = 1000;
+    let cursorId: string | null = null;
+    for (;;) {
+      const { data, error } = await makeQuery(cursorId, pageSize);
+      if (error) throw error;
+      const batch = (data || []) as T[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+      cursorId = batch[batch.length - 1].id;
+    }
+    return rows;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (applicationStageFilter.length === 0) {
+      setApplicationStageLeadScope(null);
+      setApplicationStageResolving(false);
+      return;
+    }
+
+    setApplicationStageResolving(true);
+    setApplicationStageLeadScope(null);
+
+    (async () => {
+      try {
+        const [leadRows, appRows, paymentRows] = await Promise.all([
+          fetchAllIdOrderedRows<{ id: string; stage: string }>((cursorId, pageSize) => {
+            let query = supabase.from("leads").select("id, stage").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
+          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; status: string | null; submitted_at: string | null; payment_status: string | null }>((cursorId, pageSize) => {
+            let query = supabase.from("applications").select("id, lead_id, status, submitted_at, payment_status").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
+          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; type: string | null; status: string | null }>((cursorId, pageSize) => {
+            let query = supabase.from("lead_payments" as any).select("id, lead_id, type, status").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
+        ]);
+
+        const allLeadIds = new Set(leadRows.map((lead) => lead.id));
+        const appLeadIds = new Set<string>();
+        const submittedIds = new Set<string>();
+        const applicationFeePaidIds = new Set<string>();
+        const tokenFeePaidIds = new Set<string>();
+
+        for (const app of appRows) {
+          if (!app.lead_id) continue;
+          appLeadIds.add(app.lead_id);
+          const status = app.status || "";
+          if (app.submitted_at || (status && !["draft", "in_progress"].includes(status))) {
+            submittedIds.add(app.lead_id);
+          }
+          if (app.payment_status === "paid") {
+            applicationFeePaidIds.add(app.lead_id);
+          }
+        }
+
+        for (const payment of paymentRows) {
+          if (!payment.lead_id || payment.status !== "confirmed") continue;
+          if (payment.type === "application_fee") applicationFeePaidIds.add(payment.lead_id);
+          if (payment.type === "token_fee") tokenFeePaidIds.add(payment.lead_id);
+        }
+
+        for (const lead of leadRows) {
+          if (["token_paid", "pre_admitted", "admitted"].includes(lead.stage)) {
+            tokenFeePaidIds.add(lead.id);
+          }
+        }
+
+        const advancedIds = new Set<string>([
+          ...Array.from(submittedIds),
+          ...Array.from(applicationFeePaidIds),
+          ...Array.from(tokenFeePaidIds),
+        ]);
+
+        const buckets: Record<ApplicationStageFilter, Set<string>> = {
+          pre_application: new Set(Array.from(allLeadIds).filter((id) => !advancedIds.has(id))),
+          no_application: new Set(Array.from(allLeadIds).filter((id) => !appLeadIds.has(id) && !advancedIds.has(id))),
+          application_in_progress: new Set(Array.from(appLeadIds).filter((id) => !advancedIds.has(id))),
+          application_fee_paid: new Set(Array.from(applicationFeePaidIds).filter((id) => !submittedIds.has(id) && !tokenFeePaidIds.has(id))),
+          application_submitted: new Set(Array.from(submittedIds).filter((id) => !tokenFeePaidIds.has(id))),
+          token_fee_paid: tokenFeePaidIds,
+        };
+
+        const matchingIds = new Set<string>();
+        for (const stage of applicationStageFilter) {
+          for (const id of buckets[stage] || []) matchingIds.add(id);
+        }
+
+        const excludedIds = new Set<string>();
+        for (const id of allLeadIds) {
+          if (!matchingIds.has(id)) excludedIds.add(id);
+        }
+        const scope: ApplicationStageLeadScope = matchingIds.size <= excludedIds.size
+          ? { mode: "include", ids: matchingIds }
+          : { mode: "exclude", ids: excludedIds };
+
+        if (!cancelled) {
+          setApplicationStageLeadScope(scope);
+        }
+      } catch (error) {
+        console.error("[Admissions] failed to resolve application stage filter", error);
+        if (!cancelled) {
+          setApplicationStageLeadScope({ mode: "include", ids: new Set() });
+          toast({
+            title: "Application stage filter failed",
+            description: error instanceof Error ? error.message : "Unable to resolve matching leads.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setApplicationStageResolving(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicationStageFilter]);
+
+  const applyListQueryFilters = (query: any) => {
+    return applyAdmissionsListQueryFilters(query, admissionsListFilter);
+  };
 
   useEffect(() => {
     if (leadInstitutionType === "all" || courseOptions.length === 0) return;
@@ -391,34 +661,17 @@ const Admissions = () => {
     setCourseSearch("");
   }, [categoryCourseIds, courseOptions.length, leadInstitutionType]);
 
-  // Hydrate application completion % for whichever rows we just loaded.
-  // Split out so both fetch paths can reuse it.
   const hydrateLeadEnrichment = async (rows: any[]) => {
-    if (!rows.length) return { rows, summaries: {} as Record<string, string> };
+    if (!rows.length) return applyAdmissionsLeadEnrichment(rows, []);
     const leadIds = rows.map(r => r.id);
     const { data, error } = await supabase.rpc("admissions_lead_enrichment" as any, {
       p_lead_ids: leadIds,
     });
     if (error) {
       console.warn("[Admissions] lead enrichment skipped for this page", error.message);
-      return { rows, summaries: {} as Record<string, string> };
+      return applyAdmissionsLeadEnrichment(rows, []);
     }
-    const byLead = new Map<string, any>();
-    const summaries: Record<string, string> = {};
-    for (const row of (data || []) as any[]) {
-      if (!row?.lead_id) continue;
-      byLead.set(row.lead_id, row);
-      if (row.ai_summary) summaries[row.lead_id] = row.ai_summary;
-    }
-    rows.forEach((l: any) => {
-      const m = byLead.get(l.id);
-      if (m) {
-        l.app_completion_pct = m.app_completion_pct ?? null;
-        l.app_payment_status = m.app_payment_status ?? null;
-        l.app_fee_amount = m.app_fee_amount ?? null;
-      }
-    });
-    return { rows, summaries };
+    return applyAdmissionsLeadEnrichment(rows, data as any[] || []);
   };
 
   const applyLeadEnrichment = (rows: Lead[]) => {
@@ -440,6 +693,11 @@ const Admissions = () => {
   };
 
   const fetchLeads = async () => {
+    if (applicationStageFilter.length > 0 && applicationStageLeadScope === null) {
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
     setLoadError(null);
 
@@ -451,7 +709,8 @@ const Admissions = () => {
         let query = supabase
           .from("leads")
           .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
-          .order("created_at", { ascending: false })
+          .order("created_at", { ascending: leadSortOrder === "oldest" })
+          .order("id", { ascending: leadSortOrder === "oldest" })
           .limit(500);
         if (role === "counsellor" && profile?.id) {
           query = query.eq("counsellor_id", profile.id);
@@ -487,82 +746,35 @@ const Admissions = () => {
         setPage(1);
         return;
       }
+      // The total ("of N") uses a `planned` planner estimate to avoid an
+      // expensive COUNT(*) over the full leads table on the unfiltered hot
+      // path (#122). That estimate is accurate only when no filter narrows the
+      // query — once filters stack, the planner can't estimate the
+      // intersection (it sizes off a single predicate's selectivity) and
+      // reports a number wholly decoupled from the real result, producing the
+      // "Showing 0 of 280" contradiction. So switch to an `exact` count
+      // whenever any list filter is active: that's precisely when the estimate
+      // breaks and when the filtered set is small enough for an exact count to
+      // be cheap.
+      const hasActiveListFilters = hasActiveAdmissionsListFilters(admissionsListFilter);
       let query: any = supabase
         .from("leads")
         .select(
-          `id, name, phone, email, stage, source, person_role, created_at,
-           application_id, pre_admission_no, admission_no, course_id, campus_id,
-           counsellor_id, lead_score, lead_temperature, ai_called,
-           courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
-          page === 1 ? { count: "planned" } : undefined
-        )
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(PAGE_SIZE + 1);
+          ADMISSIONS_LEAD_LIST_SELECT,
+          page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
+        );
+      query = applyAdmissionsLeadSort(query, leadSortOrder);
+      query = query.limit(PAGE_SIZE + 1);
 
-      // Counsellor / campus scope
-      if (role === "counsellor" && profile?.id) {
-        query = query.eq("counsellor_id", profile.id);
-      } else if (counsellorFilter === "unassigned") {
-        query = query.is("counsellor_id", null);
-      } else if (counsellorFilter !== "all") {
-        query = query.eq("counsellor_id", counsellorFilter);
-      } else if (selectedCampusId !== "all") {
-        query = query.eq("campus_id", selectedCampusId);
-      }
-
-      // Stage / source / role / temperature
-      if (stageFilter !== "all") {
-        const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
-        if (stages.length === 1) query = query.eq("stage", stages[0]);
-        else if (stages.length > 1) query = query.in("stage", stages);
-      }
-      if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
-      if (leadInstitutionType !== "all" && effectiveCourseFilterIds.length === 0) {
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) {
         setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
         setHasNextLeadPage(false); setLeadPageCursors({});
         return;
       }
-      if (effectiveCourseFilterIds.length > 0) query = query.in("course_id", effectiveCourseFilterIds);
-      if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
-      if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
+      query = scoped.query;
 
-      // Date range (applied to created_at)
-      if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
-      if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
-
-      // Multi-field search (server-side ilike OR). Triggered after ≥ 2 chars.
-      if (debouncedSearch.length >= 2) {
-        const q = debouncedSearch;
-        const digits = q.replace(/\D/g, "");
-        const phoneTerm = digits.length >= 3 ? digits : q;
-        // Escape any commas in the user-supplied search to avoid breaking the OR string
-        const safe = (s: string) => s.replace(/,/g, "");
-        query = query.or(
-          `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
-        );
-      }
-
-      if (pageCursor) {
-        query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
-      }
-
-      // ID-set filters: intersect any active sets and pass the result as .in("id", …)
-      const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
-      const activeSets = idSets.filter((s): s is Set<string> => s !== null);
-      if (activeSets.length > 0) {
-        let intersection = Array.from(activeSets[0]);
-        for (let i = 1; i < activeSets.length; i++) {
-          const other = activeSets[i];
-          intersection = intersection.filter(id => other.has(id));
-        }
-        if (intersection.length === 0) {
-          setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
-          setHasNextLeadPage(false); setLeadPageCursors({});
-          return;
-        }
-        query = query.in("id", intersection);
-      }
+      query = applyAdmissionsLeadCursor(query, pageCursor, leadSortOrder);
 
       const { data, count, error } = await query;
       if (error) throw error;
@@ -615,9 +827,9 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
-    stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter,
-    fromDate, toDate, debouncedSearch,
-    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+    stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
+    applicationStageFilter, applicationStageLeadScope, fromDate, toDate, leadSortOrder, debouncedSearch,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds, newLeadAssignmentFilter,
   ]);
 
   // Fetch course options for the multi-select filter, joined with the
@@ -707,7 +919,8 @@ const Admissions = () => {
       debounceTimer = setTimeout(() => {
         lastRefetchAt = Date.now();
         fetchLeadsRef.current();
-        queryClient.invalidateQueries({ queryKey: ["admissions-stats"] });
+        queryClient.invalidateQueries({ queryKey: ["admissions-followup-counts"] });
+        queryClient.invalidateQueries({ queryKey: ["admissions-overview"] });
       }, wait);
     };
 
@@ -746,6 +959,7 @@ const Admissions = () => {
   };
 
   const openAddToListDialog = async () => {
+    setListScope("selected");
     setShowAddToList(true);
     const { data, error } = await supabase
       .from("lead_lists" as any)
@@ -765,9 +979,6 @@ const Admissions = () => {
   };
 
   const handleAddSelectedToList = async () => {
-    const leadIds = Array.from(selectedIds);
-    if (!leadIds.length) return;
-
     let listId = existingListId;
     let listName = existingLists.find((list) => list.id === existingListId)?.name || "";
 
@@ -780,13 +991,59 @@ const Admissions = () => {
         setSavingList(false);
         return;
       }
+    } else if (!listId) {
+      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    let leadIds: string[] = [];
+    try {
+      leadIds = listScope === "filtered"
+        ? await fetchLeadIdsForTransfer({ mode: "all" })
+        : Array.from(selectedIds);
+    } catch (e: any) {
+      toast({ title: "Could not load filtered leads", description: e?.message || "Try again.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    if (!leadIds.length) {
+      toast({
+        title: "No leads to add",
+        description: listScope === "filtered" ? "The current filters do not match any leads." : "Select at least one lead first.",
+        variant: "destructive",
+      });
+      setSavingList(false);
+      return;
+    }
+
+    if (listMode === "new") {
+      const name = newListName.trim();
 
       const { data: list, error: listErr } = await supabase
         .from("lead_lists" as any)
         .insert({
           name,
-          source: "manual",
-          description: `Saved from Admissions — ${leadIds.length} selected leads`,
+          source: listScope === "filtered" ? "filter" : "manual",
+          filters_snapshot: listScope === "filtered" ? {
+            stageFilter,
+            sourceFilter,
+            sourceFilterMode,
+            leadInstitutionType,
+            courseFilter: debouncedCourseFilter,
+            courseFilterMode,
+            applicationStageFilter,
+            roleFilter,
+            tempFilter,
+            counsellorFilter,
+            selectedCampusId,
+            fromDate,
+            toDate,
+            leadSortOrder,
+            search: debouncedSearch,
+          } : {},
+          description: `Saved from Admissions — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} leads`,
           created_by: profile?.id || null,
         })
         .select("id, name")
@@ -800,10 +1057,6 @@ const Admissions = () => {
 
       listId = (list as any).id;
       listName = (list as any).name;
-    } else if (!listId) {
-      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
-      setSavingList(false);
-      return;
     }
 
     const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
@@ -832,18 +1085,40 @@ const Admissions = () => {
 
     toast({
       title: listMode === "new" ? "List created" : "List updated",
-      description: `"${listName}" — ${leadIds.length} selected lead${leadIds.length === 1 ? "" : "s"} added.`,
+      description: `"${listName}" — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${leadIds.length === 1 ? "" : "s"} added.`,
     });
     setShowAddToList(false);
     setNewListName("");
     setExistingListId("");
     setListMode("new");
+    setListScope("selected");
     setSelectedIds(new Set());
   };
 
   const handleBulkDelete = async () => {
     setDeleting(true);
     const ids = Array.from(selectedIds);
+    const { data: linkedApps, error: linkedAppsError } = await supabase
+      .from("applications")
+      .select("lead_id, application_id")
+      .in("lead_id", ids)
+      .limit(10);
+    if (linkedAppsError) {
+      toast({ title: "Delete failed", description: linkedAppsError.message, variant: "destructive" });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if ((linkedApps || []).length > 0) {
+      toast({
+        title: "Cannot delete leads with applications",
+        description: `Remove linked applications first. Example: ${linkedApps![0].application_id}.`,
+        variant: "destructive",
+      });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
     const { error } = await supabase.from("leads").delete().in("id", ids);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
@@ -877,6 +1152,86 @@ const Admissions = () => {
     setSelectedIds(new Set());
   };
 
+  const fetchFilteredLeadsForExport = async () => {
+    const rows: Lead[] = [];
+    const exportPageSize = 1000;
+    let cursor: { created_at: string; id: string } | null = null;
+
+    for (;;) {
+      let query: any = supabase
+        .from("leads")
+        .select(ADMISSIONS_LEAD_LIST_SELECT);
+      query = applyAdmissionsLeadSort(query, leadSortOrder);
+      query = query.limit(exportPageSize);
+
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) return [];
+      query = scoped.query;
+
+      query = applyAdmissionsLeadCursor(query, cursor, leadSortOrder);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const batch = ((data || []) as any[]).map((l: any) => ({
+        ...l,
+        course_name: l.courses?.name || "",
+        campus_name: l.campuses?.name || "",
+        counsellor_name: l.profiles?.display_name || "Unassigned",
+        app_completion_pct: null,
+        app_payment_status: null,
+        app_fee_amount: null,
+      })) as Lead[];
+
+      rows.push(...batch);
+      const last = batch[batch.length - 1];
+      if (batch.length < exportPageSize || !last) break;
+      cursor = { created_at: last.created_at, id: last.id };
+    }
+
+    return rows;
+  };
+
+  const handleExportLeads = async () => {
+    setExporting(true);
+    try {
+      const rows = await fetchFilteredLeadsForExport();
+      const { count } = exportRowsCsv(
+        rows.map((lead) => ({
+          "Lead Name": lead.name || "",
+          Phone: lead.phone || "",
+          Email: lead.email || "",
+          Course: lead.course_name || "",
+          Campus: lead.campus_name || "",
+          Stage: STAGE_LABELS[lead.stage] || lead.stage || "",
+          Source: SOURCE_LABELS[lead.source] || lead.source || "",
+          Role: lead.person_role || "",
+          Counsellor: lead.counsellor_name || "",
+          "Lead Temperature": lead.lead_temperature || "",
+          "Lead Score": lead.lead_score ?? "",
+          "AI Called": lead.ai_called ? "Yes" : "No",
+          "Application ID": lead.application_id || "",
+          PAN: lead.pre_admission_no || "",
+          AN: lead.admission_no || "",
+          "Created At": formatExportDateTime(lead.created_at),
+        })),
+        "leads-export",
+      );
+      toast({
+        title: count > 0 ? "Leads exported" : "No leads to export",
+        description: count > 0 ? `${count} filtered lead${count === 1 ? "" : "s"} exported.` : undefined,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Unable to export leads.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase().trim();
     const digits = q.replace(/\D/g, "");
@@ -889,8 +1244,23 @@ const Admissions = () => {
       (l.application_id || "").toLowerCase().includes(q) ||
       (digits.length >= 3 && phoneDigits.includes(digits));
     const matchesStage = stageFilter === "all" || stageFilter.split(",").includes(l.stage);
-    const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
-    const matchesCourse = effectiveCourseFilterIds.length === 0 || (l.course_id != null && effectiveCourseFilterIds.includes(l.course_id));
+    const matchesSource = sourceFilter === "all"
+      || (sourceFilterMode === "exclude" ? l.source !== sourceFilter : l.source === sourceFilter);
+    const matchesCourse = (() => {
+      if (leadInstitutionType !== "all") {
+        if (l.lead_institution_type !== leadInstitutionType) return false;
+        if (l.is_mirror) return false;
+        if (courseFilterMode === "exclude") {
+          return l.course_id == null || !scopedSelectedCourseFilterIds.includes(l.course_id);
+        }
+        return scopedSelectedCourseFilterIds.length === 0
+          || (l.course_id != null && scopedSelectedCourseFilterIds.includes(l.course_id));
+      }
+      if (debouncedCourseFilter.length === 0) return true;
+      return courseFilterMode === "exclude"
+        ? l.course_id == null || !debouncedCourseFilter.includes(l.course_id)
+        : l.course_id != null && debouncedCourseFilter.includes(l.course_id);
+    })();
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
@@ -900,6 +1270,16 @@ const Admissions = () => {
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
+    const matchesNewLeadAssignment = !newLeadAssignmentFilter
+      || (l.stage === "new_lead" && (
+        newLeadAssignmentFilter === "assigned" ? !!l.counsellor_id : !l.counsellor_id
+      ));
+    const matchesApplicationStage = applicationStageFilter.length === 0
+      || (applicationStageLeadScope?.mode === "include"
+        ? applicationStageLeadScope.ids.has(l.id)
+        : applicationStageLeadScope?.mode === "exclude"
+          ? !applicationStageLeadScope.ids.has(l.id)
+          : false);
     // Date-range filter (URL ?from=YYYY-MM-DD&to=YYYY-MM-DD or in-page state)
     let matchesDate = true;
     if (fromDate || toDate) {
@@ -913,7 +1293,14 @@ const Admissions = () => {
         if (t > to) matchesDate = false;
       }
     }
-    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
+    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesNewLeadAssignment && matchesApplicationStage && matchesDate;
+  }).sort((a, b) => {
+    const aTime = new Date(a.created_at).getTime();
+    const bTime = new Date(b.created_at).getTime();
+    if (aTime !== bTime) {
+      return leadSortOrder === "oldest" ? aTime - bTime : bTime - aTime;
+    }
+    return leadSortOrder === "oldest" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
   });
 
   // List view paginates server-side: `leads` is already the current page
@@ -928,13 +1315,41 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, newLeadAssignmentFilter, fromDate, toDate, leadSortOrder]);
+
+  const handleNewLeadAssignmentClick = (assignment: NewLeadAssignmentFilter | null) => {
+    setNewLeadAssignmentFilter(assignment);
+    setFunnelStage(null);
+    setVisitAction(null);
+    setVisitFunnelBox(null);
+    setStageFilter("all");
+    setActionLeadIds(null);
+    setActionBucketLabel("");
+    setVisitLeadIds(null);
+    setFollowupLeadIds(null);
+    setInactiveIds(null);
+    setNotCalledIds(null);
+    setSourceFilter("all");
+    setSourceFilterMode("include");
+    setLeadInstitutionType("all");
+    setCourseFilter([]);
+    setApplicationStageFilter([]);
+    setRoleFilter("all");
+    setTempFilter("all");
+    setCounsellorFilter("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setView("list");
+    setPage(1);
+  };
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
   // understands via `.split(",").includes(l.stage)`).
   const handleFunnelClick = async (bucket: LeadFunnelStage | "leakage" | null) => {
     setFunnelStage(bucket);
+    setNewLeadAssignmentFilter(null);
     if (!bucket) {
       setStageFilter("all");
       setActionLeadIds(null);
@@ -945,6 +1360,7 @@ const Admissions = () => {
     setVisitLeadIds(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
+    setNotCalledIds(null);
 
     if (bucket === "hot") {
       // Union of canonical hot stages + interested-disposition leads.
@@ -978,6 +1394,7 @@ const Admissions = () => {
     setFunnelStage(null);
     setStageFilter("all");
     setActionLeadIds(null);
+    setNewLeadAssignmentFilter(null);
     setVisitAction(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
@@ -995,6 +1412,7 @@ const Admissions = () => {
     if (!a) { setActionLeadIds(null); setActionBucketLabel(""); return; }
     setFunnelStage(null);
     setStageFilter("all");
+    setNewLeadAssignmentFilter(null);
     setFollowupLeadIds(null);
     setVisitLeadIds(null);
     setInactiveIds(null);
@@ -1044,7 +1462,9 @@ const Admissions = () => {
   // /admissions without a refetch as long as data is < 30s stale.
   const statsCounsellorId = role === "counsellor" && profile?.id ? profile.id : null;
   const statsCampusId = statsCounsellorId ? null : (selectedCampusId !== "all" ? selectedCampusId : null);
-  const { data: statsData } = useAdmissionsStats({ counsellorId: statsCounsellorId, campusId: statsCampusId });
+  const { data: dashboardFollowups } = useAdmissionsFollowupCounts({
+    counsellorId: statsCounsellorId,
+  });
   const { data: admissionsOverview } = useAdmissionsOverview({
     counsellorId: statsCounsellorId,
     campusId: statsCampusId,
@@ -1054,6 +1474,12 @@ const Admissions = () => {
     () => admissionsOverview?.stage_counts ?? {},
     [admissionsOverview?.stage_counts],
   );
+  const newLeadAssignmentCounts = admissionsOverview?.new_lead_assignment_counts ?? {
+    assigned: 0,
+    unassigned: 0,
+    unassigned_ai_called: 0,
+    unassigned_not_ai_called: 0,
+  };
   const interestedLeadIds = useMemo(
     () => new Set<string>(admissionsOverview?.interested_lead_ids ?? []),
     [admissionsOverview?.interested_lead_ids],
@@ -1082,29 +1508,35 @@ const Admissions = () => {
   };
   const visitFunnelLeakage = admissionsOverview?.visit_funnel_leakage ?? 0;
   const visitFunnelBoxIds = admissionsOverview?.visit_funnel_box_ids ?? {};
+  const stageCount = (stage: string) => stageCounts[stage] || 0;
+  const sumStageCounts = (stages: string[]) => stages.reduce((total, stage) => total + stageCount(stage), 0);
 
-  const newLeads        = statsData?.new_leads         ?? 0;
-  const todayLeads      = statsData?.today_leads       ?? 0;
-  const appStarted      = statsData?.app_started       ?? 0;
-  const feePaid         = statsData?.fee_paid          ?? 0;
-  const appSubmitted    = statsData?.app_submitted     ?? 0;
-  const admitted        = statsData?.admitted          ?? 0;
-  const offerSent       = statsData?.offer_sent        ?? 0;
-  const tokenPaid       = statsData?.token_paid        ?? 0;
-  const preAdmitted     = statsData?.pre_admitted      ?? 0;
-  const pendingFollowups = statsData?.pending_followups ?? 0;
-  const todayFollowups  = statsData?.today_followups   ?? 0;
-  const overdueFollowups = statsData?.overdue_followups ?? 0;
-  const upcomingVisits  = statsData?.upcoming_visits   ?? 0;
-  const completedVisits = statsData?.completed_visits  ?? 0;
+  const newLeads        = stageCount("new_lead");
+  const assignedNewLeads = newLeadAssignmentCounts.assigned ?? 0;
+  const bucketNewLeads = newLeadAssignmentCounts.unassigned ?? 0;
+  const bucketAiCalledNewLeads = newLeadAssignmentCounts.unassigned_ai_called ?? 0;
+  const bucketNotAiCalledNewLeads = newLeadAssignmentCounts.unassigned_not_ai_called ?? 0;
+  const appStarted      = sumStageCounts(["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"]);
+  const feePaid         = sumStageCounts(["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"]);
+  const appSubmitted    = sumStageCounts(["application_submitted", "offer_sent", "token_paid", "pre_admitted"]);
+  const admitted        = stageCount("admitted");
+  const offerSent       = stageCount("offer_sent");
+  const tokenPaid       = stageCount("token_paid");
+  const preAdmitted     = stageCount("pre_admitted");
+  const pendingFollowups = dashboardFollowups?.pending ?? 0;
+  const todayFollowups  = dashboardFollowups?.today ?? 0;
+  const overdueFollowups = dashboardFollowups?.overdue ?? 0;
+  const upcomingVisits  = visitActionCounts.scheduled ?? 0;
+  const completedVisits = visitActionCounts.visitsCompleted ?? 0;
   const postVisitPendingIds = useMemo(
-    () => new Set<string>(statsData?.post_visit_pending_lead_ids ?? []),
-    [statsData?.post_visit_pending_lead_ids],
+    () => new Set<string>(visitFunnelBoxIds.visit_followup ?? []),
+    [visitFunnelBoxIds.visit_followup],
   );
 
   // Row 1: Lead data
   const leadStats = [
-    { label: "New Leads", value: newLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
+    { label: "Unassigned Untouched", value: bucketNewLeads, sub: `${bucketAiCalledNewLeads} AI / ${bucketNotAiCalledNewLeads} not called`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "", link: "", action: "unassigned_new_leads" },
+    { label: "Assigned Untouched", value: assignedNewLeads, sub: `${newLeads} total untouched`, icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
     { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
@@ -1121,12 +1553,50 @@ const Admissions = () => {
     { label: "Admitted", value: admitted, sub: "Fully admitted", icon: UserCheck, iconBg: "bg-pastel-green", filterStage: "admitted", action: "" },
   ];
 
+  const fetchLeadIdsForTransfer = async ({ mode, pageCount }: { mode: "pages" | "all"; pageCount?: number }) => {
+    const ids: string[] = [];
+    const target = mode === "all" ? Infinity : Math.max(0, (pageCount || 1) * PAGE_SIZE);
+    let cursor: { created_at: string; id: string } | null = null;
+
+    while (ids.length < target) {
+      const remaining = target === Infinity ? 999 : target - ids.length;
+      const step = Math.min(999, remaining);
+      let query: any = supabase
+        .from("leads")
+        .select("id, created_at")
+        .order("created_at", { ascending: leadSortOrder === "oldest" })
+        .order("id", { ascending: leadSortOrder === "oldest" })
+        .limit(step + 1);
+
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) break;
+      query = scoped.query;
+
+      if (cursor) {
+        query = leadSortOrder === "oldest"
+          ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+          : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const fetched = (data || []) as { id: string; created_at: string }[];
+      const rows = fetched.slice(0, step);
+      ids.push(...rows.map((row) => row.id));
+      const last = rows[rows.length - 1];
+      if (!last || fetched.length <= step) break;
+      cursor = { created_at: last.created_at, id: last.id };
+    }
+
+    return ids;
+  };
+
   // Only show the full-page spinner on the very first load (before any
   // result has come back). Refetches keep the page mounted so controls
   // like the course multi-select popover preserve their state — an empty
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    return <PageLoader />;
   }
 
   if (loadError && leads.length === 0) {
@@ -1146,6 +1616,52 @@ const Admissions = () => {
   }
 
   const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);
+  const bulkActionBar = selectedIds.size > 0 ? (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+      <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="gap-2" onClick={openAddToListDialog}>
+          <ListPlus className="h-4 w-4" /> Add to List
+        </Button>
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
+          <Send className="h-4 w-4" /> WhatsApp
+        </Button>
+        {canTransfer && (
+          <>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
+              <ArrowRightLeft className="h-4 w-4" /> Transfer
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+              const ids = Array.from(selectedIds);
+              const { error } = await supabase
+                .from("leads")
+                .update({ counsellor_id: null } as any)
+                .in("id", ids);
+              if (error) {
+                toast({ title: "Error", description: error.message, variant: "destructive" });
+              } else {
+                toast({ title: "Moved to bucket", description: `${ids.length} lead${ids.length > 1 ? "s" : ""} unassigned and moved to lead buckets.` });
+                setSelectedIds(new Set());
+                fetchLeads();
+              }
+            }}>
+              <Inbox className="h-4 w-4" /> Move to Bucket
+            </Button>
+          </>
+        )}
+        {isSuperAdmin ? (
+          <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
+            <Trash2 className="h-4 w-4" /> Delete
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setShowDeleteRequest(true)}>
+            <Flag className="h-4 w-4" /> Request Deletion
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1161,17 +1677,85 @@ const Admissions = () => {
           <CloudDialerNudge />
         </Suspense>
       )}
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>
         </div>
         <div className="flex items-center gap-3">
           {role === "counsellor" && <CounsellorScoreBadge />}
+          {canExportLeads && (
+            <Button
+              variant="pill-outline"
+              size="pill"
+              onClick={handleExportLeads}
+              disabled={exporting}
+              className="gap-2"
+              title="Export leads matching the current filters"
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download CSV
+            </Button>
+          )}
           <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
           <Button variant="pill" size="pill" onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
       </div>
+
+      {/* Today's followup alert - counsellors must not miss their due calls */}
+      {role === "counsellor" && (todayFollowups > 0 || overdueFollowups > 0) && view !== "action_center" && (
+        <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
+          overdueFollowups > 0
+            ? "border-destructive/25/50 bg-destructive/5 dark:bg-destructive/90/30"
+            : "border-warning/30/50 bg-warning/5 dark:bg-warning/90/30"
+        }`}>
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
+            overdueFollowups > 0 ? "bg-destructive/50/20" : "bg-warning/50/20"
+          }`}>
+            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-destructive dark:text-destructive/80" : "text-warning-foreground dark:text-warning"}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">
+              {overdueFollowups > 0 && todayFollowups > 0 ? (
+                <>
+                  <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue</span>
+                  <span className="mx-1.5 text-muted-foreground">/</span>
+                  <span className="text-warning-foreground dark:text-warning/70">{todayFollowups} due today</span>
+                </>
+              ) : overdueFollowups > 0 ? (
+                <span className="text-destructive dark:text-destructive/80">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
+              ) : (
+                <span className="text-warning-foreground dark:text-warning/40">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
+              )}
+            </p>
+            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-destructive/80 dark:text-destructive/80/80" : "text-warning-foreground/80 dark:text-warning/70/80"}`}>
+              Don't let these leads wait - call them before end of day
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {todayFollowups > 0 && (
+              <Button
+                size="sm"
+                className="bg-warning hover:bg-warning/60 text-white shadow-none gap-1.5"
+                onClick={() => navigate("/pending-followups?tab=today")}
+              >
+                <Phone className="h-3.5 w-3.5" />
+                {todayFollowups} Today
+              </Button>
+            )}
+            {overdueFollowups > 0 && (
+              <Button
+                size="sm"
+                className="bg-destructive hover:bg-destructive/60 text-white shadow-none gap-1.5"
+                onClick={() => navigate("/pending-followups?tab=overdue")}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {overdueFollowups} Overdue
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Resumable lead drafts (autosaved from AddLeadDialog) */}
       <Suspense fallback={<DeferredBlock className="h-20" />}>
@@ -1180,54 +1764,6 @@ const Admissions = () => {
           onResume={(id) => { setResumeDraftId(id); setShowAddLead(true); }}
         />
       </Suspense>
-
-      {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
-          <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={openAddToListDialog}>
-              <ListPlus className="h-4 w-4" /> Add to List
-            </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
-              <Send className="h-4 w-4" /> WhatsApp
-            </Button>
-            {canTransfer && (
-              <>
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
-                  <ArrowRightLeft className="h-4 w-4" /> Transfer
-                </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
-                  const ids = Array.from(selectedIds);
-                  const { error } = await supabase
-                    .from("leads")
-                    .update({ counsellor_id: null } as any)
-                    .in("id", ids);
-                  if (error) {
-                    toast({ title: "Error", description: error.message, variant: "destructive" });
-                  } else {
-                    toast({ title: "Moved to bucket", description: `${ids.length} lead${ids.length > 1 ? "s" : ""} unassigned and moved to lead buckets.` });
-                    setSelectedIds(new Set());
-                    fetchLeads();
-                  }
-                }}>
-                  <Inbox className="h-4 w-4" /> Move to Bucket
-                </Button>
-              </>
-            )}
-            {isSuperAdmin ? (
-              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
-                <Trash2 className="h-4 w-4" /> Delete
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setShowDeleteRequest(true)}>
-                <Flag className="h-4 w-4" /> Request Deletion
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
-          </div>
-        </div>
-      )}
 
       {/* Pipelines zone (spine + visit) then the visit action center — all
           hidden during the action-center / counsellor focus view to keep that
@@ -1241,6 +1777,9 @@ const Admissions = () => {
               extraHot={extraHotCount}
               activeStage={funnelStage}
               onStageClick={handleFunnelClick}
+              newLeadAssignmentCounts={newLeadAssignmentCounts}
+              activeNewLeadAssignment={newLeadAssignmentFilter}
+              onNewLeadAssignmentClick={handleNewLeadAssignmentClick}
             />
             <VisitPipeline
               counts={visitFunnelCounts}
@@ -1260,25 +1799,36 @@ const Admissions = () => {
       {/* Stat cards & filter banners — hidden when Action Center is active */}
       {view !== "action_center" && <>
       {/* Compact stats: Leads + Applications in a single row.
-          11 cards total — tight on lg+; wraps to 2 rows of 6 at md, and
+          12 cards total — tight on lg+; wraps to 2 rows of 6 at md, and
           to 4 rows of 3 on mobile. */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-11 gap-1.5">
+      <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1.5">
         {/* Lead stats */}
-        {leadStats.map((stat) => {
+        {leadStats.map((stat, i) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
+            (stat.action === "unassigned_new_leads" && newLeadAssignmentFilter === "unassigned") ||
+            (stat.action === "assigned_new_leads" && newLeadAssignmentFilter === "assigned") ||
             (stat.action === "followups" && !!followupLeadIds) ||
             ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && !!visitLeadIds);
           return (
             <Card
               key={stat.label}
-              className={`rounded-2xl border-border/40 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              className={`rounded-2xl border-border/40 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              style={{ animationDelay: `${i * 40}ms`, animationFillMode: "both" }}
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
                   const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending").limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids); setVisitLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                }
+                if (stat.action === "unassigned_new_leads") {
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "unassigned" ? null : "unassigned");
+                  return;
+                }
+                if (stat.action === "assigned_new_leads") {
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "assigned" ? null : "assigned");
+                  return;
                 }
                 if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1291,7 +1841,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.action === "completed_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1303,7 +1853,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
                 if (stat.filterStage) {
@@ -1326,31 +1876,32 @@ const Admissions = () => {
                     });
                   }
                   setStageFilter(stat.filterStage);
-                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
+                  setNewLeadAssignmentFilter(null); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
                 }
               }}
             >
               <CardContent className="p-2.5">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3 w-3 text-foreground/70" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground leading-tight line-clamp-2">{stat.label}</span>
                 </div>
-                <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-                <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate mt-1.5 flex items-center gap-0.5">▲ {stat.sub}</p>
               </CardContent>
             </Card>
           );
         })}
         {/* Application stats */}
-        {appStats.map((stat) => (
+        {appStats.map((stat, i) => (
           <Card
             key={stat.label}
-            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
+            className={`border-border/60 shadow-none hover:elevation-low hover:-translate-y-0.5 transition-all duration-240 ease-standard animate-rs-slide-up cursor-pointer ${
               (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "fee_paid" && actionLeadIds && actionBucketLabel === "Fee Paid")
                 ? "ring-2 ring-primary/40 bg-primary/5" : ""
             }`}
+            style={{ animationDelay: `${(leadStats.length + i) * 40}ms`, animationFillMode: "both" }}
             onClick={async () => {
               // Fee Paid uses ID-based filter (count includes leads with paid applications regardless of stage)
               if (stat.action === "fee_paid") {
@@ -1390,6 +1941,7 @@ const Admissions = () => {
                   }
                 }
                 setActionLeadIds(allIds); setActionBucketLabel("Fee Paid");
+                setNewLeadAssignmentFilter(null);
                 setStageFilter("all"); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
                 return;
@@ -1423,21 +1975,21 @@ const Admissions = () => {
                     return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
                   });
                 }
-                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel("");
+                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel(""); setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
               }
             }}
           >
             <CardContent className="p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                  <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground leading-tight line-clamp-1">{stat.label}</span>
+                <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                  <stat.icon className="h-3 w-3 text-foreground/70" />
                 </div>
-                <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
               </div>
-              <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
-              <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
+              <p className="text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate mt-1.5">{stat.sub}</p>
             </CardContent>
           </Card>
         ))}
@@ -1456,15 +2008,15 @@ const Admissions = () => {
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
       {myDefaults && myDefaults.total_defaults > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/10 dark:border-red-900/30 px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
-            <Clock className="h-4 w-4 text-red-600" />
+        <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 dark:bg-destructive/90/10 dark:border-destructive/60/30 px-4 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 dark:bg-destructive/80/30">
+            <Clock className="h-4 w-4 text-destructive" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+            <p className="text-sm font-semibold text-destructive dark:text-destructive/60">
               You have {myDefaults.total_defaults} pending action{myDefaults.total_defaults > 1 ? "s" : ""}
             </p>
-            <p className="text-xs text-red-600 dark:text-red-400">
+            <p className="text-xs text-destructive dark:text-destructive/80">
               {[
                 myDefaults.new_leads_overdue > 0 && `${myDefaults.new_leads_overdue} new leads to contact`,
                 myDefaults.overdue_followups > 0 && `${myDefaults.overdue_followups} overdue follow-ups`,
@@ -1472,21 +2024,26 @@ const Admissions = () => {
               ].filter(Boolean).join(" · ")}
             </p>
           </div>
-          <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-100 shrink-0" onClick={() => navigate("/counsellor-dashboard?tab=tat-defaults")}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
+            onClick={() => setView("action_center")}
+          >
             View Details
           </Button>
         </div>
       )}
 
       {inactiveIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-amber-600" />
-          <span className="font-medium text-amber-800 dark:text-amber-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/60/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/70">
             Showing {inactiveIds.size} inactive lead{inactiveIds.size !== 1 ? "s" : ""} past threshold
           </span>
           <button
             onClick={() => setInactiveIds(null)}
-            className="ml-2 rounded-md bg-amber-200 dark:bg-amber-800 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/25 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -1494,14 +2051,14 @@ const Admissions = () => {
       )}
 
       {followupLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 px-3 py-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-orange-600" />
-          <span className="font-medium text-orange-800 dark:text-orange-300">
+        <div className="flex items-center gap-2 rounded-lg bg-warning/5 dark:bg-warning/90/20 border border-warning/20 dark:border-warning/50/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-warning-foreground" />
+          <span className="font-medium text-warning-foreground dark:text-warning/60">
             Showing {followupLeadIds.size} lead{followupLeadIds.size !== 1 ? "s" : ""} with pending follow-ups
           </span>
           <button
             onClick={() => setFollowupLeadIds(null)}
-            className="ml-2 rounded-md bg-orange-200 dark:bg-orange-800 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200 hover:bg-orange-300 dark:hover:bg-orange-700"
+            className="ml-2 rounded-md bg-warning/15 dark:bg-warning/70 px-2 py-0.5 text-xs font-medium text-warning-foreground dark:text-warning/40 hover:bg-warning/30 dark:hover:bg-warning/60"
           >
             Clear filter
           </button>
@@ -1509,14 +2066,14 @@ const Admissions = () => {
       )}
 
       {visitLeadIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800/40 px-3 py-2 text-sm">
-          <MapPin className="h-3.5 w-3.5 text-violet-600" />
-          <span className="font-medium text-violet-800 dark:text-violet-300">
+        <div className="flex items-center gap-2 rounded-lg bg-primary/5 dark:bg-primary/90/20 border border-primary/20 dark:border-primary/50/40 px-3 py-2 text-sm">
+          <MapPin className="h-3.5 w-3.5 text-primary" />
+          <span className="font-medium text-primary dark:text-primary/50">
             Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with campus visits
           </span>
           <button
             onClick={() => setVisitLeadIds(null)}
-            className="ml-2 rounded-md bg-violet-200 dark:bg-violet-800 px-2 py-0.5 text-xs font-medium text-violet-800 dark:text-violet-200 hover:bg-violet-300 dark:hover:bg-violet-700"
+            className="ml-2 rounded-md bg-primary/15 dark:bg-primary/70 px-2 py-0.5 text-xs font-medium text-primary dark:text-primary/40 hover:bg-primary/25 dark:hover:bg-primary/60"
           >
             Clear filter
           </button>
@@ -1524,14 +2081,29 @@ const Admissions = () => {
       )}
 
       {notCalledIds && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm">
-          <Phone className="h-3.5 w-3.5 text-red-600" />
-          <span className="font-medium text-red-800 dark:text-red-300">
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/5 dark:bg-destructive/90/20 border border-destructive/20 dark:border-destructive/50/40 px-3 py-2 text-sm">
+          <Phone className="h-3.5 w-3.5 text-destructive" />
+          <span className="font-medium text-destructive dark:text-destructive/60">
             Showing {notCalledIds.size} not-called lead{notCalledIds.size !== 1 ? "s" : ""} — select and transfer to reassign
           </span>
           <button
             onClick={() => { setNotCalledIds(null); setCounsellorFilter("all"); }}
-            className="ml-2 rounded-md bg-red-200 dark:bg-red-800 px-2 py-0.5 text-xs font-medium text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-700"
+            className="ml-2 rounded-md bg-destructive/15 dark:bg-destructive/70 px-2 py-0.5 text-xs font-medium text-destructive dark:text-destructive/40 hover:bg-destructive/25 dark:hover:bg-destructive/60"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
+      {newLeadAssignmentFilter && (
+        <div className="flex items-center gap-2 rounded-lg bg-slate-50 dark:bg-slate-950/20 border border-slate-200 dark:border-slate-800/40 px-3 py-2 text-sm">
+          <Users className="h-3.5 w-3.5 text-slate-600" />
+          <span className="font-medium text-slate-800 dark:text-slate-300">
+            Showing {newLeadAssignmentFilter === "assigned" ? "assigned" : "unassigned"} untouched leads
+          </span>
+          <button
+            onClick={() => setNewLeadAssignmentFilter(null)}
+            className="ml-2 rounded-md bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700"
           >
             Clear filter
           </button>
@@ -1573,7 +2145,7 @@ const Admissions = () => {
 
       {/* Search & filters — hidden on Action Center view */}
       {view !== "action_center" && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
               <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
@@ -1584,17 +2156,28 @@ const Admissions = () => {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
           </div>
-          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
+          <select value={stageFilter} onChange={(e) => { setNewLeadAssignmentFilter(null); setStageFilter(e.target.value); }}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Stages</option>
             {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
+          </select>
+          <select value={sourceFilterMode} onChange={(e) => setSourceFilterMode(e.target.value as FilterMode)}
+            disabled={sourceFilter === "all"}
+            title="Source filter mode"
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50">
+            <option value="include">Only source</option>
+            <option value="exclude">Except source</option>
           </select>
           <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Sources</option>
             {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-          <select value={leadInstitutionType} onChange={(e) => setLeadInstitutionType(e.target.value as LeadInstitutionType)}
+          <select value={leadInstitutionType} onChange={(e) => {
+            const next = e.target.value as LeadInstitutionType;
+            setLeadInstitutionType(next);
+            if (next !== "all") setRoleFilter("lead");
+          }}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">School & College</option>
             <option value="school">School Leads</option>
@@ -1614,10 +2197,10 @@ const Admissions = () => {
                         ? "All College Courses"
                         : "All Courses"
                     : courseFilter.length === 1
-                      ? (courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course")
+                      ? `${courseFilterMode === "exclude" ? "Except " : ""}${courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course"}`
                       : leadInstitutionType === "school"
-                        ? `${courseFilter.length} grades`
-                        : `${courseFilter.length} courses`}
+                        ? `${courseFilterMode === "exclude" ? "Except " : ""}${courseFilter.length} grades`
+                        : `${courseFilterMode === "exclude" ? "Except " : ""}${courseFilter.length} courses`}
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
@@ -1641,6 +2224,22 @@ const Admissions = () => {
                     Clear
                   </button>
                 )}
+              </div>
+              <div className="flex items-center gap-1 border-b border-border/60 px-2 py-2">
+                <button
+                  type="button"
+                  onClick={() => setCourseFilterMode("include")}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium ${courseFilterMode === "include" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  Only selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCourseFilterMode("exclude")}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium ${courseFilterMode === "exclude" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  Except selected
+                </button>
               </div>
               <div className="max-h-80 overflow-y-auto p-1">
                 {(() => {
@@ -1753,6 +2352,62 @@ const Admissions = () => {
               </div>
             </PopoverContent>
           </Popover>
+          <Popover open={applicationStagePopoverOpen} onOpenChange={setApplicationStagePopoverOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 hover:bg-muted/40"
+              >
+                {applicationStageResolving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span>{applicationStageFilterLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80 p-0">
+              <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                <span className="text-xs font-semibold text-foreground">Application stage</span>
+                {applicationStageFilter.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setApplicationStageFilter([])}
+                    className="text-[10px] text-primary hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="p-1">
+                {APPLICATION_STAGE_OPTIONS.map((option) => {
+                  const checked = applicationStageFilter.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted/50"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) => {
+                          setApplicationStageFilter((prev) =>
+                            v
+                              ? Array.from(new Set([...prev, option.value]))
+                              : prev.filter((stage) => stage !== option.value)
+                          );
+                        }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-foreground">{option.label}</span>
+                        <span className="block text-[11px] leading-snug text-muted-foreground">{option.description}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
           <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Roles</option>
@@ -1778,6 +2433,36 @@ const Admissions = () => {
               ))}
             </select>
           )}
+          <DateRangeFilter
+            preset={datePreset}
+            fromDate={fromDate}
+            toDate={toDate}
+            onPresetChange={setDatePreset}
+            onFromDateChange={setFromDate}
+            onToDateChange={setToDate}
+            className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+            ariaPrefix="Lead created"
+          />
+          {(fromDate || toDate) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 px-2 text-xs"
+              onClick={() => { setDatePreset("all"); setFromDate(""); setToDate(""); }}
+            >
+              Clear dates
+            </Button>
+          )}
+          <select
+            value={leadSortOrder}
+            onChange={(e) => setLeadSortOrder(e.target.value as LeadSortOrder)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            title="Sort by lead created date"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
         </div>
       )}
 
@@ -1816,6 +2501,7 @@ const Admissions = () => {
                 }
                 setActionLeadIds(new Set(leadIds));
                 setActionBucketLabel(labels[bucket] || bucket);
+                setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null);
                 setVisitLeadIds(null);
                 setInactiveIds(null);
@@ -1840,79 +2526,82 @@ const Admissions = () => {
           <PaymentReconciliation />
         </Suspense>
       ) : view === "pipeline" ? (
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
-          {STAGES.map((stage) => {
-            const stageLeads = filtered.filter((l) => l.stage === stage);
-            const StageIcon = stageIcons[stage] || FileText;
-            return (
-              <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
-                <div className="flex items-center gap-2 mb-3 px-1">
-                  <StageIcon className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
-                  <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
-                    {stageLeads.length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {stageLeads.map((lead) => (
-                    <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
-                      {(isSuperAdmin || canTransfer) && (
-                        <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(lead.id)}
-                            onCheckedChange={() => toggleSelect(lead.id)}
-                            className="h-4 w-4"
-                          />
-                        </div>
-                      )}
-                      <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                        <div className="flex items-start justify-between">
-                          <div className="pr-6">
-                            <div className="flex items-center gap-1.5">
-                              <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
-                              <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
-                            </div>
-                            <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground mt-1">{lead.campus_name}</p>
-                        <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
-                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
-                          {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
-                          <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
-                        </div>
-                        {(lead.pre_admission_no || lead.admission_no) && (
-                          <div className="mt-2">
-                            {lead.pre_admission_no && !lead.admission_no && (
-                              <Badge variant="outline" className="text-[10px] text-primary border-primary/30">PAN: {lead.pre_admission_no}</Badge>
-                            )}
-                            {lead.admission_no && (
-                              <Badge className="text-[10px] bg-primary text-primary-foreground">AN: {lead.admission_no}</Badge>
-                            )}
+        <div className="space-y-3">
+          {bulkActionBar}
+          <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
+            {STAGES.map((stage, stageIdx) => {
+              const stageLeads = filtered.filter((l) => l.stage === stage);
+              const StageIcon = stageIcons[stage] || FileText;
+              return (
+                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0 animate-rs-slide-up" style={{ animationDelay: `${stageIdx * 40}ms`, animationFillMode: "both" }}>
+                  <div className="flex items-center gap-2 mb-3 px-1">
+                    <StageIcon className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
+                    <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                      {stageLeads.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {stageLeads.map((lead, leadIdx) => (
+                      <Card key={lead.id} className="border-border/60 elevation-low hover:elevation-mid hover:-translate-y-1 transition-all duration-240 ease-standard cursor-pointer group animate-rs-slide-up relative" style={{ animationDelay: `${leadIdx * 40}ms`, animationFillMode: "both" }}>
+                        {(isSuperAdmin || canTransfer) && (
+                          <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedIds.has(lead.id)}
+                              onCheckedChange={() => toggleSelect(lead.id)}
+                              className="h-4 w-4"
+                            />
                           </div>
                         )}
-                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
-                          <div className="flex items-center gap-1.5">
-                            <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>{SOURCE_LABELS[lead.source] || lead.source}</Badge>
-                            <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
+                        <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                          <div className="flex items-start justify-between">
+                            <div className="pr-6">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
+                                <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                              </div>
+                              <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
-                          <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
+                          <p className="text-[11px] text-muted-foreground mt-1">{lead.campus_name}</p>
+                          <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
+                            {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
+                            <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
                           </div>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">{lead.counsellor_name}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {stageLeads.length === 0 && (
-                    <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground">No leads</div>
-                  )}
+                          {(lead.pre_admission_no || lead.admission_no) && (
+                            <div className="mt-2">
+                              {lead.pre_admission_no && !lead.admission_no && (
+                                <Badge variant="outline" className="text-[10px] text-primary border-primary/30">PAN: {lead.pre_admission_no}</Badge>
+                              )}
+                              {lead.admission_no && (
+                                <Badge className="text-[10px] bg-primary text-primary-foreground">AN: {lead.admission_no}</Badge>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
+                            <div className="flex items-center gap-1.5">
+                              <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>{SOURCE_LABELS[lead.source] || lead.source}</Badge>
+                              <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">{lead.counsellor_name}</p>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {stageLeads.length === 0 && (
+                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground animate-rs-slide-up">No leads</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ) : (
         <>
@@ -1936,11 +2625,12 @@ const Admissions = () => {
             </div>
           )}
         </div>
-        <Card className="border-border/60 shadow-none overflow-hidden">
+        {bulkActionBar && <div className="mb-3">{bulkActionBar}</div>}
+        <Card className="border-border/60 shadow-none overflow-hidden rounded-xl">
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/50">
+                <tr className="border-b border-border bg-surface-subtle">
                   {(isSuperAdmin || canTransfer) && (
                     <th className="px-3 py-3 w-10">
                       <Checkbox
@@ -1965,7 +2655,7 @@ const Admissions = () => {
                 {paginatedLeads.map((lead) => {
                   const summary = aiSummaries[lead.id];
                   return (
-                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors align-top">
+                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors duration-160 ease-standard align-top">
                     {(isSuperAdmin || canTransfer) && (
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
@@ -1983,21 +2673,22 @@ const Admissions = () => {
                         <span className="font-medium text-foreground text-sm truncate">{lead.name}</span>
                         <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
                         <span onClick={(e) => e.stopPropagation()}>
-                          <CahetPendingBadge
+                          <ExamPendingBadge
                             leadId={lead.id}
                             leadName={lead.name}
                             phone={lead.phone}
                             courseName={lead.course_name}
+                            campusName={lead.campus_name}
                           />
                         </span>
                         {lead.ai_called && (
-                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30 shrink-0" title="AI Called">
-                            <Bot className="h-2.5 w-2.5 text-violet-600" />
+                          <span className="flex h-4 w-4 items-center justify-center rounded bg-primary/10 dark:bg-primary/80/30 shrink-0" title="AI Called">
+                            <Bot className="h-2.5 w-2.5 text-primary" />
                           </span>
                         )}
                         {postVisitPendingIds.has(lead.id) && (
-                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1 shrink-0" title="Post-visit followup pending">
-                            <MapPin className="h-2.5 w-2.5 text-amber-600" />
+                          <span className="flex h-4 items-center gap-0.5 rounded bg-warning/10 dark:bg-warning/80/30 px-1 shrink-0" title="Post-visit followup pending">
+                            <MapPin className="h-2.5 w-2.5 text-warning-foreground" />
                           </span>
                         )}
                       </div>
@@ -2101,6 +2792,7 @@ const Admissions = () => {
           setNewListName("");
           setExistingListId("");
           setListMode("new");
+          setListScope("selected");
         }
       }}>
         <DialogContent>
@@ -2109,8 +2801,28 @@ const Admissions = () => {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              {selectedIds.size} selected lead{selectedIds.size === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.
+              {listScope === "filtered"
+                ? `All ${filteredCount.toLocaleString("en-IN")} filtered leads will be saved to a static list for bulk WhatsApp or email campaigns.`
+                : `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`}
             </p>
+            {filteredCount > selectedIds.size && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={listScope === "selected" ? "default" : "outline"}
+                  onClick={() => setListScope("selected")}
+                >
+                  Selected ({selectedIds.size})
+                </Button>
+                <Button
+                  type="button"
+                  variant={listScope === "filtered" ? "default" : "outline"}
+                  onClick={() => setListScope("filtered")}
+                >
+                  All filtered ({filteredCount.toLocaleString("en-IN")})
+                </Button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"
@@ -2192,6 +2904,9 @@ const Admissions = () => {
             onOpenChange={setShowTransfer}
             leadIds={Array.from(selectedIds)}
             leadNames={selectedLeadNames}
+            pageSize={PAGE_SIZE}
+            totalMatchingLeads={filteredCount}
+            fetchLeadIdsForTransfer={fetchLeadIdsForTransfer}
             onSuccess={fetchLeads}
           />
         </Suspense>
@@ -2253,7 +2968,7 @@ const Admissions = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the selected lead{selectedIds.size > 1 ? "s" : ""} and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+              This will permanently delete the selected lead{selectedIds.size > 1 ? "s" : ""} and associated non-application data. Leads with linked applications will be blocked because admission steps depend on the lead record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

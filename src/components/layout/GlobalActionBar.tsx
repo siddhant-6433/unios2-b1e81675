@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
+import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed, Flame, MessageCircle, Timer } from "lucide-react";
 
 interface ActionItem {
@@ -39,6 +40,10 @@ export function GlobalActionBar() {
 
   useEffect(() => {
     if (!role || ["student", "parent"].includes(role)) return;
+    if (isAcademicPartnerPortalRole(role)) {
+      setItems([]);
+      return;
+    }
     if (!profileId && isCounsellor) return;
 
     const fetchCounts = async () => {
@@ -59,62 +64,62 @@ export function GlobalActionBar() {
 
         if (c("missed_callbacks") > 0) result.push({
           key: "missed_callbacks", label: "Missed Callbacks", count: c("missed_callbacks"),
-          icon: PhoneMissed, color: "text-white bg-red-600 border-red-700 animate-pulse",
+          icon: PhoneMissed, color: "text-white bg-destructive border-destructive/40 animate-rs-error-pulse",
           url: "/call-log",
         });
         if (c("ai_needs_followup") > 0) result.push({
           key: "ai_needs_followup", label: "AI Needs Follow-up", count: c("ai_needs_followup"),
-          icon: PhoneMissed, color: "text-white bg-rose-600 border-rose-700 animate-pulse",
+          icon: PhoneMissed, color: "text-white bg-destructive border-destructive/60 animate-rs-error-pulse",
           url: "/missed-calls",
         });
         if (c("reclaim_soon") > 0) result.push({
           key: "reclaim_soon", label: "Reclaim in <30m", count: c("reclaim_soon"),
-          icon: Timer, color: "text-white bg-red-600 border-red-700 animate-pulse",
+          icon: Timer, color: "text-white bg-destructive border-destructive/40 animate-rs-error-pulse",
           url: "/cloud-dialer",
         });
         if (c("unassigned") > 0) result.push({
           key: "unassigned", label: "Unassigned", count: c("unassigned"),
-          icon: Inbox, color: "text-white bg-orange-500 border-orange-600 animate-pulse",
+          icon: Inbox, color: "text-white bg-warning border-warning/60",
           url: "/lead-buckets",
         });
         if (c("hot") > 0) result.push({
           key: "hot", label: "Hot Leads", count: c("hot"),
-          icon: Flame, color: "text-violet-700 bg-violet-50 border-violet-200",
+          icon: Flame, color: "text-primary bg-primary/5 border-primary/20",
           url: "/cloud-dialer",
         });
         if (c("overdue") > 0) result.push({
           key: "overdue", label: "Overdue Follow-ups", count: c("overdue"),
-          icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200",
+          icon: AlertTriangle, color: "text-destructive bg-destructive/5 border-destructive/20",
           url: "/pending-followups?tab=overdue",
         });
         if (c("today") > 0) result.push({
           key: "today", label: "Today's Follow-ups", count: c("today"),
-          icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200",
+          icon: Clock, color: "text-warning-foreground bg-warning/5 border-warning/20",
           url: "/pending-followups?tab=today",
         });
         if (c("fresh") > 0) result.push({
           key: "fresh", label: "Fresh Leads", count: c("fresh"),
-          icon: Sparkles, color: "text-orange-600 bg-orange-50 border-orange-200",
+          icon: Sparkles, color: "text-warm bg-warm-container border-warm/20",
           url: "/fresh-leads",
         });
         if (c("post_visit") > 0) result.push({
           key: "post_visit", label: "Post-Visit", count: c("post_visit"),
-          icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200",
+          icon: Phone, color: "text-warning-foreground bg-warning/5 border-warning/20",
           url: "/pending-followups?tab=post_visit",
         });
         if (c("unclosed") > 0) result.push({
           key: "unclosed", label: "Visits to Close", count: c("unclosed"),
-          icon: MapPin, color: "text-red-600 bg-red-50 border-red-200",
+          icon: MapPin, color: "text-destructive bg-destructive/5 border-destructive/20",
           url: "/pending-followups?tab=unclosed_visits",
         });
         if (c("confirm") > 0) result.push({
           key: "confirm", label: "Visit Confirmations", count: c("confirm"),
-          icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200",
+          icon: CalendarCheck, color: "text-info-foreground bg-info/5 border-info/20",
           url: "/pending-followups?tab=visit_confirm",
         });
         if (c("wa_unread") > 0) result.push({
-          key: "wa_unread", label: "WhatsApp Unread", count: c("wa_unread"),
-          icon: MessageCircle, color: "text-emerald-700 bg-emerald-50 border-emerald-200",
+          key: "wa_unread", label: "WhatsApp Unreplied", count: c("wa_unread"),
+          icon: MessageCircle, color: "text-success bg-success/5 border-success/20",
           url: "/whatsapp-inbox",
         });
 

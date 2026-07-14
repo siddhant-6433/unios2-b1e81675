@@ -11,6 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, PDFImage, PDFFont, PDFPage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +43,68 @@ async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImag
 const fmtINR = (n: number) =>
   "Rs. " + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuidLike(value: string | null | undefined): boolean {
+  return UUID_RE.test(String(value || "").trim());
+}
+
+const SCHOOL_OFFER_TERM_ORDER = ["admission", "q1", "q2", "q3", "q4"];
+
+function isOfferProgrammeFeeTerm(term: string | null | undefined): boolean {
+  const normalized = String(term || "").trim().toLowerCase();
+  return /^year_\d+$/.test(normalized) || SCHOOL_OFFER_TERM_ORDER.includes(normalized);
+}
+
+type OfferFeeStructureRow = {
+  id: string;
+  version?: string | null;
+  created_at?: string | null;
+  policy?: FeeStructurePolicy | null;
+  fee_structure_items?: {
+    term: string;
+    amount: number;
+    fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null;
+  }[] | null;
+};
+
+function offerFeeStructureVersionRank(version: string | null | undefined): number {
+  const normalized = String(version || "").trim().toLowerCase();
+  if (normalized === "new_admission") return 0;
+  if (normalized === "standard") return 1;
+  if (normalized.includes("existing_parent")) return 3;
+  return 2;
+}
+
+function feeStructureHasOfferItems(structure: OfferFeeStructureRow): boolean {
+  return (structure.fee_structure_items || []).some((item) =>
+    isOfferProgrammeFeeTerm(item.term) && Number(item.amount || 0) > 0
+  );
+}
+
+function pickOfferFeeStructure(structures: OfferFeeStructureRow[] | null | undefined): OfferFeeStructureRow | null {
+  const usable = (structures || []).filter(feeStructureHasOfferItems);
+  if (usable.length === 0) return null;
+  return [...usable].sort((a, b) => {
+    const versionRank = offerFeeStructureVersionRank(a.version) - offerFeeStructureVersionRank(b.version);
+    if (versionRank !== 0) return versionRank;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  })[0];
+}
+
+function offerFeeTermRank(term: string): number {
+  const normalized = String(term || "").trim().toLowerCase();
+  const yearMatch = normalized.match(/^year_(\d+)$/);
+  if (yearMatch) return Number(yearMatch[1]);
+  const schoolIndex = SCHOOL_OFFER_TERM_ORDER.indexOf(normalized);
+  if (schoolIndex >= 0) return 100 + schoolIndex;
+  return 1_000;
+}
+
+function firstOfferFeeTerm(items: { term: string; total: number }[]): string {
+  return items.find(it => it.term === "year_1")?.term || items[0]?.term || "year_1";
+}
+
 const fmtDate = (d?: string | null) => {
   if (!d) return "-";
   const dt = new Date(d);
@@ -63,6 +126,105 @@ const fmtDeadline = (d?: string | null) => {
   const month   = dt.toLocaleDateString("en-IN", { month: "long" });
   return `${weekday}, ${ordinal(dt.getDate())} ${month}`;
 };
+
+const DEFAULT_INSTITUTION_NAME = "NIMT Educational Institutions";
+
+function sentenceCaseName(value?: string | null): string {
+  const cleaned = String(value || "").trim().replace(/\s+/g, " ");
+  if (!cleaned) return "Applicant";
+  return cleaned
+    .toLocaleLowerCase("en-IN")
+    .replace(/(^|[\s.'-])([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toLocaleUpperCase("en-IN")}`);
+}
+
+function publicApplicationRef(value?: string | null): string | null {
+  const cleaned = String(value || "").trim();
+  if (!cleaned || isUuidLike(cleaned)) return null;
+  return cleaned;
+}
+
+function institutionNameForOffer(brandingName?: string | null, campusName?: string | null): string {
+  const raw = String(brandingName || DEFAULT_INSTITUTION_NAME).trim() || DEFAULT_INSTITUTION_NAME;
+  const base = raw
+    .replace(/\s+-\s+Application Form$/i, "")
+    .replace(/\s+-\s+.*Campus.*$/i, "")
+    .trim() || DEFAULT_INSTITUTION_NAME;
+  const campus = String(campusName || "").trim();
+  return campus ? `${base} - ${campus}` : base;
+}
+
+function isBptOrBmritCourseName(courseName: string | null | undefined): boolean {
+  if (!courseName) return false;
+  const c = courseName.toLowerCase();
+  return (
+    c.includes("bpt") ||
+    c.includes("physiotherapy") ||
+    c.includes("bmrit") ||
+    (c.includes("radiology") && c.includes("b.sc")) ||
+    (c.includes("radiology") && c.includes("imaging"))
+  );
+}
+
+function isDeledCourseName(courseName: string | null | undefined): boolean {
+  if (!courseName) return false;
+  const c = courseName.toLowerCase();
+  return (
+    c.includes("d.el.ed") ||
+    c.includes("d el ed") ||
+    c.includes("deled") ||
+    (c.includes("diploma") && c.includes("elementary") && c.includes("education")) ||
+    c.includes("btc")
+  );
+}
+
+function isUpdeledExamName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(name);
+}
+
+interface ApplicationEntranceExam {
+  exam_name?: string | null;
+  registration_no?: string | null;
+  registered_name?: string | null;
+}
+
+interface ApplicationCahetSource {
+  application_id?: string | null;
+  full_name?: string | null;
+  academic_details?: {
+    entrance_exams?: ApplicationEntranceExam[] | null;
+  } | null;
+}
+
+function cahetRegistrationFromApplication(app: ApplicationCahetSource | null): { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null {
+  const exams = app?.academic_details?.entrance_exams;
+  if (!Array.isArray(exams)) return null;
+  const exam = exams.find((entry) => /cahet/i.test(String(entry?.exam_name || "")));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (!registrationNo) return null;
+  const registeredName = String(exam?.registered_name || "").trim();
+  return {
+    registration_no: registrationNo,
+    document_url: null,
+    notes: registeredName ? `Name on CAHET form: ${registeredName}` : "Entered in application form",
+    registered_at: null,
+  };
+}
+
+function updeledRegistrationFromApplication(app: ApplicationCahetSource | null): { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null {
+  const exams = app?.academic_details?.entrance_exams;
+  if (!Array.isArray(exams)) return null;
+  const exam = exams.find((entry) => isUpdeledExamName(String(entry?.exam_name || "")));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (!registrationNo) return null;
+  const registeredName = String(exam?.registered_name || "").trim();
+  return {
+    registration_no: registrationNo,
+    document_url: null,
+    notes: registeredName ? `Name on UPDELED form: ${registeredName}` : "Entered in application form",
+    registered_at: null,
+  };
+}
 
 const COLORS = {
   border:    rgb(0.55, 0.55, 0.6),
@@ -305,10 +467,10 @@ function drawParagraph(ctx: Ctx, text: string, opts: { size?: number; bold?: boo
   ctx.y -= opts.gapAfter ?? 0;
 }
 
-// Fee ledger table — Particulars / Amount / [Waiver/Scholarship] / Applicable Fee.
-// The Waiver/Scholarship column is rendered only when at least one row carries
-// a non-zero waiver (so a clean offer with no discounts still shows a tight
-// 3-column grid instead of an empty middle column).
+// Fee ledger table — Particulars / Amount / [Waiver/Adjustment] / Applicable Fee.
+// The adjustment column is rendered only when at least one row carries a
+// non-zero waiver/payment adjustment, so a clean offer still shows a tight
+// 3-column grid instead of an empty middle column.
 interface LedgerRow {
   label: string;
   amount: number;
@@ -317,6 +479,18 @@ interface LedgerRow {
   bold?: boolean;
   highlight?: boolean;
 }
+
+interface FeeStructureItem {
+  term: string;
+  amount: number;
+  fee_code_code?: string | null;
+  fee_code_name?: string | null;
+  fee_code_category?: string | null;
+}
+
+type FeeStructurePolicy = {
+  token_required_amount?: number | string | null;
+};
 
 function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
   const hasWaiverCol = rows.some(r => r.waiver > 0);
@@ -333,7 +507,7 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
     ? [labelW, numW, numW, numW]
     : [labelW, numW, numW];
   const headers = hasWaiverCol
-    ? ["Particulars", "Amount", "Waiver/Scholarship", "Applicable Fee"]
+    ? ["Particulars", "Amount", "Waiver/Adjustment", "Applicable Fee"]
     : ["Particulars", "Amount", "Applicable Fee"];
 
   const drawRowFrame = (fillColor: any) => {
@@ -392,14 +566,17 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
 // ───────────────────────── builder ─────────────────────────
 
 interface BuildOpts {
-  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string };
+  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string; admission_mode?: string | null; entrance_exam_name?: string | null };
   lead: { name: string; phone: string | null; email: string | null; application_id: string | null; pre_admission_no: string | null };
-  course: { name: string; duration_years?: number | null } | null;
+  course: { name: string; code?: string | null; duration_years?: number | null } | null;
   campus: { name: string; address?: string | null } | null;
   yearItems: { term: string; total: number }[];
+  feeItems: FeeStructureItem[];
   branding: any;
   totalCourseFee: number;
   tokenAmount: number;
+  tokenAlreadyPaid?: number;
+  applicationFeePaid: number;
   sessionName: string | null;
   // Resolved separately from applications table — leads.application_id is
   // often null for leads created via the SQL/test path.
@@ -408,6 +585,57 @@ interface BuildOpts {
   // deduction rows in the fee table; the displayed Net Offer Fee is
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
+  cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
+  updeledRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
+}
+
+function isDaottCourse(course: BuildOpts["course"]) {
+  const code = String(course?.code || "").toUpperCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
+}
+
+function isBptOrBmritCourse(course: BuildOpts["course"]) {
+  const code = String(course?.code || "").toLowerCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("bpt") ||
+    name.includes("bpt") ||
+    name.includes("physiotherapy") ||
+    code.includes("bmrit") ||
+    name.includes("bmrit") ||
+    (name.includes("radiology") && name.includes("imaging")) ||
+    (name.includes("radiology") && name.includes("b.sc"));
+}
+
+function labelForOfferTerm(term: string, isDaott: boolean) {
+  return isDaott
+    ? term.replace(/^year_(\d+)$/, "Sem $1")
+    : term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function daottFeeHeadLabel(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  const name = String(item.fee_code_name || "").toLowerCase();
+  if (code === "DAOTT-SEAT" || name.includes("seat block")) return "Seat Block";
+  if (code === "DAOTT-TUITION" || name.includes("tuition")) return "Tuition";
+  if (code === "DAOTT-ADMIN-TECH" || name.includes("admin")) return "Admin/Tech";
+  if (code === "DAOTT-EXAM" || name.includes("exam")) return "Examination";
+  return String(item.fee_code_name || "Fee").replace(/^DAOTT\s+/i, "").replace(/\s+Fee$/i, "");
+}
+
+function daottFeeItemRank(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  if (code === "DAOTT-SEAT") return 0;
+  if (code === "DAOTT-TUITION") return 1;
+  if (code === "DAOTT-ADMIN-TECH") return 2;
+  if (code === "DAOTT-EXAM") return 3;
+  return 9;
+}
+
+function isDaottSeatBlockItem(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  const name = String(item.fee_code_name || "").toLowerCase();
+  return code === "DAOTT-SEAT" || name.includes("seat block");
 }
 
 async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
@@ -425,11 +653,16 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     y: 0, contentStart: 0, contentEnd: 0,
     branding: { ...(opts.branding || {}), _lh: lh, _footer: ftr },
     hasLetterhead: !!lh,
-    appId: opts.applicationId || opts.lead.application_id,
+    appId: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no,
     sessionName: opts.sessionName,
   };
 
   await newPage(ctx);
+  const isDaott = isDaottCourse(opts.course);
+  const isCahetRoute = String(opts.offer.entrance_exam_name || "").toLowerCase().includes("cahet");
+  const isUpdeledRoute = isUpdeledExamName(opts.offer.entrance_exam_name);
+  const applicantName = sentenceCaseName(opts.lead.name);
+  const institutionName = institutionNameForOffer(opts.branding?.name, opts.campus?.name);
 
   // ── Date + greeting (compact — single line each) ────────────────────────
   ctx.page.drawText(`Date: ${fmtDate(opts.offer.created_at)}`, {
@@ -437,14 +670,14 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   ctx.y -= 18;
 
-  ctx.page.drawText(`Dear ${opts.lead.name || "Applicant"},`, {
+  ctx.page.drawText(`Dear ${applicantName},`, {
     x: ctx.margin, y: ctx.y - 11, size: 11, font: ctx.bold, color: COLORS.text,
   });
   ctx.y -= 22;
 
   // One-paragraph congratulations — short enough to never spill.
   drawParagraph(ctx,
-    "Congratulations! On behalf of " + (opts.branding?.name || "NIMT Educational Institutions") +
+    "Congratulations! On behalf of " + institutionName +
     ", we are pleased to offer you provisional admission to the programme detailed below. " +
     "Pay the token fee before the acceptance deadline to confirm your seat.",
     { size: 9.5, gapAfter: 8 });
@@ -453,13 +686,13 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   drawSection(ctx, "PROGRAMME DETAILS");
   drawKVGrid(ctx, [
     { label: "Programme",         value: opts.course?.name || "-" },
-    { label: "Duration",          value: opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
+    { label: "Duration",          value: isDaott ? "2.5 years (5 semesters)" : opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
     { label: "Campus",            value: opts.campus?.name || "-" },
     { label: "Academic Session",  value: opts.sessionName || "-" },
-    { label: "Applicant Name",    value: opts.lead.name || "-" },
+    { label: "Applicant Name",    value: applicantName },
     { label: "Phone",             value: opts.lead.phone || "-" },
     { label: "Email",             value: opts.lead.email || "-" },
-    { label: "Application ID",    value: opts.applicationId || opts.lead.application_id || "-" },
+    { label: "Application ID",    value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-" },
   ]);
 
   if (opts.campus?.address) {
@@ -469,15 +702,41 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     ctx.y -= 28;
   }
 
+  if (opts.cahetRegistration && (isBptOrBmritCourse(opts.course) || isCahetRoute)) {
+    ctx.y -= 4;
+    drawKVGrid(ctx, [
+      { label: "CAHET Status", value: "Registered" },
+      { label: "CAHET Registration No.", value: opts.cahetRegistration.registration_no || "-" },
+      { label: "Registered On", value: fmtDate(opts.cahetRegistration.registered_at) },
+      { label: "Proof", value: opts.cahetRegistration.document_url ? "Uploaded" : "Not attached" },
+    ]);
+    if (opts.cahetRegistration.notes) {
+      drawKVGrid(ctx, [{ label: "CAHET Notes", value: opts.cahetRegistration.notes }], 26, 1);
+    }
+  }
+
+  if (opts.updeledRegistration && (isDeledCourseName(opts.course?.name) || isUpdeledRoute)) {
+    ctx.y -= 4;
+    drawKVGrid(ctx, [
+      { label: "UPDELED Status", value: "Registered" },
+      { label: "UPDELED Registration No.", value: opts.updeledRegistration.registration_no || "-" },
+      { label: "Registered On", value: fmtDate(opts.updeledRegistration.registered_at) },
+      { label: "Proof", value: opts.updeledRegistration.document_url ? "Uploaded" : "Not attached" },
+    ]);
+    if (opts.updeledRegistration.notes) {
+      drawKVGrid(ctx, [{ label: "UPDELED Notes", value: opts.updeledRegistration.notes }], 26, 1);
+    }
+  }
+
   ctx.y -= 6;
 
   // ── Fee structure ──────────────────────────────────────────────────────
   drawSection(ctx, "FEE STRUCTURE");
 
-  // Build per-year ledger rows. Legacy `scholarship_amount` is attributed to
-  // Year 1 (that's also how the token-fee math handles it upstream); newer
-  // discounts live in `offer_waivers`. Waiver column is shown only if any
-  // year carries a non-zero waiver/scholarship.
+  // Build ledger rows. Legacy `scholarship_amount` is attributed to Year 1
+  // (that's also how the token-fee math handles it upstream); newer discounts
+  // live in `offer_waivers`. DAOTT offers are rendered from fee-head rows so
+  // the seat-block line remains visible instead of being hidden inside Sem 1.
   const scholarship = Number(opts.offer.scholarship_amount || 0);
   const ledgerRows: LedgerRow[] = [];
 
@@ -485,25 +744,78 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   let totalWaiver = 0;
   let totalApplicable = 0;
 
-  for (const it of opts.yearItems) {
-    const yearLabel = it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    const waiverForYear = opts.waivers
-      .filter(w => w.term === it.term)
-      .reduce((s, w) => s + Number(w.amount || 0), 0);
-    const scholarshipShare = it.term === "year_1" ? scholarship : 0;
-    const lineWaiver = waiverForYear + scholarshipShare;
-    const applicable = Math.max(0, Number(it.total) - lineWaiver);
+  if (isDaott && opts.feeItems.length > 0) {
+    const sortedFeeItems = [...opts.feeItems]
+      .filter((it) => isOfferProgrammeFeeTerm(it.term))
+      .sort((a, b) => offerFeeTermRank(a.term) - offerFeeTermRank(b.term) || daottFeeItemRank(a) - daottFeeItemRank(b));
 
-    ledgerRows.push({
-      label: yearLabel,
-      amount: Number(it.total),
-      waiver: lineWaiver,
-      applicable,
-    });
+    const termAdjustmentRemaining = new Map<string, number>();
+    for (const it of sortedFeeItems) {
+      if (!termAdjustmentRemaining.has(it.term)) {
+        const waiverForTerm = opts.waivers
+          .filter(w => w.term === it.term)
+          .reduce((s, w) => s + Number(w.amount || 0), 0);
+        termAdjustmentRemaining.set(it.term, waiverForTerm + (it.term === "year_1" ? scholarship : 0));
+      }
+    }
 
-    totalAmount     += Number(it.total);
-    totalWaiver     += lineWaiver;
-    totalApplicable += applicable;
+    const termHasNonSeatItem = new Map<string, boolean>();
+    for (const it of sortedFeeItems) {
+      if (!isDaottSeatBlockItem(it)) termHasNonSeatItem.set(it.term, true);
+    }
+
+    let applicationCreditRemaining = Math.max(0, Number(opts.applicationFeePaid || 0));
+
+    for (const it of sortedFeeItems) {
+      const amount = Number(it.amount || 0);
+      const isSeatBlock = isDaottSeatBlockItem(it);
+      const applicationAdjustment = isSeatBlock
+        ? Math.min(applicationCreditRemaining, amount)
+        : 0;
+      applicationCreditRemaining -= applicationAdjustment;
+
+      const termAdjustment = termAdjustmentRemaining.get(it.term) || 0;
+      const shouldApplyTermAdjustment = !isSeatBlock || !termHasNonSeatItem.get(it.term);
+      const waiverAdjustment = shouldApplyTermAdjustment
+        ? Math.min(termAdjustment, Math.max(0, amount - applicationAdjustment))
+        : 0;
+      termAdjustmentRemaining.set(it.term, termAdjustment - waiverAdjustment);
+
+      const lineAdjustment = applicationAdjustment + waiverAdjustment;
+      const applicable = Math.max(0, amount - lineAdjustment);
+
+      ledgerRows.push({
+        label: `${labelForOfferTerm(it.term, true)} - ${daottFeeHeadLabel(it)}`,
+        amount,
+        waiver: lineAdjustment,
+        applicable,
+      });
+
+      totalAmount += amount;
+      totalWaiver += lineAdjustment;
+      totalApplicable += applicable;
+    }
+  } else {
+    for (const it of opts.yearItems) {
+      const yearLabel = labelForOfferTerm(it.term, isDaott);
+      const waiverForYear = opts.waivers
+        .filter(w => w.term === it.term)
+        .reduce((s, w) => s + Number(w.amount || 0), 0);
+      const scholarshipShare = it.term === "year_1" ? scholarship : 0;
+      const lineWaiver = waiverForYear + scholarshipShare;
+      const applicable = Math.max(0, Number(it.total) - lineWaiver);
+
+      ledgerRows.push({
+        label: yearLabel,
+        amount: Number(it.total),
+        waiver: lineWaiver,
+        applicable,
+      });
+
+      totalAmount     += Number(it.total);
+      totalWaiver     += lineWaiver;
+      totalApplicable += applicable;
+    }
   }
 
   if (opts.totalCourseFee > 0 || ledgerRows.length > 0) {
@@ -523,22 +835,32 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   // ── Token + acceptance deadline ────────────────────────────────────────
   drawSection(ctx, "ADMISSION CONFIRMATION");
-  drawKVGrid(ctx, [
-    { label: "Token Fee Payable",   value: fmtINR(opts.tokenAmount || 0) },
+  const tokenPrePaid = Number(opts.tokenAlreadyPaid || 0);
+  const netTokenPayable = Math.max(0, Number(opts.tokenAmount || 0) - tokenPrePaid);
+  const confirmationRows = [
+    { label: "Token Fee Payable", value: fmtINR(opts.tokenAmount || 0) },
+    ...(tokenPrePaid > 0
+      ? [
+          { label: "Less: Token Fee Already Paid", value: "- " + fmtINR(tokenPrePaid) },
+          { label: "Net Token Fee Due", value: fmtINR(netTokenPayable) },
+        ]
+      : []),
     { label: "Acceptance Deadline", value: fmtDeadline(opts.offer.acceptance_deadline) },
     { label: "Pay Online",          value: "uni.nimt.ac.in" },
-    { label: "Reference No.",       value: opts.applicationId || opts.lead.application_id || "-" },
-  ]);
+    { label: "Reference No.",       value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-" },
+  ];
+  drawKVGrid(ctx, confirmationRows);
 
   ctx.y -= 4;
 
   // ── Terms (compact, smaller font) ──────────────────────────────────────
   drawSection(ctx, "TERMS & NEXT STEPS");
+  const firstFeePeriod = isDaott ? "Semester 1" : labelForOfferTerm(firstOfferFeeTerm(opts.yearItems), false);
   const terms = [
     "Provisional offer subject to verification of original documents at physical admission.",
-    "Token fee is adjustable against the first-year programme fee and is non-refundable once paid.",
+    `Token fee is adjustable against the ${firstFeePeriod} programme fee and is non-refundable once paid.`,
     "Education loan support letter can be downloaded from the applicant portal after the token fee is paid.",
-    "Remaining first-year fee is due as per the schedule communicated post token-fee confirmation.",
+    `Remaining ${firstFeePeriod} fee is due as per the schedule communicated post token-fee confirmation.`,
     "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
     "Offer lapses automatically if token fee is not received by the acceptance deadline.",
     "The institution may revoke this offer if any submitted information is found inaccurate.",
@@ -644,7 +966,7 @@ Deno.serve(async (req) => {
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    const { offer_letter_id } = await req.json();
+    const { offer_letter_id, application_id } = await req.json();
     if (!offer_letter_id) {
       return new Response(JSON.stringify({ error: "offer_letter_id required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -656,10 +978,11 @@ Deno.serve(async (req) => {
       .from("offer_letters")
       .select(`
         id, total_fee, scholarship_amount, net_fee, approval_status,
-        token_fee_amount, acceptance_deadline, created_at,
+        source_fee_proposal_id, source_fee_proposal_child_key,
+        token_fee_amount, acceptance_deadline, created_at, admission_mode, entrance_exam_name,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
-        courses:course_id ( name, duration_years ),
+        courses:course_id ( name, code, duration_years ),
         campuses:campus_id ( name, address )
       `)
       .eq("id", offer_letter_id)
@@ -679,24 +1002,58 @@ Deno.serve(async (req) => {
     const course: any = offer.courses;
     const campus: any = offer.campuses;
 
-    // Per-year fee breakdown from fee_structure_items.
-    const { data: yearRows } = await admin
+    // Programme fee breakdown from fee_structure_items. Keep both the grouped
+    // term totals for token math and detailed fee-code rows for DAOTT offer
+    // PDFs, where the seat-block fee must be shown explicitly.
+    const { data: feeStructures, error: feeStructureError } = await admin
       .from("fee_structures")
-      .select("id, fee_structure_items ( term, amount )")
+      .select("id, version, created_at, policy, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
-      .eq("is_active", true)
-      .single();
+      .eq("is_active", true);
+    if (feeStructureError) throw feeStructureError;
+    const yearRows = pickOfferFeeStructure((feeStructures || []) as OfferFeeStructureRow[]);
 
     const yearMap = new Map<string, number>();
-    for (const it of ((yearRows as any)?.fee_structure_items || []) as { term: string; amount: number }[]) {
-      if (!it.term?.startsWith("year_")) continue;
-      yearMap.set(it.term, (yearMap.get(it.term) || 0) + Number(it.amount));
+    const feeItems: FeeStructureItem[] = [];
+    for (const it of (yearRows?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
+      const term = String(it.term || "").trim().toLowerCase();
+      if (!isOfferProgrammeFeeTerm(term)) continue;
+      yearMap.set(term, (yearMap.get(term) || 0) + Number(it.amount));
+      feeItems.push({
+        term,
+        amount: Number(it.amount || 0),
+        fee_code_code: it.fee_codes?.code || null,
+        fee_code_name: it.fee_codes?.name || null,
+        fee_code_category: it.fee_codes?.category || null,
+      });
     }
     const yearItems = Array.from(yearMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => offerFeeTermRank(a) - offerFeeTermRank(b) || a.localeCompare(b))
       .map(([term, total]) => ({ term, total }));
     const totalCourseFee = yearItems.reduce((s, y) => s + y.total, 0);
+
+    const { data: applicationFeeRows } = await admin
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .eq("type", "application_fee")
+      .eq("status", "confirmed");
+    const applicationFeePaid = ((applicationFeeRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+    // Sum of confirmed token payments (offer-driven token_fee + any
+    // pre-application token collected before this offer existed). Shown on the
+    // offer as "Less: token fee already paid" so a pre-paid candidate sees the
+    // credit against their admission fee (owner requirement).
+    const { data: tokenPaidRows } = await admin
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .in("type", ["token_fee", "pre_admission_token"])
+      .eq("status", "confirmed");
+    const tokenAlreadyPaid = ((tokenPaidRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
     // Resolve session name for the top-right pill + programme details grid.
     let sessionName: string | null = null;
@@ -705,21 +1062,62 @@ Deno.serve(async (req) => {
       sessionName = sess?.name || null;
     }
 
-    // Resolve application_id directly from applications. leads.application_id
-    // is sometimes null (test data, manual SQL inserts, race conditions on
-    // the trigger that mirrors it). Pull the latest application linked to
-    // this lead — that's the authoritative source for the top-right badge.
-    let applicationId: string | null = lead?.application_id || null;
-    if (!applicationId && offer.lead_id) {
+    // Resolve the display application ID directly from applications. Do not
+    // display leads.application_id blindly: older sync paths can store the
+    // internal applications.id UUID there, while PDFs must show APP-... IDs.
+    const requestedApplicationValue = String(application_id || "").trim();
+    const leadApplicationValue = String(lead?.application_id || "").trim();
+    let applicationId: string | null = null;
+    applicationId = publicApplicationRef(requestedApplicationValue) || publicApplicationRef(leadApplicationValue);
+    let applicationRow: ApplicationCahetSource | null = null;
+    if (applicationId) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id")
+        .select("application_id, full_name, academic_details")
+        .eq("application_id", applicationId)
+        .maybeSingle();
+      applicationRow = appRow || null;
+    }
+    if (!applicationRow && offer.lead_id) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("id, application_id, full_name, academic_details")
         .eq("lead_id", offer.lead_id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      applicationRow = appRow || null;
+      applicationId = publicApplicationRef(appRow?.application_id) || applicationId;
+    }
+    if (!applicationRow && isUuidLike(leadApplicationValue)) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("id, application_id, full_name, academic_details")
+        .eq("id", leadApplicationValue)
+        .maybeSingle();
+      applicationRow = appRow || null;
+      applicationId = publicApplicationRef(appRow?.application_id) || applicationId;
+    }
+    if (!applicationRow && lead?.application_id && isUuidLike(lead.application_id)) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("application_id, full_name, academic_details")
+        .eq("id", lead.application_id)
+        .maybeSingle();
+      applicationRow = appRow || null;
       applicationId = appRow?.application_id || null;
     }
+    if (!applicationRow && lead?.application_id && !isUuidLike(lead.application_id)) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("application_id, full_name, academic_details")
+        .eq("application_id", lead.application_id)
+        .maybeSingle();
+      applicationRow = appRow || null;
+      applicationId = appRow?.application_id || lead.application_id || null;
+    }
+    const applicantName = String(applicationRow?.full_name || "").trim() || lead?.name || "Applicant";
+    const pdfLead = { ...lead, name: applicantName };
 
     // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
     // then 'all', then default).
@@ -731,7 +1129,7 @@ Deno.serve(async (req) => {
     // so Year 1 renders before Year 2 in the fee table.
     const { data: waiverRows } = await admin
       .from("offer_waivers")
-      .select("term, amount")
+      .select("term, amount, source_type, metadata")
       .eq("offer_letter_id", offer_letter_id)
       .eq("status", "approved")
       .order("term", { ascending: true });
@@ -740,9 +1138,40 @@ Deno.serve(async (req) => {
       amount: Number(w.amount || 0),
     }));
 
+    const { data: cahetRegistrationRow } = await admin
+      .from("cahet_registrations")
+      .select("registration_no, document_url, notes, registered_at")
+      .eq("lead_id", offer.lead_id)
+      .maybeSingle();
+    const cahetRegistration = cahetRegistrationRow || cahetRegistrationFromApplication(applicationRow);
+    if (isBptOrBmritCourseName(course?.name) && !cahetRegistration) {
+      return new Response(JSON.stringify({
+        error: "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.",
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: updeledRegistrationRow } = await admin
+      .from("updeled_registrations")
+      .select("registration_no, document_url, notes, registered_at")
+      .eq("lead_id", offer.lead_id)
+      .maybeSingle();
+    const updeledRegistration = updeledRegistrationRow || updeledRegistrationFromApplication(applicationRow);
+    if (isDeledCourseName(course?.name) && !updeledRegistration) {
+      return new Response(JSON.stringify({
+        error: "UPDELED registration details are required before issuing an offer letter for D.El.Ed.",
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Token fee on the PDF: this is the amount the candidate must pay before
-    // downloading the education-loan support letter — i.e. 10% of the
-    // post-scholarship + post-waiver Year-1 fee, floored at ₹5,000.
+    // downloading the education-loan support letter — i.e. 25% of the
+    // post-scholarship + post-waiver Year-1 fee, floored at the
+    // course-specific seat-block amount.
     //
     //   1. If the offer carries an explicit token_fee_amount (set when the
     //      counsellor used the new offer-letter form), use that verbatim.
@@ -753,42 +1182,45 @@ Deno.serve(async (req) => {
     //      legacy leads.token_amount.
     let tokenAmount = Number((offer as any)?.token_fee_amount ?? 0);
     if (!tokenAmount || tokenAmount <= 0) {
-      const y1Total = yearItems.find(it => it.term === "year_1")?.total ?? 0;
+      const firstTerm = firstOfferFeeTerm(yearItems);
+      const firstTermTotal = yearItems.find(it => it.term === firstTerm)?.total ?? 0;
       const scholarship = Number(offer.scholarship_amount || 0);
       const y1Waivers = waivers
-        .filter(w => w.term === "year_1")
+        .filter(w => w.term === firstTerm)
         .reduce((s, w) => s + Number(w.amount || 0), 0);
-      const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
-      tokenAmount = postY1 > 0
-        ? Math.max(Math.round(postY1 * 0.10), 5000)
+      const postY1 = Math.max(0, firstTermTotal - scholarship - y1Waivers);
+      const policy = (yearRows as { policy?: FeeStructurePolicy | null } | null)?.policy;
+      const policyTokenAmount = Number(policy?.token_required_amount || 0);
+      const tokenFloor = policyTokenAmount || 5000;
+      tokenAmount = policyTokenAmount > 0
+        ? policyTokenAmount
+        : postY1 > 0
+        ? Math.max(Math.round(postY1 * 0.25), tokenFloor)
         : Number(lead?.token_amount || 0);
     }
 
     const pdfBytes = await buildOfferPdf({
       offer,
-      lead,
+      lead: pdfLead,
       course,
       campus,
       yearItems,
+      feeItems,
       branding,
       totalCourseFee,
       tokenAmount,
+      tokenAlreadyPaid,
+      applicationFeePaid,
       sessionName,
       applicationId,
       waivers,
+      cahetRegistration: cahetRegistration || null,
+      updeledRegistration: updeledRegistration || null,
     });
 
     const path = `offer-letters/${offer.lead_id}/${offer.id}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from("application-documents")
-      .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });
-    if (upErr) {
-      return new Response(JSON.stringify({ error: upErr.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    const letterUrl = pub?.publicUrl || path;
+    const uploaded = await uploadToR2({ key: path, body: pdfBytes, contentType: "application/pdf" });
+    const letterUrl = uploaded.url;
 
     await admin.from("offer_letters").update({ letter_url: letterUrl }).eq("id", offer.id);
 

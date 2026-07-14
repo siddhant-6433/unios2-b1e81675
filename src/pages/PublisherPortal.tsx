@@ -5,46 +5,25 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
   Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
-  BookOpen, MapPin, BarChart3, Calendar,
+  BookOpen, MapPin, BarChart3,
 } from "lucide-react";
-import {
-  startOfDay, endOfDay, startOfYesterday, endOfYesterday,
-  startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths,
-} from "date-fns";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 
-type DatePreset = "today" | "yesterday" | "this_week" | "this_month" | "last_month" | "all" | "custom";
-
-const DATE_PRESET_LABELS: Record<DatePreset, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  this_week: "This Week",
-  this_month: "This Month",
-  last_month: "Last Month",
-  all: "All Time",
-  custom: "Custom",
-};
-
-function dateRangeFor(preset: DatePreset, customStart?: string, customEnd?: string): [Date | null, Date | null] {
-  const now = new Date();
-  switch (preset) {
-    case "today":      return [startOfDay(now), endOfDay(now)];
-    case "yesterday":  return [startOfYesterday(), endOfYesterday()];
-    case "this_week":  return [startOfWeek(now, { weekStartsOn: 1 }), endOfWeek(now, { weekStartsOn: 1 })];
-    case "this_month": return [startOfMonth(now), endOfMonth(now)];
-    case "last_month": { const lm = subMonths(now, 1); return [startOfMonth(lm), endOfMonth(lm)]; }
-    case "custom":     return [
-      customStart ? startOfDay(new Date(customStart)) : null,
-      customEnd   ? endOfDay(new Date(customEnd))     : null,
-    ];
-    case "all":
-    default:           return [null, null];
-  }
+function dateRangeFor(preset: DatePreset, fromDate?: string, toDate?: string): [Date | null, Date | null] {
+  const range = preset === "custom" ? { from: fromDate || "", to: toDate || "" } : getDatePresetRange(preset);
+  return [
+    range.from ? new Date(`${range.from}T00:00:00`) : null,
+    range.to ? new Date(`${range.to}T23:59:59.999`) : null,
+  ];
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -107,23 +86,23 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  new_lead: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
+  new_lead: "bg-info/10 text-info-foreground dark:bg-info/90/40 dark:text-info/80",
   application_in_progress: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-400",
-  application_fee_paid: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400",
+  application_fee_paid: "bg-success/10 text-success dark:bg-success/90/40 dark:text-success",
   application_submitted: "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400",
-  counsellor_call: "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400",
-  visit_scheduled: "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400",
-  interview: "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400",
+  counsellor_call: "bg-warning/10 text-warning-foreground dark:bg-warning/90/40 dark:text-warning",
+  visit_scheduled: "bg-primary/10 text-primary dark:bg-primary/90/40 dark:text-primary/60",
+  interview: "bg-primary/10 text-primary dark:bg-primary/90/40 dark:text-primary/60",
   offer_sent: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400",
-  token_paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  token_paid: "bg-success/10 text-success dark:bg-success/90/40 dark:text-success",
   pre_admitted: "bg-lime-100 text-lime-700 dark:bg-lime-950/40 dark:text-lime-400",
-  admitted: "bg-green-200 text-green-800 dark:bg-green-900/50 dark:text-green-300",
-  waitlisted: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
+  admitted: "bg-success/15 text-success-foreground dark:bg-success/80/50 dark:text-success/60",
+  waitlisted: "bg-warning/10 text-warning-foreground dark:bg-warning/90/40 dark:text-warning",
   not_interested: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-  ineligible: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+  ineligible: "bg-destructive/10 text-destructive dark:bg-destructive/90/40 dark:text-destructive/80",
   dnc: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
-  deferred: "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400",
-  rejected: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+  deferred: "bg-primary/10 text-primary dark:bg-primary/90/40 dark:text-primary/60",
+  rejected: "bg-destructive/10 text-destructive dark:bg-destructive/90/40 dark:text-destructive/80",
 };
 
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -136,10 +115,10 @@ const ACTIVITY_LABELS: Record<string, string> = {
 };
 
 const ACTIVITY_COLORS: Record<string, string> = {
-  stage_change: "bg-blue-500",
-  call: "bg-orange-500",
-  ai_call: "bg-violet-500",
-  payment: "bg-green-500",
+  stage_change: "bg-info/50",
+  call: "bg-warning",
+  ai_call: "bg-primary/50",
+  payment: "bg-success/50",
   application_submitted: "bg-teal-500",
   application_started: "bg-yellow-500",
 };
@@ -173,8 +152,8 @@ export default function PublisherPortal() {
   const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
   const [aiNotInterestedOnly, setAiNotInterestedOnly] = useState(false);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
-  const [customStart, setCustomStart] = useState<string>("");
-  const [customEnd, setCustomEnd] = useState<string>("");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
   const [contractFilter, setContractFilter] = useState<string>("all");
 
   const [avgAiCallMs, setAvgAiCallMs] = useState<number | null>(null);
@@ -232,7 +211,9 @@ export default function PublisherPortal() {
       }
       setPublisher(pub);
 
-      // Paginate to bypass Supabase server-side max-rows cap (default 1000)
+      // Paginate to bypass Supabase server-side max-rows cap (default 1000).
+      // Do not request PAGE + 1 here: PostgREST still caps the response at
+      // 1000, so the sentinel row never arrives and totals stick at 1000.
       const PAGE = 1000;
       let allLeads: any[] = [];
       let cursor: { created_at: string; id: string } | null = null;
@@ -249,17 +230,16 @@ export default function PublisherPortal() {
           .eq("source", pub.source)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
-          .limit(PAGE + 1);
+          .limit(PAGE);
         if (cursor) {
           query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
         }
         const { data: batch, error } = await query;
         if (error) { fetchErr = error; break; }
         const fetched = batch ?? [];
-        const rows = fetched.slice(0, PAGE);
-        allLeads = allLeads.concat(rows);
-        const last = rows[rows.length - 1];
-        if (!last || fetched.length <= PAGE) break; // last page
+        allLeads = allLeads.concat(fetched);
+        const last = fetched[fetched.length - 1];
+        if (!last || fetched.length < PAGE) break; // last page
         cursor = { created_at: last.created_at, id: last.id };
       }
 
@@ -388,7 +368,7 @@ export default function PublisherPortal() {
 
   // Date-scoped lead set — drives stats, breakdowns, and the table.
   // Avg AI/manual response cards keep their own fixed 3-day window above.
-  const [dateStart, dateEnd] = dateRangeFor(datePreset, customStart, customEnd);
+  const [dateStart, dateEnd] = dateRangeFor(datePreset, fromDate, toDate);
   const dateScopedLeads = leads.filter(l => {
     if (!dateStart && !dateEnd) return true;
     const t = new Date(l.created_at).getTime();
@@ -429,7 +409,7 @@ export default function PublisherPortal() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -481,16 +461,14 @@ export default function PublisherPortal() {
         </div>
         {isSuperAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
-            <select
+            <SelectField
               value={impersonatingId}
-              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setCustomStart(""); setCustomEnd(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
-              className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              <option value="">— Switch Publisher —</option>
-              {allPublishers.map(p => (
-                <option key={p.id} value={p.id}>{p.display_name} ({p.source})</option>
-              ))}
-            </select>
+              onValueChange={value => { setImpersonatingId(value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setFromDate(""); setToDate(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
+              placeholder="Switch Publisher"
+              options={allPublishers.map(p => ({ value: p.id, label: `${p.display_name} (${p.source})` }))}
+              triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+              ariaLabel="Switch publisher"
+            />
             {impersonatingId && (() => {
               const pub = allPublishers.find(p => p.id === impersonatingId);
               return pub?.user_id ? (
@@ -507,7 +485,7 @@ export default function PublisherPortal() {
                   Login as {pub.display_name}
                 </button>
               ) : (
-                <span className="text-xs text-amber-600 dark:text-amber-400">⚠ No user account linked</span>
+                <span className="text-xs text-warning-foreground dark:text-warning">⚠ No user account linked</span>
               );
             })()}
           </div>
@@ -538,7 +516,7 @@ export default function PublisherPortal() {
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Admitted</p>
-              <CheckCircle className="h-4 w-4 text-green-500" />
+              <CheckCircle className="h-4 w-4 text-success" />
             </div>
             <p className="text-3xl font-bold text-foreground">{admitted}</p>
           </CardContent>
@@ -556,7 +534,7 @@ export default function PublisherPortal() {
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Response — AI</p>
-              <Phone className="h-4 w-4 text-violet-500" />
+              <Phone className="h-4 w-4 text-primary" />
             </div>
             {avgAiCallMs === null ? (
               <p className="text-sm text-muted-foreground mt-1">No data</p>
@@ -572,7 +550,7 @@ export default function PublisherPortal() {
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Response — Manual</p>
-              <Phone className="h-4 w-4 text-orange-500" />
+              <Phone className="h-4 w-4 text-warning" />
             </div>
             {avgManualCallMs === null ? (
               <p className="text-sm text-muted-foreground mt-1">No data</p>
@@ -617,14 +595,14 @@ export default function PublisherPortal() {
                   }}
                   className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
                     aiNotInterestedOnly
-                      ? "border-violet-500 bg-violet-500 text-white"
-                      : "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
+                      ? "border-primary/35 bg-primary/50 text-white"
+                      : "border-primary/25 bg-primary/5 text-primary hover:bg-primary/10 dark:border-primary/50 dark:bg-primary/90/40 dark:text-primary/50"
                   }`}
                   title="Leads closed automatically by AI voice call or WhatsApp classifier"
                 >
                   Marked Not Interested by AI Call
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                    aiNotInterestedOnly ? "bg-white/20" : "bg-violet-200/70 dark:bg-violet-900/60"
+                    aiNotInterestedOnly ? "bg-white/20" : "bg-primary/15/70 dark:bg-primary/80/60"
                   }`}>
                     {aiNotInterestedCount}
                   </span>
@@ -712,18 +690,21 @@ export default function PublisherPortal() {
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   {bestCourse && bestCourse.ratio > 0 && (
-                    <span className="text-[11px] text-green-600 dark:text-green-400 font-medium bg-green-50 dark:bg-green-950/30 px-2.5 py-1 rounded-full">
+                    <span className="text-[11px] text-success dark:text-success font-medium bg-success/5 dark:bg-success/90/30 px-2.5 py-1 rounded-full">
                       Best: {bestCourse.course} ({(bestCourse.ratio * 100).toFixed(0)}% int/called)
                     </span>
                   )}
-                  <select
+                  <SelectField
                     value={courseSortBy}
-                    onChange={e => setCourseSortBy(e.target.value as "total"|"ratio")}
-                    className="rounded-lg border border-input bg-background px-2 py-1 text-[11px] font-medium text-foreground focus:outline-none"
-                  >
-                    <option value="total">Sort: Total Leads</option>
-                    <option value="ratio">Sort: Interested/Called ↓</option>
-                  </select>
+                    onValueChange={value => setCourseSortBy(value as "total"|"ratio")}
+                    options={[
+                      { value: "total", label: "Sort: Total Leads" },
+                      { value: "ratio", label: "Sort: Interested/Called ↓" },
+                    ]}
+                    allowEmpty={false}
+                    triggerClassName="h-7 rounded-lg border border-input bg-background px-2 py-1 text-[11px] font-medium text-foreground focus:ring-0"
+                    ariaLabel="Sort course-wise lead stages"
+                  />
                 </div>
               </div>
             </CardHeader>
@@ -734,8 +715,8 @@ export default function PublisherPortal() {
                     <tr className="border-b border-t border-border bg-muted/50">
                       <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wide sticky left-0 bg-muted/50 z-10">Course</th>
                       <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Total</th>
-                      <th className="px-3 py-2.5 text-center font-semibold text-violet-500 whitespace-nowrap">Called</th>
-                      <th className="px-3 py-2.5 text-center font-semibold text-blue-500 whitespace-nowrap cursor-pointer hover:text-blue-700" onClick={() => setCourseSortBy(courseSortBy === "ratio" ? "total" : "ratio")}>
+                      <th className="px-3 py-2.5 text-center font-semibold text-primary whitespace-nowrap">Called</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-info whitespace-nowrap cursor-pointer hover:text-info-foreground" onClick={() => setCourseSortBy(courseSortBy === "ratio" ? "total" : "ratio")}>
                         Int/Called{courseSortBy === "ratio" ? " ↓" : ""}
                       </th>
                       {pipelineStages.filter(s => activeStages.includes(s)).map(s => (
@@ -743,7 +724,7 @@ export default function PublisherPortal() {
                           {(STAGE_LABELS[s] || s).replace(/ /g, "\u00A0")}
                         </th>
                       ))}
-                      <th className="px-3 py-2.5 text-center font-semibold text-red-400">Dropped</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-destructive/80">Dropped</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -753,7 +734,7 @@ export default function PublisherPortal() {
                         <td className="px-3 py-2.5 text-center font-bold text-foreground">{total}</td>
                         <td className="px-3 py-2.5 text-center">
                           {called > 0 ? (
-                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400">
+                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-primary/10 text-primary dark:bg-primary/90/40 dark:text-primary/60">
                               {called}
                             </span>
                           ) : <span className="text-muted-foreground/40">—</span>}
@@ -761,9 +742,9 @@ export default function PublisherPortal() {
                         <td className="px-3 py-2.5 text-center">
                           {called > 0 ? (
                             <span className={`inline-block min-w-[36px] px-1.5 py-0.5 rounded-md text-[11px] font-bold ${
-                              ratio >= 0.5 ? "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400"
-                              : ratio >= 0.25 ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
-                              : "bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+                              ratio >= 0.5 ? "bg-success/10 text-success dark:bg-success/90/40 dark:text-success"
+                              : ratio >= 0.25 ? "bg-warning/10 text-warning-foreground dark:bg-warning/90/40 dark:text-warning"
+                              : "bg-destructive/10 text-destructive dark:bg-destructive/90/40 dark:text-destructive/80"
                             }`}>
                               {(ratio * 100).toFixed(0)}%
                             </span>
@@ -783,7 +764,7 @@ export default function PublisherPortal() {
                         })}
                         <td className="px-3 py-2.5 text-center">
                           {dropped > 0 ? (
-                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400">
+                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-destructive/10 text-destructive dark:bg-destructive/90/40 dark:text-destructive/80">
                               {dropped}
                             </span>
                           ) : <span className="text-muted-foreground/40">—</span>}
@@ -851,10 +832,10 @@ export default function PublisherPortal() {
                     <div key={name} className="flex items-center gap-3">
                       <span className="text-xs text-foreground font-medium w-28 truncate shrink-0" title={name}>{name}</span>
                       <div className="flex-1 h-6 bg-muted/50 rounded-md overflow-hidden relative">
-                        <div className="h-full bg-blue-100 dark:bg-blue-950/40 rounded-md transition-all" style={{ width: `${barWidth}%` }} />
+                        <div className="h-full bg-info/10 dark:bg-info/90/40 rounded-md transition-all" style={{ width: `${barWidth}%` }} />
                         <div className="absolute inset-0 flex items-center px-2 justify-between">
                           <span className="text-[10px] font-semibold text-foreground">{d.total} leads</span>
-                          <span className={`text-[10px] font-bold ${intRate >= 50 ? "text-green-600" : intRate >= 25 ? "text-amber-600" : "text-red-500"}`}>
+                          <span className={`text-[10px] font-bold ${intRate >= 50 ? "text-success" : intRate >= 25 ? "text-warning-foreground" : "text-destructive"}`}>
                             {intRate}% interested
                           </span>
                         </div>
@@ -890,73 +871,58 @@ export default function PublisherPortal() {
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
+          <Input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search by name, phone, course…"
             className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </div>
-        <div className="relative">
-          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <select
-            value={datePreset}
-            onChange={e => setDatePreset(e.target.value as DatePreset)}
-            className="rounded-xl border border-input bg-card pl-8 pr-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            {(Object.entries(DATE_PRESET_LABELS) as [DatePreset, string][]).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        </div>
-        {datePreset === "custom" && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customStart}
-              max={customEnd || undefined}
-              onChange={e => setCustomStart(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-            <span className="text-xs text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={customEnd}
-              min={customStart || undefined}
-              onChange={e => setCustomEnd(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-          </div>
-        )}
-        <select
+        <DateRangeFilter
+          preset={datePreset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setDatePreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+          ariaPrefix="Publisher leads"
+        />
+        <SelectField
           value={stageFilter}
-          onChange={e => setStageFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        >
-          <option value="all">All Stages</option>
-          {Object.entries(STAGE_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
-        <select
+          onValueChange={setStageFilter}
+          options={[
+            { value: "all", label: "All Stages" },
+            ...Object.entries(STAGE_LABELS).map(([key, label]) => ({ value: key, label })),
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+          ariaLabel="Filter by stage"
+        />
+        <SelectField
           value={aiFilter}
-          onChange={e => setAiFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        >
-          <option value="all">All AI Call Status</option>
-          <option value="called">AI Called</option>
-          <option value="not_called">Not Called</option>
-        </select>
+          onValueChange={setAiFilter}
+          options={[
+            { value: "all", label: "All AI Call Status" },
+            { value: "called", label: "AI Called" },
+            { value: "not_called", label: "Not Called" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+          ariaLabel="Filter by AI call status"
+        />
         {contractIds.length > 0 && (
-          <select
+          <SelectField
             value={contractFilter}
-            onChange={e => setContractFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            title="JustDial contract ID"
-          >
-            <option value="all">All Contracts</option>
-            {contractIds.map(c => <option key={c} value={c}>Contract {c}</option>)}
-          </select>
+            onValueChange={setContractFilter}
+            options={[
+              { value: "all", label: "All Contracts" },
+              ...contractIds.map(c => ({ value: c, label: `Contract ${c}` })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:ring-2 focus:ring-ring/20"
+            ariaLabel="Filter by JustDial contract ID"
+          />
         )}
       </div>
 
@@ -1002,7 +968,7 @@ export default function PublisherPortal() {
                   </td>
                   <td className="px-4 py-3">
                     {lead.ai_called ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success dark:text-success">
                         <Phone className="h-3.5 w-3.5" />
                         Called
                         {lead.ai_called_at && (
@@ -1087,7 +1053,7 @@ export default function PublisherPortal() {
                     if (!firstCall) return (
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">First Call</span>
-                        <span className="text-amber-600 dark:text-amber-400 text-xs font-medium">Not called yet</span>
+                        <span className="text-warning-foreground dark:text-warning text-xs font-medium">Not called yet</span>
                       </div>
                     );
                     const ms = new Date(firstCall.created_at).getTime() - new Date(selectedLead.created_at).getTime();
@@ -1095,8 +1061,8 @@ export default function PublisherPortal() {
                     return (
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Time to First Call</span>
-                        <span className={`font-medium text-xs flex items-center gap-1 ${ms <= 3600000 ? "text-green-600 dark:text-green-400" : ms <= 86400000 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
-                          {isAi && <span className="text-[9px] bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full font-semibold">AI</span>}
+                        <span className={`font-medium text-xs flex items-center gap-1 ${ms <= 3600000 ? "text-success dark:text-success" : ms <= 86400000 ? "text-warning-foreground dark:text-warning" : "text-destructive dark:text-destructive/80"}`}>
+                          {isAi && <span className="text-[9px] bg-primary/10 dark:bg-primary/90/40 text-primary dark:text-primary/60 px-1.5 py-0.5 rounded-full font-semibold">AI</span>}
                           {formatDuration(ms)}
                         </span>
                       </div>
@@ -1117,7 +1083,7 @@ export default function PublisherPortal() {
                   </h3>
                   {activitiesLoading ? (
                     <div className="flex justify-center py-4">
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     </div>
                   ) : activities.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-4">No timeline events yet.</p>

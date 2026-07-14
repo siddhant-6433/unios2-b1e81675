@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,27 +7,28 @@ import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import {
   Phone, Clock, Search, Loader2, ExternalLink,
   CheckCircle, XCircle, AlertCircle, Play, PhoneCall, Calendar,
 } from "lucide-react";
 
 const DISPOSITION_COLORS: Record<string, string> = {
-  interested: "bg-emerald-100 text-emerald-700",
-  not_interested: "bg-red-100 text-red-700",
-  not_answered: "bg-amber-100 text-amber-700",
-  no_answer: "bg-amber-100 text-amber-700",
-  "no-answer": "bg-amber-100 text-amber-700",
-  voicemail: "bg-indigo-100 text-indigo-700",
-  call_back: "bg-blue-100 text-blue-700",
-  callback: "bg-blue-100 text-blue-700",
-  busy: "bg-orange-100 text-orange-700",
-  cancelled: "bg-slate-100 text-slate-600",
-  timeout: "bg-amber-100 text-amber-600",
-  failed: "bg-red-100 text-red-600",
-  completed: "bg-green-100 text-green-700",
+  interested: "bg-success/10 text-success",
+  not_interested: "bg-destructive/10 text-destructive",
+  not_answered: "bg-warning/10 text-warning-foreground",
+  no_answer: "bg-warning/10 text-warning-foreground",
+  "no-answer": "bg-warning/10 text-warning-foreground",
+  voicemail: "bg-primary/10 text-primary",
+  call_back: "bg-info/10 text-info-foreground",
+  callback: "bg-info/10 text-info-foreground",
+  busy: "bg-warning/10 text-warning-foreground",
+  timeout: "bg-warning/10 text-warning-foreground",
+  failed: "bg-destructive/10 text-destructive",
+  completed: "bg-success/10 text-success",
   wrong_number: "bg-pink-100 text-pink-700",
-  do_not_contact: "bg-red-200 text-red-800",
+  do_not_contact: "bg-destructive/15 text-destructive",
   ineligible: "bg-gray-100 text-gray-600",
 };
 
@@ -104,6 +106,16 @@ interface CallLogCursor {
   id: string;
 }
 
+interface CallLogMetrics {
+  total?: number;
+  interested?: number;
+  not_interested?: number;
+  no_answer?: number;
+  busy?: number;
+  call_back?: number;
+  counsellors?: { id: string | null; name: string | null; count: number | null }[];
+}
+
 const CallLog = () => {
   const navigate = useNavigate();
   const { role, roleLoaded, user, profile } = useAuth();
@@ -178,9 +190,10 @@ const CallLog = () => {
       .select(`
         id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
         leads:lead_id(name, phone, stage, source)
-      `, page === 1 ? { count: "planned" } : undefined)
+      `)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
+      .not("disposition", "in", '("cancelled","cancelled_by_counsellor")')
       .limit(PAGE_SIZE + 1);
 
     if (from) query = query.gte("created_at", `${from}T00:00:00`);
@@ -196,7 +209,7 @@ const CallLog = () => {
       query = query.eq("user_id", scopedCounsellorId);
     }
 
-    const { data, count } = await query;
+    const { data } = await query;
 
     if (data) {
       const rows = (data as unknown as CallLogRow[]).slice(0, PAGE_SIZE);
@@ -269,7 +282,6 @@ const CallLog = () => {
       });
 
       setRecords(enriched);
-      if (page === 1) setTotalCount(count || enriched.length);
       setHasNextCallPage(hasNext);
       if (hasNext && enriched.length > 0) {
         const last = enriched[enriched.length - 1];
@@ -278,48 +290,51 @@ const CallLog = () => {
         delete callPageCursorsRef.current[page + 1];
       }
 
-      // Compute stats from this page (ideally from full dataset, but good enough for filtered view)
-      const s = {
-        ...EMPTY_STATS,
-        total: page === 1
-          ? (count || enriched.length)
-          : (page - 1) * PAGE_SIZE + enriched.length + (hasNext ? 1 : 0),
-      };
-      enriched.forEach(r => {
-        if (r.disposition === "interested") s.interested++;
-        else if (r.disposition === "not_interested") s.not_interested++;
-        else if (["not_answered", "no_answer", "voicemail"].includes(r.disposition)) s.no_answer++;
-        else if (r.disposition === "busy") s.busy++;
-        else if (["call_back", "callback"].includes(r.disposition)) s.call_back++;
-      });
-      setStats(s);
-      if (isCounsellor && page === 1) {
-        setCounsellorStats([{
-          id: user.id,
-          name: profile?.display_name || callerMap[user.id] || "You",
-          count: s.total,
-        }]);
+      if (page === 1) {
+        const { data: metricsData, error: metricsError } = await supabase.rpc("call_log_metrics", {
+          p_from_date: from || null,
+          p_to_date: to || null,
+          p_counsellor_id: scopedCounsellorId,
+        });
+
+        if (metricsError) {
+          console.error("Failed to fetch call log metrics", metricsError);
+          const fallbackStats = { ...EMPTY_STATS, total: enriched.length };
+          enriched.forEach(r => {
+            if (r.disposition === "interested") fallbackStats.interested++;
+            else if (r.disposition === "not_interested") fallbackStats.not_interested++;
+            else if (["not_answered", "no_answer", "voicemail"].includes(r.disposition || "")) fallbackStats.no_answer++;
+            else if (r.disposition === "busy") fallbackStats.busy++;
+            else if (["call_back", "callback"].includes(r.disposition || "")) fallbackStats.call_back++;
+          });
+          setTotalCount(fallbackStats.total);
+          setStats(fallbackStats);
+          setCounsellorStats([]);
+        } else {
+          const metrics = (metricsData || EMPTY_STATS) as CallLogMetrics;
+          const nextStats = {
+            total: metrics.total || 0,
+            interested: metrics.interested || 0,
+            not_interested: metrics.not_interested || 0,
+            no_answer: metrics.no_answer || 0,
+            busy: metrics.busy || 0,
+            call_back: metrics.call_back || 0,
+          };
+          setTotalCount(nextStats.total);
+          setStats(nextStats);
+          setCounsellorStats((metrics.counsellors || [])
+            .filter((c): c is { id: string; name: string | null; count: number | null } => Boolean(c.id))
+            .map(c => ({
+              id: c.id,
+              name: c.name || "Unknown",
+              count: c.count || 0,
+            })));
+        }
       }
     }
 
-    // Per-counsellor call counts for the same date range (admins only).
-    // Avoid exact counts on this hot path; the breakdown is advisory and should
-    // not force expensive count scans while the main call log is loading.
-    if (!isCounsellor && counsellorOptions.length > 0 && page === 1) {
-      const results = await Promise.all(
-        counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs").select("id", { count: "planned", head: true }).eq("user_id", c.id);
-          if (from) q = q.gte("created_at", `${from}T00:00:00`);
-          if (to) q = q.lte("created_at", `${to}T23:59:59`);
-          const { count } = await q;
-          return { id: c.id, name: c.name, count: count || 0 };
-        })
-      );
-      setCounsellorStats(results.sort((a, b) => b.count - a.count));
-    }
-
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, profile?.display_name, roleLoaded, user?.id]);
+  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, roleLoaded, user?.id]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => {
@@ -330,6 +345,7 @@ const CallLog = () => {
 
   // Client-side filters (disposition + search — counsellor is now server-side)
   const filtered = records.filter(r => {
+    if (["cancelled", "cancelled_by_counsellor"].includes(r.disposition || "")) return false;
     if (dispositionFilter !== "all" && r.disposition !== dispositionFilter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -350,8 +366,6 @@ const CallLog = () => {
     const sec = s % 60;
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
-
-  const inputCls = "rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -447,34 +461,47 @@ const CallLog = () => {
 
         {/* Custom date range */}
         <div className="flex items-center gap-1.5">
-          <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setDatePreset("custom"); }} className={`${inputCls} w-[130px] text-xs`} />
+          <FieldShell hideLabel><Input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setDatePreset("custom"); }} className="w-[130px]" /></FieldShell>
           <span className="text-xs text-muted-foreground">to</span>
-          <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset("custom"); }} className={`${inputCls} w-[130px] text-xs`} />
+          <FieldShell hideLabel><Input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset("custom"); }} className="w-[130px]" /></FieldShell>
         </div>
 
         {/* Counsellor filter (admins only — counsellors are auto-filtered) */}
         {!isCounsellor && (
-          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)} className={inputCls}>
-            <option value="all">All Counsellors</option>
-            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <SelectField
+            value={counsellorFilter}
+            onValueChange={setCounsellorFilter}
+            options={[
+              { value: "all", label: "All Counsellors" },
+              ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+            ]}
+            hideLabel
+            placeholder="All Counsellors"
+            className="min-w-[160px]"
+          />
         )}
 
         {/* Disposition filter */}
-        <select value={dispositionFilter} onChange={e => setDispositionFilter(e.target.value)} className={inputCls}>
-          <option value="all">All Dispositions</option>
-          <option value="interested">Interested</option>
-          <option value="not_interested">Not Interested</option>
-          <option value="not_answered">Not Answered</option>
-          <option value="busy">Busy</option>
-          <option value="call_back">Call Back</option>
-          <option value="voicemail">Voicemail</option>
-          <option value="wrong_number">Wrong Number</option>
-          <option value="do_not_contact">DNC</option>
-          <option value="ineligible">Ineligible</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="timeout">Timeout</option>
-        </select>
+        <SelectField
+          value={dispositionFilter}
+          onValueChange={setDispositionFilter}
+          options={[
+            { value: "all", label: "All Dispositions" },
+            { value: "interested", label: "Interested" },
+            { value: "not_interested", label: "Not Interested" },
+            { value: "not_answered", label: "Not Answered" },
+            { value: "busy", label: "Busy" },
+            { value: "call_back", label: "Call Back" },
+            { value: "voicemail", label: "Voicemail" },
+            { value: "wrong_number", label: "Wrong Number" },
+            { value: "do_not_contact", label: "DNC" },
+            { value: "ineligible", label: "Ineligible" },
+            { value: "timeout", label: "Timeout" },
+          ]}
+          hideLabel
+          placeholder="All Dispositions"
+          className="min-w-[160px]"
+        />
 
         {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
@@ -506,7 +533,7 @@ const CallLog = () => {
 
       {/* Table */}
       {loading ? (
-        <div className="flex h-40 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        <PageLoader />
       ) : (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">

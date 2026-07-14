@@ -18,6 +18,68 @@
     <meta name="twitter:title" content="NIMT UniOs">
     <meta name="twitter:description" content="Student Lifecycle Management">
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <link rel="preconnect" href="https://www.google-analytics.com" />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@500;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@500;600;700;800&display=swap" /></noscript>
+  </head>
+
+  <body>
+    <!-- Meta Pixel noscript fallback. Lives in <body> (browsers disallow
+         <img> inside <noscript> in <head>). The SPA needs JS anyway, so a
+         no-JS visitor never reaches the form — this fallback is purely for
+         crawlers/preview cards. Brand isn't known at HTML load, so we fall
+         back to the parent NIMT college pixel. -->
+    <noscript><img height="1" width="1" style="display:none"
+      src="https://www.facebook.com/tr?id=2580313152286928&ev=PageView&noscript=1"
+      alt=""
+    /></noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Google Tag Manager — public marketing-site containers.
+         The same build can be served from multiple hostnames; choose the GTM
+         container by hostname. UniOs uses the parent NIMT container so CRM and
+         apply routes both satisfy site-wide Google tag diagnostics. -->
+    <script>
+      (function(w,d,s,l){
+        var host = (w.location.hostname || "").toLowerCase();
+        var path = w.location.pathname || "/";
+        var containers = {
+	          "nimt.ac.in": "GTM-NHC65VZ",
+	          "www.nimt.ac.in": "GTM-NHC65VZ",
+	          "uni.nimt.ac.in": "GTM-NHC65VZ",
+	          "apply.nimt.ac.in": "GTM-NHC65VZ",
+	          "miraischool.in": "GTM-WL5MTC3D",
+          "www.miraischool.in": "GTM-WL5MTC3D",
+          "school.nimt.ac.in": "GTM-M9J8RJ7V",
+          "seralislab.com": "GTM-NN2LQW8T",
+          "www.seralislab.com": "GTM-NN2LQW8T"
+        };
+        var i = containers[host];
+        if (!i && host === "uni.nimt.ac.in") {
+          if (/^\/applly\/nimt\/?$/i.test(path) || /^\/apply\/nimt\/?$/i.test(path)) {
+            i = "GTM-NHC65VZ";
+          } else if (/^\/apply\.mirai\/?$/i.test(path) || /^\/apply\/mirai\/?$/i.test(path)) {
+            i = "GTM-WL5MTC3D";
+          } else if (/^\/apply\/beacon\/?$/i.test(path)) {
+            i = "GTM-M9J8RJ7V";
+          }
+        }
+        if (!i) return;
+        w[l]=w[l]||[];
+        w[l].push({"gtm.start": new Date().getTime(), event: "gtm.js"});
+        var f=d.getElementsByTagName(s)[0],
+          j=d.createElement(s),
+          dl=l!="dataLayer" ? "&l="+l : "";
+        j.async=true;
+        j.src="https://www.googletagmanager.com/gtm.js?id="+i+dl;
+        f.parentNode.insertBefore(j,f);
+      })(window,document,"script","dataLayer");
+    </script>
+
     <!-- Google Analytics — UniOs-wide property, fires on every surface
          (CRM + apply). The apply-portal-gated block below adds a second,
          apply-only property that's wired up with cross-domain linker. -->
@@ -89,19 +151,5 @@
         window.fbq('track', 'PageView');
       })();
     </script>
-  </head>
-
-  <body>
-    <!-- Meta Pixel noscript fallback. Lives in <body> (browsers disallow
-         <img> inside <noscript> in <head>). The SPA needs JS anyway, so a
-         no-JS visitor never reaches the form — this fallback is purely for
-         crawlers/preview cards. Brand isn't known at HTML load, so we fall
-         back to the parent NIMT college pixel. -->
-    <noscript><img height="1" width="1" style="display:none"
-      src="https://www.facebook.com/tr?id=2580313152286928&ev=PageView&noscript=1"
-      alt=""
-    /></noscript>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

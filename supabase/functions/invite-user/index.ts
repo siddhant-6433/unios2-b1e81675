@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source } = await req.json();
+    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids } = await req.json();
 
     if (!email || !role) {
       return new Response(
@@ -301,6 +301,25 @@ Deno.serve(async (req) => {
         .insert({ user_id: newUser.user.id, role });
       if (roleError) {
         return new Response(JSON.stringify({ error: roleError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const selectedTeamIds = Array.isArray(team_ids)
+      ? [...new Set(team_ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0))]
+      : [];
+
+    if (role === "counsellor" && selectedTeamIds.length > 0) {
+      const { error: teamErr } = await adminClient
+        .from("team_members")
+        .upsert(
+          selectedTeamIds.map((teamId) => ({ team_id: teamId, user_id: newUser.user.id })),
+          { onConflict: "team_id,user_id", ignoreDuplicates: true },
+        );
+      if (teamErr) {
+        return new Response(JSON.stringify({ error: `Failed to add counsellor to teams: ${teamErr.message}` }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });

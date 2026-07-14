@@ -8,6 +8,61 @@ const corsHeaders = {
 };
 
 const TEMPLATES: Record<string, any> = {
+  // Entrance-exam registration check — two quick-reply buttons. The webhook
+  // (exam-registration-intake) matches the button titles "Yes, registered" /
+  // "Not registered yet", so keep those EXACT.
+  exam_registration_check: {
+    name: "exam_registration_check",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, regarding your {{2}} application at NIMT — have you completed your *{{3}}* registration/counselling? " +
+          "Please tap below so our team can guide your next step.",
+        example: {
+          body_text: [[
+            "Rohan Sharma",
+            "B.Sc Nursing",
+            "CNET (BSc Nursing - Conducted by ABVMU Lucknow)",
+          ]],
+        },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "QUICK_REPLY", text: "Yes, registered" },
+          { type: "QUICK_REPLY", text: "Not registered yet" },
+        ],
+      },
+    ],
+  },
+
+  // Application put on hold for eligibility (candidate can't be processed).
+  application_on_hold_eligibility: {
+    name: "application_on_hold_eligibility",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, your application for {{2}} at NIMT is currently on hold. " +
+          "Our records show the {{3}} eligibility/registration requirement isn't met. " +
+          "If this is a mistake or you'd like to discuss alternative courses, reply here and our team will help.\n\n" +
+          "NIMT Admissions",
+        example: {
+          body_text: [[
+            "Rohan Sharma",
+            "B.Sc Nursing",
+            "CNET (BSc Nursing - Conducted by ABVMU Lucknow)",
+          ]],
+        },
+      },
+    ],
+  },
+
   payment_receipt: {
     name: "payment_receipt",
     category: "UTILITY",
@@ -33,6 +88,46 @@ const TEMPLATES: Record<string, any> = {
       },
     ],
   },
+
+  // Payment link request — sent when staff/consultant sends a custom-amount
+  // payment link (create-payment-link, send_channel whatsapp/both). Worded as
+  // a follow-through on a conversation ("as discussed") so Meta categorises
+  // UTILITY, not MARKETING (lesson from course_info v3→v4). Button URL must
+  // be our own domain with a single {{1}} suffix (Meta constraint) — /pay/<token>
+  // redirects to the Razorpay hosted page when applicable.
+  payment_link_request: {
+    name: "payment_link_request",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, as discussed, here is your secure payment link for {{2}} of Rs. {{3}}. " +
+          "The link is valid till {{4}}. Your receipt will be generated automatically once the payment is complete.\n\n" +
+          "NIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Rohan Sharma",
+            "Token fee prior to admission",
+            "25,000",
+            "16 Jul 2026",
+          ]],
+        },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [
+          {
+            type: "URL",
+            text: "Pay Now",
+            url: "https://uni.nimt.ac.in/pay/{{1}}",
+            example: ["https://uni.nimt.ac.in/pay/0a1b2c3d4e5f60718293a4b5c6d7e8f9"],
+          },
+        ],
+      },
+    ],
+  },
 };
 
 Deno.serve(async (req) => {
@@ -48,7 +143,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { name } = await req.json();
+    const reqBody = await req.json();
+
+    // Status check: POST { check: ["name1","name2"] } → current Meta review
+    // status for those templates. Used to decide when it's safe to schedule
+    // dependent automation (e.g. the exam-registration intake cron).
+    if (Array.isArray(reqBody.check)) {
+      const listUrl = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=200`;
+      const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const listBody = await listRes.json();
+      const wanted = new Set(reqBody.check.map((n: string) => String(n)));
+      const found = (listBody?.data || [])
+        .filter((t: any) => wanted.has(t.name))
+        .map((t: any) => ({ name: t.name, status: t.status, category: t.category, language: t.language }));
+      return new Response(JSON.stringify({ ok: listRes.ok, templates: found }), {
+        status: listRes.ok ? 200 : 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { name } = reqBody;
     const tmpl = TEMPLATES[name];
     if (!tmpl) {
       return new Response(JSON.stringify({ error: `Unknown template "${name}". Known: ${Object.keys(TEMPLATES).join(", ")}` }), {

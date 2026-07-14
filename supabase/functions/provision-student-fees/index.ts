@@ -37,6 +37,21 @@ function quarterDueDate(term: string, year: number): string | null {
   return map[term] || null;
 }
 
+/** Stetho Batch stores semester rows as year_1..year_5 for compatibility. */
+function stethoSemesterDueDate(term: string, year: number, day: number): string | null {
+  const safeDay = Math.min(Math.max(day || 10, 1), 28);
+  const map: Record<string, { yearOffset: number; month: string }> = {
+    year_1: { yearOffset: 0, month: "04" },
+    year_2: { yearOffset: 0, month: "10" },
+    year_3: { yearOffset: 1, month: "04" },
+    year_4: { yearOffset: 1, month: "10" },
+    year_5: { yearOffset: 2, month: "04" },
+  };
+  const spec = map[term];
+  if (!spec) return null;
+  return `${year + spec.yearOffset}-${spec.month}-${String(safeDay).padStart(2, "0")}`;
+}
+
 interface ProvisionRequest {
   student_id?: string;
   student_ids?: string[];
@@ -159,11 +174,12 @@ async function provisionStudent(
     fsRows.find((r: any) => r.version === version) ||
     fsRows.find((r: any) => r.version === "standard") ||
     fsRows[0];
+  const appliedVersion = feeStructure.version || version;
 
   // 3. Fetch fee_structure_items with fee_codes
   const { data: items } = await db
     .from("fee_structure_items")
-    .select("id, fee_code_id, term, amount, due_day, fee_codes:fee_code_id(code, category)")
+    .select("id, fee_code_id, term, amount, due_day, fee_codes:fee_code_id(code, name, category)")
     .eq("fee_structure_id", feeStructure.id);
 
   if (!items || items.length === 0) throw new Error("Fee structure has no items");
@@ -181,9 +197,10 @@ async function provisionStudent(
     // Tuition → always include
     if (category === "tuition") return true;
 
-    // Enrollment (registration, admission fees) → only for new admissions
+    // Enrollment (registration, admission/seat-block fees) → only for new admissions
+    // or explicit batch structures that include their own enrollment component.
     if (category === "enrollment") {
-      return version === "new_admission";
+      return appliedVersion === "new_admission" || appliedVersion === "stetho_batch";
     }
 
     // Transport → only if transport_required AND matching zone
@@ -235,7 +252,9 @@ async function provisionStudent(
   // 7. Build ledger rows
   const rows = filtered.map((item: any) => {
     const term = item.term;
-    let dueDate = quarterDueDate(term, academicYear);
+    let dueDate = feeStructure.version === "stetho_batch"
+      ? stethoSemesterDueDate(term, academicYear, Number(item.due_day || 10))
+      : quarterDueDate(term, academicYear);
 
     // For non-quarter terms (registration, admission), due immediately
     if (!dueDate) {
@@ -246,6 +265,8 @@ async function provisionStudent(
       student_id: studentId,
       fee_code_id: item.fee_code_id,
       fee_structure_item_id: item.id,
+      fee_code_code: item.fee_codes?.code || "",
+      fee_code_name: item.fee_codes?.name || "",
       term: term,
       total_amount: Number(item.amount),
       paid_amount: 0,
@@ -336,6 +357,35 @@ async function provisionStudent(
   // This handles the case where the token floor (₹5,000) exceeds the net Year-1
   // balance after waivers — excess rolls forward rather than sitting unallocated.
   if (student.lead_id && newRows.length > 0) {
+    const { data: appPayments } = await db
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", student.lead_id)
+      .eq("type", "application_fee")
+      .eq("status", "confirmed");
+
+    let remainingApplicationCredit = (appPayments || [])
+      .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+
+    if (remainingApplicationCredit > 0) {
+      const newSeatRows = newRows
+        .filter((r: any) => r.term === "year_1" && /SEAT|BLOCK/i.test(`${r.fee_code_code || ""} ${r.fee_code_name || ""}`))
+        .sort((a: any, b: any) => String(a.fee_code_code || "").localeCompare(String(b.fee_code_code || "")));
+
+      for (const row of newSeatRows) {
+        if (remainingApplicationCredit <= 0) break;
+        const netDue = Math.max(
+          0,
+          Number(row.total_amount) - Number(row.concession || 0) - Number(row.paid_amount || 0),
+        );
+        if (netDue <= 0) continue;
+        const credit = Math.min(remainingApplicationCredit, netDue);
+        row.paid_amount = Number(row.paid_amount || 0) + credit;
+        if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
+        remainingApplicationCredit -= credit;
+      }
+    }
+
     const { data: toks } = await db
       .from("lead_payments")
       .select("amount")
@@ -361,11 +411,14 @@ async function provisionStudent(
 
       for (const row of newYearRows) {
         if (remaining <= 0) break;
-        const netDue = Math.max(0, Number(row.total_amount) - Number(row.concession || 0));
+        const netDue = Math.max(
+          0,
+          Number(row.total_amount) - Number(row.concession || 0) - Number(row.paid_amount || 0),
+        );
         if (netDue <= 0) continue;
         const credit = Math.min(remaining, netDue);
-        row.paid_amount = credit;
-        if (credit >= netDue) row.status = "paid";
+        row.paid_amount = Number(row.paid_amount || 0) + credit;
+        if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
         remaining -= credit;
       }
     }
@@ -374,10 +427,11 @@ async function provisionStudent(
   if (newRows.length === 0) return 0;
 
   // Try insert with fee_structure_item_id; if column doesn't exist yet, retry without it
-  let { error: insertErr } = await db.from("fee_ledger").insert(newRows);
+  const insertRows = newRows.map(({ fee_code_code, fee_code_name, ...row }: any) => row);
+  let { error: insertErr } = await db.from("fee_ledger").insert(insertRows);
   if (insertErr && insertErr.message?.includes("fee_structure_item_id")) {
     console.warn("fee_structure_item_id column not found, retrying without it");
-    const fallbackRows = newRows.map(({ fee_structure_item_id, ...rest }: any) => rest);
+    const fallbackRows = insertRows.map(({ fee_structure_item_id, ...rest }: any) => rest);
     const res = await db.from("fee_ledger").insert(fallbackRows);
     insertErr = res.error;
   }

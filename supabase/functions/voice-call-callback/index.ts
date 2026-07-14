@@ -11,6 +11,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,13 +20,27 @@ const corsHeaders = {
 
 // ── Transcribe + Summarize recording using Google Gemini directly ──
 // Uses generativelanguage.googleapis.com — native audio support, no gateway.
-async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string): Promise<{
+// durationSeconds (when known) gates out blank/too-short recordings: Gemini
+// HALLUCINATES entire plausible conversations when given silent audio (seen
+// in prod: a 9s blank recording produced a full fabricated MBA call with a
+// fake visit booking). Never transcribe what can't contain a conversation.
+const MIN_TRANSCRIBABLE_SECONDS = 15;
+async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string, durationSeconds?: number): Promise<{
   transcript: string | null;
   summary: string | null;
   conversionProb: number | null;
   disposition: string | null;
 } | null> {
   try {
+    if (typeof durationSeconds === "number" && durationSeconds > 0 && durationSeconds < MIN_TRANSCRIBABLE_SECONDS) {
+      console.log(`Skipping transcription: recording ${durationSeconds}s < ${MIN_TRANSCRIBABLE_SECONDS}s minimum`);
+      return {
+        transcript: null,
+        summary: `Call too short to transcribe (${durationSeconds}s) — no meaningful conversation.`,
+        conversionProb: null,
+        disposition: "no_answer",
+      };
+    }
     // Download the recording
     const audioRes = await fetch(recordingUrl);
     if (!audioRes.ok) { console.error("Failed to download recording:", audioRes.status); return null; }
@@ -53,6 +68,15 @@ Provide a JSON response with:
 2. "summary": 2-4 sentence summary of the call outcome in English — what was discussed, interest level, key points.
 3. "conversion_probability": 0-100 integer — how likely this lead is to enroll.
 4. "disposition": One of: interested, callback_requested, not_interested, no_answer, busy, wrong_number, voicemail, partial_conversation
+
+CRITICAL — DO NOT INVENT CONTENT:
+Transcribe ONLY speech that is audibly present in the recording. If the audio is
+silent, blank, only ringing/hold music/noise, or contains no intelligible
+conversation, return exactly:
+{"transcript": "", "summary": "No conversation — audio is blank or unintelligible.", "conversion_probability": null, "disposition": "no_answer"}
+NEVER fabricate dialogue, names, courses, appointments, or outcomes that are not
+explicitly spoken in the audio. An empty transcript is the correct answer for
+empty audio.
 
 Respond ONLY in valid JSON.`
               },
@@ -162,10 +186,11 @@ async function applyDispositionToLeadStage(
   const TERMINAL = new Set(["not_interested", "dnc", "rejected", "ineligible", "admitted"]);
   if (TERMINAL.has(lead.stage)) return;
 
-  await db.from("leads").update({ stage: targetStage }).eq("id", leadId);
-  await db.from("lead_activities").insert({
-    lead_id: leadId,
-    type: "ai_call",
+  await applyLeadTransition(db, {
+    leadId,
+    currentStage: lead.stage,
+    command: targetStage === "dnc" ? "markDnc" : "classifyNotInterested",
+    activityType: "ai_call",
     description: `AI call disposition: ${disposition} → lead marked ${targetStage}`,
   });
   console.log(`Lead ${leadId} stage updated to ${targetStage} (AI disposition: ${disposition})`);
@@ -186,8 +211,13 @@ async function autoAssignCounsellor(
   db: any,
   leadId: string,
   disposition: string | null,
+  conversionProb: number | null,
 ): Promise<void> {
-  if (!disposition || !["interested", "callback_requested"].includes(disposition)) return;
+  const isHighIntent =
+    disposition === "interested" ||
+    disposition === "callback_requested" ||
+    (typeof conversionProb === "number" && conversionProb >= 60);
+  if (!isHighIntent) return;
 
   const { data: lead } = await db.from("leads")
     .select("id, counsellor_id, campus_id, course_id, name, stage")
@@ -204,72 +234,49 @@ async function autoAssignCounsellor(
     return;
   }
 
-  // ── Determine which team to assign from ──
-  const MIRAI_CAMPUS  = "c0000002-0000-0000-0000-000000000001";
-  const BEACON_CAMPUS = "9bb6b4cc-c992-4af1-b9d3-384537a510c8";
-
-  let teamName = "Grn Counselling"; // default fallback
-
-  // Check campus first (school leads)
-  if (lead.campus_id === MIRAI_CAMPUS) {
-    teamName = "Mirai Admissions";
-  } else if (lead.campus_id === BEACON_CAMPUS) {
-    teamName = "NSAE II Admissions";
-  } else if (lead.course_id) {
-    // Check course department
-    const { data: course } = await db.from("courses")
-      .select("id, department_id, departments:department_id(name)")
-      .eq("id", lead.course_id).single();
-    const dept = (course?.departments as any)?.name || "";
-
-    if (dept === "Education") {
-      teamName = "Grn BEd Admissions";
-    } else if (dept === "Law") {
-      teamName = "Grn Law Admissions";
-    } else if (dept === "Management") {
-      teamName = "Grn Mgmt Faculty Admissions";
-    }
-    // Medical, Nursing, Pharmacy, CS → default Grn Counselling
+  const { data: teamName } = await db.rpc("fn_team_for_lead" as any, { _lead_id: leadId });
+  const { data: chosenId, error: assignErr } = await db.rpc("fn_round_robin_assign_counsellor" as any, {
+    _lead_id: leadId,
+  });
+  if (assignErr || !chosenId) {
+    console.warn(`Auto-assign skipped for lead ${leadId}:`, assignErr?.message || "no eligible counsellor");
+    return;
   }
 
-  // ── Get team members ──
-  const { data: teams } = await db.from("teams").select("id").eq("name", teamName).limit(1);
-  if (!teams?.length) {
-    console.warn(`Team "${teamName}" not found, falling back to Grn Counselling`);
-    const { data: fallback } = await db.from("teams").select("id").eq("name", "Grn Counselling").limit(1);
-    if (!fallback?.length) return;
-    teams[0] = fallback[0];
-  }
+  const { data: chosen } = await db.from("profiles")
+    .select("id, user_id, display_name")
+    .eq("id", chosenId)
+    .maybeSingle();
+  if (!chosen?.user_id) return;
 
-  const { data: members } = await db.from("team_members").select("user_id").eq("team_id", teams[0].id);
-  if (!members?.length) return;
-
-  const userIds = members.map((m: any) => m.user_id);
-  const { data: profiles } = await db.from("profiles").select("id, user_id, display_name").in("user_id", userIds);
-  if (!profiles?.length) return;
-
-  // ── Round-robin: fewest active leads first ──
-  const profileIds = profiles.map((p: any) => p.id);
-  const { data: leadCounts } = await db
-    .from("leads")
-    .select("counsellor_id")
-    .in("counsellor_id", profileIds)
-    .not("stage", "in", "(not_interested,ineligible,dnc,rejected,admitted)");
-
-  const countMap: Record<string, number> = {};
-  for (const pid of profileIds) countMap[pid] = 0;
-  for (const lc of leadCounts || []) {
-    if (lc.counsellor_id) countMap[lc.counsellor_id] = (countMap[lc.counsellor_id] || 0) + 1;
-  }
-
-  const sorted = profiles.sort((a: any, b: any) => (countMap[a.id] || 0) - (countMap[b.id] || 0));
-  const chosen = sorted[0];
-
-  // ── Assign ──
+  const nextStage = typeof conversionProb === "number" && conversionProb >= 60
+    ? "priority_interested"
+    : "counsellor_call";
   await db.from("leads").update({
-    counsellor_id: chosen.id,
-    stage: "counsellor_call",
+    stage: lead.stage === "priority_interested" ? "priority_interested" : nextStage,
   }).eq("id", leadId);
+
+  if (nextStage === "priority_interested") {
+    const { data: existingHistory } = await db.from("lead_assignment_history")
+      .select("id")
+      .eq("lead_id", leadId)
+      .eq("assigned_to", chosenId)
+      .eq("assignment_source", "ai_priority")
+      .maybeSingle();
+
+    if (!existingHistory) {
+      await db.from("lead_assignment_history").insert({
+        lead_id: leadId,
+        assigned_to: chosenId,
+        previous_counsellor_id: null,
+        assigned_by_profile_id: null,
+        assigned_by_user_id: null,
+        assignment_source: "ai_priority",
+        bucket_name: "AI Priority Interested",
+        lead_stage_at_assignment: lead.stage,
+      });
+    }
+  }
 
   const scheduledAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   await db.from("lead_followups").insert({
@@ -277,13 +284,14 @@ async function autoAssignCounsellor(
     scheduled_at: scheduledAt,
     type: "call",
     status: "pending",
-    notes: `AI call outcome: ${disposition}. Auto-assigned to ${teamName} team.`,
+    user_id: chosen.user_id,
+    notes: `AI call outcome: ${disposition || "high conversion"}. Auto-assigned to ${teamName || "admissions"} team.`,
   });
 
   await db.from("lead_activities").insert({
     lead_id: leadId,
     type: "system",
-    description: `Auto-assigned to ${chosen.display_name} (${teamName}) after AI call (${disposition})`,
+    description: `Auto-assigned to ${chosen.display_name || "counsellor"} (${teamName || "admissions"}) after AI call (${disposition || `${conversionProb}% conversion`})`,
   });
 
   // notifications.user_id FKs auth.users(id), so pass profiles.user_id — NOT profiles.id.
@@ -291,12 +299,12 @@ async function autoAssignCounsellor(
     user_id: chosen.user_id,
     type: "lead_assigned",
     title: `New lead assigned: ${lead.name || "Unknown"}`,
-    body: `AI call outcome: ${disposition}. Follow up within 30 minutes.`,
+    body: `AI call outcome: ${disposition || `${conversionProb}% conversion`}. Follow up within 30 minutes.`,
     link: `/admissions/${leadId}`,
     lead_id: leadId,
   });
 
-  console.log(`Auto-assigned lead ${leadId} to ${chosen.display_name} (${teamName}, ${disposition})`);
+  console.log(`Auto-assigned lead ${leadId} to ${chosen.display_name} (${teamName}, ${disposition || conversionProb})`);
 }
 
 Deno.serve(async (req) => {
@@ -371,7 +379,7 @@ Deno.serve(async (req) => {
           // Transcribe + summarize via Gemini in background (non-blocking)
           const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
           if (GOOGLE_AI_KEY && recordUrl) {
-            transcribeAndSummarize(recordUrl, GOOGLE_AI_KEY).then(async (result) => {
+            transcribeAndSummarize(recordUrl, GOOGLE_AI_KEY, duration).then(async (result) => {
               if (!result) return;
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -392,8 +400,8 @@ Deno.serve(async (req) => {
               }
               // Apply disposition → stage mapping (not_interested / wrong_number)
               await applyDispositionToLeadStage(db, callRecord.lead_id, result.disposition);
-              // Auto-assign counsellor if interested / callback_requested
-              await autoAssignCounsellor(db, callRecord.lead_id, result.disposition);
+              // Auto-assign counsellor if interested / callback_requested / high conversion
+              await autoAssignCounsellor(db, callRecord.lead_id, result.disposition, result.conversionProb);
               console.log(`Gemini transcribe+summarize done for call ${callRecord.id}`);
             }).catch(e => console.error("Background transcription error:", e));
           }
@@ -445,16 +453,13 @@ Deno.serve(async (req) => {
       const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
       for (const call of pendingCalls || []) {
-        let uuid = call.plivo_call_uuid || "";
-        if (!uuid) {
-          // No plivo UUID — try to find it from the lead's ai_call_uuid
-          const { data: lead } = await db.from("leads").select("ai_call_uuid").eq("id", call.lead_id).maybeSingle();
-          if (lead?.ai_call_uuid) {
-            uuid = lead.ai_call_uuid;
-            // Update the record with the plivo UUID
-            await db.from("ai_call_records").update({ plivo_call_uuid: uuid }).eq("id", call.id);
-          }
-        }
+        // ONLY match by this record's own Plivo UUID. The old fallback
+        // borrowed leads.ai_call_uuid (the lead's LATEST call), which
+        // attached other calls' recordings to this record — 423 recordings
+        // ended up on wrong call records (counsellor-call audio on AI-call
+        // rows and vice versa). A missing recording is recoverable; a wrong
+        // one silently corrupts transcripts, mining, and reviews.
+        const uuid = call.plivo_call_uuid || "";
 
         if (!uuid) {
           // Still no UUID — check if call is old enough to mark as failed
@@ -522,7 +527,7 @@ Deno.serve(async (req) => {
 
           // Transcribe + summarize via Gemini
           if (GOOGLE_AI_KEY) {
-            const result = await transcribeAndSummarize(recording.url, GOOGLE_AI_KEY);
+            const result = await transcribeAndSummarize(recording.url, GOOGLE_AI_KEY, recording.duration);
             if (result) {
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -542,7 +547,7 @@ Deno.serve(async (req) => {
                 });
               }
               await applyDispositionToLeadStage(db, call.lead_id, result.disposition);
-              await autoAssignCounsellor(db, call.lead_id, result.disposition);
+              await autoAssignCounsellor(db, call.lead_id, result.disposition, result.conversionProb);
             }
           }
         }
@@ -554,7 +559,7 @@ Deno.serve(async (req) => {
     if (GOOGLE_AI_KEY) {
       const { data: untranscribed } = await db
         .from("ai_call_records")
-        .select("id, lead_id, recording_url")
+        .select("id, lead_id, recording_url, duration_seconds")
         .not("recording_url", "is", null)
         .is("summary", null)
         .eq("status", "completed")
@@ -564,7 +569,7 @@ Deno.serve(async (req) => {
       for (const call of untranscribed || []) {
         if (!call.recording_url) continue;
         console.log(`Transcribing call ${call.id} for lead ${call.lead_id}...`);
-        const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY);
+        const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY, (call as any).duration_seconds ?? undefined);
         if (result) {
           await db.from("ai_call_records").update({
             transcript: result.transcript,
@@ -583,7 +588,7 @@ Deno.serve(async (req) => {
               description: `AI Call Summary: ${result.summary}`,
             });
           }
-          await autoAssignCounsellor(db, call.lead_id, result.disposition);
+          await autoAssignCounsellor(db, call.lead_id, result.disposition, result.conversionProb);
           console.log(`Transcribed call ${call.id}: ${result.disposition}, ${result.conversionProb}%`);
         }
       }

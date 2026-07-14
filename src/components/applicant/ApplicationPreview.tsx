@@ -4,12 +4,24 @@ import {
   FileText, Eye, Download, CheckCircle, AlertCircle,
   GraduationCap, User, Users, MapPin, BookOpen, Award, Image as ImageIcon,
 } from "lucide-react";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
+import { displayValue } from "@/lib/displayValue";
 
-export type PreviewDoc = { name: string; url: string };
+export type PreviewDoc = {
+  name: string;
+  url: string;
+  path?: string;
+  doc_key?: string;
+  uploaded_at?: string | null;
+  review_status?: "pending" | "verified" | "rejected";
+  review_notes?: string | null;
+};
 
 interface Props {
   app: any;
   docs: PreviewDoc[];
+  cahetRegistration?: CahetRegistrationDetailsType | null;
 }
 
 /**
@@ -17,7 +29,7 @@ interface Props {
  * /applications/:id (admin view) and the apply portal's "View Submission"
  * tile so staff and students see the same comprehensive layout.
  */
-export function ApplicationPreview({ app, docs }: Props) {
+export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
   const courses = (app?.course_selections as any[]) || [];
   const photo = docs.find(d => /^(applicant|student)_photo|passport_photo|^photo[-_]/i.test(d.name));
   const otherDocs = docs.filter(d => d !== photo);
@@ -32,7 +44,7 @@ export function ApplicationPreview({ app, docs }: Props) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             {Object.entries(cs).map(([key, done]) => (
               <div key={key} className="flex items-center gap-1.5">
-                {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
+                {done ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <AlertCircle className="h-3.5 w-3.5 text-warning" />}
                 <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
               </div>
             ))}
@@ -91,13 +103,16 @@ export function ApplicationPreview({ app, docs }: Props) {
                 <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-xs">
                   <div>
                     <span className="text-muted-foreground">#{c.preference_order || i + 1}</span>{" "}
-                    <span className="font-medium">{c.course_name}</span>
+                    <span className="font-medium">{displayValue(c.course_name) || "Course"}</span>
                   </div>
-                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">{c.campus_name}</Badge>
+                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">
+                    {displayValue(c.campus_name) || "Campus"}
+                  </Badge>
                 </div>
               ))}
             </div>
           )}
+          <CahetRegistrationDetails registration={cahetRegistration} compact className="mt-3" />
         </CardContent>
       </Card>
 
@@ -161,13 +176,13 @@ export function ApplicationPreview({ app, docs }: Props) {
                     details.map((d: any, i: number) => (
                       <div key={i} className="text-[11px] text-muted-foreground mb-1">
                         {Object.entries(d).map(([k, v]) =>
-                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{String(v)}</span></span> : null
+                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{displayValue(v)}</span></span> : null
                         )}
                       </div>
                     ))
                   ) : (
                     Object.entries(details).map(([k, v]) =>
-                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
                     )
                   )}
                 </div>
@@ -185,7 +200,7 @@ export function ApplicationPreview({ app, docs }: Props) {
               <Award className="h-3 w-3" />Extracurricular
             </p>
             {Object.entries(app.extracurricular).map(([k, v]) =>
-              v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+              v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
             )}
           </CardContent>
         </Card>
@@ -235,12 +250,13 @@ export function ApplicationPreview({ app, docs }: Props) {
   );
 }
 
-function Row({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
+function Row({ label, value }: { label: string; value?: unknown }) {
+  const text = displayValue(value);
+  if (!text) return null;
   return (
     <div className="flex items-baseline justify-between gap-3 py-1 text-xs border-b border-border/50 last:border-0">
       <span className="text-muted-foreground capitalize">{label}</span>
-      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{value}</span>
+      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{text}</span>
     </div>
   );
 }

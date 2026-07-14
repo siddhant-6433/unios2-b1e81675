@@ -611,7 +611,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             <span className="text-foreground font-medium text-sm">{f.label}</span>
-                            {f.required && <span className="text-[10px] uppercase tracking-wide text-rose-600 font-semibold">required</span>}
+                            {f.required && <span className="text-[10px] uppercase tracking-wide text-destructive font-semibold">required</span>}
                           </div>
                           {f.help && <p className="text-[10px] text-muted-foreground mt-0.5">{f.help}</p>}
                         </td>
@@ -638,7 +638,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
             </div>
 
             {!requiredMapped && (
-              <p className="text-xs text-rose-600">
+              <p className="text-xs text-destructive">
                 Map both <strong>Name</strong> and <strong>Phone</strong> to continue.
               </p>
             )}
@@ -691,11 +691,11 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
             </div>
 
             {/* Lead source override — useful for vendor lists with no source column */}
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1">
-                  <p className="text-xs font-semibold text-amber-900">Lead source</p>
-                  <p className="text-[11px] text-amber-800/90 mt-0.5">
+                  <p className="text-xs font-semibold text-warning-foreground">Lead source</p>
+                  <p className="text-[11px] text-warning-foreground/90 mt-0.5">
                     {sourceOverride
                       ? <>All <strong>{validCount}</strong> leads will be tagged as <strong>{sourceOverrideLabel}</strong>, overriding the CSV.</>
                       : mapping.source !== NONE
@@ -707,7 +707,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
               <select
                 value={sourceOverride}
                 onChange={(e) => setSourceOverride(e.target.value)}
-                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-amber-300"
+                className="w-full rounded-lg border border-warning/20 bg-white px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-amber-300"
               >
                 <option value="">— Use CSV value (fallback: Other) —</option>
                 {LEAD_SOURCES.map(s => (
@@ -716,7 +716,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
               </select>
               {sourceOverride === "other" && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-amber-900" htmlFor="bulk-import-other-source-name">
+                  <label className="text-[11px] font-medium text-warning-foreground" htmlFor="bulk-import-other-source-name">
                     Other source name
                   </label>
                   <input
@@ -725,9 +725,9 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                     value={otherSourceName}
                     onChange={e => setOtherSourceName(e.target.value)}
                     placeholder="NEET 2026 Entrance Center Data"
-                    className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-300"
+                    className="w-full rounded-lg border border-warning/20 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-300"
                   />
-                  <p className="text-[10px] text-amber-800/80">
+                  <p className="text-[10px] text-warning-foreground/80">
                     Leads still use source Other, and this name is saved into each lead note.
                   </p>
                 </div>
@@ -735,11 +735,11 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
             </div>
 
             {/* Save as List — three modes */}
-            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-3">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-3">
               <div className="flex items-start gap-3">
                 <div className="flex-1">
-                  <p className="text-xs font-semibold text-violet-800">Save these leads as a list</p>
-                  <p className="text-[11px] text-violet-700 mt-0.5">
+                  <p className="text-xs font-semibold text-primary">Save these leads as a list</p>
+                  <p className="text-[11px] text-primary mt-0.5">
                     Reusable for bulk WhatsApp / email sends from the Lists page.
                   </p>
                 </div>
@@ -754,7 +754,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                     key={o.v}
                     size="sm"
                     variant={listMode === o.v ? "default" : "outline"}
-                    className={`h-8 text-xs ${listMode === o.v ? "" : "border-violet-300 text-violet-700 hover:bg-violet-100"}`}
+                    className={`h-8 text-xs ${listMode === o.v ? "" : "border-primary/25 text-primary hover:bg-primary/10"}`}
                     onClick={() => setListMode(o.v as any)}
                   >
                     {o.label}
@@ -767,14 +767,14 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                   value={listName}
                   onChange={e => setListName(e.target.value)}
                   placeholder={defaultListName}
-                  className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  className="w-full rounded-lg border border-primary/20 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-300"
                 />
               )}
               {listMode === "existing" && (
                 <select
                   value={existingListId}
                   onChange={e => setExistingListId(e.target.value)}
-                  className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  className="w-full rounded-lg border border-primary/20 bg-white px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-violet-300"
                 >
                   <option value="">— Choose a list —</option>
                   {existingLists.map(l => (
@@ -785,16 +785,16 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
             </div>
 
             {/* AI Call option */}
-            <label className="flex items-start gap-3 p-3 rounded-xl border border-blue-200 bg-blue-50 cursor-pointer select-none">
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-info/20 bg-info/5 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={triggerAiCalls}
                 onChange={e => setTriggerAiCalls(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-blue-300 text-blue-600"
+                className="mt-0.5 h-4 w-4 rounded border-info/30 text-info-foreground"
               />
               <div>
-                <p className="text-xs font-semibold text-blue-800">Trigger AI calls after import</p>
-                <p className="text-[11px] text-blue-700 mt-0.5">
+                <p className="text-xs font-semibold text-info-foreground">Trigger AI calls after import</p>
+                <p className="text-[11px] text-info-foreground mt-0.5">
                   Each lead will receive an AI voice call sequentially (30s gap between calls).
                   Leads without phone numbers will be skipped.
                 </p>
@@ -829,7 +829,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
               )}
             </div>
             {result.listId && (
-              <p className="text-xs text-violet-700 px-4">
+              <p className="text-xs text-primary px-4">
                 List <strong>{result.listName}</strong> ready — open the Lists page to send bulk WhatsApp / email. Existing leads matched by phone are also included.
               </p>
             )}
