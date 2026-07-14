@@ -23,6 +23,9 @@ interface TransferLeadDialogProps {
 
 type TransferScope = "selected" | `pages:${number}` | "all";
 
+/** Sentinel select value — Radix SelectItem cannot use empty string. */
+const UNASSIGN_VALUE = "__unassigned__";
+
 export function TransferLeadDialog({
   open,
   onOpenChange,
@@ -40,6 +43,8 @@ export function TransferLeadDialog({
   const [transferScope, setTransferScope] = useState<TransferScope>("selected");
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
+
+  const isUnassign = selectedCounsellor === UNASSIGN_VALUE;
 
   useEffect(() => {
     if (open) {
@@ -88,7 +93,10 @@ export function TransferLeadDialog({
         profileId = data?.id || null;
       }
 
-      const newCounsellorName = counsellors.find(c => c.id === selectedCounsellor)?.display_name || "Unknown";
+      const targetCounsellorId = isUnassign ? null : selectedCounsellor;
+      const newCounsellorName = isUnassign
+        ? "Unassigned"
+        : (counsellors.find(c => c.id === selectedCounsellor)?.display_name || "Unknown");
       const oldLeadRows: { id: string; name: string | null; counsellor_id: string | null }[] = [];
 
       for (let i = 0; i < idsToTransfer.length; i += 500) {
@@ -116,7 +124,7 @@ export function TransferLeadDialog({
         const chunk = idsToTransfer.slice(i, i + 500);
         const { error } = await supabase
           .from("leads")
-          .update({ counsellor_id: selectedCounsellor })
+          .update({ counsellor_id: targetCounsellorId })
           .in("id", chunk);
         if (error) throw error;
         transferredCount += chunk.length;
@@ -128,14 +136,21 @@ export function TransferLeadDialog({
           lead_id: lead.id,
           user_id: profileId,
           type: "info_update",
-          description: `Primary counsellor transferred from "${oldName}" to "${newCounsellorName}"`,
+          description: isUnassign
+            ? `Primary counsellor unassigned (was "${oldName}")`
+            : `Primary counsellor transferred from "${oldName}" to "${newCounsellorName}"`,
         };
       });
       for (let i = 0; i < activities.length; i += 500) {
         await supabase.from("lead_activities").insert(activities.slice(i, i + 500));
       }
 
-      toast({ title: "Leads transferred", description: `${transferredCount} lead(s) transferred to ${newCounsellorName}` });
+      toast({
+        title: isUnassign ? "Leads unassigned" : "Leads transferred",
+        description: isUnassign
+          ? `${transferredCount} lead(s) moved to unassigned (pool / buckets).`
+          : `${transferredCount} lead(s) transferred to ${newCounsellorName}`,
+      });
       onOpenChange(false);
       onSuccess();
     } catch (error) {
@@ -177,8 +192,8 @@ export function TransferLeadDialog({
           </DialogTitle>
           <DialogDescription>
             {isBulk
-              ? `Transfer ${leadIds.length} selected leads to a new primary counsellor.`
-              : `Transfer${leadNames?.[0] ? ` "${leadNames[0]}"` : ""} to a new primary counsellor.`}
+              ? `Transfer ${leadIds.length} selected leads to a new primary counsellor, or unassign them.`
+              : `Transfer${leadNames?.[0] ? ` "${leadNames[0]}"` : ""} to a new primary counsellor, or unassign.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -212,22 +227,34 @@ export function TransferLeadDialog({
             <Label>New Primary Counsellor</Label>
             <Select value={selectedCounsellor} onValueChange={setSelectedCounsellor} disabled={fetching}>
               <SelectTrigger>
-                <SelectValue placeholder={fetching ? "Loading counsellors..." : "Select counsellor"} />
+                <SelectValue placeholder={fetching ? "Loading counsellors..." : "Select counsellor or unassign"} />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={UNASSIGN_VALUE}>
+                  Unassign lead{isBulk ? "s" : ""} (no counsellor)
+                </SelectItem>
                 {counsellors.map(c => (
                   <SelectItem key={c.id} value={c.id}>{c.display_name || "Unnamed"}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {isUnassign && (
+              <p className="text-xs text-muted-foreground">
+                Clears the primary counsellor. Leads return to the unassigned pool / buckets for others to claim.
+              </p>
+            )}
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
-          <Button onClick={handleTransfer} disabled={!selectedCounsellor || loading}>
+          <Button
+            onClick={handleTransfer}
+            disabled={!selectedCounsellor || loading}
+            variant={isUnassign ? "destructive" : "default"}
+          >
             {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            Transfer {scopeDescription}
+            {isUnassign ? `Unassign ${scopeDescription}` : `Transfer ${scopeDescription}`}
           </Button>
         </DialogFooter>
       </DialogContent>

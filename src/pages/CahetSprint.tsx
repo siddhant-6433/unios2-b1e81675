@@ -203,20 +203,40 @@ const CahetSprint = () => {
   }, [activeCall?.status, activeCall?.startTime]);
 
   // ── Data ────────────────────────────────────────────────────────────────
+  // PostgREST caps RPC result sets (~1000 rows). Page through cahet_sprint_queue
+  // so "Save as list" can include the full BPT/BMRIT pool (pool can be 1.4k+).
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const counsellorParam = scope === "mine" ? profileId : null;
-    const [queueRes, statsRes] = await Promise.all([
-      supabase.rpc("cahet_sprint_queue", {
+    const PAGE = 1000;
+    const allRows: QueueRow[] = [];
+    let offset = 0;
+    let queueError: { message: string } | null = null;
+
+    while (true) {
+      const { data, error } = await supabase.rpc("cahet_sprint_queue", {
         p_counsellor_id: counsellorParam,
-        p_limit: 1000,
-      }),
-      supabase.rpc("cahet_sprint_stats", { p_counsellor_id: profileId }),
-    ]);
-    if (queueRes.error) {
-      toast({ title: "Couldn't load queue", description: queueRes.error.message, variant: "destructive" });
+        p_limit: PAGE,
+        p_offset: offset,
+      } as any);
+      if (error) {
+        queueError = error;
+        break;
+      }
+      const batch = (data as QueueRow[]) || [];
+      allRows.push(...batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+      // Safety: avoid runaway loops if offset is ignored by an older RPC.
+      if (offset > 50_000) break;
+    }
+
+    const statsRes = await supabase.rpc("cahet_sprint_stats", { p_counsellor_id: profileId });
+
+    if (queueError) {
+      toast({ title: "Couldn't load queue", description: queueError.message, variant: "destructive" });
     } else {
-      setRows((queueRes.data as QueueRow[]) || []);
+      setRows(allRows);
     }
     if (!statsRes.error && statsRes.data) {
       const s = Array.isArray(statsRes.data) ? statsRes.data[0] : statsRes.data;
