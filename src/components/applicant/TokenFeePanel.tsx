@@ -54,6 +54,10 @@ type FeeStatus = {
   paid_toward_course?: number;
   /** Application-fee amount credited against a seat-block fee line. */
   seat_block_application_credit?: number;
+  /** Configured university seat-reservation deposit (e.g. ABVMU ₹40k). */
+  abvmu_deposit_amount?: number;
+  /** Super-admin-approved provisional credit (no receipt until settled). */
+  abvmu_approved_credit?: number;
   twenty_five_pct: number;
   min_token_instalment?: number;
   token_complete: boolean;
@@ -188,6 +192,16 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
   });
   const [bankDetails, setBankDetails] = useState<BankDetails>(DEFAULT_BANK_DETAILS);
+  const [abvmuClaims, setAbvmuClaims] = useState<{
+    id: string; amount: number; status: string; challan_number: string | null;
+    submitted_at: string; rejection_reason: string | null;
+  }[]>([]);
+  const [abvmuOpen, setAbvmuOpen] = useState(false);
+  const [abvmuChallanNo, setAbvmuChallanNo] = useState("");
+  const [abvmuChallanDate, setAbvmuChallanDate] = useState("");
+  const [abvmuNotes, setAbvmuNotes] = useState("");
+  const [abvmuFile, setAbvmuFile] = useState<File | null>(null);
+  const [abvmuSubmitting, setAbvmuSubmitting] = useState(false);
   const { gateways: tokenGateways, loading: tokenGatewayLoading } = useScopedPaymentGateways({
     context: "token_fee",
     applicationId,
@@ -346,12 +360,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
     // Fetch per-term waivers and payment history in parallel.
     const offerId = (offerRes.data as any[])?.[0]?.id;
-    const [waiverRes, payRes] = await Promise.all([
+    const [waiverRes, payRes, abvmuRes] = await Promise.all([
       offerId ? (supabase as any).rpc("get_applicant_offer_waivers", { _offer_id: offerId }) : Promise.resolve({ data: [] }),
       (supabase as any).rpc("get_applicant_payments", { _lead_id: resolvedLeadId }),
+      (supabase as any).rpc("get_abvmu_deposit_claims", { _lead_id: resolvedLeadId }),
     ]);
     setOfferWaivers((waiverRes.data || []).map((w: any) => ({ term: w.term, amount: Number(w.amount) })));
     setPayments(payRes.data || []);
+    setAbvmuClaims((abvmuRes.data || []).map((c: any) => ({
+      id: c.id,
+      amount: Number(c.amount),
+      status: c.status,
+      challan_number: c.challan_number,
+      submitted_at: c.submitted_at,
+      rejection_reason: c.rejection_reason,
+    })));
 
     const leadRow = (leadRes.data as any[])?.[0];
     if (!leadRow) {
@@ -913,6 +936,90 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
   const useLocalLoanLetterPreview = shouldUseLocalLoanLetterPreview();
+  const abvmuDepositAmount = Math.max(0, Number(feeStatus.abvmu_deposit_amount || 0));
+  const abvmuApprovedCredit = Math.max(0, Number(feeStatus.abvmu_approved_credit || 0));
+  const abvmuOpenClaim = abvmuClaims.find((c) => c.status === "pending" || c.status === "approved");
+  const showAbvmuClaim = abvmuDepositAmount > 0 && abvmuApprovedCredit <= 0;
+
+  const submitAbvmuClaim = async () => {
+    if (!lead || !abvmuFile) {
+      setError("Choose a challan file (PDF or image) to upload.");
+      return;
+    }
+    setAbvmuSubmitting(true);
+    setError(null);
+    try {
+      const safeName = abvmuFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `abvmu-claims/${lead.id}/${Date.now()}-${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from("application-documents")
+        .upload(path, abvmuFile, { contentType: abvmuFile.type || undefined, upsert: false });
+      if (upErr) throw upErr;
+
+      const { data, error: claimErr } = await (supabase as any).rpc("submit_abvmu_deposit_claim", {
+        _lead_id: lead.id,
+        _proof_path: path,
+        _proof_file_name: abvmuFile.name,
+        _proof_content_type: abvmuFile.type || null,
+        _challan_number: abvmuChallanNo || null,
+        _challan_date: abvmuChallanDate || null,
+        _notes: abvmuNotes || null,
+        _amount: abvmuDepositAmount,
+      });
+      if (claimErr) throw claimErr;
+
+      // WhatsApp-style staff alert: in-app notifications are created in the RPC.
+      // Best-effort WA to super admins via fee_reminder template.
+      try {
+        const { data: roles } = await supabase.from("user_roles").select("user_id").eq("role", "super_admin");
+        const ids = (roles || []).map((r: any) => r.user_id).filter(Boolean);
+        if (ids.length) {
+          const { data: profs } = await supabase.from("profiles").select("phone, display_name").in("user_id", ids);
+          for (const p of (profs || []) as any[]) {
+            if (!p.phone) continue;
+            await supabase.functions.invoke("whatsapp-send", {
+              body: {
+                template_key: "fee_reminder",
+                phone: p.phone,
+                params: [
+                  applicantName || "Candidate",
+                  String(Math.round(abvmuDepositAmount)),
+                  "ABVMU challan review (Inbox)",
+                ],
+                lead_id: lead.id,
+              },
+            });
+          }
+        }
+      } catch {
+        /* non-blocking */
+      }
+
+      setAbvmuClaims((prev) => [
+        {
+          id: data?.id || crypto.randomUUID(),
+          amount: abvmuDepositAmount,
+          status: "pending",
+          challan_number: abvmuChallanNo || null,
+          submitted_at: new Date().toISOString(),
+          rejection_reason: null,
+        },
+        ...prev,
+      ]);
+      setAbvmuOpen(false);
+      setAbvmuFile(null);
+      setAbvmuChallanNo("");
+      setAbvmuChallanDate("");
+      setAbvmuNotes("");
+      // Refresh fee status for provisional messaging
+      const { data: statusRes } = await supabase.rpc("lead_fee_status" as any, { _lead_id: lead.id });
+      if (statusRes) setFeeStatus(statusRes as FeeStatus);
+    } catch (e: any) {
+      setError(e?.message || "Could not submit ABVMU deposit claim");
+    } finally {
+      setAbvmuSubmitting(false);
+    }
+  };
 
   // Deadline calculations
   const deadlineDate = offer.acceptance_deadline ? new Date(offer.acceptance_deadline) : null;
@@ -1419,6 +1526,122 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           </div>
         );
       })()}
+
+      {/* ── ABVMU / university deposit challan claim ── */}
+      {showAbvmuClaim && (
+        <div className="rounded-2xl border border-info/20 bg-info/5 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAbvmuOpen((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-info/10 transition-colors"
+          >
+            <div>
+              <p className="text-sm font-semibold text-info-foreground">
+                Already paid ABVMU deposit (₹{abvmuDepositAmount.toLocaleString("en-IN")})?
+              </p>
+              <p className="text-xs text-info-foreground/80 mt-0.5">
+                Upload your ABVMU challan details here. After super-admin approval, ₹
+                {abvmuDepositAmount.toLocaleString("en-IN")} is reduced from your first-year due
+                (receipt is issued later when the university remits funds to the college).
+              </p>
+            </div>
+            <ChevronRight className={`h-4 w-4 text-info shrink-0 transition-transform ${abvmuOpen ? "rotate-90" : ""}`} />
+          </button>
+
+          {abvmuOpenClaim && (
+            <div className="border-t border-info/15 px-4 py-3 text-xs">
+              {abvmuOpenClaim.status === "pending" && (
+                <p className="text-warning-foreground font-medium">
+                  Claim submitted · pending super-admin review
+                  {abvmuOpenClaim.challan_number ? ` · Challan ${abvmuOpenClaim.challan_number}` : ""}
+                </p>
+              )}
+              {abvmuOpenClaim.status === "approved" && (
+                <p className="text-success font-medium">
+                  Approved · ₹{abvmuOpenClaim.amount.toLocaleString("en-IN")} provisionally reduced from year-1 due
+                  (no receipt yet — remittance pending)
+                </p>
+              )}
+            </div>
+          )}
+
+          {abvmuOpen && !abvmuOpenClaim && (
+            <div className="border-t border-info/15 px-4 pb-4 pt-3 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Challan number</label>
+                  <input
+                    value={abvmuChallanNo}
+                    onChange={(e) => setAbvmuChallanNo(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Payment date</label>
+                  <input
+                    type="date"
+                    value={abvmuChallanDate}
+                    onChange={(e) => setAbvmuChallanDate(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Notes</label>
+                <input
+                  value={abvmuNotes}
+                  onChange={(e) => setAbvmuNotes(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                  Challan / proof (PDF or image) *
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setAbvmuFile(e.target.files?.[0] || null)}
+                  className="w-full text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={abvmuSubmitting || !abvmuFile}
+                onClick={submitAbvmuClaim}
+                className="w-full rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/90 disabled:opacity-50"
+              >
+                {abvmuSubmitting ? (
+                  <span className="inline-flex items-center gap-2 justify-center">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Submitting…
+                  </span>
+                ) : (
+                  "Submit for super-admin approval"
+                )}
+              </button>
+            </div>
+          )}
+
+          {abvmuClaims.some((c) => c.status === "rejected") && !abvmuOpenClaim && (
+            <div className="border-t border-destructive/15 px-4 py-2 text-xs text-destructive">
+              Previous claim rejected
+              {abvmuClaims.find((c) => c.status === "rejected")?.rejection_reason
+                ? `: ${abvmuClaims.find((c) => c.status === "rejected")!.rejection_reason}`
+                : ""}
+              . You may submit again.
+            </div>
+          )}
+        </div>
+      )}
+
+      {abvmuApprovedCredit > 0 && (
+        <div className="rounded-xl border border-success/20 bg-success/5 px-4 py-3 text-xs text-success">
+          ABVMU deposit credit of ₹{abvmuApprovedCredit.toLocaleString("en-IN")} is applied to your course due.
+          Official receipt will be generated when the university remits this amount to the college.
+        </div>
+      )}
 
       {onBehalfContext?.token && !feeStatus.twenty_five_complete && (
         <div className={`rounded-2xl border p-4 space-y-3 ${offerConsentVerified ? "border-success/20 bg-success/5" : "border-warning/20 bg-warning/5"}`}>

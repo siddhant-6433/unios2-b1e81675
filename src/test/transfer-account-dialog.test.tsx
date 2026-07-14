@@ -20,39 +20,49 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
 
+function mockLeadRows(rows: Array<{ id: string; course_id: string | null; courses: unknown }>, count?: number) {
+  mocks.from.mockReturnValue({
+    select: vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        range: vi.fn().mockResolvedValue({
+          data: rows,
+          count: count ?? rows.length,
+          error: null,
+        }),
+      }),
+    }),
+  });
+}
+
+const staff = [
+  { profile_id: "source-profile", user_id: "source-user", name: "Khyati Sagar", role: "counsellor" },
+  { profile_id: "target-arushi", user_id: "user-arushi", name: "Arushi Tyagi", role: "counsellor" },
+  { profile_id: "target-neha", user_id: "user-neha", name: "Neha Garg", role: "counsellor" },
+];
+
 describe("TransferAccountDialog", () => {
   beforeEach(() => {
     mocks.from.mockReset();
     mocks.rpc.mockReset();
     mocks.toast.mockReset();
 
-    mocks.from.mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          range: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: "lead-1",
-                course_id: "course-nursing",
-                courses: { id: "course-nursing", name: "B.Sc Nursing", code: "BSCN-GN" },
-              },
-              {
-                id: "lead-2",
-                course_id: "course-nursing",
-                courses: { id: "course-nursing", name: "B.Sc Nursing", code: "BSCN-GN" },
-              },
-              {
-                id: "lead-3",
-                course_id: "course-law",
-                courses: { id: "course-law", name: "LLB", code: "LLB-GN" },
-              },
-            ],
-            count: 3,
-            error: null,
-          }),
-        }),
-      }),
-    });
+    mockLeadRows([
+      {
+        id: "lead-1",
+        course_id: "course-nursing",
+        courses: { id: "course-nursing", name: "B.Sc Nursing", code: "BSCN-GN" },
+      },
+      {
+        id: "lead-2",
+        course_id: "course-nursing",
+        courses: { id: "course-nursing", name: "B.Sc Nursing", code: "BSCN-GN" },
+      },
+      {
+        id: "lead-3",
+        course_id: "course-law",
+        courses: { id: "course-law", name: "LLB", code: "LLB-GN" },
+      },
+    ], 3);
     mocks.rpc.mockResolvedValue({ data: { leads_transferred: 3 }, error: null });
   });
 
@@ -94,5 +104,108 @@ describe("TransferAccountDialog", () => {
       });
     });
     expect(onDone).toHaveBeenCalled();
+  });
+
+  it("finishes a 0-lead single-target transfer via the simple RPC", async () => {
+    mockLeadRows([], 0);
+    mocks.rpc.mockResolvedValue({ data: { leads_transferred: 0 }, error: null });
+    const onDone = vi.fn();
+
+    render(
+      <TransferAccountDialog
+        source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
+        allUsers={staff}
+        onClose={vi.fn()}
+        onDone={onDone}
+      />,
+    );
+
+    expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+
+    fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
+
+    await waitFor(() => {
+      expect(mocks.rpc).toHaveBeenCalledWith("transfer_counsellor_account", {
+        source_profile_id: "source-profile",
+        target_profile_id: "target-arushi",
+        disable_source: true,
+      });
+    });
+
+    expect(onDone).toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Transfer complete",
+        description: expect.stringMatching(/No leads were assigned/i),
+      }),
+    );
+  });
+
+  it("shows failure toast and clears spinner when RPC throws", async () => {
+    mockLeadRows([], 0);
+    mocks.rpc.mockRejectedValue(new Error("network down"));
+    const onDone = vi.fn();
+
+    render(
+      <TransferAccountDialog
+        source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
+        allUsers={staff}
+        onClose={vi.fn()}
+        onDone={onDone}
+      />,
+    );
+
+    expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+    fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
+
+    await waitFor(() => {
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Transfer failed",
+          description: "network down",
+        }),
+      );
+    });
+
+    expect(onDone).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /finish transfer/i });
+      expect(btn).not.toBeDisabled();
+      expect(btn).not.toHaveTextContent("Transferring");
+    });
+  });
+
+  it("shows failure toast when RPC returns an error payload", async () => {
+    mockLeadRows([], 0);
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: "Only super admins can transfer accounts" } });
+
+    render(
+      <TransferAccountDialog
+        source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
+        allUsers={staff}
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+    fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
+
+    await waitFor(() => {
+      expect(mocks.toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Transfer failed",
+          description: "Only super admins can transfer accounts",
+        }),
+      );
+    });
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /finish transfer/i });
+      expect(btn).not.toBeDisabled();
+      expect(btn).not.toHaveTextContent("Transferring");
+    });
   });
 });

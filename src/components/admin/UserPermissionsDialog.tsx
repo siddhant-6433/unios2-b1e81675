@@ -56,8 +56,39 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
 
   const togglePermission = async (permId: string, currentlyEffective: boolean) => {
     setSaving(permId);
+    const perm = allPermissions.find((p) => p.id === permId);
     const hasRolePerm = rolePermissionIds.has(permId);
-    const currentOverride = overrides.get(permId);
+
+    // Photo Day capture must go through assign_photo_day so principal campus ACL applies
+    // (raw overrides table is super_admin-only for writes).
+    if (perm?.module === "photo_day" && perm.action === "capture") {
+      try {
+        const nextGranted = !currentlyEffective;
+        const { error } = await supabase.rpc("assign_photo_day" as never, {
+          _target_user_id: userId,
+          _granted: nextGranted,
+        } as never);
+        if (error) throw error;
+        const newMap = new Map(overrides);
+        if (nextGranted) {
+          if (hasRolePerm) newMap.delete(permId);
+          else newMap.set(permId, true);
+        } else {
+          if (hasRolePerm) newMap.set(permId, false);
+          else newMap.delete(permId);
+        }
+        setOverrides(newMap);
+        toast({
+          title: nextGranted ? "Photo Day enabled" : "Photo Day revoked",
+          description: `${userName} ${nextGranted ? "can" : "can no longer"} capture student photos.`,
+        });
+      } catch (err: any) {
+        toast({ title: "Error", description: err.message, variant: "destructive" });
+      } finally {
+        setSaving(null);
+      }
+      return;
+    }
 
     // Determine new state
     let newOverride: boolean | null = null; // null = remove override

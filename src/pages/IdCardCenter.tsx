@@ -17,8 +17,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/state-fields";
+import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
+import { PhotoDayAssigneesPanel } from "@/components/admin/PhotoDayAssigneesPanel";
 
 type CardMode = "students" | "employees";
+
+type PhotoFilter = "all" | "missing" | "has" | "ai_pending";
 
 interface CardPerson {
   id: string;
@@ -32,6 +36,8 @@ interface CardPerson {
   email: string;
   bloodGroup: string;
   photoUrl: string | null;
+  photoOriginalUrl: string | null;
+  photoProcessedUrl: string | null;
   extraLabel: string;
   extraValue: string;
 }
@@ -52,6 +58,32 @@ function displayNo(admissionNo: string | null, preAdmissionNo: string | null): s
   return admissionNo || preAdmissionNo || "-";
 }
 
+/** Tiny list avatar: lazy-load a storage thumb; fall back to initials on error. */
+function PersonAvatar({ name, photoUrl, className }: { name: string; photoUrl: string | null; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = avatarThumbUrl(photoUrl);
+  const showImage = !!src && !failed;
+
+  return (
+    <div className={className ?? "flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg bg-primary/10 text-sm font-bold text-primary"}>
+      {showImage ? (
+        <img
+          src={src}
+          alt=""
+          width={44}
+          height={44}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        initials(name)
+      )}
+    </div>
+  );
+}
+
 const IdCardCenter = () => {
   const { role } = useAuth();
   const { can } = usePermissions();
@@ -62,6 +94,7 @@ const IdCardCenter = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [photoFilter, setPhotoFilter] = useState<PhotoFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const hasHrAccess = can("hr", "view");
@@ -85,6 +118,16 @@ const IdCardCenter = () => {
     const q = search.trim().toLowerCase();
     return activeRows.filter((row) => {
       if (groupFilter !== "all" && row.group !== groupFilter) return false;
+      if (photoFilter === "missing" && row.photoUrl) return false;
+      if (photoFilter === "has" && !row.photoUrl) return false;
+      if (photoFilter === "ai_pending") {
+        // Original captured, processed not yet applied
+        const pending =
+          !!row.photoOriginalUrl &&
+          !row.photoProcessedUrl &&
+          row.photoUrl === row.photoOriginalUrl;
+        if (!pending) return false;
+      }
       if (!q) return true;
       return (
         row.name.toLowerCase().includes(q) ||
@@ -93,7 +136,7 @@ const IdCardCenter = () => {
         row.group.toLowerCase().includes(q)
       );
     });
-  }, [activeRows, search, groupFilter]);
+  }, [activeRows, search, groupFilter, photoFilter]);
 
   const groups = useMemo(() => {
     return Array.from(new Set(activeRows.map((row) => row.group || "Unassigned")))
@@ -121,7 +164,7 @@ const IdCardCenter = () => {
   async function fetchStudents() {
     let query = supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, photo_url, blood_group, joining_class, section, campus_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, photo_url, photo_original_url, photo_processed_url, blood_group, joining_class, section, campus_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)")
       .in("status", ["active", "pre_admitted"])
       .order("name", { ascending: true })
       .limit(1000);
@@ -152,6 +195,8 @@ const IdCardCenter = () => {
         email: "-",
         bloodGroup: student.blood_group || "-",
         photoUrl: student.photo_url || null,
+        photoOriginalUrl: student.photo_original_url || null,
+        photoProcessedUrl: student.photo_processed_url || null,
         extraLabel: "Batch",
         extraValue: batch,
       };
@@ -204,6 +249,8 @@ const IdCardCenter = () => {
         email: employeeProfile.work_email || profile.email || "-",
         bloodGroup: employeeProfile.blood_group || "-",
         photoUrl: employeeProfile.photo_url || profile.avatar_url || null,
+        photoOriginalUrl: null,
+        photoProcessedUrl: null,
         extraLabel: "Department",
         extraValue: profile.department || "-",
       } satisfies CardPerson;
@@ -213,6 +260,7 @@ const IdCardCenter = () => {
   function switchMode(nextMode: CardMode) {
     setMode(nextMode);
     setGroupFilter("all");
+    setPhotoFilter("all");
     setSearch("");
     setSelectedIds(new Set());
   }
@@ -316,6 +364,8 @@ const IdCardCenter = () => {
         </div>
       </div>
 
+      <PhotoDayAssigneesPanel />
+
       <div className="print:hidden flex flex-wrap items-center gap-3">
         <div className="relative min-w-[240px] flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -338,6 +388,31 @@ const IdCardCenter = () => {
           triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:ring-2 focus:ring-ring/20"
           ariaLabel={mode === "students" ? "Filter by grade or programme" : "Filter by department"}
         />
+        {mode === "students" && (
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { value: "all", label: "All photos" },
+                { value: "missing", label: "Missing photo" },
+                { value: "has", label: "Has photo" },
+                { value: "ai_pending", label: "AI pending" },
+              ] as const
+            ).map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                onClick={() => setPhotoFilter(chip.value)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  photoFilter === chip.value
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
         <span className="text-sm text-muted-foreground">
           {selectedRows.length} selected from {filteredRows.length} visible
         </span>
@@ -361,9 +436,7 @@ const IdCardCenter = () => {
                     onChange={() => toggleRow(row.id)}
                     className="h-4 w-4 rounded border-border"
                   />
-                  <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg bg-primary/10 text-sm font-bold text-primary">
-                    {row.photoUrl ? <img src={row.photoUrl} alt="" className="h-full w-full object-cover" /> : initials(row.name)}
-                  </div>
+                  <PersonAvatar name={row.name} photoUrl={row.photoUrl} />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">{row.name}</p>
                     <p className="text-xs text-muted-foreground">
@@ -406,7 +479,19 @@ function IdCardFront({ person }: { person: CardPerson }) {
       </div>
       <div className="-mt-9 flex flex-col items-center px-4 pb-3 text-center">
         <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-muted text-lg font-bold text-primary shadow-sm">
-          {person.photoUrl ? <img src={person.photoUrl} alt="" className="h-full w-full object-cover" /> : initials(person.name)}
+          {person.photoUrl ? (
+            <img
+              src={idCardPhotoUrl(person.photoUrl) || person.photoUrl}
+              alt=""
+              width={80}
+              height={80}
+              // Print needs the image present — don't lazy-load selected card faces.
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            initials(person.name)
+          )}
         </div>
         <div className="mt-2 text-[15px] font-bold leading-tight text-foreground">{person.name}</div>
         <div className="text-[11px] font-medium text-muted-foreground">{person.subtitle}</div>

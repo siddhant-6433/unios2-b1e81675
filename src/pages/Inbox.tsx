@@ -25,7 +25,21 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "offer_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "abvmu_deposits" | "offer_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+
+interface AbvmuDepositItem {
+  id: string;
+  lead_id: string;
+  lead_name: string;
+  amount: number;
+  status: string;
+  challan_number: string | null;
+  challan_date: string | null;
+  proof_path: string;
+  proof_file_name: string | null;
+  notes: string | null;
+  submitted_at: string;
+}
 
 interface WaiverItem {
   id: string;
@@ -123,7 +137,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | OfferApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | AbvmuDepositItem | OfferApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -174,6 +188,7 @@ export default function Inbox() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
+    abvmu_deposits: 0,
     offer_approvals: 0,
     contact_changes: 0,
     applications: 0,
@@ -201,6 +216,14 @@ export default function Inbox() {
       count: counts.offer_waivers,
       roles: ["super_admin"],
       color: "text-warning-foreground",
+    },
+    {
+      id: "abvmu_deposits",
+      label: "ABVMU Deposits",
+      icon: FileText,
+      count: counts.abvmu_deposits,
+      roles: ["super_admin"],
+      color: "text-info-foreground",
     },
     {
       id: "offer_approvals",
@@ -287,6 +310,14 @@ export default function Inbox() {
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
+      // abvmu deposit claims — super_admin only
+      isSuperAdmin
+        ? supabase
+            .from("abvmu_deposit_claims" as any)
+            .select("id")
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
+
       // offer_approvals — approvers
       isApprover
         ? supabase
@@ -356,13 +387,14 @@ export default function Inbox() {
 
     setCounts({
       offer_waivers: get(0),
-      offer_approvals: get(1),
-      contact_changes: get(2),
-      applications: get(3),
-      followups: get(4),
-      whatsapp: get(5),
-      video_approvals: get(6),
-      voice_messages: get(7),
+      abvmu_deposits: get(1),
+      offer_approvals: get(2),
+      contact_changes: get(3),
+      applications: get(4),
+      followups: get(5),
+      whatsapp: get(6),
+      video_approvals: get(7),
+      voice_messages: get(8),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -385,7 +417,37 @@ export default function Inbox() {
     setItems([]); // clear stale items immediately so renderMiddleItem never sees mismatched data
 
     try {
-      if (cat === "offer_waivers") {
+      if (cat === "abvmu_deposits") {
+        const { data, error } = await supabase
+          .from("abvmu_deposit_claims" as any)
+          .select("id, lead_id, amount, status, challan_number, challan_date, proof_path, proof_file_name, notes, submitted_at")
+          .eq("status", "pending")
+          .order("submitted_at", { ascending: false });
+        if (error) throw error;
+        const rows = (data || []) as any[];
+        const leadIds = Array.from(new Set(rows.map((r) => r.lead_id).filter(Boolean)));
+        const leadsById = new Map<string, any>();
+        if (leadIds.length) {
+          const { data: leads } = await supabase.from("leads").select("id, name").in("id", leadIds);
+          for (const l of (leads || []) as any[]) leadsById.set(l.id, l);
+        }
+        commitItems(
+          cat,
+          rows.map((r) => ({
+            id: r.id,
+            lead_id: r.lead_id,
+            lead_name: leadsById.get(r.lead_id)?.name || "Candidate",
+            amount: Number(r.amount),
+            status: r.status,
+            challan_number: r.challan_number,
+            challan_date: r.challan_date,
+            proof_path: r.proof_path,
+            proof_file_name: r.proof_file_name,
+            notes: r.notes,
+            submitted_at: r.submitted_at,
+          })) as AbvmuDepositItem[],
+        );
+      } else if (cat === "offer_waivers") {
         // Keep the pending waiver row as the source of truth for this inbox.
         // Related offer/lead/course data is resolved separately so a relationship
         // shape change cannot make the badge count include a row that the list
@@ -713,6 +775,38 @@ export default function Inbox() {
     }
   };
 
+  const decideAbvmuDeposit = async (claim: AbvmuDepositItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      rejection_reason = r || undefined;
+    }
+    setProcessing(claim.id);
+    try {
+      const { data, error } = await (supabase as any).rpc("decide_abvmu_deposit_claim", {
+        _claim_id: claim.id,
+        _decision: decision,
+        _rejection_reason: rejection_reason || null,
+      });
+      if (error || data?.error) throw new Error(error?.message || data?.error);
+      toast({
+        title: decision === "approved" ? "ABVMU deposit approved" : "ABVMU deposit rejected",
+        description: decision === "approved"
+          ? "Year-1 due reduced provisionally. Settle later when university remits funds to issue a receipt."
+          : undefined,
+      });
+      setSelectedItem(null);
+      loadItems("abvmu_deposits");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const decideOfferApproval = async (offer: OfferApprovalItem, decision: "approved" | "rejected") => {
     if (!isApprover) return;
     let rejection_reason: string | undefined;
@@ -869,6 +963,24 @@ export default function Inbox() {
         ? "bg-card shadow-sm ring-1 ring-border border-l-2 border-l-primary"
         : "hover:bg-card/80"
     );
+
+    if (selected === "abvmu_deposits") {
+      const c = item as AbvmuDepositItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.lead_name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                ABVMU deposit · ₹{Number(c.amount).toLocaleString("en-IN")}
+              </p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.submitted_at)}</p>
+        </button>
+      );
+    }
 
     if (selected === "offer_waivers") {
       const w = item as WaiverItem;
@@ -1030,6 +1142,69 @@ export default function Inbox() {
         <div className="flex flex-col items-center justify-center h-full text-center gap-3 text-muted-foreground">
           <InboxIcon className="h-10 w-10 opacity-20" />
           <p className="text-sm">Select an item to review</p>
+        </div>
+      );
+    }
+
+    if (selected === "abvmu_deposits") {
+      const c = selectedItem as AbvmuDepositItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.lead_name}</h3>
+            <p className="text-sm text-muted-foreground">ABVMU deposit challan claim</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Amount" value={`₹${Number(c.amount).toLocaleString("en-IN")}`} highlight />
+            <Row label="Challan no." value={c.challan_number || "—"} />
+            <Row label="Challan date" value={c.challan_date || "—"} />
+            <Row label="Submitted" value={fmtDate(c.submitted_at)} />
+            <Row label="Notes" value={c.notes || "—"} />
+            <Row label="Proof file" value={c.proof_file_name || c.proof_path} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                const { data } = await supabase.storage
+                  .from("application-documents")
+                  .createSignedUrl(c.proof_path, 60 * 30);
+                if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+                else toast({ title: "Could not open proof", variant: "destructive" });
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View proof
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-success/90 hover:bg-success text-white"
+                disabled={!isSuperAdmin || processing === c.id}
+                onClick={() => decideAbvmuDeposit(c, "approved")}
+              >
+                {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="flex-1"
+                disabled={!isSuperAdmin || processing === c.id}
+                onClick={() => decideAbvmuDeposit(c, "rejected")}
+              >
+                <XCircle className="h-4 w-4 mr-1.5" />Reject
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground text-center">
+              Approval reduces year-1 due provisionally. Use settle later (when ABVMU remits) to issue a receipt.
+            </p>
+            {c.lead_id && (
+              <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`/admissions/${c.lead_id}`)}>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View Lead
+              </Button>
+            )}
+          </div>
         </div>
       );
     }
