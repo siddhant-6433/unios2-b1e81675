@@ -235,7 +235,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(plivoWebhook).toContain("invokeConversationOrchestrator");
     expect(plivoWebhook).toContain('source: "plivo_webhook"');
     expect(plivoWebhook).toContain('provider: "plivo"');
-    expect(plivoWebhook).toContain("EdgeRuntime?.waitUntil?.(dispatch)");
+    expect(plivoWebhook).toContain("await invokeConversationOrchestrator");
+    expect(plivoWebhook).toContain("conversation orchestrator dispatch failed");
     expect(metaWebhook).toContain("dispatch_reply: true");
     expect(plivoWebhook).toContain("dispatch_reply: true");
   });
