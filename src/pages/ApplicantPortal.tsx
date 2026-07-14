@@ -29,6 +29,9 @@ interface Application {
   submitted_at: string | null;
   form_pdf_url: string | null;
   fee_receipt_url: string | null;
+  phone?: string | null;
+  email?: string | null;
+  lead_id?: string | null;
 }
 
 function portalFromFlags(flags: string[]): { slug: string; label: string } {
@@ -87,7 +90,7 @@ export default function ApplicantPortal() {
 
     let query = (supabase as any)
       .from("applications")
-      .select("application_id, full_name, status, payment_status, fee_amount, payment_ref, course_selections, flags, created_at, updated_at, submitted_at, form_pdf_url, fee_receipt_url")
+      .select("application_id, full_name, status, payment_status, fee_amount, payment_ref, course_selections, flags, created_at, updated_at, submitted_at, form_pdf_url, fee_receipt_url, phone, email, lead_id")
       .order("created_at", { ascending: false });
 
     if (phone && email) {
@@ -372,9 +375,10 @@ export default function ApplicantPortal() {
                     {/* Offer letter + token fee — only renders if an approved offer exists for this app's lead */}
                     <TokenFeePanel
                       applicationId={app.application_id}
+                      leadId={app.lead_id || null}
                       applicantName={app.full_name}
-                      applicantPhone={profile?.phone || user?.phone || null}
-                      applicantEmail={user?.email || null}
+                      applicantPhone={profile?.phone || user?.phone || app.phone || null}
+                      applicantEmail={user?.email || app.email || null}
                       courseName={(app.course_selections as any[])?.[0]?.course_name || null}
                       onPayment={fetchApplications}
                     />
