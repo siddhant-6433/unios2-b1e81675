@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
+import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
@@ -266,6 +267,8 @@ export default function Marketing() {
   const [campaignName, setCampaignName] = useState("");
   const [campaignScheduleMode, setCampaignScheduleMode] = useState<"now" | "scheduled">("now");
   const [campaignScheduledAt, setCampaignScheduledAt] = useState("");
+  const [waSendMode, setWaSendMode] = useState<"immediate" | "paced">("immediate");
+  const [waDailyCap, setWaDailyCap] = useState(String(DEFAULT_DAILY_UNIQUE_CAP));
   const [waTemplate, setWaTemplate] = useState(WA_BULK_TEMPLATES[0]?.key || "");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
@@ -605,6 +608,13 @@ export default function Marketing() {
           if (value) staticParamsToSend[field.name] = value;
         }
 
+        const pacePlan = buildCampaignPacePlan({
+          recipientCount: valid.length,
+          sendMode: waSendMode,
+          dailyUniqueCap: waSendMode === "paced" ? Number(waDailyCap) : null,
+          startAt: nextAttemptAt,
+        });
+
         const { data: campaign, error: campErr } = await supabase
           .from("whatsapp_campaigns" as any)
           .insert({
@@ -617,15 +627,19 @@ export default function Marketing() {
             next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
+            send_mode: pacePlan.sendMode,
+            daily_unique_cap: pacePlan.dailyUniqueCap,
+            paced_wave_count: pacePlan.waveCount,
           })
           .select("id")
           .single();
         if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
 
-        const rows = valid.map((lead) => ({
+        const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
           lead_id: lead.id,
           phone: lead.phone,
+          eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
         }));
         for (let i = 0; i < rows.length; i += 500) {
           const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(rows.slice(i, i + 500));
@@ -689,6 +703,8 @@ export default function Marketing() {
       setCampaignName("");
       setCampaignScheduleMode("now");
       setCampaignScheduledAt("");
+      setWaSendMode("immediate");
+      setWaDailyCap(String(DEFAULT_DAILY_UNIQUE_CAP));
       await load();
     } catch (error: any) {
       setLaunchError(error?.message || "Could not queue campaign.");
@@ -1139,6 +1155,55 @@ export default function Marketing() {
               </div>
             )}
           </div>
+
+          {campaignChannel === "whatsapp" && (
+            <div className="max-w-2xl rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                  checked={waSendMode === "paced"}
+                  onChange={(e) => setWaSendMode(e.target.checked ? "paced" : "immediate")}
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-foreground">Pace over days (Meta unique-user limit)</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Split recipients into waves ~24h apart so you stay under Meta&apos;s rolling 24h unique-user tier.
+                  </span>
+                </span>
+              </label>
+              {waSendMode === "paced" && (
+                <div className="pl-6 space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Max recipients per day</label>
+                  <Input
+                    type="number"
+                    min={50}
+                    step={50}
+                    value={waDailyCap}
+                    onChange={(e) => setWaDailyCap(e.target.value)}
+                    className="h-9 w-40"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {(() => {
+                      try {
+                        const start = campaignScheduleMode === "scheduled" && campaignScheduledAt
+                          ? new Date(campaignScheduledAt)
+                          : new Date();
+                        return buildCampaignPacePlan({
+                          recipientCount: selectedList?.member_count || 0,
+                          sendMode: "paced",
+                          dailyUniqueCap: Number(waDailyCap) || DEFAULT_DAILY_UNIQUE_CAP,
+                          startAt: start,
+                        }).preview;
+                      } catch {
+                        return "Enter a valid daily cap.";
+                      }
+                    })()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">

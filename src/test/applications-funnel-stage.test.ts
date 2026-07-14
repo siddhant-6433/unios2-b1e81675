@@ -93,12 +93,16 @@ describe("Applications funnel stage", () => {
     expect(splits.approved).toEqual({ stuck: 1, onHold: 1, active: 0 });
   });
 
-  it("renders hold/active split chips on pipeline stage cards", () => {
+  it("renders hold/active split chips on every pipeline stage card", () => {
     const page = readFileSync("src/pages/Applications.tsx", "utf8");
     expect(page).toContain("funnelStageHoldSplits");
     expect(page).toContain("stageHoldSplit");
-    expect(page).toContain("hold");
-    expect(page).toContain("active");
-    expect(page).toContain("stuckOnHold");
+    expect(page).toContain("hold/active on every stage");
+    expect(page).toContain("Always show hold/active");
+    expect(page).toContain("{stuckOnHold} hold");
+    expect(page).toContain("{stuckActive} active");
+    // Must not gate chips on stuckOnHold > 0 (all cards show the split)
+    expect(page).not.toContain("stuckOnHold > 0 &&");
   });
 });
+

@@ -43,6 +43,11 @@ import {
 } from "@/lib/waCampaignParams";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
+import {
+  buildCampaignPacePlan,
+  DEFAULT_DAILY_UNIQUE_CAP,
+  type CampaignSendMode,
+} from "@/lib/campaignPacing";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -346,6 +351,8 @@ export default function LeadLists() {
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [waScheduleMode, setWaScheduleMode] = useState<"now" | "scheduled">("now");
   const [waScheduledAt, setWaScheduledAt] = useState("");
+  const [waSendMode, setWaSendMode] = useState<CampaignSendMode>("immediate");
+  const [waDailyCap, setWaDailyCap] = useState(String(DEFAULT_DAILY_UNIQUE_CAP));
   const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waSenderLoading, setWaSenderLoading] = useState(false);
@@ -677,6 +684,8 @@ export default function LeadLists() {
     setWaStaticParams({});
     setWaScheduleMode("now");
     setWaScheduledAt("");
+    setWaSendMode("immediate");
+    setWaDailyCap(String(DEFAULT_DAILY_UNIQUE_CAP));
     setWaSenderValue(DEFAULT_WA_SENDER);
     setWaOpen(true);
   };
@@ -857,6 +866,21 @@ export default function LeadLists() {
       if (v) staticParamsToSend[f.name] = v;
     }
 
+    let pacePlan;
+    try {
+      const dailyCap = Number(waDailyCap);
+      pacePlan = buildCampaignPacePlan({
+        recipientCount: valid.length,
+        sendMode: waSendMode,
+        dailyUniqueCap: waSendMode === "paced" ? dailyCap : null,
+        startAt: schedule.nextAttemptAt,
+      });
+    } catch (error: any) {
+      toast({ title: "Invalid pacing", description: error?.message, variant: "destructive" });
+      setWaSending(false);
+      return;
+    }
+
     const { data: campaign, error: campErr } = await supabase
       .from("whatsapp_campaigns" as any)
       .insert({
@@ -871,6 +895,9 @@ export default function LeadLists() {
         next_attempt_at: schedule.nextAttemptAt,
         worker_locked_at: null,
         status: "pending",
+        send_mode: pacePlan.sendMode,
+        daily_unique_cap: pacePlan.dailyUniqueCap,
+        paced_wave_count: pacePlan.waveCount,
       })
       .select("id")
       .single();
@@ -882,10 +909,11 @@ export default function LeadLists() {
     }
 
     const campaignId = (campaign as any).id;
-    const rows = valid.map((l: any) => ({
+    const rows = valid.map((l: any, index: number) => ({
       campaign_id: campaignId,
       lead_id: l.id,
       phone: l.phone,
+      eligible_at: pacePlan.eligibleAtByIndex[index] || schedule.nextAttemptAt,
     }));
 
     // Chunked insert to stay under PostgREST's request size cap.
@@ -897,13 +925,21 @@ export default function LeadLists() {
 
     setWaSending(false);
     setWaOpen(false);
+    const pacedNote = pacePlan.sendMode === "paced"
+      ? ` Paced: ${pacePlan.waveCount} wave(s), max ${pacePlan.dailyUniqueCap}/day.`
+      : "";
     toast({
-      title: schedule.scheduled ? "WhatsApp campaign scheduled" : "WhatsApp campaign queued",
-      description: schedule.scheduled
+      title: schedule.scheduled
+        ? "WhatsApp campaign scheduled"
+        : pacePlan.sendMode === "paced"
+          ? "WhatsApp campaign paced"
+          : "WhatsApp campaign queued",
+      description: (schedule.scheduled
         ? `${valid.length} recipients scheduled for ${new Date(schedule.nextAttemptAt).toLocaleString()}.`
-        : `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+        : `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`) + pacedNote,
     });
-    if (!schedule.scheduled) {
+    // Kick dispatcher only if first wave is due now
+    if (new Date(schedule.nextAttemptAt).getTime() <= Date.now() + 2000) {
       supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     }
     await fetchLists();
@@ -1273,6 +1309,53 @@ export default function LeadLists() {
                     onChange={(e) => setWaScheduledAt(e.target.value)}
                     className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
                   />
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                  checked={waSendMode === "paced"}
+                  onChange={(e) => setWaSendMode(e.target.checked ? "paced" : "immediate")}
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-foreground">Pace over days (Meta unique-user limit)</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Split this list into waves ~24h apart so you stay under Meta&apos;s rolling 24h unique-user tier.
+                    Does not fix quality or template blocks.
+                  </span>
+                </span>
+              </label>
+              {waSendMode === "paced" && (
+                <div className="pl-6 space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Max recipients per day</label>
+                  <input
+                    type="number"
+                    min={50}
+                    step={50}
+                    value={waDailyCap}
+                    onChange={(e) => setWaDailyCap(e.target.value)}
+                    className="h-9 w-40 rounded-lg border border-input bg-card px-3 text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {(() => {
+                      try {
+                        const start = waScheduleMode === "scheduled" && waScheduledAt
+                          ? new Date(waScheduledAt)
+                          : new Date();
+                        return buildCampaignPacePlan({
+                          recipientCount: waList?.member_count || 0,
+                          sendMode: "paced",
+                          dailyUniqueCap: Number(waDailyCap) || DEFAULT_DAILY_UNIQUE_CAP,
+                          startAt: start,
+                        }).preview;
+                      } catch {
+                        return "Enter a valid daily cap.";
+                      }
+                    })()}
+                  </p>
                 </div>
               )}
             </div>

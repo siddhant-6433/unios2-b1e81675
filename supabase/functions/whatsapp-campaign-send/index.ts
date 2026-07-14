@@ -463,30 +463,92 @@ Deno.serve(async (req) => {
       .update({ status: "sending" })
       .eq("id", campaign_id);
 
-    // Fetch all pending recipients with lead + course + campus joined in.
-    // course/campus are used to auto-fill `course_name` and `campus_name`
-    // template params per recipient — see substitution loop below.
-    const { data: recipients, error: recipientsError } = await adminClient
-      .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
-      .eq("campaign_id", campaign_id)
-      .eq("status", "pending")
-      .limit(batchSize);
+    // Fetch pending recipients that are eligible to send now (wave pacing).
+    // eligible_at defaults to now() for legacy campaigns.
+    const nowIso = new Date().toISOString();
+    const recipientSelect =
+      "id, campaign_id, lead_id, phone, status, eligible_at, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+    let recipients: any[] | null = null;
+    {
+      const paced = await adminClient
+        .from("whatsapp_campaign_recipients")
+        .select(recipientSelect)
+        .eq("campaign_id", campaign_id)
+        .eq("status", "pending")
+        .lte("eligible_at", nowIso)
+        .order("eligible_at", { ascending: true })
+        .limit(batchSize);
 
-    if (recipientsError) {
-      console.error("Failed to fetch recipients:", recipientsError);
-      await adminClient
-        .from("whatsapp_campaigns")
-        .update({ status: "failed" })
-        .eq("id", campaign_id);
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch recipients" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (paced.error && /eligible_at/i.test(paced.error.message || "")) {
+        // Pre-migration fallback
+        const legacy = await adminClient
+          .from("whatsapp_campaign_recipients")
+          .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending")
+          .limit(batchSize);
+        if (legacy.error) {
+          console.error("Failed to fetch recipients:", legacy.error);
+          await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+          return new Response(
+            JSON.stringify({ error: "Failed to fetch recipients" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        recipients = legacy.data || [];
+      } else if (paced.error) {
+        console.error("Failed to fetch recipients:", paced.error);
+        await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+        return new Response(
+          JSON.stringify({ error: "Failed to fetch recipients" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      } else {
+        recipients = paced.data || [];
+      }
     }
 
     if (!recipients || recipients.length === 0) {
       const counts = await syncCampaignCounts(adminClient, campaign_id);
+
+      // Pending exist but not yet eligible (next wave) — wait, don't complete.
+      if (counts.pendingCount > 0) {
+        const { data: nextRow } = await adminClient
+          .from("whatsapp_campaign_recipients")
+          .select("eligible_at")
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending")
+          .order("eligible_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        const nextAt = (nextRow as { eligible_at?: string } | null)?.eligible_at
+          || new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        await adminClient
+          .from("whatsapp_campaigns")
+          .update({
+            sent_count: counts.totalSent,
+            failed_count: counts.totalFailed,
+            status: "pending",
+            next_attempt_at: nextAt,
+            worker_locked_at: null,
+          })
+          .eq("id", campaign_id);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            sent: 0,
+            failed: 0,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: false,
+            waiting_for_eligible_at: nextAt,
+            message: "No recipients eligible yet — waiting for next wave",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       await adminClient
         .from("whatsapp_campaigns")
         .update({
