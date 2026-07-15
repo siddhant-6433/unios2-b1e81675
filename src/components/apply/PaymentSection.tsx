@@ -415,6 +415,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
   };
 
   // ── Razorpay Standard Checkout (modal + server signature verification) ───
+  // Settlement is server-side (verify + webhook + cron). Client never double-marks.
   const handlePayRazorpay = async () => {
     setError(null);
     setLoading(true);
@@ -425,6 +426,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
         context: "application_fee",
         description: "Application Processing Fee",
         applicationId: data.application_id,
+        leadId: onBehalfContext?.lead_id || data.lead_id || undefined,
         customerName: data.full_name,
         customerEmail: data.email || undefined,
         customerPhone: data.phone,
@@ -433,7 +435,26 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
       await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "razorpay" }, result.paymentId);
       await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "razorpay" }, result.paymentId);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Payment was cancelled.");
+      // If money was captured but UI failed, pull status from DB once more.
+      try {
+        const { data: row } = await supabase
+          .from("applications")
+          .select("payment_status, payment_ref")
+          .eq("application_id", data.application_id)
+          .maybeSingle();
+        if (row?.payment_status === "paid") {
+          onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Payment was cancelled. If money was deducted it will update automatically within a few minutes.",
+      );
     } finally {
       setLoading(false);
     }
