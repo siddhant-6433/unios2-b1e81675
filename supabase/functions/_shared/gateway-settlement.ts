@@ -516,3 +516,197 @@ export async function settleStudentFeePayment(
     payment_id: payId,
   };
 }
+
+/**
+ * Settle a payment_links row at most once (active→paid), then create lead_payments.
+ * Used by Razorpay pay-link, Easebuzz surl/webhook, and future gateways.
+ */
+export async function settlePaymentLink(
+  admin: AdminClient,
+  supabaseUrl: string,
+  serviceKey: string,
+  link: {
+    id: string;
+    purpose: string;
+    amount: number | string;
+    note?: string | null;
+    lead_id?: string | null;
+    student_id?: string | null;
+  },
+  paymentRef: string,
+  gateway: GatewayName,
+  source: SettlementSource = "unknown",
+): Promise<SettlementResult> {
+  const payId = String(paymentRef || "").trim();
+  if (!payId) return { ok: false, message: "payment ref required" };
+
+  const claim = await claimGatewayPayment(admin, gateway, payId, {
+    context: "payment_link",
+    entityType: "payment_link",
+    entityId: link.id,
+    amount: Number(link.amount),
+    source,
+  });
+  if (claim.error && !claim.claimed && !claim.already) {
+    return { ok: false, message: claim.error, payment_id: payId };
+  }
+
+  // Guard: only the first caller flips active→paid.
+  const { data: claimed, error: claimErr } = await admin
+    .from("payment_links")
+    .update({ status: "paid" })
+    .eq("id", link.id)
+    .eq("status", "active")
+    .select("id")
+    .maybeSingle();
+  if (claimErr) return { ok: false, message: claimErr.message, payment_id: payId };
+  if (!claimed) {
+    return {
+      ok: true,
+      already: true,
+      entity_type: "payment_link",
+      entity_id: link.id,
+      payment_id: payId,
+    };
+  }
+
+  const paidAmount = Number(link.amount);
+
+  const notifyPaymentReceived = (leadId: string, leadPaymentId: string) => {
+    fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({
+        event: "payment_received",
+        lead_id: leadId,
+        context: { payment_id: leadPaymentId },
+      }),
+    }).catch((e) => console.error("[gateway-settlement] payment_link notify failed:", e));
+  };
+
+  if (link.purpose === "pre_admission_token") {
+    if (!link.lead_id) return { ok: false, message: "pre_admission_token link has no lead_id" };
+    const { data: lp, error } = await admin
+      .from("lead_payments")
+      .insert({
+        lead_id: link.lead_id,
+        type: "pre_admission_token",
+        amount: paidAmount,
+        payment_mode: "gateway",
+        gateway,
+        transaction_ref: payId,
+        status: "confirmed",
+        notes: link.note || "Pre-admission token via payment link",
+      })
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
+        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+      }
+      return { ok: false, message: error.message };
+    }
+    if (lp?.id) {
+      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      notifyPaymentReceived(link.lead_id, lp.id);
+    }
+    return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+  }
+
+  if (link.student_id) {
+    const { data: student } = await admin
+      .from("students").select("lead_id").eq("id", link.student_id).maybeSingle();
+    const leadId = student?.lead_id || link.lead_id || null;
+    if (!leadId) return { ok: false, message: "No lead linked to student for settlement" };
+
+    const { data: lp, error } = await admin
+      .from("lead_payments")
+      .insert({
+        lead_id: leadId,
+        type: "other",
+        amount: paidAmount,
+        payment_mode: "gateway",
+        gateway,
+        transaction_ref: payId,
+        status: "confirmed",
+        applied_to_ledger: true,
+        notes: link.note || "Fee payment via payment link",
+      })
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
+        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+      }
+      return { ok: false, message: error.message };
+    }
+    if (lp?.id) {
+      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      // Apply amount to oldest due ledger rows (same as pay-link).
+      const { data: rows } = await admin
+        .from("fee_ledger")
+        .select("id, total_amount, paid_amount, concession, balance, due_date, status")
+        .eq("student_id", link.student_id)
+        .in("status", ["due", "overdue"])
+        .gt("balance", 0)
+        .order("due_date", { ascending: true });
+      let remaining = Math.round(paidAmount * 100) / 100;
+      const splits: Array<{ id: string; amount: number }> = [];
+      for (const row of rows || []) {
+        if (remaining <= 0) break;
+        const balance = Number(row.balance ?? 0);
+        const apply = Math.min(balance, remaining);
+        remaining = Math.round((remaining - apply) * 100) / 100;
+        const newPaid = Number(row.paid_amount || 0) + apply;
+        const fullyPaid = newPaid + Number(row.concession || 0) >= Number(row.total_amount) - 0.01;
+        await admin
+          .from("fee_ledger")
+          .update({ paid_amount: newPaid, status: fullyPaid ? "paid" : row.status })
+          .eq("id", row.id);
+        splits.push({ id: row.id, amount: apply });
+      }
+      if (splits.length) {
+        await admin.from("fee_ledger_payments").insert(
+          splits.map((s) => ({
+            fee_ledger_id: s.id,
+            lead_payment_id: lp.id,
+            amount: s.amount,
+            notes: "Payment link settlement",
+          })),
+        );
+      }
+      notifyPaymentReceived(leadId, lp.id);
+    }
+    return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+  }
+
+  if (link.lead_id) {
+    const { data: lp, error } = await admin
+      .from("lead_payments")
+      .insert({
+        lead_id: link.lead_id,
+        type: "other",
+        amount: paidAmount,
+        payment_mode: "gateway",
+        gateway,
+        transaction_ref: payId,
+        status: "confirmed",
+        notes: link.note || "Custom payment via payment link",
+      })
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
+        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+      }
+      return { ok: false, message: error.message };
+    }
+    if (lp?.id) {
+      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      notifyPaymentReceived(link.lead_id, lp.id);
+    }
+    return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+  }
+
+  return { ok: false, message: "Link has no settlement target" };
+}

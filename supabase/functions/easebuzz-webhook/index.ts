@@ -13,6 +13,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   settleApplicationFee,
   settleLeadPaymentRow,
+  settlePaymentLink,
   settleStudentFeePayment,
 } from "../_shared/gateway-settlement.ts";
 
@@ -93,6 +94,23 @@ Deno.serve(async (req) => {
     const paymentRef = easepayid || txnid;
     if (!paymentRef) {
       return new Response(JSON.stringify({ ok: true, ignored: "no_payment_ref" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Path 0: payment link (udf3=payment_link, udf1=payment_links.id)
+    if (udf3 === "payment_link" && udf1 && /^[0-9a-f-]{36}$/i.test(udf1)) {
+      const { data: plink } = await admin.from("payment_links").select("*").eq("id", udf1).maybeSingle();
+      if (!plink) {
+        return new Response(JSON.stringify({ ok: true, ignored: "payment_link_not_found" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const settled = await settlePaymentLink(
+        admin, supabaseUrl, serviceKey, plink, paymentRef, "easebuzz", "webhook",
+      );
+      if (!settled.ok) {
+        console.error("[easebuzz-webhook] payment_link settle failed:", settled.message);
+        return new Response(JSON.stringify({ error: settled.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      console.log(`[easebuzz-webhook] payment_link ${udf1} settled (already=${!!settled.already})`);
+      return new Response(JSON.stringify({ ok: true, already: settled.already, payment_link_id: udf1, payment_ref: paymentRef }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Path 1: student fee

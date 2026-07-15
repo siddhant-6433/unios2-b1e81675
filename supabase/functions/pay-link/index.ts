@@ -15,6 +15,7 @@
 // insert the payment, so replayed webhooks cannot double-insert.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { settlePaymentLink } from "../_shared/gateway-settlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,169 +73,22 @@ async function razorpayRequest(path: string, init: RequestInit, keyId: string, k
   return { res, data };
 }
 
-// Allocate a paid amount across a student's outstanding fee_ledger rows.
-// Mirrors the settle logic in razorpay-payment's settleStudentFeePayment but
-// pays exactly `paidAmount` (no waiver) against the oldest-due rows first.
-async function settleStudentFeeLedger(
-  admin: any,
-  studentId: string,
-  paidAmount: number,
-  leadPaymentId: string,
-): Promise<void> {
-  const { data: rows } = await admin
-    .from("fee_ledger")
-    .select("id, total_amount, paid_amount, concession, balance, due_date, status")
-    .eq("student_id", studentId)
-    .in("status", ["due", "overdue"])
-    .gt("balance", 0)
-    .order("due_date", { ascending: true });
-
-  let remaining = Math.round(paidAmount * 100) / 100;
-  const splits: Array<{ id: string; amount: number }> = [];
-  for (const row of rows || []) {
-    if (remaining <= 0) break;
-    const balance = Number(row.balance ?? 0);
-    const apply = Math.min(balance, remaining);
-    remaining = Math.round((remaining - apply) * 100) / 100;
-    const newPaid = Number(row.paid_amount || 0) + apply;
-    const fullyPaid = newPaid + Number(row.concession || 0) >= Number(row.total_amount) - 0.01;
-    await admin
-      .from("fee_ledger")
-      .update({ paid_amount: newPaid, status: fullyPaid ? "paid" : row.status })
-      .eq("id", row.id);
-    splits.push({ id: row.id, amount: apply });
-  }
-
-  if (splits.length) {
-    await admin.from("fee_ledger_payments").insert(
-      splits.map((s) => ({
-        fee_ledger_id: s.id,
-        lead_payment_id: leadPaymentId,
-        amount: s.amount,
-        notes: "Payment link settlement",
-      })),
-    );
-  }
-}
-
-// Receipt PDF + WhatsApp/email go out via notify-event. Required here because
-// the DB trigger fn_notify_payment_received skips gateway rows (the gateway
-// edge fn is expected to notify, mirroring razorpay-payment/easebuzz).
-function notifyPaymentReceived(
-  supabaseUrl: string,
-  serviceKey: string,
-  leadId: string,
-  leadPaymentId: string,
-): void {
-  fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-    body: JSON.stringify({
-      event: "payment_received",
-      lead_id: leadId,
-      context: { payment_id: leadPaymentId },
-    }),
-  }).catch((e) => console.error("[pay-link] notify payment_received failed:", e));
-}
-
-// Core idempotent settlement: guard on status transition active→paid, then
-// insert the payment row exactly once.
 async function settleLink(
   admin: any,
   supabaseUrl: string,
   serviceKey: string,
   link: any,
   paymentRef: string,
-  gateway: string,
-): Promise<{ ok: boolean; message?: string }> {
-  // Guard: only the first caller flips active→paid.
-  const { data: claimed, error: claimErr } = await admin
-    .from("payment_links")
-    .update({ status: "paid" })
-    .eq("id", link.id)
-    .eq("status", "active")
-    .select("id")
-    .maybeSingle();
-  if (claimErr) return { ok: false, message: claimErr.message };
-  if (!claimed) return { ok: true }; // already settled by an earlier (replayed) call
+  gateway: "razorpay" | "easebuzz" | "icici" | "cashfree" | "offline" | "other",
+): Promise<{ ok: boolean; message?: string; already?: boolean }> {
+  return settlePaymentLink(admin, supabaseUrl, serviceKey, link, paymentRef, gateway, "unknown");
+}
 
-  const paidAmount = Number(link.amount);
-
-  if (link.purpose === "pre_admission_token") {
-    if (!link.lead_id) return { ok: false, message: "pre_admission_token link has no lead_id" };
-    const { data: lp, error } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: link.lead_id,
-        type: "pre_admission_token",
-        amount: paidAmount,
-        payment_mode: "gateway",
-        gateway,
-        transaction_ref: paymentRef,
-        status: "confirmed",
-        notes: link.note || "Pre-admission token via payment link",
-      } as any)
-      .select("id")
-      .single();
-    if (error) return { ok: false, message: error.message };
-    await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
-    // Triggers assign receipt no + advance stage; receipt/WA/email via notify.
-    notifyPaymentReceived(supabaseUrl, serviceKey, link.lead_id, lp.id);
-    return { ok: true };
-  }
-
-  // fee_due / custom
-  if (link.student_id) {
-    const { data: student } = await admin
-      .from("students").select("lead_id").eq("id", link.student_id).maybeSingle();
-    const leadId = student?.lead_id || link.lead_id || null;
-    if (!leadId) return { ok: false, message: "No lead linked to student for settlement" };
-
-    const { data: lp, error } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: leadId,
-        type: "other",
-        amount: paidAmount,
-        payment_mode: "gateway",
-        gateway,
-        transaction_ref: paymentRef,
-        status: "confirmed",
-        applied_to_ledger: true,
-        notes: link.note || "Fee payment via payment link",
-      } as any)
-      .select("id")
-      .single();
-    if (error) return { ok: false, message: error.message };
-    await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
-    await settleStudentFeeLedger(admin, link.student_id, paidAmount, lp.id);
-    notifyPaymentReceived(supabaseUrl, serviceKey, leadId, lp.id);
-    return { ok: true };
-  }
-
-  // custom link on a lead with no student yet → record as 'other' on the lead.
-  if (link.lead_id) {
-    const { data: lp, error } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: link.lead_id,
-        type: "other",
-        amount: paidAmount,
-        payment_mode: "gateway",
-        gateway,
-        transaction_ref: paymentRef,
-        status: "confirmed",
-        notes: link.note || "Custom payment via payment link",
-      } as any)
-      .select("id")
-      .single();
-    if (error) return { ok: false, message: error.message };
-    await admin.from("payment_links").update({ lead_payment_id: lp.id } as any).eq("id", link.id);
-    notifyPaymentReceived(supabaseUrl, serviceKey, link.lead_id, lp.id);
-    return { ok: true };
-  }
-
-  return { ok: false, message: "Link has no settlement target" };
+async function sha512(message: string): Promise<string> {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-512", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.serve(async (req) => {
@@ -328,7 +182,100 @@ Deno.serve(async (req) => {
       return json({ error: `This payment link is ${link.status}.` }, 409);
     }
 
-    if (action === "create-order") {
+    if (action === "create-order" || action === "create-easebuzz-order") {
+      const preferredGateway = String(parsed.gateway || link.gateway || "").toLowerCase();
+      const useEasebuzz = action === "create-easebuzz-order"
+        || preferredGateway === "easebuzz"
+        || (!keyId || !keySecret);
+
+      // ── Easebuzz path (UniOs /pay page + initiate) ─────────────────────
+      if (useEasebuzz) {
+        const merchantKey = Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY") || "";
+        const merchantSalt = Deno.env.get("EASEBUZZ_SALT") || Deno.env.get("EASEBUZZ_MERCHANT_SALT") || "";
+        const envMode = (Deno.env.get("EASEBUZZ_ENV") || "prod").toLowerCase();
+        const baseUrl = envMode === "test" || envMode === "sandbox"
+          ? "https://testpay.easebuzz.in"
+          : "https://pay.easebuzz.in";
+        if (!merchantKey || !merchantSalt) {
+          return json({ error: "Easebuzz not configured" }, 500);
+        }
+
+        // Resolve payer contact for prefill
+        let firstname = payerName.split(/\s+/)[0] || "Candidate";
+        let phone = "";
+        let email = "noreply@nimteducation.com";
+        if (link.lead_id) {
+          const { data: lead } = await admin.from("leads").select("name, phone, email").eq("id", link.lead_id).maybeSingle();
+          if (lead?.name) firstname = String(lead.name).split(/\s+/)[0] || firstname;
+          if (lead?.phone) phone = String(lead.phone).replace(/\D/g, "").slice(-10);
+          if (lead?.email) email = lead.email;
+        } else if (link.student_id) {
+          const { data: student } = await admin.from("students").select("name, phone, email").eq("id", link.student_id).maybeSingle();
+          if (student?.name) firstname = String(student.name).split(/\s+/)[0] || firstname;
+          if (student?.phone) phone = String(student.phone).replace(/\D/g, "").slice(-10);
+          if (student?.email) email = student.email;
+        }
+        if (!phone) phone = "9999999999";
+
+        const amountStr = Number(link.amount).toFixed(2);
+        const productStr = (PURPOSE_LABEL[link.purpose] || "Payment").slice(0, 100);
+        // udf3=payment_link, udf1=payment_link uuid — surl/webhook settle via settlePaymentLink
+        const txnid = `PL${link.id.replace(/-/g, "").slice(0, 12)}${Date.now()}`.slice(0, 40);
+        const udf1 = link.id;
+        const udf3 = "payment_link";
+        // Hash: key|txnid|amount|productinfo|firstname|email|udf1..udf10|salt
+        const hashInput = [
+          merchantKey, txnid, amountStr, productStr, firstname, email,
+          udf1, "", udf3, "", "", "", "", "", "", "",
+          merchantSalt,
+        ].join("|");
+        const hash = await sha512(hashInput);
+        const selfUrl = `${supabaseUrl}/functions/v1/easebuzz-payment`;
+
+        const formData = new URLSearchParams({
+          key: merchantKey,
+          txnid,
+          amount: amountStr,
+          productinfo: productStr,
+          firstname,
+          email,
+          phone,
+          hash,
+          udf1,
+          udf2: "",
+          udf3,
+          udf4: "",
+          udf5: "",
+          surl: selfUrl,
+          furl: selfUrl,
+        });
+
+        const res = await fetch(`${baseUrl}/payment/initiateLink`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formData.toString(),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.status !== 1) {
+          console.error("[pay-link] easebuzz initiate error:", data);
+          return json({ error: data.error_desc || data.data || "Failed to initiate Easebuzz payment" }, 400);
+        }
+
+        // Persist txn for reconcile; stamp gateway on the link
+        await admin.from("payment_links").update({
+          gateway: "easebuzz",
+          gateway_link_id: txnid,
+        } as any).eq("id", link.id);
+
+        return json({
+          gateway: "easebuzz",
+          txnid,
+          pay_url: `${baseUrl}/pay/${data.data}`,
+          amount: Number(link.amount),
+        });
+      }
+
+      // ── Razorpay Standard Checkout path ────────────────────────────────
       if (!keyId || !keySecret) return json({ error: "Razorpay not configured" }, 500);
       const amountPaise = Math.round(Number(link.amount) * 100);
       const { res, data } = await razorpayRequest("/orders", {
@@ -337,11 +284,18 @@ Deno.serve(async (req) => {
           amount: amountPaise,
           currency: "INR",
           receipt: cleanReceipt(`pl_${link.id}`),
-          notes: { payment_link_id: link.id, purpose: link.purpose },
+          notes: { payment_link_id: link.id, purpose: link.purpose, context: "payment_link" },
         }),
       }, keyId, keySecret);
       if (!res.ok) return json({ error: data?.error?.description || "Failed to create order" }, 500);
-      return json({ order_id: data.id, amount: data.amount, currency: data.currency, key_id: keyId });
+      await admin.from("payment_links").update({ gateway: "razorpay" } as any).eq("id", link.id);
+      return json({
+        gateway: "razorpay",
+        order_id: data.id,
+        amount: data.amount,
+        currency: data.currency,
+        key_id: keyId,
+      });
     }
 
     // Razorpay hosted Payment-Link callback (candidate lands back on
