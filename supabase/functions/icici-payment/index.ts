@@ -24,6 +24,11 @@
 //   ICICI_RETURN_URLS (optional comma-list; picks a return URL by request Origin)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  settleApplicationFee,
+  settleLeadPaymentRow,
+  settleStudentFeePayment,
+} from "../_shared/gateway-settlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -210,146 +215,16 @@ async function settleStudentFee(
   studentId: string,
   paidAmount: number,
   paymentRef: string | null,
-  selection = "due",
-  waiverAmount = 0,
-): Promise<{ ok: boolean; message?: string }> {
-  let query = admin
-    .from("fee_ledger")
-    .select("id, total_amount, concession, balance, due_date")
-    .eq("student_id", studentId)
-    .in("status", ["due", "overdue"])
-    .gt("balance", 0);
-
-  const cleanedSelection = normalizeFeeSelection(selection);
-  if (cleanedSelection === "due") {
-    query = query.lte("due_date", todayInIndia());
-  } else if (cleanedSelection !== "all") {
-    query = query.in("id", cleanedSelection.split(","));
-  }
-
-  const { data: rows, error: feeErr } = await query.order("due_date", { ascending: true });
-  if (feeErr) return { ok: false, message: feeErr.message };
-  if (!rows?.length) return { ok: true };
-
-  const grossTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? 0), 0);
-  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
-  const expectedPaid = grossTotal - waiver;
-  if (Math.abs(paidAmount - expectedPaid) > 1) {
-    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
-  }
-
-  let remainingWaiver = Math.round(waiver * 100) / 100;
-  const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const balance = Number(row.balance ?? 0);
-    const concessionPart = i === rows.length - 1
-      ? remainingWaiver
-      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
-    remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
-    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
-    const newConcession = Number(row.concession || 0) + concessionPart;
-    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
-
-    const { error: updateErr } = await admin
-      .from("fee_ledger")
-      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
-      .eq("id", row.id);
-    if (updateErr) return { ok: false, message: updateErr.message };
-
-    ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
-  }
-
-  const { data: student } = await admin
-    .from("students")
-    .select("lead_id")
-    .eq("id", studentId)
-    .maybeSingle();
-
-  if (student?.lead_id) {
-    let lp: { id: string } | null = null;
-    if (paymentRef) {
-      const { data: existing } = await admin
-        .from("lead_payments")
-        .select("id")
-        .eq("lead_id", student.lead_id)
-        .eq("gateway", "icici")
-        .eq("transaction_ref", paymentRef)
-        .maybeSingle();
-      lp = existing;
-    }
-    if (!lp?.id) {
-      const { data: inserted, error: lpErr } = await admin
-        .from("lead_payments")
-        .insert({
-          lead_id: student.lead_id,
-          type: "other",
-          amount: paidAmount,
-          concession_amount: waiver,
-          payment_mode: "gateway",
-          gateway: "icici",
-          transaction_ref: paymentRef,
-          status: "confirmed",
-          applied_to_ledger: true,
-          notes: waiver > 0 ? "Course-fee payment with 5% annual Pay All waiver" : "Course-fee instalment via ICICI",
-        } as any)
-        .select("id")
-        .maybeSingle();
-      if (lpErr) return { ok: false, message: lpErr.message };
-      lp = inserted;
-    }
-    if (lp?.id) {
-      await admin.from("fee_ledger_payments").insert(
-        ledgerSplits.map((split) => ({
-          fee_ledger_id: split.id,
-          lead_payment_id: lp.id,
-          amount: split.amount,
-          concession_amount: split.concession,
-          notes: "Student portal gateway payment",
-        })),
-      );
-      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-        body: JSON.stringify({
-          event: "payment_received",
-          lead_id: student.lead_id,
-          context: { payment_id: lp.id },
-        }),
-      }).catch((e) => console.error(`[${FN_NAME}] student-fee notify-event failed:`, e));
-    }
-  }
-
-  return { ok: true };
+  selection: string,
+  waiverAmount: number,
+): Promise<{ ok: boolean; message?: string; already?: boolean }> {
+  // At-most-once via gateway_settlements + no ledger re-apply.
+  return settleStudentFeePayment(
+    admin, supabaseUrl, serviceKey, studentId, paidAmount, paymentRef,
+    selection, waiverAmount, "icici", "callback",
+  );
 }
 
-function todayInIndia(): string {
-  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-function normalizeFeeSelection(selection?: string | null): string {
-  const cleaned = String(selection || "due").trim();
-  if (cleaned === "all" || cleaned === "due") return cleaned;
-  const ids = cleaned
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
-  return ids.length ? ids.join(",") : "due";
-}
-
-function feeSelectionFromBody(scope: unknown, feeIds: unknown): string {
-  const ids = Array.isArray(feeIds)
-    ? feeIds.map((id) => String(id)).filter((id) => /^[0-9a-f-]{36}$/i.test(id))
-    : [];
-  if (ids.length > 0) return ids.join(",");
-  return normalizeFeeSelection(scope === "all" ? "all" : "due");
-}
-
-function compactMerchantTxnNo(prefix = "F"): string {
-  const timePart = Date.now().toString(36).toUpperCase();
-  const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
-  return `${prefix}${timePart}${randomPart}`.slice(0, 20);
-}
 
 async function settleAlumniService(
   admin: any,
@@ -535,32 +410,20 @@ Deno.serve(async (req) => {
 
       // Lead-side payment (addl1 is the lead_payments.id)
       if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
-        const newStatus = isSuccess ? "confirmed" : "pending";
-        const { error: lpErr } = await admin
-          .from("lead_payments")
-          .update({ status: newStatus, transaction_ref: paymentRef })
-          .eq("id", addl1);
-        if (lpErr) {
-          console.error(`[${FN_NAME}] lead_payments update error:`, lpErr.message);
-          return returnPage("Payment Received", `Payment confirmed but our records could not be updated. Please contact support. Txn: ${paymentRef}`, false);
-        }
-        if (isSuccess) {
-          // notify-event handles PDF generation + WA + email. DB trigger now
-          // skips gateway='icici' rows so this won't double-send.
-          const { data: lpRow } = await admin
-            .from("lead_payments")
-            .select("lead_id, type")
-            .eq("id", addl1)
-            .maybeSingle();
-          if (lpRow?.lead_id) {
-            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
-            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: addl1 } }),
-            }).catch((e) => console.error(`[${FN_NAME}] notify-event invoke failed:`, e));
+        if (isSuccess && paymentRef) {
+          const settled = await settleLeadPaymentRow(admin, addl1, paymentRef, {
+            gateway: "icici",
+            source: "callback",
+            notify: true,
+            supabaseUrl,
+            serviceKey,
+          });
+          if (!settled.ok) {
+            console.error(`[${FN_NAME}] lead_payments settle error:`, settled.message);
+            return returnPage("Payment Received", `Payment confirmed but our records could not be updated. Please contact support. Txn: ${paymentRef}`, false);
           }
         }
+        // failed → leave pending for retry
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
           isSuccess
@@ -614,22 +477,19 @@ Deno.serve(async (req) => {
 
       // Application-fee payment (addl2 is the application_id string)
       if (addl2 && isSuccess) {
-        const { data: updated, error: dbErr } = await admin
-          .from("applications")
-          .update({ payment_status: "paid", payment_ref: paymentRef })
-          .eq("application_id", addl2)
-          .select("application_id");
-        if (dbErr || !updated?.length) {
-          console.error(`[${FN_NAME}] applications update error:`, dbErr?.message, "rows:", updated?.length);
+        if (!paymentRef) {
+          return returnPage("Payment Received", "Payment confirmed but missing bank reference. Contact support.", false);
+        }
+        const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, addl2, paymentRef, {
+          gateway: "icici",
+          orderId: merchantTxnNo || null,
+          source: "callback",
+          fireReceipt: true,
+        });
+        if (!settled.ok) {
+          console.error(`[${FN_NAME}] application settle error:`, settled.message);
           return returnPage("Payment Received", `Payment confirmed but could not link to application. Contact support. Txn: ${paymentRef}`, false);
         }
-        // Fire-and-forget: generate the application-fee receipt PDF so it's
-        // ready by the time the candidate lands back on their dashboard.
-        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ application_id: addl2 }),
-        }).catch((e) => console.error(`[${FN_NAME}] receipt invoke failed:`, e));
         return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
       }
 
@@ -1021,31 +881,24 @@ Deno.serve(async (req) => {
         const addl3 = data?.addlParam3 || feeSelectionFromBody(body.payment_scope, body.fee_ids);
         const addl4 = data?.addlParam4 || String(Number(body.waiver_amount || 0));
         if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
-          await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", addl1);
-          const { data: lpRow } = await admin
-            .from("lead_payments")
-            .select("lead_id, type")
-            .eq("id", addl1)
-            .maybeSingle();
-          if (lpRow?.lead_id) {
-            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
-            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: addl1 } }),
-            }).catch((e) => console.error(`[${FN_NAME}] verify notify-event failed:`, e));
-          }
+          await settleLeadPaymentRow(admin, addl1, paymentRef, {
+            gateway: "icici",
+            source: "verify",
+            notify: true,
+            supabaseUrl,
+            serviceKey,
+          });
         } else if (addl1 === "student_fee" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
           await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, Number(data?.amount || 0), paymentRef, addl3, Number(addl4 || 0));
         } else if (addl1 === "alumni_service" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
           await settleAlumniService(admin, addl2, Number(data?.amount || 0), paymentRef, data);
         } else if (addl2) {
-          await admin.from("applications").update({ payment_status: "paid", payment_ref: paymentRef }).eq("application_id", addl2);
-          fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-            body: JSON.stringify({ application_id: addl2 }),
-          }).catch((e) => console.error(`[${FN_NAME}] verify receipt invoke failed:`, e));
+          await settleApplicationFee(admin, supabaseUrl, serviceKey, addl2, paymentRef, {
+            gateway: "icici",
+            orderId: String(txnid || ""),
+            source: "verify",
+            fireReceipt: true,
+          });
         }
       }
 
@@ -1131,15 +984,17 @@ Deno.serve(async (req) => {
 
           if (isSettled) {
             const paymentRef = data?.txnID || data?.merchantTxnNo || txnid;
-            await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", row.id);
-            outcome = "confirmed";
-            // Fire notify-event directly — handles PDF + WA + email + finance CC.
-            const evt = row.type === "application_fee" ? "app_fee_paid" : "payment_received";
-            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ event: evt, lead_id: row.lead_id, context: { payment_id: row.id } }),
-            }).catch((e) => console.error(`[${FN_NAME}] reconcile notify-event invoke failed:`, e));
+            const settled = await settleLeadPaymentRow(admin, row.id, paymentRef, {
+              gateway: "icici",
+              source: "cron",
+              notify: true,
+              supabaseUrl,
+              serviceKey,
+            });
+            outcome = settled.ok ? "confirmed" : "still_pending";
+            if (!settled.ok) {
+              console.error(`[${FN_NAME}] reconcile settle failed for ${row.id}:`, settled.message);
+            }
           } else if (isExplicitFail) {
             await admin.from("lead_payments").update({
               status: "failed",

@@ -1,4 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  settleApplicationFee,
+  settleLeadPaymentRow,
+  settleStudentFeePayment,
+} from "../_shared/gateway-settlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -102,107 +107,8 @@ async function fetchStudentFeeRows(admin: any, studentId: string, selection: str
   return { rows: data || [] };
 }
 
-async function settleStudentFeePayment(
-  admin: any,
-  supabaseUrl: string,
-  serviceKey: string,
-  studentId: string,
-  paidAmount: number,
-  paymentRef: string | null,
-  selection: string,
-  waiverAmount: number,
-  gateway: string,
-): Promise<{ ok: boolean; message?: string }> {
-  const { rows, error } = await fetchStudentFeeRows(admin, studentId, selection);
-  if (error) return { ok: false, message: error };
-  if (!rows.length) return { ok: true };
-
-  const grossTotal = rows.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
-  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
-  const expectedPaid = grossTotal - waiver;
-  if (Math.abs(paidAmount - expectedPaid) > 1) {
-    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
-  }
-
-  let remainingWaiver = Math.round(waiver * 100) / 100;
-  const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const balance = Number(row.balance ?? 0);
-    const concessionPart = i === rows.length - 1
-      ? remainingWaiver
-      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
-    remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
-    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
-    const newConcession = Number(row.concession || 0) + concessionPart;
-    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
-
-    const { error: updateErr } = await admin
-      .from("fee_ledger")
-      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
-      .eq("id", row.id);
-    if (updateErr) return { ok: false, message: updateErr.message };
-
-    ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
-  }
-
-  const { data: stu } = await admin
-    .from("students")
-    .select("lead_id")
-    .eq("id", studentId)
-    .maybeSingle();
-
-  if (stu?.lead_id) {
-    let paymentId: string | null = null;
-    if (paymentRef) {
-      const { data: existing } = await admin
-        .from("lead_payments")
-        .select("id")
-        .eq("transaction_ref", paymentRef)
-        .maybeSingle();
-      paymentId = existing?.id || null;
-    }
-    if (!paymentId) {
-      const { data: lpIns, error: lpErr } = await admin
-        .from("lead_payments")
-        .insert({
-          lead_id: stu.lead_id,
-          type: "other",
-          amount: paidAmount,
-          concession_amount: waiver,
-          payment_mode: "gateway",
-          gateway,
-          transaction_ref: paymentRef,
-          status: "confirmed",
-          applied_to_ledger: true,
-          notes: waiver > 0 ? "Course-fee payment with 5% annual Pay All waiver" : "Course-fee instalment via gateway",
-        })
-        .select("id")
-        .maybeSingle();
-      if (lpErr) return { ok: false, message: lpErr.message };
-      paymentId = lpIns?.id || null;
-    }
-
-    if (paymentId) {
-      await admin.from("fee_ledger_payments").insert(
-        ledgerSplits.map((split) => ({
-          fee_ledger_id: split.id,
-          lead_payment_id: paymentId,
-          amount: split.amount,
-          concession_amount: split.concession,
-          notes: "Student portal gateway payment",
-        })),
-      );
-      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-        body: JSON.stringify({ event: "payment_received", lead_id: stu.lead_id, context: { payment_id: paymentId } }),
-      }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
-    }
-  }
-
-  return { ok: true };
-}
+// Student fee settlement: shared claim-once helper (../_shared/gateway-settlement.ts).
+// Never re-applies ledger for an existing capture.
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -283,12 +189,14 @@ Deno.serve(async (req) => {
           }
 
           const paidAmount = parseFloat(amount || "0");
-          const settled = await settleStudentFeePayment(admin, supabaseUrl, serviceKey, udf4, paidAmount, paymentRef, udf5, Number(udf6 || 0), "easebuzz");
+          const settled = await settleStudentFeePayment(
+            admin, supabaseUrl, serviceKey, udf4, paidAmount, paymentRef, udf5, Number(udf6 || 0), "easebuzz", "surl",
+          );
           if (!settled.ok) {
             console.error("[easebuzz] fee_payment settlement failed:", settled.message);
             return returnPage("Payment Error", `${settled.message}. Transaction ID: ${easepayid || txnid}. Please contact support.`, false);
           }
-          console.log("[easebuzz] fee_payment: settled selected entries for student", udf4);
+          console.log("[easebuzz] fee_payment: settled selected entries for student", udf4, settled.already ? "(already)" : "");
         }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
@@ -302,32 +210,21 @@ Deno.serve(async (req) => {
       // status — the AFTER trigger will then auto-advance the lead's stage and
       // issue PAN / AN as the threshold is crossed.
       if (udf2 && /^[0-9a-f-]{36}$/i.test(udf2)) {
-        const newStatus = isSuccess ? "confirmed" : "pending"; // failed → leave pending so user can retry
-        const { error: lpErr } = await admin
-          .from("lead_payments")
-          .update({ status: newStatus, transaction_ref: paymentRef })
-          .eq("id", udf2);
-        if (lpErr) {
-          console.error("[easebuzz] lead_payments update error:", lpErr.message);
-          return returnPage("Payment Received", "Payment confirmed but our records could not be updated. Please contact support. Txn: " + (easepayid || txnid), false);
-        }
-        // Fire notify-event directly (it ensures the PDF, then sends WA + email).
-        // The DB trigger now skips gateway='easebuzz' rows to avoid duplicates.
-        if (isSuccess) {
-          const { data: lpRow } = await admin
-            .from("lead_payments")
-            .select("lead_id, type")
-            .eq("id", udf2)
-            .maybeSingle();
-          if (lpRow?.lead_id) {
-            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
-            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: udf2 } }),
-            }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
+        if (isSuccess && paymentRef) {
+          // Claim-once: pending→confirmed only; never inserts a second row.
+          const settled = await settleLeadPaymentRow(admin, udf2, paymentRef, {
+            gateway: "easebuzz",
+            source: "surl",
+            notify: true,
+            supabaseUrl,
+            serviceKey,
+          });
+          if (!settled.ok) {
+            console.error("[easebuzz] lead_payments settle error:", settled.message);
+            return returnPage("Payment Received", "Payment confirmed but our records could not be updated. Please contact support. Txn: " + (easepayid || txnid), false);
           }
         }
+        // failed → leave pending so user can retry
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
           isSuccess ? "Your payment has been received. The receipt has been emailed to you. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
@@ -340,33 +237,23 @@ Deno.serve(async (req) => {
           console.error("[easebuzz] missing udf1 (application_id) in return POST — fields:", JSON.stringify(allFields));
           return returnPage("Payment Received", "Payment received but could not be linked automatically. Please contact support with transaction ID: " + (easepayid || txnid), false);
         }
+        if (!paymentRef) {
+          return returnPage("Payment Received", "Payment confirmed but missing gateway reference. Please contact support.", false);
+        }
 
-        // Update application in DB — trust EaseBuzz's status=success from surl
-        const { data: updated, error: dbErr } = await admin
-          .from("applications")
-          .update({ payment_status: "paid", payment_ref: paymentRef })
-          .eq("application_id", applicationId)
-          .select("application_id, payment_status");
+        // At-most-once application fee claim (gateway_settlements + unpaid→paid).
+        const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, applicationId, paymentRef, {
+          gateway: "easebuzz",
+          orderId: txnid || null,
+          source: "surl",
+          fireReceipt: true,
+        });
+        console.log("[easebuzz] application settle:", JSON.stringify(settled));
 
-        console.log("[easebuzz] DB update result:", JSON.stringify({ updated, dbErr, applicationId, paymentRef }));
-
-        if (dbErr) {
-          console.error("[easebuzz] DB update error:", dbErr.message, dbErr.code, dbErr.details);
+        if (!settled.ok) {
+          console.error("[easebuzz] application settle error:", settled.message);
           return returnPage("Payment Received", "Payment confirmed but could not update your application automatically. Please contact support. Transaction ID: " + (easepayid || txnid), false);
         }
-
-        if (!updated || updated.length === 0) {
-          console.error("[easebuzz] DB update matched 0 rows for application_id:", applicationId);
-          return returnPage("Payment Received", "Payment confirmed but application not found. Please contact support. Transaction ID: " + (easepayid || txnid), false);
-        }
-
-        // Fire-and-forget: generate the application-fee receipt PDF so it's
-        // ready by the time the candidate lands back on their dashboard.
-        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ application_id: applicationId }),
-        }).catch((e) => console.error("[easebuzz] receipt invoke failed:", e));
 
         return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
       }
@@ -696,19 +583,22 @@ Deno.serve(async (req) => {
             feeSelection,
             feeWaiver,
             "easebuzz",
+            "verify",
           );
           if (!settled.ok) console.error("[easebuzz] verify-payment fee settlement failed:", settled.message);
         }
         const appId = application_id || txn?.udf1 || "";
         if (appId) {
-          const { error: dbErr } = await admin
-            .from("applications")
-            .update({ payment_status: "paid", payment_ref: paymentRef })
-            .eq("application_id", appId);
-          if (dbErr) {
-            console.error("[easebuzz] verify-payment DB update error:", dbErr.message);
+          const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, appId, paymentRef, {
+            gateway: "easebuzz",
+            orderId: String(txnid || ""),
+            source: "verify",
+            fireReceipt: true,
+          });
+          if (!settled.ok) {
+            console.error("[easebuzz] verify-payment app settle error:", settled.message);
           } else {
-            console.log("[easebuzz] verify-payment: updated application", appId, "to paid");
+            console.log("[easebuzz] verify-payment: application", appId, settled.already ? "already paid" : "marked paid");
           }
         }
       }
@@ -761,18 +651,19 @@ Deno.serve(async (req) => {
         );
       }
 
-      const { data: updated, error: dbErr } = await admin
-        .from("applications")
-        .update({ payment_status: "paid", payment_ref: refTag })
-        .eq("application_id", application_id)
-        .select("application_id, payment_status")
-        .maybeSingle();
-      if (dbErr) {
+      const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, application_id, refTag, {
+        gateway: "easebuzz",
+        source: "manual",
+        fireReceipt: true,
+      });
+      if (!settled.ok) {
+        const status = /not found/i.test(settled.message || "") ? 404 : /already paid with different/i.test(settled.message || "") ? 409 : 500;
         return new Response(
-          JSON.stringify({ error: dbErr.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: settled.message }),
+          { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      const updated = settled.ok ? { application_id, payment_status: "paid" } : null;
       if (!updated) {
         return new Response(
           JSON.stringify({ error: "application not found" }),
@@ -991,23 +882,20 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const { error: upErr } = await admin
-          .from("applications")
-          .update({ payment_status: "paid", payment_ref: refTag })
-          .eq("application_id", app.application_id);
-        if (upErr) {
-          // Including unique-index violations from the new DB guards — these
-          // surface as 23505. Treat them as informative skips, not failures.
-          skipped.push({ application_id: app.application_id, reason: "db_update_failed", detail: upErr.message });
+        const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, app.application_id, refTag, {
+          gateway: "easebuzz",
+          orderId: String(txn.txnid || ""),
+          source: "reconcile",
+          fireReceipt: true,
+        });
+        if (!settled.ok) {
+          skipped.push({ application_id: app.application_id, reason: "db_update_failed", detail: settled.message });
           continue;
         }
-
-        // Fire-and-forget receipt generation, like surl + mark-paid-manual.
-        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ application_id: app.application_id }),
-        }).catch((e) => console.error(`[easebuzz] reconcile-by-udf1 receipt invoke failed (${app.application_id}):`, e));
+        if (settled.already) {
+          skipped.push({ application_id: app.application_id, reason: "already_paid", detail: refTag });
+          continue;
+        }
 
         reconciled.push({ application_id: app.application_id, easepayid, amount: got, source: "udf1_date_range" });
       }
@@ -1096,20 +984,20 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const { error: upErr } = await admin
-          .from("applications")
-          .update({ payment_status: "paid", payment_ref: refTag })
-          .eq("application_id", app.application_id);
-        if (upErr) {
-          skipped.push({ application_id: app.application_id, reason: "db_update_failed_fallback", detail: upErr.message });
+        const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, app.application_id, refTag, {
+          gateway: "easebuzz",
+          orderId: String(txnid || ""),
+          source: "reconcile",
+          fireReceipt: true,
+        });
+        if (!settled.ok) {
+          skipped.push({ application_id: app.application_id, reason: "db_update_failed_fallback", detail: settled.message });
           continue;
         }
-
-        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ application_id: app.application_id }),
-        }).catch((e) => console.error(`[easebuzz] reconcile-by-udf1 fallback receipt invoke failed (${app.application_id}):`, e));
+        if (settled.already) {
+          skipped.push({ application_id: app.application_id, reason: "already_paid_fallback", detail: refTag });
+          continue;
+        }
 
         reconciled.push({ application_id: app.application_id, easepayid, amount: got, source: "per_txn_retrieve" });
         fallback_attempts.push({ application_id: app.application_id, txnid, easepayid, status: "marked_paid" });
