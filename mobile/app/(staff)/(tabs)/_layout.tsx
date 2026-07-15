@@ -1,8 +1,9 @@
 import { Tabs } from 'expo-router';
-import { Briefcase, Home, Inbox, User } from 'lucide-react-native';
+import { Briefcase, Home, MessageCircle, User } from 'lucide-react-native';
 import { useTheme } from '../../../theme/ThemeContext';
+import { Platform } from 'react-native';
 
-/** Staff tab set is identical for all roles — role variation lives inside Work. */
+/** Staff tab set — role variation lives inside Me / Work. Chats = WhatsApp-mimic. */
 export default function StaffTabLayout() {
   const { colors, mode } = useTheme();
 
@@ -10,15 +11,14 @@ export default function StaffTabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.ink,
-        tabBarInactiveTintColor: colors.inkMuted,
+        tabBarActiveTintColor: mode === 'dark' ? colors.ink : colors.inverseInk,
+        tabBarInactiveTintColor: mode === 'dark' ? colors.inkMuted : 'rgba(243,245,249,0.55)',
         tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopWidth: mode === 'dark' ? 0 : 0.5,
-          borderTopColor: colors.line,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 8,
+          backgroundColor: mode === 'dark' ? colors.card : colors.inverse,
+          borderTopWidth: 0,
+          height: Platform.OS === 'ios' ? 84 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          paddingTop: 10,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
@@ -33,8 +33,8 @@ export default function StaffTabLayout() {
       <Tabs.Screen
         name="inbox"
         options={{
-          title: 'Inbox',
-          tabBarIcon: ({ color, size }) => <Inbox size={size - 4} color={color} />,
+          title: 'Chats',
+          tabBarIcon: ({ color, size }) => <MessageCircle size={size - 4} color={color} />,
         }}
       />
       <Tabs.Screen

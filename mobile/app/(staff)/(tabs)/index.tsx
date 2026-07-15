@@ -1,375 +1,411 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, SafeAreaView,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { colors, spacing, radius, typography } from '../../../constants/Colors';
 import { router } from 'expo-router';
 import {
-  Fingerprint, IndianRupee, ChevronRight, CheckCircle,
-  CalendarOff, Calendar, Clock, Bell, Search, Megaphone, Gift, AlertCircle,
-  ClipboardCheck, Users, FileText, Briefcase, Cake, BadgeCheck,
+  Fingerprint,
+  CheckCircle,
+  Calendar,
+  MessageCircle,
+  Users,
+  MapPin,
+  ChevronRight,
+  AlertCircle,
 } from 'lucide-react-native';
-import {
-  ActionTile,
-  MetricCard,
-  ScreenHeader,
-  SectionTitle,
-  StatusCard,
-} from '../../../components/ui/DashboardPrimitives';
+import { useTheme } from '../../../theme/ThemeContext';
+import { spacing, radius } from '../../../theme/tokens';
+import { formatTodaySubtitle, getGreeting } from '../../../lib/greetings';
 
+/**
+ * Super Admin–first Me cockpit (structure).
+ * - Web-parity rotating greeting
+ * - Punch hero
+ * - Scoped pulse (not raw global dumps)
+ * - Four pinned actions (no pastel wallpaper / vanity empty sections)
+ */
 export default function HomeScreen() {
   const { profile, role, user } = useAuth();
-  const displayName = profile?.display_name?.split(' ')[0] || 'User';
+  const { colors } = useTheme();
+  const displayName = profile?.display_name || 'there';
+  const greeting = getGreeting(displayName);
+  const subtitle = formatTodaySubtitle();
 
-  const isAdmin = ['super_admin', 'campus_admin', 'principal', 'admission_head'].includes(role || '');
-  const isEmployee = ['counsellor', 'accountant', 'data_entry', 'office_admin', 'office_assistant', 'hostel_warden'].includes(role || '');
-  const isFaculty = ['faculty', 'teacher', 'ib_coordinator'].includes(role || '');
-  const isStudent = role === 'student';
-  const isParent = role === 'parent';
-  const isStaff = isAdmin || isEmployee || isFaculty;
+  const isStaff = !['student', 'parent'].includes(role || '');
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <ScreenHeader
-          title={isStaff ? `Hello, ${displayName}` : `Hello, ${displayName}`}
-          subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-          avatar={(
-            <TouchableOpacity style={styles.avatar} onPress={() => router.push('/(staff)/(tabs)/profile' as any)}>
-            <Text style={styles.avatarText}>
-              {(profile?.display_name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.greeting, { color: colors.ink }]} numberOfLines={2}>
+              {greeting}
             </Text>
-            </TouchableOpacity>
-          )}
-        />
+            <Text style={[styles.dateLine, { color: colors.inkSecondary }]}>{subtitle}</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.avatar, { backgroundColor: colors.accentSoft }]}
+            onPress={() => router.push('/(staff)/(tabs)/profile' as any)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.avatarText, { color: colors.accent }]}>
+              {(profile?.display_name || 'U')
+                .split(' ')
+                .map((n) => n[0])
+                .join('')
+                .slice(0, 2)
+                .toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Staff views */}
-        {isStaff && <StaffHome isAdmin={isAdmin} userId={user?.id || ''} role={role || ''} />}
-
-        {/* Student view */}
-        {isStudent && <StudentHome userId={user?.id || ''} />}
-
-        {/* Parent view */}
-        {isParent && <ParentHome userId={user?.id || ''} />}
+        {isStaff ? (
+          <StaffHome userId={user?.id || ''} isAdmin={['super_admin', 'campus_admin', 'principal', 'admission_head'].includes(role || '')} />
+        ) : (
+          <Text style={{ color: colors.inkSecondary, padding: spacing.md }}>
+            Open the Campus app for student and parent features.
+          </Text>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ── Staff/Admin Home ──
-function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string; role: string }) {
+function StaffHome({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
+  const { colors } = useTheme();
   const [punchStatus, setPunchStatus] = useState<'in' | 'out' | 'none'>('none');
   const [punchTime, setPunchTime] = useState<string | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState(0);
-  const [newLeads, setNewLeads] = useState(0);
-  const [totalStudents, setTotalStudents] = useState(0);
-  const [pendingFollowups, setPendingFollowups] = useState(0);
-  const [visitsToday, setVisitsToday] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [pulse, setPulse] = useState({ present: 0, visits: 0, unreplied: 0 });
+  const [attention, setAttention] = useState(0);
 
   const fetchStatus = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
 
-    // Punch status
-    const { data } = await supabase
+    const { data: attendance } = await supabase
       .from('employee_attendance')
       .select('punch_in, punch_out')
       .eq('user_id', userId)
       .eq('date', today)
+      .order('punch_in', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
-    if (data) {
-      if (data.punch_out) { setPunchStatus('out'); setPunchTime(data.punch_out); }
-      else { setPunchStatus('in'); setPunchTime(data.punch_in); }
+    if (attendance) {
+      if (attendance.punch_out) {
+        setPunchStatus('out');
+        setPunchTime(attendance.punch_out);
+      } else {
+        setPunchStatus('in');
+        setPunchTime(attendance.punch_in);
+      }
+    } else {
+      setPunchStatus('none');
+      setPunchTime(null);
     }
 
-    if (isAdmin) {
-      // Platform stats
-      const [faceRes, leaveRes, leadsRes, studentsRes, followupsRes, visitsRes] = await Promise.all([
-        supabase.from('employee_face_registrations').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('employee_leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('leads').select('id', { count: 'exact', head: true }).eq('stage', 'new_lead'),
-        supabase.from('students').select('id', { count: 'exact', head: true }).in('status', ['active', 'pre_admitted']),
-        supabase.from('lead_followups').select('id', { count: 'exact', head: true })
-          .eq('status', 'pending').lte('scheduled_at', `${today}T23:59:59`),
-        supabase.from('campus_visits').select('id', { count: 'exact', head: true })
-          .gte('visit_date', `${today}T00:00:00`).lte('visit_date', `${today}T23:59:59`),
-      ]);
-      setPendingApprovals((faceRes.count || 0) + (leaveRes.count || 0));
-      setNewLeads(leadsRes.count || 0);
-      setTotalStudents(studentsRes.count || 0);
-      setPendingFollowups(followupsRes.count || 0);
-      setVisitsToday(visitsRes.count || 0);
-    }
-  }, [isAdmin, userId]);
+    // Scoped "today" pulse — not global lead warehouse counts.
+    const dayStart = `${today}T00:00:00`;
+    const dayEnd = `${today}T23:59:59`;
+    const [presentRes, visitsRes, unrepliedRes, leaveRes, faceRes] = await Promise.all([
+      supabase
+        .from('employee_attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('date', today)
+        .not('punch_in', 'is', null)
+        .is('punch_out', null),
+      supabase
+        .from('campus_visits')
+        .select('id', { count: 'exact', head: true })
+        .gte('visit_date', dayStart)
+        .lte('visit_date', dayEnd),
+      // Unreplied WA is role-sensitive; keep 0 until Chats badge RPC exists.
+      Promise.resolve({ count: 0 }),
+      isAdmin
+        ? supabase
+            .from('employee_leave_requests')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending')
+        : Promise.resolve({ count: 0 }),
+      isAdmin
+        ? supabase
+            .from('employee_face_registrations')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending')
+        : Promise.resolve({ count: 0 }),
+    ]);
 
-  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+    setPulse({
+      present: presentRes.count || 0,
+      visits: visitsRes.count || 0,
+      unreplied: unrepliedRes.count || 0,
+    });
+    setAttention((leaveRes.count || 0) + (faceRes.count || 0));
+    setLoading(false);
+  }, [userId, isAdmin]);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  const punchTitle =
+    punchStatus === 'none'
+      ? 'Mark attendance'
+      : punchStatus === 'in'
+        ? 'You are punched in'
+        : 'Day complete';
+  const punchSub =
+    punchStatus === 'none'
+      ? 'Start your day with a secure campus punch.'
+      : punchTime
+        ? `Since ${new Date(punchTime).toLocaleTimeString('en-IN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+          })}`
+        : 'Attendance is up to date.';
+  const punchValue = punchStatus === 'in' ? 'Active' : punchStatus === 'out' ? 'Done' : 'Ready';
+  const punchTone =
+    punchStatus === 'in' ? colors.tint.green : punchStatus === 'out' ? colors.tint.neutral : colors.tint.blue;
 
   return (
     <View style={styles.section}>
-      <StatusCard
-        icon={punchStatus === 'in' ? CheckCircle : Fingerprint}
-        tone={punchStatus === 'in' ? 'green' : punchStatus === 'out' ? 'neutral' : 'blue'}
-        title={punchStatus === 'none' ? 'Mark attendance' : punchStatus === 'in' ? 'You are punched in' : 'Day complete'}
-        subtitle={
-          punchStatus === 'none'
-            ? 'Start your day with a secure campus punch.'
-            : punchTime
-              ? `Last update ${new Date(punchTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}`
-              : 'Attendance is up to date.'
-        }
-        value={punchStatus === 'in' ? 'Active' : punchStatus === 'out' ? 'Done' : 'Ready'}
+      {/* Punch hero */}
+      <TouchableOpacity
+        style={[styles.hero, { backgroundColor: punchTone.bg }]}
         onPress={() => router.push('/(staff)/work/punch' as any)}
-      />
+        activeOpacity={0.85}
+      >
+        <View style={[styles.heroIcon, { backgroundColor: colors.card }]}>
+          {punchStatus === 'in' ? (
+            <CheckCircle size={22} color={punchTone.fg} />
+          ) : (
+            <Fingerprint size={22} color={punchTone.fg} />
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.heroTitle, { color: colors.ink }]}>{punchTitle}</Text>
+          <Text style={[styles.heroSub, { color: colors.inkSecondary }]}>{punchSub}</Text>
+        </View>
+        <Text style={[styles.heroValue, { color: punchTone.fg }]}>{punchValue}</Text>
+      </TouchableOpacity>
 
-      {isAdmin && (
+      {/* Campus pulse */}
+      <View style={styles.pulseHeader}>
+        <Text style={[styles.sectionLabel, { color: colors.ink }]}>Today</Text>
+        <Text style={[styles.scopeLabel, { color: colors.inkMuted }]}>All campuses</Text>
+      </View>
+      {loading ? (
+        <ActivityIndicator color={colors.inkMuted} style={{ marginVertical: spacing.md }} />
+      ) : (
         <View style={styles.metricRow}>
-          <MetricCard icon={Users} label="New leads" value={String(newLeads)} tone="purple" />
-          <MetricCard icon={Calendar} label="Visits today" value={String(visitsToday)} tone="yellow" />
-          <MetricCard icon={Clock} label="Follow-ups" value={String(pendingFollowups)} tone="yellow" />
+          <Metric
+            colors={colors}
+            label="Staff in"
+            value={String(pulse.present)}
+            icon={<Users size={16} color={colors.tint.green.fg} />}
+          />
+          <Metric
+            colors={colors}
+            label="Visits"
+            value={String(pulse.visits)}
+            icon={<Calendar size={16} color={colors.tint.yellow.fg} />}
+          />
+          <Metric
+            colors={colors}
+            label="Chats"
+            value={pulse.unreplied > 0 ? String(pulse.unreplied) : '—'}
+            icon={<MessageCircle size={16} color={colors.tint.blue.fg} />}
+          />
         </View>
       )}
 
-      {(pendingApprovals > 0 || pendingFollowups > 0 || newLeads > 0) && (
-        <TouchableOpacity style={styles.priorityCard} onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} activeOpacity={0.75}>
-          <View style={styles.priorityIcon}>
-            <AlertCircle size={20} color="#BE123C" />
-          </View>
+      {attention > 0 && (
+        <TouchableOpacity
+          style={[styles.attention, { backgroundColor: colors.tint.red.bg }]}
+          onPress={() => router.push('/(staff)/(tabs)/inbox' as any)}
+          activeOpacity={0.85}
+        >
+          <AlertCircle size={18} color={colors.tint.red.fg} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.priorityTitle}>Needs attention</Text>
-            <Text style={styles.prioritySub}>
-              {pendingApprovals} approvals · {pendingFollowups} follow-ups · {newLeads} new leads
+            <Text style={[styles.attentionTitle, { color: colors.ink }]}>Needs attention</Text>
+            <Text style={[styles.attentionSub, { color: colors.inkSecondary }]}>
+              {attention} pending approval{attention === 1 ? '' : 's'}
             </Text>
           </View>
-          <ChevronRight size={18} color={colors.textMuted} />
+          <ChevronRight size={18} color={colors.inkMuted} />
         </TouchableOpacity>
       )}
 
-      <SectionTitle title="Quick actions" />
-      <View style={styles.actionGrid}>
-        <ActionTile icon={CalendarOff} label="Apply leave" subtitle="Request time off" tone="purple" onPress={() => router.push('/(staff)/work/hr' as any)} />
-        <ActionTile icon={ClipboardCheck} label="Attendance" subtitle="Logs and shifts" tone="green" onPress={() => router.push('/(staff)/work/hr' as any)} />
-        <ActionTile icon={FileText} label="Pay slips" subtitle="Salary documents" tone="blue" onPress={() => router.push('/(staff)/work/hr' as any)} />
-        <ActionTile icon={Bell} label="Notices" subtitle="Announcements" tone="yellow" onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} />
-        <ActionTile icon={Calendar} label="Visits" subtitle="Today’s campus visits" tone="yellow" onPress={() => router.push('/(staff)/work/visits' as any)} />
-        <ActionTile icon={Search} label="Directory" subtitle="Find people" tone="pink" onPress={() => router.push('/(staff)/work/team' as any)} />
-        <ActionTile icon={Briefcase} label="My work" subtitle={role === 'librarian' ? 'Library desk' : 'Role workspace'} tone="orange" onPress={() => router.push('/(staff)/(tabs)/work' as any)} />
-      </View>
-
-      <SectionTitle title="People moments" />
-      <View style={styles.momentRow}>
-        <View style={styles.momentCard}>
-          <Cake size={18} color="#BE185D" />
-          <Text style={styles.momentTitle}>Birthdays</Text>
-          <Text style={styles.momentSub}>No birthdays today</Text>
-        </View>
-        <View style={styles.momentCard}>
-          <BadgeCheck size={18} color="#15803D" />
-          <Text style={styles.momentTitle}>Anniversaries</Text>
-          <Text style={styles.momentSub}>No work anniversaries today</Text>
-        </View>
-      </View>
-
-      <SectionTitle title="Announcements" />
-      <View style={styles.emptyCard}>
-        <Megaphone size={24} color={colors.textMuted} />
-        <Text style={styles.emptyText}>No announcements</Text>
-      </View>
-    </View>
-  );
-}
-
-// ── Student Home ──
-function StudentHome({ userId }: { userId: string }) {
-  const [attendance, setAttendance] = useState<number | null>(null);
-  const [feeDue, setFeeDue] = useState(0);
-
-  const fetchData = useCallback(async () => {
-    const { data: attData } = await supabase
-      .from('daily_attendance').select('status').eq('student_id', userId);
-    if (attData && attData.length > 0) {
-      const present = attData.filter((a: any) => a.status === 'present').length;
-      setAttendance(Math.round((present / attData.length) * 100));
-    }
-    const { data: feeData } = await supabase
-      .from('fee_ledger').select('balance').in('status', ['due', 'overdue']);
-    if (feeData) setFeeDue(feeData.reduce((s: number, f: any) => s + Number(f.balance || 0), 0));
-  }, [userId]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  return (
-    <View style={styles.section}>
-      <View style={styles.statRow}>
-        <StatCard
-          label="Attendance" value={attendance !== null ? `${attendance}%` : '—'}
-          color={attendance !== null && attendance >= 75 ? colors.success : colors.destructive}
-          icon={ClipboardCheck}
+      <Text style={[styles.sectionLabel, { color: colors.ink, marginTop: spacing.lg }]}>
+        Pinned
+      </Text>
+      <View style={styles.pinGrid}>
+        <Pin
+          colors={colors}
+          icon={<MapPin size={20} color={colors.ink} />}
+          label="Visits"
+          onPress={() => router.push('/(staff)/work/visits' as any)}
         />
-        <StatCard
-          label="Fee Due" value={feeDue > 0 ? `₹${(feeDue / 1000).toFixed(0)}K` : '₹0'}
-          color={feeDue > 0 ? colors.destructive : colors.success}
-          icon={IndianRupee}
+        <Pin
+          colors={colors}
+          icon={<Users size={20} color={colors.ink} />}
+          label="Directory"
+          onPress={() => router.push('/(staff)/work/team' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<MessageCircle size={20} color={colors.ink} />}
+          label="Chats"
+          onPress={() => router.push('/(staff)/(tabs)/inbox' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<Fingerprint size={20} color={colors.ink} />}
+          label="Punch"
+          onPress={() => router.push('/(staff)/work/punch' as any)}
         />
       </View>
-
-      <Text style={styles.sectionTitle}>Notices</Text>
-      <View style={styles.emptyCard}>
-        <Bell size={24} color={colors.textMuted} />
-        <Text style={styles.emptyText}>No new notices</Text>
-      </View>
     </View>
   );
 }
 
-// ── Parent Home ──
-function ParentHome({ userId }: { userId: string }) {
+function Metric({
+  colors,
+  label,
+  value,
+  icon,
+}: {
+  colors: any;
+  label: string;
+  value: string;
+  icon: ReactNode;
+}) {
   return (
-    <View style={styles.section}>
-      <TouchableOpacity style={styles.infoCard} onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} activeOpacity={0.7}>
-        <View style={[styles.infoIcon, { backgroundColor: '#f0f9ff' }]}>
-          <IndianRupee size={22} color="#0284c7" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.infoTitle}>Fee Status</Text>
-          <Text style={styles.infoSub}>View fees and make payments</Text>
-        </View>
-        <ChevronRight size={18} color={colors.textMuted} />
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.infoCard} onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} activeOpacity={0.7}>
-        <View style={[styles.infoIcon, { backgroundColor: '#fefce8' }]}>
-          <Bell size={22} color="#ca8a04" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.infoTitle}>Notices</Text>
-          <Text style={styles.infoSub}>School announcements and updates</Text>
-        </View>
-        <ChevronRight size={18} color={colors.textMuted} />
-      </TouchableOpacity>
+    <View style={[styles.metric, { backgroundColor: colors.card, borderColor: colors.line }]}>
+      {icon}
+      <Text style={[styles.metricValue, { color: colors.ink }]}>{value}</Text>
+      <Text style={[styles.metricLabel, { color: colors.inkMuted }]}>{label}</Text>
     </View>
   );
 }
 
-function StatCard({ label, value, color, icon: Icon }: { label: string; value: string; color: string; icon: any }) {
+function Pin({
+  colors,
+  icon,
+  label,
+  onPress,
+}: {
+  colors: any;
+  icon: ReactNode;
+  label: string;
+  onPress: () => void;
+}) {
   return (
-    <View style={styles.statCard}>
-      <Icon size={20} color={color} style={{ marginBottom: 8 }} />
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    <TouchableOpacity
+      style={[styles.pin, { backgroundColor: colors.card, borderColor: colors.line }]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <View style={[styles.pinIcon, { backgroundColor: colors.cardSubtle }]}>{icon}</View>
+      <Text style={[styles.pinLabel, { color: colors.ink }]}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  scroll: { padding: 16, paddingBottom: 100 },
+  root: { flex: 1 },
+  scroll: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 20, paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
-  greeting: { fontSize: 24, fontWeight: '700', color: colors.text, letterSpacing: -0.5 },
-  dateText: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  greeting: { fontSize: 24, fontWeight: '700', letterSpacing: -0.4, lineHeight: 30 },
+  dateLine: { fontSize: 14, marginTop: 4 },
   avatar: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarText: { fontSize: 14, fontWeight: '600', color: colors.primary },
-  section: { gap: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: 8 },
-  metricRow: { flexDirection: 'row', gap: spacing.sm },
-  priorityCard: {
+  avatarText: { fontSize: 14, fontWeight: '700' },
+  section: { gap: spacing.md },
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: '#FFE4E6',
-    borderRadius: 22,
+    borderRadius: radius.xl,
     padding: spacing.md,
   },
-  priorityIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  heroIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
   },
-  priorityTitle: { ...typography.bodyMedium, color: colors.text },
-  prioritySub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
-  momentRow: { flexDirection: 'row', gap: spacing.sm },
-  momentCard: {
-    flex: 1,
-    minHeight: 108,
-    borderRadius: 22,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
+  heroTitle: { fontSize: 16, fontWeight: '700' },
+  heroSub: { fontSize: 13, marginTop: 2 },
+  heroValue: { fontSize: 14, fontWeight: '700' },
+  pulseHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
     justifyContent: 'space-between',
+    marginTop: spacing.sm,
   },
-  momentTitle: { ...typography.bodyMedium, color: colors.text },
-  momentSub: { ...typography.caption, color: colors.textSecondary, lineHeight: 17 },
-
-  // Punch card
-  punchCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: colors.card, borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: colors.cardBorder,
+  sectionLabel: { fontSize: 16, fontWeight: '700' },
+  scopeLabel: { fontSize: 12, fontWeight: '500' },
+  metricRow: { flexDirection: 'row', gap: spacing.sm },
+  metric: {
+    flex: 1,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.sm,
+    gap: 4,
   },
-  punchCardActive: { borderColor: colors.success, backgroundColor: '#f0fdf4' },
-  punchIcon: {
-    width: 48, height: 48, borderRadius: 12,
-    backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center',
+  metricValue: { fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  metricLabel: { fontSize: 12, fontWeight: '500' },
+  attention: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.lg,
+    padding: spacing.md,
   },
-  punchTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
-  punchSub: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-
-  // Quick actions grid
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  actionCard: {
-    width: '48%' as any, borderRadius: 14, padding: 16, gap: 10,
-    flexGrow: 1, flexBasis: '45%',
+  attentionTitle: { fontSize: 15, fontWeight: '600' },
+  attentionSub: { fontSize: 13, marginTop: 2 },
+  pinGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  pin: {
+    width: '48%',
+    flexGrow: 1,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  actionLabel: { fontSize: 13, fontWeight: '600' },
-
-  // Alert card
-  alertCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#fef2f2', borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: '#fecaca',
+  pinIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  alertIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#fee2e2', alignItems: 'center', justifyContent: 'center' },
-  alertTitle: { fontSize: 14, fontWeight: '600', color: '#dc2626' },
-  alertSub: { fontSize: 12, color: '#991b1b', marginTop: 1 },
-
-  // Info card (parent)
-  infoCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: colors.card, borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: colors.cardBorder,
-  },
-  infoIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  infoTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
-  infoSub: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
-
-  // Stats
-  statRow: { flexDirection: 'row', gap: 10 },
-  statCard: {
-    flex: 1, backgroundColor: colors.card, borderRadius: 16, padding: 16,
-    alignItems: 'center', borderWidth: 1, borderColor: colors.cardBorder,
-  },
-  statValue: { fontSize: 28, fontWeight: '700' },
-  statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-
-  // Empty
-  emptyCard: {
-    backgroundColor: colors.card, borderRadius: 14, padding: 24,
-    alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.cardBorder,
-  },
-  emptyText: { fontSize: 13, color: colors.textMuted },
+  pinLabel: { fontSize: 15, fontWeight: '600' },
 });
