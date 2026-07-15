@@ -17,8 +17,14 @@ import { WebView } from 'react-native-webview';
 
 type PunchStep =
   | 'loading' | 'face_register' | 'face_pending'
-  | 'checking_location' | 'location_ok' | 'selfie' | 'liveness' | 'submitting'
+  | 'checking_location' | 'location_ok' | 'selfie'
+  | 'creating_session' | 'liveness' | 'submitting'
   | 'done' | 'error';
+
+/** Liveness SPA host. Override with EXPO_PUBLIC_LIVENESS_URL for local testing. */
+const LIVENESS_BASE =
+  process.env.EXPO_PUBLIC_LIVENESS_URL?.replace(/\/?$/, '/') ||
+  'https://uni.nimt.ac.in/liveness/';
 
 interface Geofence {
   lat: number;
@@ -342,21 +348,78 @@ export default function PunchScreen() {
   };
 
   // ── AWS Rekognition Liveness WebView ──
+  // Session is created natively first — the WebView was hanging forever on
+  // "Creating AWS Rekognition session" because Amplify auth / getUserMedia
+  // warmup blocked create, or the fetch stalled inside the WebView.
   const livenessUrlRef = useRef<string | null>(null);
 
-  const startLivenessCheck = () => {
+  const startLivenessCheck = async () => {
+    setStep('creating_session');
+    setErrorMsg(null);
+
     const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
     const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+    if (!supabaseUrl || !supabaseKey) {
+      setErrorMsg('App is missing Supabase config. Restart Expo so .env is loaded.');
+      setStep('error');
+      return;
+    }
+
+    // Grant camera at the native layer before opening the WebView (Android
+    // WebViews often never surface a getUserMedia prompt on their own).
+    try {
+      if (!cameraPermission?.granted) {
+        const cam = await requestCameraPermission();
+        if (!cam.granted) {
+          setErrorMsg('Camera permission is required for face verification. Enable it in Settings.');
+          setStep('error');
+          return;
+        }
+      }
+    } catch {
+      // Continue — FaceLivenessDetector will request camera itself.
+    }
+
+    let sessionId = '';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 25000);
+      const res = await fetch(`${supabaseUrl}/functions/v1/face-liveness-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${supabaseKey}`,
+          apikey: supabaseKey,
+        },
+        body: JSON.stringify({ action: 'create' }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await res.json().catch(() => ({} as { error?: string; session_id?: string }));
+      if (!res.ok || data.error || !data.session_id) {
+        throw new Error(data.error || `Could not create liveness session (HTTP ${res.status})`);
+      }
+      sessionId = data.session_id;
+    } catch (err: any) {
+      const msg =
+        err?.name === 'AbortError'
+          ? 'Creating AWS Rekognition session timed out. Check network and try again.'
+          : err?.message || 'Failed to create AWS Rekognition session';
+      setErrorMsg(msg);
+      setStep('error');
+      return;
+    }
 
     const params = new URLSearchParams({
       supabase_url: supabaseUrl,
       supabase_key: supabaseKey,
       user_id: user!.id || '',
+      session_id: sessionId,
       region: 'ap-south-1',
       identity_pool_id: 'ap-south-1:518a81c9-8722-431a-9d1b-2e988ab4f0b5',
     });
 
-    livenessUrlRef.current = `https://uni.nimt.ac.in/liveness/?${params.toString()}`;
+    livenessUrlRef.current = `${LIVENESS_BASE}?${params.toString()}`;
     setStep('liveness');
   };
 
@@ -577,6 +640,17 @@ export default function PunchScreen() {
         </View>
       )}
 
+      {/* Native create-session step (before WebView) */}
+      {step === 'creating_session' && (
+        <View style={styles.centered}>
+          <View style={styles.iconCircle}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+          <Text style={styles.mainText}>Creating AWS Rekognition session…</Text>
+          <Text style={styles.subText}>Setting up secure face verification</Text>
+        </View>
+      )}
+
       {/* AWS Rekognition Liveness WebView */}
       {step === 'liveness' && livenessUrlRef.current && (
         <View style={styles.cameraContainer}>
@@ -589,6 +663,20 @@ export default function PunchScreen() {
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback
             mediaCapturePermissionGrantType="grant"
+            allowsFullscreenVideo
+            originWhitelist={['*']}
+            // Android: keep WebView alive so camera + WebSocket stay connected
+            setSupportMultipleWindows={false}
+            onError={(e) => {
+              setErrorMsg(`Liveness page failed to load: ${e.nativeEvent.description || 'unknown error'}`);
+              setStep('error');
+            }}
+            onHttpError={(e) => {
+              if (e.nativeEvent.statusCode >= 400) {
+                setErrorMsg(`Liveness page HTTP ${e.nativeEvent.statusCode}`);
+                setStep('error');
+              }
+            }}
           />
         </View>
       )}

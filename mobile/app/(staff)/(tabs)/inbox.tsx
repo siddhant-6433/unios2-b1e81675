@@ -1,367 +1,257 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect } from 'react';
+/**
+ * Chats tab — WhatsApp-mimic list shell (structure first).
+ * Data wiring (conversations, send, templates) comes in a follow-up PR.
+ */
+import { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, SafeAreaView,
-  TouchableOpacity, ActivityIndicator, Alert, Image,
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
-import { useAuth } from '../../../contexts/AuthContext';
-import { supabase } from '../../../lib/supabase';
-import { colors, radius, spacing, typography } from '../../../constants/Colors';
-import {
-  Clock, UserCheck, CalendarOff,
-  Check, X, Inbox as InboxIcon, Bell,
-} from 'lucide-react-native';
-import { PillFilter, ScreenHeader } from '../../../components/ui/DashboardPrimitives';
-import { useMarkNotificationRead, useNotifications } from '../../../api/inbox';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { MessageCircle, Search } from 'lucide-react-native';
+import { router } from 'expo-router';
+import { useTheme } from '../../../theme/ThemeContext';
+import { spacing, radius } from '../../../theme/tokens';
 
-interface ApprovalItem {
+type ChatFilter = 'all' | 'unreplied' | 'unassigned';
+
+export type ChatListItem = {
   id: string;
-  type: 'leave' | 'face' | 'attendance_reg';
-  source: 'HR' | 'Attendance' | 'Gatepass' | 'Messages' | 'WhatsApp';
-  priority: 'normal' | 'urgent';
-  user_name: string;
-  user_phone: string;
-  date: string;
-  detail: string;
-  image_url?: string;
-}
+  name: string;
+  phone: string;
+  preview: string;
+  timeLabel: string;
+  unread: number;
+};
 
-export default function InboxScreen() {
-  const { user } = useAuth();
-  const [items, setItems] = useState<ApprovalItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'approvals' | 'updates'>('all');
-  const notifications = useNotifications();
-  const markNotificationRead = useMarkNotificationRead();
+/** Demo rows so the shell feels real during design QA. Removed when live data lands. */
+const DEMO_CHATS: ChatListItem[] = [
+  {
+    id: '1',
+    name: 'Mamta Devi',
+    phone: '919418941955',
+    preview: 'Admission confirm kab hoga',
+    timeLabel: '12:53 am',
+    unread: 2,
+  },
+  {
+    id: '2',
+    name: 'Amaan',
+    phone: '917819000725',
+    preview: 'Yes Connect me',
+    timeLabel: 'Yesterday',
+    unread: 0,
+  },
+  {
+    id: '3',
+    name: 'Campus walk-in',
+    phone: '919000000001',
+    preview: 'You: Visit confirmed for 15 Jul',
+    timeLabel: 'Mon',
+    unread: 0,
+  },
+];
 
-  useEffect(() => { fetchApprovals(); }, []);
+export default function ChatsScreen() {
+  const { colors } = useTheme();
+  const [filter, setFilter] = useState<ChatFilter>('all');
+  const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  // Structure-first: demo list. Replace with live WA conversations next.
+  const [rows] = useState<ChatListItem[]>(DEMO_CHATS);
 
-  const fetchApprovals = async () => {
-    setLoading(true);
-    const allItems: ApprovalItem[] = [];
-
-    // Leave requests
-    const { data: leaves } = await supabase
-      .from('employee_leave_requests')
-      .select('id, leave_type, start_date, end_date, days, reason, created_at, user_id')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
-
-    if (leaves) {
-      const userIds = leaves.map(l => l.user_id);
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, phone')
-        .in('user_id', userIds);
-      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
-
-      for (const l of leaves) {
-        const p = profileMap.get(l.user_id);
-        allItems.push({
-          id: l.id,
-          type: 'leave',
-          source: 'HR',
-          priority: 'normal',
-          user_name: p?.display_name || 'Unknown',
-          user_phone: p?.phone || '',
-          date: l.start_date,
-          detail: `${l.leave_type} leave — ${l.days} day${l.days > 1 ? 's' : ''} (${new Date(l.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${l.start_date !== l.end_date ? ` - ${new Date(l.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''})`,
-        });
-      }
+  const filtered = useMemo(() => {
+    let list = rows;
+    if (filter === 'unreplied') list = list.filter((r) => r.unread > 0);
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(
+        (r) => r.name.toLowerCase().includes(q) || r.phone.includes(q) || r.preview.toLowerCase().includes(q),
+      );
     }
+    return list;
+  }, [rows, filter, query]);
 
-    // Face registrations
-    const { data: faces } = await supabase
-      .from('employee_face_registrations')
-      .select('id, user_id, image_url, created_at')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
-
-    if (faces) {
-      const userIds = faces.map(f => f.user_id);
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, phone')
-        .in('user_id', userIds);
-      const profileMap = new Map((profiles || []).map(p => [p.user_id, p]));
-
-      for (const f of faces) {
-        const p = profileMap.get(f.user_id);
-        allItems.push({
-          id: f.id,
-          type: 'face',
-          source: 'Attendance',
-          priority: 'urgent',
-          user_name: p?.display_name || 'Unknown',
-          user_phone: p?.phone || '',
-          date: f.created_at ?? new Date().toISOString(),
-          detail: 'Face Registration',
-          image_url: f.image_url,
-        });
-      }
-    }
-
-    setItems(allItems.sort((a, b) => Number(b.priority === 'urgent') - Number(a.priority === 'urgent')));
-    setLoading(false);
-  };
-
-  const handleApprove = async (item: ApprovalItem) => {
-    setProcessing(item.id);
-    if (item.type === 'leave') {
-      await supabase.from('employee_leave_requests')
-        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
-        .eq('id', item.id);
-    } else if (item.type === 'face') {
-      await supabase.from('employee_face_registrations')
-        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
-        .eq('id', item.id);
-    }
-    setProcessing(null);
-    fetchApprovals();
-  };
-
-  const handleReject = async (item: ApprovalItem) => {
-    Alert.alert('Reject', `Reject ${item.user_name}'s request?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reject', style: 'destructive',
-        onPress: async () => {
-          setProcessing(item.id);
-          if (item.type === 'leave') {
-            await supabase.from('employee_leave_requests')
-              .update({ status: 'rejected' }).eq('id', item.id);
-          } else if (item.type === 'face') {
-            await supabase.from('employee_face_registrations')
-              .update({ status: 'rejected', rejected_reason: 'Rejected by admin' }).eq('id', item.id);
-          }
-          setProcessing(null);
-          fetchApprovals();
-        },
-      },
-    ]);
-  };
-
-  const typeIcon = (type: string) => {
-    if (type === 'leave') return <CalendarOff size={20} color="#7c3aed" />;
-    if (type === 'face') return <UserCheck size={20} color="#0284c7" />;
-    return <Clock size={20} color={colors.textMuted} />;
-  };
-
-  const typeBg = (type: string) => {
-    if (type === 'leave') return '#f5f3ff';
-    if (type === 'face') return '#f0f9ff';
-    return colors.background;
-  };
-
-  const visibleItems = filter === 'updates'
-    ? []
-    : items.filter((item) => {
-        if (filter === 'approvals') return ['leave', 'face', 'attendance_reg'].includes(item.type);
-        return true;
-      });
-
-  const visibleNotifications = filter === 'approvals' ? [] : (notifications.data ?? []);
-  const unreadCount = (notifications.data ?? []).filter((n) => !n.isRead).length;
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <ScreenHeader
-          title="Inbox"
-          subtitle={`${items.length} approval${items.length !== 1 ? 's' : ''} · ${unreadCount} unread update${unreadCount !== 1 ? 's' : ''}`}
-        />
-        <PillFilter
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: 'All' },
-            { value: 'approvals', label: 'Approvals' },
-            { value: 'updates', label: 'Updates' },
-          ]}
-        />
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: colors.ink }]}>Chats</Text>
+        <Text style={[styles.sub, { color: colors.inkSecondary }]}>
+          WhatsApp · Super Admin view
+        </Text>
+      </View>
 
-        {visibleItems.length === 0 && visibleNotifications.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <InboxIcon size={32} color={colors.textMuted} />
-            <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptyText}>No pending items in this queue</Text>
+      <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.line }]}>
+        <Search size={18} color={colors.inkMuted} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.ink }]}
+          placeholder="Search name or number"
+          placeholderTextColor={colors.inkMuted}
+          value={query}
+          onChangeText={setQuery}
+        />
+      </View>
+
+      <View style={styles.chips}>
+        {(
+          [
+            ['all', 'All'],
+            ['unreplied', 'Unreplied'],
+            ['unassigned', 'Unassigned'],
+          ] as const
+        ).map(([key, label]) => {
+          const active = filter === key;
+          return (
+            <TouchableOpacity
+              key={key}
+              onPress={() => setFilter(key)}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.pillBg : colors.card,
+                  borderColor: colors.line,
+                },
+              ]}
+            >
+              <Text style={{ color: active ? colors.pillFg : colors.ink, fontWeight: '600', fontSize: 13 }}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={filtered.length === 0 ? styles.emptyContainer : styles.list}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <MessageCircle size={40} color={colors.inkMuted} />
+            <Text style={[styles.emptyTitle, { color: colors.ink }]}>No chats yet</Text>
+            <Text style={[styles.emptySub, { color: colors.inkSecondary }]}>
+              Conversations from WhatsApp will show up here.
+            </Text>
           </View>
-        ) : (
-          <View style={styles.list}>
-            {visibleItems.map((item) => (
-              <View key={`${item.type}-${item.id}`} style={styles.card}>
-                <View style={styles.badgeRow}>
-                  <Text style={styles.sourceBadge}>{item.source}</Text>
-                  <Text style={[styles.priorityBadge, item.priority === 'urgent' && styles.priorityUrgent]}>
-                    {item.priority}
-                  </Text>
-                </View>
-                {/* Face registration: show selfie prominently */}
-                {item.type === 'face' && item.image_url ? (
-                  <>
-                    <Image source={{ uri: item.image_url }} style={styles.faceImage} />
-                    <View style={styles.faceInfo}>
-                      <Text style={styles.userName}>{item.user_name}</Text>
-                      <Text style={styles.detail}>Face Registration</Text>
-                      <Text style={styles.detailMono}>ID: {item.id.slice(0, 8).toUpperCase()}</Text>
-                      <Text style={styles.detailDate}>
-                        {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </Text>
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.typeIcon, { backgroundColor: typeBg(item.type) }]}>
-                      {typeIcon(item.type)}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.userName}>{item.user_name}</Text>
-                      <Text style={styles.detail}>{item.detail}</Text>
-                    </View>
-                  </View>
-                )}
-                <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    style={styles.approveBtn}
-                    onPress={() => handleApprove(item)}
-                    disabled={processing === item.id}
-                    activeOpacity={0.7}
-                  >
-                    <Check size={16} color="#fff" />
-                    <Text style={styles.approveBtnText}>Approve</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.rejectBtn}
-                    onPress={() => handleReject(item)}
-                    disabled={processing === item.id}
-                    activeOpacity={0.7}
-                  >
-                    <X size={16} color={colors.textSecondary} />
-                    <Text style={styles.rejectBtnText}>Reject</Text>
-                  </TouchableOpacity>
-                </View>
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.row, { borderBottomColor: colors.line }]}
+            activeOpacity={0.7}
+            onPress={() =>
+              router.push({
+                pathname: '/(staff)/chats/[phone]',
+                params: { phone: item.phone, name: item.name },
+              } as any)
+            }
+          >
+            <View style={[styles.avatar, { backgroundColor: colors.accentSoft }]}>
+              <Text style={[styles.avatarText, { color: colors.accent }]}>
+                {item.name
+                  .split(' ')
+                  .map((p) => p[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={styles.rowTop}>
+                <Text style={[styles.name, { color: colors.ink }]} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={[styles.time, { color: colors.inkMuted }]}>{item.timeLabel}</Text>
               </View>
-            ))}
-
-            {/* Updates — notifications feed (read-only; actions arrive with the approvals engine) */}
-            {visibleNotifications.length > 0 && (
-              <View style={{ gap: 10 }}>
-                {visibleItems.length > 0 && <Text style={styles.sectionLabel}>Updates</Text>}
-                {visibleNotifications.map((n) => (
-                  <TouchableOpacity
-                    key={n.id}
-                    style={[styles.notificationRow, !n.isRead && styles.notificationUnread]}
-                    activeOpacity={0.7}
-                    onPress={() => { if (!n.isRead) markNotificationRead.mutate(n.id); }}
-                  >
-                    <View style={styles.notificationIcon}>
-                      <Bell size={16} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.userName, !n.isRead && { fontWeight: '700' }]} numberOfLines={2}>
-                        {n.title}
-                      </Text>
-                      {n.body ? <Text style={styles.detail} numberOfLines={2}>{n.body}</Text> : null}
-                      <Text style={styles.detailDate}>
-                        {new Date(n.createdAt).toLocaleString('en-IN', {
-                          day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
-                        })}
-                      </Text>
-                    </View>
-                    {!n.isRead && <View style={styles.unreadDot} />}
-                  </TouchableOpacity>
-                ))}
+              <Text
+                style={[styles.preview, { color: item.unread ? colors.ink : colors.inkSecondary }]}
+                numberOfLines={1}
+              >
+                {item.preview}
+              </Text>
+            </View>
+            {item.unread > 0 && (
+              <View style={[styles.badge, { backgroundColor: colors.success }]}>
+                <Text style={styles.badgeText}>{item.unread}</Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
         )}
-      </ScrollView>
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  scroll: { padding: spacing.lg, paddingBottom: 110, gap: spacing.lg },
-  title: { fontSize: 24, fontWeight: '700', color: colors.text, paddingTop: 8 },
-  subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2, marginBottom: 16 },
-  list: { gap: 12 },
-  card: {
-    backgroundColor: colors.card, borderRadius: 24, padding: 16,
-    borderWidth: 1, borderColor: colors.cardBorder, gap: 14,
-  },
-  badgeRow: { flexDirection: 'row', gap: spacing.sm },
-  sourceBadge: {
-    ...typography.caption,
-    color: colors.primary,
-    fontWeight: '700',
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+  root: { flex: 1 },
+  header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.sm },
+  title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.5 },
+  sub: { fontSize: 13, marginTop: 2 },
+  searchWrap: {
+    marginHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     borderRadius: radius.full,
-    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    height: 44,
   },
-  priorityBadge: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    fontWeight: '700',
-    backgroundColor: colors.background,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
+  chips: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     borderRadius: radius.full,
-    overflow: 'hidden',
-    textTransform: 'capitalize',
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  priorityUrgent: { color: '#BE123C', backgroundColor: '#FFE4E6' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  typeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  userName: { fontSize: 15, fontWeight: '600', color: colors.text },
-  detail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  faceImage: {
-    width: '100%' as any, height: 200, borderRadius: 12,
-    backgroundColor: colors.border,
+  list: { paddingBottom: spacing.xxl },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  faceInfo: { gap: 2 },
-  detailMono: { fontSize: 11, color: colors.textMuted, fontFamily: 'monospace' as any },
-  detailDate: { fontSize: 11, color: colors.textMuted },
-  cardActions: { flexDirection: 'row', gap: 10 },
-  approveBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10,
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  approveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  rejectBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: colors.background, borderRadius: 10, paddingVertical: 10,
-    borderWidth: 1, borderColor: colors.border,
+  avatarText: { fontSize: 14, fontWeight: '700' },
+  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  name: { fontSize: 16, fontWeight: '600', flex: 1 },
+  time: { fontSize: 12 },
+  preview: { fontSize: 14, marginTop: 2 },
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
   },
-  rejectBtnText: { color: colors.textSecondary, fontSize: 14, fontWeight: '500' },
-  sectionLabel: { ...typography.caption, color: colors.textSecondary, fontWeight: '700', marginTop: 4 },
-  notificationRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    backgroundColor: colors.card, borderRadius: 18, padding: 14,
-  },
-  notificationUnread: { backgroundColor: colors.primaryLight },
-  notificationIcon: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: colors.background,
-    alignItems: 'center', justifyContent: 'center', marginTop: 2,
-  },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 },
-  emptyCard: {
-    backgroundColor: colors.card, borderRadius: 16, padding: 40,
-    alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.cardBorder,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
-  emptyText: { fontSize: 13, color: colors.textMuted },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  emptyContainer: { flexGrow: 1, justifyContent: 'center' },
+  empty: { alignItems: 'center', padding: spacing.xxl, gap: spacing.sm },
+  emptyTitle: { fontSize: 17, fontWeight: '700', marginTop: spacing.sm },
+  emptySub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });

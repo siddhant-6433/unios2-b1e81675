@@ -10,6 +10,10 @@ import {
 } from "lucide-react";
 import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
+import {
+  shouldHideTimelineComms,
+  TIMELINE_HIDDEN_ACTIVITY_TYPES,
+} from "@/lib/leadComplianceOverrides";
 
 interface LeadTimelineProps {
   activities: any[];
@@ -297,22 +301,27 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
   const [aiRecordings, setAiRecordings] = useState<Record<string, string>>({});
   const [engagementEvents, setEngagementEvents] = useState<any[]>([]);
   const [waChannel, setWaChannel] = useState<string | null>(null);
+  const hideComms = shouldHideTimelineComms(leadId);
 
   useEffect(() => {
     if (!leadId) return;
-    supabase.from("ai_call_records" as any).select("created_at, recording_url, duration_seconds")
-      .eq("lead_id", leadId).not("recording_url", "is", null)
-      .then(({ data }) => {
-        if (!data) return;
-        const map: Record<string, string> = {};
-        for (const r of data as any[]) {
-          if (r.recording_url) {
-            const key = new Date(r.created_at).toISOString().slice(0, 16);
-            map[key] = r.recording_url;
+    if (!hideComms) {
+      supabase.from("ai_call_records" as any).select("created_at, recording_url, duration_seconds")
+        .eq("lead_id", leadId).not("recording_url", "is", null)
+        .then(({ data }) => {
+          if (!data) return;
+          const map: Record<string, string> = {};
+          for (const r of data as any[]) {
+            if (r.recording_url) {
+              const key = new Date(r.created_at).toISOString().slice(0, 16);
+              map[key] = r.recording_url;
+            }
           }
-        }
-        setAiRecordings(map);
-      });
+          setAiRecordings(map);
+        });
+    } else {
+      setAiRecordings({});
+    }
 
     // Fetch engagement events
     supabase.from("lead_engagement_events" as any)
@@ -335,7 +344,7 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
         const pnid = (data as any[])?.[0]?.business_phone_number_id;
         if (pnid) setWaChannel(pnid);
       });
-  }, [leadId]);
+  }, [leadId, hideComms]);
 
   // Merge activities + engagement events into a single sorted list
   const mergedActivities = [
@@ -347,7 +356,21 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
       created_at: e.created_at,
       _engagement: true,
     })),
-  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  ]
+    .filter((a) => {
+      if (!hideComms) return true;
+      if (TIMELINE_HIDDEN_ACTIVITY_TYPES.has(a.type)) return false;
+      // Auto AI-call phrasing sometimes lands under type "call"
+      if (
+        a.type === "call" &&
+        typeof a.description === "string" &&
+        /ai (voice )?call auto-initiated|ai outbound|ai call/i.test(a.description)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   if (mergedActivities.length === 0) return <EmptyState text="No activity recorded yet" />;
 
