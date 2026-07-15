@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   settleApplicationFee,
   settleLeadPaymentRow,
+  settlePaymentLink,
   settleStudentFeePayment,
 } from "../_shared/gateway-settlement.ts";
 
@@ -178,6 +179,28 @@ Deno.serve(async (req) => {
       const isSuccess = status.toLowerCase() === "success";
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const paymentRef = easepayid || txnid || null;
+
+      // udf3=payment_link + udf1=payment_links.id → staff payment link settlement
+      if (udf3 === "payment_link" && udf1 && /^[0-9a-f-]{36}$/i.test(udf1)) {
+        if (isSuccess && paymentRef) {
+          const { data: plink } = await admin.from("payment_links").select("*").eq("id", udf1).maybeSingle();
+          if (!plink) {
+            return returnPage("Payment Received", "Payment confirmed but link not found. Contact support. Txn: " + (easepayid || txnid), false);
+          }
+          const settled = await settlePaymentLink(
+            admin, supabaseUrl, serviceKey, plink, paymentRef, "easebuzz", "surl",
+          );
+          if (!settled.ok) {
+            console.error("[easebuzz] payment_link settle failed:", settled.message);
+            return returnPage("Payment Received", "Payment confirmed but records could not be updated. Contact support. Txn: " + (easepayid || txnid), false);
+          }
+        }
+        return returnPage(
+          isSuccess ? "Payment Successful" : "Payment Failed",
+          isSuccess ? "Your payment has been received. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
+          isSuccess,
+        );
+      }
 
       // udf3="fee_payment" + udf4=student_id → student fee ledger payment
       if (udf3 === "fee_payment" && udf4 && /^[0-9a-f-]{36}$/i.test(udf4)) {
