@@ -1153,6 +1153,88 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Ops: sign + self-POST a payment.captured webhook using RAZORPAY_WEBHOOK_SECRET.
+    // Proves secret is set, HMAC path works, and settlement is at-most-once.
+    // Guarded by CRON_SECRET (header x-cron-secret or body.cron_secret).
+    if (action === "webhook-smoke-test") {
+      const cronSecret = Deno.env.get("CRON_SECRET") || "";
+      const provided =
+        req.headers.get("x-cron-secret") ||
+        String(parsed.cron_secret || "");
+      if (!cronSecret || provided !== cronSecret) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      if (!webhookSecret) {
+        return json({ error: "RAZORPAY_WEBHOOK_SECRET not configured" }, 500);
+      }
+
+      // Prefer replaying a real already-settled payment so we exercise full settle path.
+      const { data: prior } = await admin
+        .from("gateway_settlements")
+        .select("gateway_payment_id, gateway_order_id, entity_id, amount, context")
+        .eq("gateway", "razorpay")
+        .eq("entity_type", "application")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const paymentId = prior?.gateway_payment_id || "pay_smoke_test_only";
+      const orderId = prior?.gateway_order_id || "";
+      const amountPaise = prior?.amount != null
+        ? Math.round(Number(prior.amount) * 100)
+        : 100;
+      const applicationId = prior?.entity_id || "";
+      const context = prior?.context || "application_fee";
+
+      const bodyObj = {
+        event: "payment.captured",
+        payload: {
+          payment: {
+            entity: {
+              id: paymentId,
+              amount: amountPaise,
+              currency: "INR",
+              order_id: orderId,
+              notes: {
+                context,
+                application_id: applicationId,
+              },
+            },
+          },
+        },
+      };
+      const body = JSON.stringify(bodyObj);
+      const signature = await hmacSha256Hex(webhookSecret, body);
+
+      const selfRes = await fetch(`${supabaseUrl}/functions/v1/razorpay-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Razorpay-Signature": signature,
+        },
+        body,
+      });
+      const selfText = await selfRes.text();
+      let selfJson: unknown = null;
+      try {
+        selfJson = JSON.parse(selfText);
+      } catch {
+        selfJson = { raw: selfText.slice(0, 500) };
+      }
+
+      return json({
+        ok: selfRes.status >= 200 && selfRes.status < 300,
+        http_status: selfRes.status,
+        replayed_payment_id: paymentId,
+        replayed_order_id: orderId || null,
+        application_id: applicationId || null,
+        response: selfJson,
+        note:
+          "Signed with RAZORPAY_WEBHOOK_SECRET in Supabase and POSTed to this function. " +
+          "If already settled, expect already=true. Does not prove Razorpay dashboard secret matches — only that Supabase secret verifies correctly end-to-end.",
+      });
+    }
+
     return json({ error: "Unsupported action" }, 400);
   } catch (error) {
     console.error("[razorpay] function error:", error);
