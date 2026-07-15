@@ -612,7 +612,33 @@ Deno.serve(async (req) => {
       const dearLeadName = resolveDearRecipientName(lead, latestApplication);
       const courseName = lead.courses?.name || "";
       const campusName = lead.campuses?.name || "";
-      const waPhone = recipient.phone.replace(/[^0-9]/g, "");
+      const waPhone = (recipient.phone || lead.phone || "").replace(/[^0-9]/g, "");
+
+      // DNC is a hard stop: never send further communications (stage may have
+      // changed after the campaign was queued).
+      if (String(lead.stage || "").toLowerCase() === "dnc") {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Lead is DNC — message not sent",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
+
+      if (!waPhone) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Missing phone",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
 
       // Build template params in the exact order Meta expects. Per-lead
       // values take precedence over staticParams (so an explicit
