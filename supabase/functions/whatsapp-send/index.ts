@@ -143,6 +143,10 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // 2. Application fee paid — receipt PDF as document-header template.
   app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
   app_fee_receipt_pdf:    { name: "app_fee_receipt_pdf",    params: ["student_name", "amount", "application_id"] },
+  // Placement & Internship Report — sent when a website visitor requests the
+  // Clinical Training, Internship & Placement Report (2025-26). The report PDF
+  // is passed as a DOCUMENT header (header_document_url) by placement-report-send.
+  placement_report:       { name: "placement_report_download", params: ["student_name"] },
   // 3. Offer letter issued — offer PDF + magic-link to accept & pay token.
   // button_urls = [offer_pdf_url, magic_pay_url]
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
@@ -722,6 +726,7 @@ Deno.serve(async (req) => {
       application_submitted: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
       app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       app_fee_receipt_pdf: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+      placement_report_download: "Hi {{1}}, thank you for your interest in NIMT Institute of Medical & Paramedical Sciences. As requested, our Clinical Training, Internship & Placement Report (2025-26) is attached. It covers internship stipends, clinical departments, hiring hospitals and placement support. Our admissions team will reach out to help you with the next steps.",
       offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",
       pan_nudge_balance: "Hi {{1}}, your pre-admission number is {{2}}. Pay the balance of ₹{{3}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
       payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
