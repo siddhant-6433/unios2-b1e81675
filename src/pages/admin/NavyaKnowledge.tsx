@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X, Paperclip, Image as ImageIcon } from "lucide-react";
 
 // voice_knowledge_gaps may not have generated TS types yet — cast via `supabase as any`.
 // Lead context shared by gap + mined cards: name, current stage, and the
@@ -35,6 +36,7 @@ interface LearnedExample {
   id: string;
   query_text: string;
   reply_text: string;
+  media_url: string | null;
   status: string;
   created_at: string;
   tags: string[] | null;
@@ -57,6 +59,7 @@ interface MinedExample {
   id: string;
   query_text: string;
   reply_text: string;
+  media_url: string | null;
   language: string | null;
   status: string;
   created_at: string;
@@ -127,7 +130,22 @@ export function NavyaKnowledgeContent() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [mediaFiles, setMediaFiles] = useState<Record<string, File>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  const uploadMedia = async (file: File): Promise<string | null> => {
+    const ext = file.name.split(".").pop() ?? "bin";
+    const path = `${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage
+      .from("navya-knowledge")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (error) {
+      toast({ title: "Media upload failed", description: error.message, variant: "destructive" });
+      return null;
+    }
+    const { data: urlData } = supabase.storage.from("navya-knowledge").getPublicUrl(path);
+    return urlData.publicUrl;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,7 +160,7 @@ export function NavyaKnowledgeContent() {
         .from("admissions_ai_reply_examples")
         // Active examples across every channel (voice, whatsapp, coached, mined) —
         // this tab is the audit trail of what Navya actually uses.
-        .select("id, query_text, reply_text, status, created_at, tags, source_channel")
+        .select("id, query_text, reply_text, media_url, status, created_at, tags, source_channel")
         .eq("status", "active")
         .order("created_at", { ascending: false })
         .limit(50),
@@ -156,7 +174,7 @@ export function NavyaKnowledgeContent() {
       (supabase as any)
         // Every needs_review row regardless of source; filtered client-side by chip.
         .from("admissions_ai_reply_examples")
-        .select("id, query_text, reply_text, language, status, created_at, lead_id, tags, source_channel, leads(name, stage, courses:course_id(name)), courses:course_id(name)")
+        .select("id, query_text, reply_text, media_url, language, status, created_at, lead_id, tags, source_channel, leads(name, stage, courses:course_id(name)), courses:course_id(name)")
         .eq("status", "needs_review")
         .order("created_at", { ascending: false })
         .limit(100),
@@ -219,6 +237,13 @@ export function NavyaKnowledgeContent() {
       return;
     }
 
+    let mediaUrl: string | null = null;
+    const file = mediaFiles[gap.id];
+    if (file) {
+      mediaUrl = await uploadMedia(file);
+      if (!mediaUrl) { setSavingId(null); return; }
+    }
+
     const insert = await (supabase as any).from("admissions_ai_reply_examples").insert({
       source_channel: "voice",
       target_channels: ["whatsapp", "voice"],
@@ -229,6 +254,7 @@ export function NavyaKnowledgeContent() {
       quality_score: 0.9,
       course_id: gap.course_id,
       lead_id: gap.lead_id,
+      media_url: mediaUrl,
     });
 
     setSavingId(null);
@@ -238,11 +264,8 @@ export function NavyaKnowledgeContent() {
     }
 
     toast({ title: "Navya learned this answer" });
-    setAnswers((a) => {
-      const next = { ...a };
-      delete next[gap.id];
-      return next;
-    });
+    setAnswers((a) => { const next = { ...a }; delete next[gap.id]; return next; });
+    setMediaFiles((m) => { const next = { ...m }; delete next[gap.id]; return next; });
     load();
   };
 
@@ -406,6 +429,29 @@ export function NavyaKnowledgeContent() {
                       rows={3}
                     />
                     <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                        <Paperclip className="h-3.5 w-3.5" />
+                        {mediaFiles[gap.id] ? mediaFiles[gap.id].name : "Attach media"}
+                        <Input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) setMediaFiles((m) => ({ ...m, [gap.id]: f }));
+                          }}
+                        />
+                      </label>
+                      {mediaFiles[gap.id] && (
+                        <button
+                          onClick={() => setMediaFiles((m) => { const next = { ...m }; delete next[gap.id]; return next; })}
+                          className="text-xs text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <Button size="sm" onClick={() => saveAndTeach(gap)} disabled={savingId === gap.id}>
                         {savingId === gap.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                         Save &amp; Teach
@@ -444,6 +490,13 @@ export function NavyaKnowledgeContent() {
                     </div>
                   </div>
                   <p className="text-sm text-muted-foreground pl-6">{ex.reply_text}</p>
+                  {ex.media_url && (
+                    <div className="pl-6">
+                      <a href={ex.media_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+                        <ImageIcon className="h-3.5 w-3.5" /> View attached media
+                      </a>
+                    </div>
+                  )}
                   {ex.status === "active" && (
                     <div className="pl-6">
                       <Button size="sm" variant="ghost" onClick={() => deactivate(ex)}>
@@ -599,6 +652,11 @@ function MinedCard({
           />
         ) : (
           <p className="text-sm text-muted-foreground">{ex.reply_text}</p>
+        )}
+        {ex.media_url && (
+          <a href={ex.media_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+            <ImageIcon className="h-3.5 w-3.5" /> View attached media
+          </a>
         )}
         <div className="flex items-center gap-2 pt-1">
           <Button size="sm" onClick={() => onDecide("active", edited ? draft : undefined)}>

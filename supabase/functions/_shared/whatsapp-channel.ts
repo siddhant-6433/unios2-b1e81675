@@ -293,6 +293,65 @@ export async function sendWhatsAppText(
   };
 }
 
+export type WhatsAppMediaType = "image" | "document" | "video" | "audio";
+
+export async function sendWhatsAppMedia(
+  admin: SupabaseLike,
+  hint: WhatsAppChannelHint,
+  to: string,
+  mediaType: WhatsAppMediaType,
+  mediaUrl: string,
+  caption?: string,
+): Promise<WhatsAppSendResult> {
+  const channel = await resolveWhatsAppChannel(admin, hint);
+
+  if (channel.provider === "plivo") {
+    // Plivo media not supported yet — fall back to text with link
+    if (caption) {
+      const { sendPlivoWhatsAppText } = await import("./plivo.ts");
+      const src = digits(channel.business_number || hint.businessNumber);
+      if (!src) {
+        return { ok: false, provider: "plivo", messageId: null, businessPhoneNumberId: null, businessNumber: null, status: 503, raw: null, error: "Plivo business number is required" };
+      }
+      const result = await sendPlivoWhatsAppText(src, digits(to), `${caption}\n${mediaUrl}`);
+      return { ok: result.ok, provider: "plivo", messageId: result.messageUuid, businessPhoneNumberId: src, businessNumber: src, status: result.ok ? 200 : 502, raw: result.raw, error: result.ok ? null : errorMessage(result.raw, "Failed to send via Plivo") };
+    }
+    return { ok: false, provider: "plivo", messageId: null, businessPhoneNumberId: null, businessNumber: null, status: 501, raw: null, error: "Plivo media messages not supported" };
+  }
+
+  const { token, phoneNumberId } = metaConfig(channel, hint.route || "reply");
+  if (!token || !phoneNumberId) {
+    return { ok: false, provider: "meta", messageId: null, businessPhoneNumberId: phoneNumberId || null, businessNumber: channel.business_number, status: 503, raw: null, error: "WhatsApp channel is not configured" };
+  }
+
+  const mediaPayload: Record<string, unknown> = { link: mediaUrl };
+  if (caption) mediaPayload.caption = caption;
+  if (mediaType === "document") mediaPayload.filename = mediaUrl.split("/").pop() || "document";
+
+  const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: digits(to),
+      type: mediaType,
+      [mediaType]: mediaPayload,
+    }),
+  });
+  const raw = await response.json().catch(() => ({}));
+
+  return {
+    ok: response.ok,
+    provider: "meta",
+    messageId: (raw as { messages?: { id?: string }[] })?.messages?.[0]?.id || null,
+    businessPhoneNumberId: phoneNumberId,
+    businessNumber: channel.business_number,
+    status: response.status,
+    raw,
+    error: response.ok ? null : errorMessage((raw as { error?: unknown })?.error || raw, "Failed to send media via Meta"),
+  };
+}
+
 export async function sendWhatsAppTemplate(
   admin: SupabaseLike,
   hint: WhatsAppChannelHint,

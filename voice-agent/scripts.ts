@@ -26,6 +26,7 @@ export interface CallContext {
   admissionsMemoryExamples?: {
     leadAsked?: string;
     counsellorReplied?: string;
+    mediaUrl?: string | null;
     sourceChannel?: string | null;
   }[];
 }
@@ -81,11 +82,15 @@ function formatAdmissionsMemoryExamples(ctx: CallContext): string {
     .slice(0, 3);
   if (examples.length === 0) return "";
 
-  const lines = examples.map((example, index) => [
-    `Example ${index + 1}${example.sourceChannel ? ` (${example.sourceChannel})` : ""}:`,
-    `Caller asked: ${example.leadAsked}`,
-    `Counsellor answered: ${example.counsellorReplied}`,
-  ].join("\n"));
+  const lines = examples.map((example, index) => {
+    const parts = [
+      `Example ${index + 1}${example.sourceChannel ? ` (${example.sourceChannel})` : ""}:`,
+      `Caller asked: ${example.leadAsked}`,
+      `Counsellor answered: ${example.counsellorReplied}`,
+    ];
+    if (example.mediaUrl) parts.push(`Reference media: ${example.mediaUrl}`);
+    return parts.join("\n");
+  });
 
   return `
 ADMISSIONS MEMORY EXAMPLES:

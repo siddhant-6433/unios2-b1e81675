@@ -309,6 +309,7 @@ interface WhatsAppReplyExample {
   id: string;
   query_text: string;
   reply_text: string;
+  media_url: string | null;
   course_id: string | null;
   source_channel: string | null;
   target_channels: string[] | null;
@@ -370,11 +371,13 @@ async function loadCourseAdmissionBrief(
 }
 
 function formatReplyExample(example: WhatsAppReplyExample, index: number): string {
-  return [
+  const lines = [
     `Example ${index + 1}:`,
     `Lead asked: ${example.query_text}`,
     `Counsellor replied: ${example.reply_text}`,
-  ].join("\n");
+  ];
+  if (example.media_url) lines.push(`Reference media: ${example.media_url}`);
+  return lines.join("\n");
 }
 
 async function loadReplyExamplesContext(
@@ -424,7 +427,7 @@ async function loadGoldenAnswersContext(
 
     const { data } = await admin
       .from("admissions_ai_reply_examples")
-      .select("query_text, reply_text")
+      .select("query_text, reply_text, media_url")
       .eq("status", "active")
       .gte("quality_score", 0.85)
       .or("tags.cs.{golden_answer},tags.cs.{knowledge_gap_answer},tags.cs.{admin_verified}")
@@ -432,8 +435,12 @@ async function loadGoldenAnswersContext(
       .limit(2);
 
     if (!data?.length) return "";
-    return (data as { query_text: string; reply_text: string }[])
-      .map((g, i) => `Admin-verified answer ${i + 1}:\nQ: ${g.query_text}\nA: ${g.reply_text}`)
+    return (data as { query_text: string; reply_text: string; media_url: string | null }[])
+      .map((g, i) => {
+        const lines = [`Admin-verified answer ${i + 1}:`, `Q: ${g.query_text}`, `A: ${g.reply_text}`];
+        if (g.media_url) lines.push(`Reference media: ${g.media_url}`);
+        return lines.join("\n");
+      })
       .join("\n\n");
   } catch (err) {
     console.warn("Golden answers lookup error:", err instanceof Error ? err.message : String(err));
