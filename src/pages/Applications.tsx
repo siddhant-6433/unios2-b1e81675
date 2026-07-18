@@ -125,6 +125,7 @@ interface AppRow {
   counsellor_name?: string;
   lead_stage?: string;
   lead_counsellor_id?: string;
+  lead_shared_with_nimt?: boolean | null;
   lead_pre_admission_no?: string | null;
   lead_admission_no?: string | null;
   has_offer?: boolean;
@@ -380,6 +381,7 @@ export default function Applications() {
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted" | "on_hold">("all");
   const [courseFilter, setCourseFilter] = useState("all");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const [sharedWithNimtFilter, setSharedWithNimtFilter] = useState<"all" | "shared" | "not_shared">("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   /** When a funnel stage is active: further narrow to on-hold vs not-on-hold at that stage. */
   const [stageHoldSplit, setStageHoldSplit] = useState<"all" | "on_hold" | "active">("all");
@@ -541,6 +543,7 @@ export default function Applications() {
       const counsellorMap: Record<string, string> = {};
       const leadStageMap: Record<string, string> = {};
       const leadCounsellorIdMap: Record<string, string> = {};
+      const leadSharedMap: Record<string, boolean | null> = {};
       const leadPanMap: Record<string, string | null> = {};
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
@@ -597,6 +600,7 @@ export default function Applications() {
               registrationNo: rec?.registration_no || null,
             };
           })(),
+          lead_shared_with_nimt: leadSharedMap[leadId] ?? null,
         };
       });
 
@@ -681,7 +685,7 @@ export default function Applications() {
 
         const leadResults = await Promise.all(leadBatches.map(async (batch) => {
           const { data, error } = await supabase.from("leads")
-            .select("id, counsellor_id, stage, pre_admission_no, admission_no")
+            .select("id, counsellor_id, stage, pre_admission_no, admission_no, shared_with_nimt")
             .in("id", batch);
           if (error) {
             console.error("leads batch failed:", error);
@@ -695,12 +699,14 @@ export default function Applications() {
           stage: string;
           pre_admission_no: string | null;
           admission_no: string | null;
+          shared_with_nimt: boolean | null;
         }[];
         leads.forEach((l) => {
           leadStageMap[l.id] = l.stage;
           leadCounsellorIdMap[l.id] = l.counsellor_id;
           leadPanMap[l.id] = l.pre_admission_no;
           leadAnMap[l.id] = l.admission_no;
+          leadSharedMap[l.id] = l.shared_with_nimt;
         });
 
         const counsellorIds = [...new Set(leads.map((l) => l.counsellor_id).filter(Boolean))] as string[];
@@ -871,6 +877,8 @@ export default function Applications() {
   const filtered = useMemo(() => apps.filter(a => {
     if (!matchesCourseFilter(a)) return false;
     if (!matchesCounsellorFilter(a)) return false;
+    if (sharedWithNimtFilter === "shared" && a.lead_shared_with_nimt === false) return false;
+    if (sharedWithNimtFilter === "not_shared" && a.lead_shared_with_nimt !== false) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -935,7 +943,7 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
+  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
@@ -1843,6 +1851,20 @@ export default function Applications() {
           triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
           ariaLabel="Filter applications by application status"
         />
+        {isSuperAdmin && (
+          <SelectField
+            value={sharedWithNimtFilter}
+            onValueChange={(value) => setSharedWithNimtFilter(value as "all" | "shared" | "not_shared")}
+            options={[
+              { value: "all", label: "All NIMT sharing" },
+              { value: "shared", label: "Shared with NIMT" },
+              { value: "not_shared", label: "Not shared with NIMT" },
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+            ariaLabel="Filter applications by academic-partner NIMT sharing"
+          />
+        )}
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}
@@ -1865,8 +1887,8 @@ export default function Applications() {
             Save filter ({filteredListApps.length})
           </Button>
         )}
-        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
@@ -1991,6 +2013,11 @@ export default function Applications() {
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
+                      {app.lead_shared_with_nimt === false && (
+                        <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
+                          Not shared with NIMT
+                        </span>
+                      )}
                       {app.exam_registration && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           <ExamRegistrationBadge

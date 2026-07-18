@@ -10476,6 +10476,7 @@ export type Database = {
           _notes?: string | null
           _phone: string
           _requester_type: string
+          _share_with_nimt?: boolean | null
         }
         Returns: Json
       }

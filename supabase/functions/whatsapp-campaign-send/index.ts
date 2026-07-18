@@ -492,7 +492,7 @@ Deno.serve(async (req) => {
     // eligible_at defaults to now() for legacy campaigns.
     const nowIso = new Date().toISOString();
     const recipientSelect =
-      "id, campaign_id, lead_id, phone, status, eligible_at, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+      "id, campaign_id, lead_id, phone, status, eligible_at, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
     let recipients: any[] | null = null;
     {
       const paced = await adminClient
@@ -508,7 +508,7 @@ Deno.serve(async (req) => {
         // Pre-migration fallback
         const legacy = await adminClient
           .from("whatsapp_campaign_recipients")
-          .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
+          .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
           .eq("campaign_id", campaign_id)
           .eq("status", "pending")
           .limit(batchSize);
@@ -647,6 +647,20 @@ Deno.serve(async (req) => {
           .update({
             status: "skipped",
             error_message: "Lead is DNC — message not sent",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
+
+      // Academic-partner private leads (shared_with_nimt = false) are never part
+      // of NIMT outreach — hard stop even if they somehow entered the audience.
+      if (lead.shared_with_nimt === false) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Lead not shared with NIMT — message not sent",
           })
           .eq("id", recipient.id);
         failedCount++;

@@ -10,8 +10,10 @@ export interface AdmissionsLeadCursor {
 
 export const ADMISSIONS_LEAD_LIST_SELECT = `id, name, phone, email, stage, source, person_role, created_at,
            application_id, pre_admission_no, admission_no, course_id, campus_id, lead_institution_type, is_mirror,
-           counsellor_id, lead_score, lead_temperature, ai_called,
+           counsellor_id, lead_score, lead_temperature, ai_called, shared_with_nimt,
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`;
+
+export type AdmissionsSharedWithNimtFilter = "all" | "shared" | "not_shared";
 
 export type AdmissionsApplicationStageLeadScope = {
   mode: "include" | "exclude";
@@ -34,6 +36,9 @@ export interface AdmissionsListFilterModel {
   applicationStageLeadScope: AdmissionsApplicationStageLeadScope | null;
   roleFilter: string;
   tempFilter: string;
+  /** Academic-partner "shared with NIMT" gate. Only meaningful for super_admin
+   *  (RLS already hides private leads from everyone else). Defaults to "all". */
+  sharedWithNimtFilter?: AdmissionsSharedWithNimtFilter;
   debouncedSearch: string;
   fromDate: string;
   toDate: string;
@@ -153,6 +158,7 @@ export function hasActiveAdmissionsListFilters(model: AdmissionsListFilterModel)
     model.sourceFilter !== "all" ||
     model.roleFilter !== "all" ||
     model.tempFilter !== "all" ||
+    (model.sharedWithNimtFilter ?? "all") !== "all" ||
     model.leadInstitutionType !== "all" ||
     model.debouncedCourseFilter.length > 0 ||
     model.applicationStageFilterCount > 0 ||
@@ -231,6 +237,10 @@ export function applyAdmissionsListQueryFilters<TQuery extends AdmissionsPostgre
 
   if (model.roleFilter !== "all") query = query.eq("person_role", model.roleFilter);
   if (model.tempFilter !== "all") query = query.eq("lead_temperature", model.tempFilter);
+
+  const sharedFilter = model.sharedWithNimtFilter ?? "all";
+  if (sharedFilter === "shared") query = query.eq("shared_with_nimt", true);
+  else if (sharedFilter === "not_shared") query = query.eq("shared_with_nimt", false);
 
   if (model.newLeadAssignmentFilter) {
     query = query.eq("stage", "new_lead").eq("is_mirror", false);

@@ -111,7 +111,7 @@ describe("academic partner access scope", () => {
     expect(portal).toContain("Application Stage");
     expect(portal).toContain("application_status");
     expect(portal).toContain("application_payment_status");
-    expect(portal).toContain("View Application");
+    expect(portal).toContain("View details");
     expect(portal).toContain("directOpen");
     expect(portal.match(/ApplyMagicLinkButton/g)?.length || 0).toBeGreaterThanOrEqual(3);
   });
