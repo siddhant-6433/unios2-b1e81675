@@ -808,7 +808,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
-  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned">("all");
+  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned" | "marketing_outbound">("all");
 
   // Quick-action followup dialog
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -2387,6 +2387,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
   const isUnassignedOps = (c: Conversation) =>
     !c.owner_user_id && !c.counsellor_id && c.has_inbound;
+  // Bulk marketing blast we sent that the lead has not replied to yet: last
+  // message is outbound with no unread inbound waiting. Lets counsellors set
+  // these aside and focus on threads that actually need a reply.
+  // ponytail: conversation view has no template_key, so this also catches
+  // AI/manual outbound-last threads; tighten if template-only precision needed.
+  const isMarketingOutbound = (c: Conversation) =>
+    c.last_direction === "outbound" && c.unread_count === 0;
   const isWithinMetaReplyWindow = (iso: string | null | undefined) =>
     Boolean(iso && Date.now() - new Date(iso).getTime() < 24 * 60 * 60 * 1000);
   const isReplyWindowConversation = (c: Conversation) =>
@@ -2409,6 +2416,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (opsFilter === "sla" && !isSlaBreached(c)) return false;
     if (opsFilter === "knowledge" && !isKnowledgeGap(c)) return false;
     if (opsFilter === "unassigned" && !isUnassignedOps(c)) return false;
+    if (opsFilter === "marketing_outbound" && !isMarketingOutbound(c)) return false;
     // Tab filter
     if (inboxTab === "all") { /* show everything */ }
     else if (inboxTab === "leads" && (!c.lead_id || isOtherCategory(c))) return false;
@@ -2453,6 +2461,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     { key: "sla" as const, label: "SLA", count: modeFiltered.filter(isSlaBreached).length },
     { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
     { key: "unassigned" as const, label: "Unassigned", count: modeFiltered.filter(isUnassignedOps).length },
+    { key: "marketing_outbound" as const, label: "Marketing Outbound", count: modeFiltered.filter(isMarketingOutbound).length },
   ];
 
   const formatTime = (iso: string) => {
