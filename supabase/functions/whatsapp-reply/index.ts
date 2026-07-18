@@ -4,7 +4,9 @@ import {
   errorMessage,
   isLikelyBusinessPhoneNumber,
   sendWhatsAppText,
+  sendWhatsAppMedia,
   type WhatsAppChannelHint,
+  type WhatsAppMediaType,
   type WhatsAppProvider,
 } from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
@@ -76,9 +78,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { phone, message, lead_id, bypass_dnc, business_phone_number_id, provider, business_number } = await req.json();
-    if (!phone || !message) {
-      return new Response(JSON.stringify({ error: "phone and message are required" }), {
+    const { phone, message, lead_id, bypass_dnc, business_phone_number_id, provider, business_number, media_url, media_type } = await req.json();
+    if (!phone || (!message && !media_url)) {
+      return new Response(JSON.stringify({ error: "phone and (message or media_url) are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -117,7 +119,9 @@ Deno.serve(async (req) => {
     }
 
     const waPhone = digits(phone);
-    const sendResult = await sendWhatsAppText(admin, channelHint, waPhone, message);
+    const sendResult = media_url
+      ? await sendWhatsAppMedia(admin, channelHint, waPhone, (media_type || "image") as WhatsAppMediaType, media_url, message || undefined)
+      : await sendWhatsAppText(admin, channelHint, waPhone, message);
 
     if (!sendResult.ok) {
       await logWhatsAppAutomationEvent(admin, {
@@ -139,11 +143,13 @@ Deno.serve(async (req) => {
     const actionResult = await recordManualReplyConversationAction(admin, {
       kind: "manualReply",
       phone: waPhone,
-      message,
+      message: message || "",
       leadId: lead_id || null,
       userId: user.id,
       businessNumberFallback: channelHint.businessNumber,
       sendResult,
+      mediaUrl: media_url || null,
+      mediaType: media_url ? (media_type || "image") : null,
     });
 
     return new Response(

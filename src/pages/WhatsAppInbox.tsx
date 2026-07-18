@@ -17,7 +17,7 @@ import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
-  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2,
+  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -801,6 +801,15 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const loadingConversationsRef = useRef(false);
+
+  // Reply media attachment
+  const [replyMedia, setReplyMedia] = useState<{ file: File; url: string; type: string } | null>(null);
+  const replyMediaInputRef = useRef<HTMLInputElement>(null);
+
+  // Flag & correct bot replies
+  const [flaggingMsgId, setFlaggingMsgId] = useState<string | null>(null);
+  const [correctionDraft, setCorrectionDraft] = useState("");
+  const [sendingCorrection, setSendingCorrection] = useState(false);
 
   // Admin-only state
   const [counsellorList, setCounsellorList] = useState<{ id: string; name: string }[]>([]);
@@ -1838,8 +1847,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { supabase.removeChannel(channel); };
   }, [selectedPhone]);
 
+  const uploadReplyMedia = async (file: File): Promise<string | null> => {
+    const ext = file.name.split(".").pop() ?? "bin";
+    const path = `inbox/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage
+      .from("navya-knowledge")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (error) {
+      toast({ title: "Media upload failed", description: error.message, variant: "destructive" });
+      return null;
+    }
+    const { data: urlData } = supabase.storage.from("navya-knowledge").getPublicUrl(path);
+    return urlData.publicUrl;
+  };
+
+  const waMediaType = (mime: string): string => {
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (mime.startsWith("audio/")) return "audio";
+    return "document";
+  };
+
   const handleSendReply = async () => {
-    if (!reply.trim() || !selectedPhone) return;
+    if ((!reply.trim() && !replyMedia) || !selectedPhone) return;
     setSending(true);
 
     const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
@@ -1848,35 +1878,47 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     const currentSenderName = profile?.display_name || user?.email || "You";
     const messageText = reply.trim();
     const localSenderSignature = `${selectedPhone}:${messageText}`;
+
+    // Upload media to storage first if attached
+    let mediaPublicUrl: string | null = null;
+    let mediaType: string | null = null;
+    if (replyMedia) {
+      mediaPublicUrl = await uploadReplyMedia(replyMedia.file);
+      if (!mediaPublicUrl) { setSending(false); return; }
+      mediaType = waMediaType(replyMedia.file.type);
+    }
+
     if (demoMode) {
       const now = new Date().toISOString();
       const localMessage: Message = {
         id: `demo-local-${Date.now()}`,
         direction: "outbound",
-        content: messageText,
-        message_type: "text",
+        content: messageText || (mediaPublicUrl ? `[${mediaType}]` : ""),
+        message_type: mediaType || "text",
         status: "sent",
         template_key: "manual_reply",
-        media_url: null,
+        media_url: mediaPublicUrl,
         created_at: now,
         sender_user_id: "demo-profile",
       };
       setMessages(prev => [...prev, localMessage]);
       setConversations(prev => prev.map(c => c.phone === selectedPhone
-        ? { ...c, last_message: messageText, last_direction: "outbound", last_message_at: now, unread_count: 0 }
+        ? { ...c, last_message: messageText || `[${mediaType}]`, last_direction: "outbound", last_message_at: now, unread_count: 0 }
         : c
       ));
       setLocalSenderNamesBySignature(prev => ({ ...prev, [localSenderSignature]: currentSenderName }));
       setReply("");
+      setReplyMedia(null);
       setSending(false);
       return;
     }
     const { data, error } = await invokeEdge<{ message_id?: string; conversation_message_id?: string | null }>("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-        message: messageText,
+        message: messageText || undefined,
         lead_id: conv?.lead_id || null,
         ...replyChannelPayload(conv),
+        ...(mediaPublicUrl ? { media_url: mediaPublicUrl, media_type: mediaType } : {}),
       },
     });
 
@@ -1900,8 +1942,60 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         });
       }
       setReply("");
+      setReplyMedia(null);
     }
     setSending(false);
+  };
+
+  const handleCorrectBotReply = async (botMsg: Message) => {
+    const corrected = correctionDraft.trim();
+    if (!corrected || !selectedPhone) return;
+    setSendingCorrection(true);
+
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
+
+    // 1. Send corrected reply to the lead
+    const { error: sendErr } = await invokeEdge<any>("whatsapp-reply", {
+      body: {
+        phone: selectedPhone,
+        message: corrected,
+        lead_id: conv?.lead_id || null,
+        ...replyChannelPayload(conv),
+      },
+    });
+
+    if (sendErr) {
+      toast({ title: "Failed to send correction", description: sendErr.message, variant: "destructive" });
+      setSendingCorrection(false);
+      return;
+    }
+
+    // 2. Insert into knowledge base so Navya learns from the correction
+    const botQuery = (() => {
+      const idx = messages.findIndex(m => m.id === botMsg.id);
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].direction === "inbound" && messages[i].content) return messages[i].content!;
+      }
+      return botMsg.content || "General enquiry";
+    })();
+
+    await (supabase as any).from("admissions_ai_reply_examples").insert({
+      query_text: botQuery,
+      reply_text: corrected,
+      source_channel: "whatsapp",
+      target_channels: ["whatsapp", "voice"],
+      language: "hinglish",
+      status: "active",
+      quality_score: 0.95,
+      tags: ["bot_correction"],
+      lead_id: conv?.lead_id || null,
+    });
+
+    toast({ title: "Correction sent & Navya learned" });
+    setFlaggingMsgId(null);
+    setCorrectionDraft("");
+    setSendingCorrection(false);
   };
 
   const KB_TEMPLATE_KEYS = new Set([
@@ -3361,6 +3455,42 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             <DeliveryReceipt status={m.status} />
                           )}
                         </div>
+                        {isOutbound && getOutboundSenderLabel(m) === "Bot" && flaggingMsgId !== m.id && (
+                          <button
+                            onClick={() => { setFlaggingMsgId(m.id); setCorrectionDraft(""); }}
+                            className="flex items-center gap-1 text-[10px] text-orange-600/70 hover:text-orange-700 mt-1 transition-colors"
+                          >
+                            <Flag className="h-3 w-3" /> Flag & correct
+                          </button>
+                        )}
+                        {flaggingMsgId === m.id && (
+                          <div className="mt-2 space-y-2 border-t border-orange-200 pt-2">
+                            <p className="text-[10px] font-medium text-orange-700">Send corrected reply & teach Navya:</p>
+                            <textarea
+                              value={correctionDraft}
+                              onChange={(e) => setCorrectionDraft(e.target.value)}
+                              rows={3}
+                              placeholder="Correct answer…"
+                              className="w-full rounded-md border border-orange-200 bg-white p-2 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-orange-400 resize-none"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleCorrectBotReply(m)}
+                                disabled={sendingCorrection || !correctionDraft.trim()}
+                                className="flex items-center gap-1 rounded-md bg-orange-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                              >
+                                {sendingCorrection ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                                Send & Teach
+                              </button>
+                              <button
+                                onClick={() => setFlaggingMsgId(null)}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -3651,20 +3781,61 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         >
                           <Zap className="h-4 w-4" />
                         </Button>
-                        <input
-                          type="text"
-                          value={reply}
-                          onChange={(e) => setReply(e.target.value)}
-                          placeholder={withinWindow ? "Type a message..." : "Window expired — use template"}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-10 w-10 shrink-0 rounded-full text-slate-600 hover:bg-slate-200"
+                          onClick={() => replyMediaInputRef.current?.click()}
+                          title="Attach media"
                           disabled={!withinWindow}
-                          className="h-11 flex-1 rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                        </Button>
+                        <input
+                          ref={replyMediaInputRef}
+                          type="file"
+                          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              setReplyMedia({ file: f, url: URL.createObjectURL(f), type: f.type });
+                            }
+                            e.target.value = "";
+                          }}
                         />
-                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
+                        <div className="flex-1 min-w-0">
+                          {replyMedia && (
+                            <div className="flex items-center gap-2 mb-1 rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                              {replyMedia.type.startsWith("image/") ? (
+                                <img src={replyMedia.url} alt="" className="h-10 w-10 rounded object-cover" />
+                              ) : (
+                                <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-100">
+                                  <Paperclip className="h-4 w-4 text-slate-500" />
+                                </div>
+                              )}
+                              <span className="flex-1 truncate text-xs text-slate-600">{replyMedia.file.name}</span>
+                              <button onClick={() => setReplyMedia(null)} className="text-slate-400 hover:text-slate-600">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
+                          <input
+                            type="text"
+                            value={reply}
+                            onChange={(e) => setReply(e.target.value)}
+                            placeholder={withinWindow ? (replyMedia ? "Add a caption…" : "Type a message...") : "Window expired — use template"}
+                            disabled={!withinWindow}
+                            className="h-11 w-full rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                        </div>
+                        <Button type="submit" disabled={!withinWindow || (!reply.trim() && !replyMedia) || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
                           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                       </form>
                       {withinWindow && !showTemplatePicker && !showQuickReplies && (
-                        <p className="text-[10px] text-muted-foreground mt-1">Free-form replies only work within 24hrs of last inbound message. Use templates otherwise.</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">Free-form replies work within 24hrs of last inbound message. Attach images, PDFs, or documents. Use templates otherwise.</p>
                       )}
                     </div>
                   );

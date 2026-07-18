@@ -35,6 +35,8 @@ export interface ManualReplyConversationAction {
   userId: string;
   businessNumberFallback?: string | null;
   sendResult: WhatsAppSendResult;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
 }
 
 export interface ConversationActionResult {
@@ -164,8 +166,9 @@ export async function recordManualReplyConversationAction(
     wa_message_id: sendResult.messageId,
     direction: "outbound",
     phone: waPhone,
-    message_type: "text",
-    content: action.message,
+    message_type: action.mediaType || "text",
+    content: action.message || null,
+    media_url: action.mediaUrl || null,
     status: "sent",
     is_read: true,
     provider: sendResult.provider,
