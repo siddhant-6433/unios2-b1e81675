@@ -184,7 +184,16 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const consultantId: string | null = consultantRow?.id || null;
 
-    if (!isStaff && !consultantId) {
+    // Academic partner identity (if any). Partners send payment links from their
+    // portal, scoped to leads/students attributed to them.
+    const { data: partnerRow } = await admin
+      .from("academic_partners")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const academicPartnerId: string | null = partnerRow?.id || null;
+
+    if (!isStaff && !consultantId && !academicPartnerId) {
       return json({ error: "Not authorised to send payment links" }, 403);
     }
 
@@ -205,6 +214,26 @@ Deno.serve(async (req) => {
         }
       }
       if (!linked) return json({ error: "This candidate is not linked to your consultant account" }, 403);
+    }
+
+    // If an academic partner (and not staff), verify the target is attributed to
+    // their partner account.
+    if (!isStaff && !consultantId && academicPartnerId) {
+      let linked = false;
+      if (leadId) {
+        const { data: lead } = await admin
+          .from("leads").select("academic_partner_id").eq("id", leadId).maybeSingle();
+        linked = lead?.academic_partner_id === academicPartnerId;
+      } else if (studentId) {
+        const { data: student } = await admin
+          .from("students").select("lead_id").eq("id", studentId).maybeSingle();
+        if (student?.lead_id) {
+          const { data: lead } = await admin
+            .from("leads").select("academic_partner_id").eq("id", student.lead_id).maybeSingle();
+          linked = lead?.academic_partner_id === academicPartnerId;
+        }
+      }
+      if (!linked) return json({ error: "This candidate is not attributed to your academic partner account" }, 403);
     }
 
     // --- Resolve payer contact -----------------------------------------------

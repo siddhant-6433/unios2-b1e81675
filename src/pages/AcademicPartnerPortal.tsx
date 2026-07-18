@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { LeadPipeline } from "@/components/admissions/LeadPipeline";
 import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
@@ -32,6 +35,7 @@ import {
   GraduationCap,
   IndianRupee,
   Loader2,
+  MoreHorizontal,
   PhoneCall,
   Link as LinkIcon,
   Plus,
@@ -123,6 +127,9 @@ type Lead = {
   attribution_type?: string | null;
   attribution_label?: string | null;
   has_offer?: boolean;
+  has_token_fee_paid?: boolean;
+  lead_pre_admission_no?: string | null;
+  lead_admission_no?: string | null;
   latest_offer_id?: string | null;
   latest_offer_letter_url?: string | null;
 };
@@ -165,6 +172,21 @@ type FeeRow = {
   fee_code_name?: string | null;
 };
 
+type FeeReceipt = {
+  id: string;
+  lead_id: string;
+  type: string;
+  amount: number | null;
+  concession_amount: number | null;
+  payment_mode: string | null;
+  transaction_ref: string | null;
+  receipt_no: string | null;
+  receipt_url: string | null;
+  status: string;
+  payment_date: string | null;
+  created_at: string;
+};
+
 type Payout = {
   id: string;
   payout_amount: number;
@@ -189,6 +211,9 @@ type ApplicationSummary = {
 };
 
 type LeadRow = Omit<Lead, "course_name" | "campus_name"> & {
+  // Raw lead columns selected by ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT.
+  pre_admission_no?: string | null;
+  admission_no?: string | null;
   courses?: { name: string | null } | null;
   campuses?: { name: string | null } | null;
   applications?: ApplicationSummary[];
@@ -435,7 +460,7 @@ const errorMessage = (error: unknown) => {
   return "Please try again.";
 };
 
-const ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT = "id, name, phone, email, stage, source, academic_partner_id, application_id, course_id, campus_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)";
+const ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT = "id, name, phone, email, stage, source, academic_partner_id, application_id, pre_admission_no, admission_no, course_id, campus_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)";
 
 // Partner-created new leads are mapped on insert; duplicate existing CRM leads
 // remain pending requests and enter these pipelines only after admin approval.
@@ -467,6 +492,7 @@ export default function AcademicPartnerPortal() {
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [fees, setFees] = useState<FeeRow[]>([]);
+  const [receiptsByLead, setReceiptsByLead] = useState<Map<string, FeeReceipt[]>>(new Map());
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showAddLead, setShowAddLead] = useState(false);
   const [detailsLead, setDetailsLead] = useState<Lead | null>(null);
@@ -477,8 +503,9 @@ export default function AcademicPartnerPortal() {
   const [savingAgentPhone, setSavingAgentPhone] = useState(false);
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
   const [payLinkLead, setPayLinkLead] = useState<{ id: string; name: string } | null>(null);
+  const [loginLinkLead, setLoginLinkLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
   const [agentPhone, setAgentPhone] = useState("");
-  const [leadForm, setLeadForm] = useState({ name: "", phone: "", email: "", course_id: "", notes: "" });
+  const [leadForm, setLeadForm] = useState({ name: "", phone: "", email: "", course_id: "", notes: "", share_with_nimt: false });
   const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
   const [appFunnelStage, setAppFunnelStage] = useState<ApplicationFunnelStage | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -528,6 +555,14 @@ export default function AcademicPartnerPortal() {
   const feeDetailsSummary = feeDetailsStudentId ? feeByStudent.get(feeDetailsStudentId) : null;
   const feeDetailsStudent = feeDetailsRows[0] || null;
 
+  // Actual payment receipts for the open student — matched via the student's
+  // lead (lead_payments is lead-scoped).
+  const feeDetailsReceipts = useMemo(() => {
+    if (!feeDetailsStudentId) return [] as FeeReceipt[];
+    const leadId = students.find((s) => s.id === feeDetailsStudentId)?.lead_id;
+    return leadId ? (receiptsByLead.get(leadId) || []) : [];
+  }, [feeDetailsStudentId, students, receiptsByLead]);
+
   const applicationLeads = useMemo(
     () => paidApplications.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)),
     [paidApplications],
@@ -553,26 +588,28 @@ export default function AcademicPartnerPortal() {
   }, [leads, leadFunnelStage]);
 
   // Application-pipeline funnel rows, derived from the scoped application leads.
+  // Full funnel input — including the offer / token-fee / PAN / AN signals — so
+  // token_paid, pre_admitted and admitted are counted, not collapsed into Paid.
+  const funnelInputOf = useCallback((lead: Lead) => ({
+    status: lead.application_status,
+    payment_status: lead.application_payment_status,
+    lead_stage: lead.stage,
+    lead_pre_admission_no: lead.lead_pre_admission_no,
+    lead_admission_no: lead.lead_admission_no,
+    has_offer: lead.has_offer,
+    has_token_fee_paid: lead.has_token_fee_paid,
+  }), []);
+
   const applicationFunnelItems = useMemo(
-    () => applicationLeads.map((lead) => ({
-      status: lead.application_status,
-      payment_status: lead.application_payment_status,
-      lead_stage: lead.stage,
-    })),
-    [applicationLeads],
+    () => applicationLeads.map((lead) => funnelInputOf(lead)),
+    [applicationLeads, funnelInputOf],
   );
 
   // Applications table filtered to the clicked application-funnel stage.
   const visibleApplicationLeads = useMemo(() => {
     if (!appFunnelStage) return applicationLeads;
-    return applicationLeads.filter((lead) =>
-      applicationFunnelStageOf({
-        status: lead.application_status,
-        payment_status: lead.application_payment_status,
-        lead_stage: lead.stage,
-      }) === appFunnelStage,
-    );
-  }, [applicationLeads, appFunnelStage]);
+    return applicationLeads.filter((lead) => applicationFunnelStageOf(funnelInputOf(lead)) === appFunnelStage);
+  }, [applicationLeads, appFunnelStage, funnelInputOf]);
 
   const loadPartnerLogoUrl = useCallback(async (filePath: string | null, fallbackUrl?: string | null) => {
     if (!filePath) {
@@ -604,7 +641,31 @@ export default function AcademicPartnerPortal() {
     }));
     setAssignments(activeAssignments);
 
-    const mappedLeads = scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId).map((l) => ({
+    const scopedRows = scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId);
+
+    // Funnel signals the partner cannot read directly (offer_letters +
+    // lead_payments are RLS-blocked for the academic_partner role) — fetched via
+    // a scoped SECURITY DEFINER RPC so token-paid / pre-admitted / admitted are
+    // classified correctly instead of collapsing into "Paid".
+    const funnelSignals = new Map<string, { has_offer: boolean; has_token_fee_paid: boolean }>();
+    const panAnByLead = new Map<string, { pan: string | null; an: string | null }>();
+    scopedRows.forEach((l) => panAnByLead.set(l.id, { pan: l.pre_admission_no ?? null, an: l.admission_no ?? null }));
+    {
+      const { data: signalRows, error: signalsError } = await supabase.rpc("academic_partner_lead_funnel_signals", {
+        _partner_id: isImpersonating && realRole === "super_admin" ? partnerId : null,
+      } as any);
+      if (signalsError) {
+        console.error("[academic_partner_lead_funnel_signals]", signalsError.message);
+      } else {
+        ((signalRows || []) as { lead_id: string; has_offer: boolean; has_token_fee_paid: boolean }[])
+          .forEach((row) => funnelSignals.set(row.lead_id, {
+            has_offer: !!row.has_offer,
+            has_token_fee_paid: !!row.has_token_fee_paid,
+          }));
+      }
+    }
+
+    const mappedLeads = scopedRows.map((l) => ({
       ...l,
       application_id: l.applications?.[0]?.application_id || l.application_id || null,
       application_status: l.applications?.[0]?.status || null,
@@ -619,7 +680,10 @@ export default function AcademicPartnerPortal() {
       campus_name: l.campuses?.name || "-",
       attribution_type: "attributed_to_you",
       attribution_label: "Attributed to you",
-      has_offer: false,
+      has_offer: funnelSignals.get(l.id)?.has_offer ?? false,
+      has_token_fee_paid: funnelSignals.get(l.id)?.has_token_fee_paid ?? false,
+      lead_pre_admission_no: l.pre_admission_no ?? null,
+      lead_admission_no: l.admission_no ?? null,
       latest_offer_id: null,
       latest_offer_letter_url: null,
     }));
@@ -670,7 +734,10 @@ export default function AcademicPartnerPortal() {
           created_at: row.application_created_at || row.application_submitted_at || new Date().toISOString(),
           attribution_type: row.attribution_type,
           attribution_label: row.attribution_label,
-          has_offer: row.has_offer,
+          has_offer: row.has_offer || (funnelSignals.get(row.lead_id)?.has_offer ?? false),
+          has_token_fee_paid: funnelSignals.get(row.lead_id)?.has_token_fee_paid ?? false,
+          lead_pre_admission_no: panAnByLead.get(row.lead_id)?.pan ?? null,
+          lead_admission_no: panAnByLead.get(row.lead_id)?.an ?? null,
           latest_offer_id: row.latest_offer_id,
           latest_offer_letter_url: row.latest_offer_letter_url,
         })));
@@ -744,6 +811,27 @@ export default function AcademicPartnerPortal() {
       student_admission_no: f.students?.admission_no || f.students?.pre_admission_no || null,
       fee_code_name: f.fee_codes?.name || null,
     })));
+
+    // Fee receipts (lead_payments) are RLS-blocked for the academic_partner
+    // role, so they're loaded via a scoped SECURITY DEFINER RPC and grouped by
+    // lead for the Students / Finance tabs.
+    {
+      const { data: receiptRows, error: receiptsError } = await supabase.rpc("academic_partner_fee_receipts", {
+        _partner_id: isImpersonating && realRole === "super_admin" ? partnerId : null,
+      } as any);
+      if (receiptsError) {
+        console.error("[academic_partner_fee_receipts]", receiptsError.message);
+        setReceiptsByLead(new Map());
+      } else {
+        const grouped = new Map<string, FeeReceipt[]>();
+        ((receiptRows || []) as FeeReceipt[]).forEach((r) => {
+          const list = grouped.get(r.lead_id) || [];
+          list.push(r);
+          grouped.set(r.lead_id, list);
+        });
+        setReceiptsByLead(grouped);
+      }
+    }
     setPayouts(((payoutsRes.data || []) as unknown as PayoutRow[]).map((p) => ({
       ...p,
       lead_name: p.leads?.name,
@@ -1001,6 +1089,7 @@ export default function AcademicPartnerPortal() {
       _notes: leadForm.notes.trim() || null,
       _consultant_id: null,
       _academic_partner_id: partner.id,
+      _share_with_nimt: leadForm.share_with_nimt,
     });
 
     if (error) {
@@ -1013,7 +1102,7 @@ export default function AcademicPartnerPortal() {
           ? "This phone already exists in CRM. It will show as associated only after superadmin approval."
           : undefined,
       });
-      setLeadForm({ name: "", phone: "", email: "", course_id: "", notes: "" });
+      setLeadForm({ name: "", phone: "", email: "", course_id: "", notes: "", share_with_nimt: false });
       setShowAddLead(false);
       await fetchPortal(partner.id);
     }
@@ -1379,26 +1468,22 @@ export default function AcademicPartnerPortal() {
                         Status: {lead.application_status || "not started"}
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setDetailsLead(lead)}>
-                          View Application
-                        </Button>
+                        {/* Primary action: the partner's own on-behalf application flow. */}
                         {isPartnerAttributed && (
-                          <>
-                            <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
-                              {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
-                              Call
-                            </Button>
-                            <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} directOpen />
-                            <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} />
-                            <ApplyMagicLinkButton
-                              leadId={lead.id}
-                              leadName={lead.name}
-                              leadPhone={lead.phone}
-                              mode="academic_partner_on_behalf"
-                              label={completed ? "Open Application" : lead.application_id ? "Continue Application" : "Complete Application"}
-                              directOpen
-                            />
-                          </>
+                          <ApplyMagicLinkButton
+                            leadId={lead.id}
+                            leadName={lead.name}
+                            leadPhone={lead.phone}
+                            mode="academic_partner_on_behalf"
+                            label={completed ? "Open Application" : lead.application_id ? "Continue Application" : "Complete Application"}
+                            directOpen
+                          />
+                        )}
+                        {isPartnerAttributed && (
+                          <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
+                            {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                            Call
+                          </Button>
                         )}
                         {canIssueOfferLetters && lead.application_id && lead.course_id && (
                           <Button size="sm" className="gap-2 bg-teal-600 hover:bg-teal-700" onClick={() => setOfferLead(lead)}>
@@ -1406,28 +1491,50 @@ export default function AcademicPartnerPortal() {
                             {lead.has_offer ? "View Offer" : "Issue Offer"}
                           </Button>
                         )}
-                        {completed && lead.application_form_pdf_url && (
-                          <a
-                            href={lead.application_form_pdf_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            View/Download PDF
-                          </a>
-                        )}
-                        {completed && isPartnerAttributed && (
-                          <ApplyMagicLinkButton
-                            leadId={lead.id}
-                            leadName={lead.name}
-                            leadPhone={lead.phone}
-                            mode="academic_partner_on_behalf"
-                            label="Start New Application"
-                            startNew
-                            directOpen
-                          />
-                        )}
+                        {/* Everything secondary collapses into one compact menu. */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline" className="gap-1 px-2">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                              More
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuItem onSelect={() => setDetailsLead(lead)}>
+                              <FileText className="h-3.5 w-3.5" /> View details
+                            </DropdownMenuItem>
+                            {completed && lead.application_form_pdf_url && (
+                              <DropdownMenuItem asChild>
+                                <a href={lead.application_form_pdf_url} target="_blank" rel="noreferrer">
+                                  <FileText className="h-3.5 w-3.5" /> View/Download PDF
+                                </a>
+                              </DropdownMenuItem>
+                            )}
+                            {isPartnerAttributed && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  disabled={!lead.phone}
+                                  onSelect={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}
+                                >
+                                  <LinkIcon className="h-3.5 w-3.5" /> Send login link to candidate
+                                </DropdownMenuItem>
+                                {completed && (
+                                  <ApplyMagicLinkButton
+                                    leadId={lead.id}
+                                    leadName={lead.name}
+                                    leadPhone={lead.phone}
+                                    mode="academic_partner_on_behalf"
+                                    label="Start New Application"
+                                    startNew
+                                    directOpen
+                                    asMenuItem
+                                  />
+                                )}
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -1473,12 +1580,22 @@ export default function AcademicPartnerPortal() {
                 {students.map((student) => {
                   const fee = feeByStudent.get(student.id);
                   const att = attendanceByStudent.get(student.id);
+                  const receiptCount = student.lead_id ? (receiptsByLead.get(student.lead_id)?.length || 0) : 0;
                   return (
                     <tr key={student.id} className="border-b last:border-0">
                       <td className="px-4 py-3"><div className="font-medium">{student.name}</div><div className="text-xs text-muted-foreground">{student.admission_no || student.phone || "-"}</div></td>
                       <td className="px-4 py-3">{student.course_name}</td>
                       <td className="px-4 py-3">{student.batch_name}</td>
-                      <td className="px-4 py-3 text-right"><div className="font-medium">{fmt(fee?.paid)}</div><div className="text-xs text-muted-foreground">Balance {fmt(fee?.balance)}</div></td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium">{fmt(fee?.paid)}</div>
+                        {receiptCount > 0 ? (
+                          <button onClick={() => setFeeDetailsStudentId(student.id)} className="text-xs text-primary hover:underline">
+                            {receiptCount} receipt{receiptCount === 1 ? "" : "s"}
+                          </button>
+                        ) : (
+                          <div className="text-xs text-muted-foreground">Balance {fmt(fee?.balance)}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-center"><div className="font-medium">{attendancePercent(att?.present || 0, att?.total || 0)}</div><div className="text-xs text-muted-foreground">{att?.present || 0}/{att?.total || 0} present</div></td>
                       <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(student.status)}`}>{student.status}</Badge></td>
                     </tr>
@@ -1779,9 +1896,14 @@ export default function AcademicPartnerPortal() {
       <Dialog open={!!feeDetailsStudentId} onOpenChange={(open) => { if (!open) setFeeDetailsStudentId(null); }}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Fee Terms</DialogTitle>
+            <DialogTitle>Fee Terms &amp; Receipts</DialogTitle>
             <DialogDescription>
-              {feeDetailsStudent?.student_name || "Candidate"} · {feeDetailsStudent?.student_admission_no || "No admission number"}
+              {(() => {
+                const s = students.find((st) => st.id === feeDetailsStudentId);
+                const name = feeDetailsStudent?.student_name || s?.name || "Candidate";
+                const idNo = feeDetailsStudent?.student_admission_no || s?.admission_no || "No admission number";
+                return `${name} · ${idNo}`;
+              })()}
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1827,6 +1949,49 @@ export default function AcademicPartnerPortal() {
               </tbody>
             </table>
           </div>
+
+          {/* Actual payment receipts (lead_payments) — what the candidate has
+              paid, with downloadable receipts. */}
+          <div className="mt-4">
+            <p className="mb-2 text-sm font-semibold text-foreground">
+              Fee Receipts{feeDetailsReceipts.length > 0 ? ` (${feeDetailsReceipts.length})` : ""}
+            </p>
+            <div className="max-h-[40vh] overflow-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted">
+                  <tr className="border-b">
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Receipt No.</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Type</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Date</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Mode</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Amount</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feeDetailsReceipts.map((r) => (
+                    <tr key={r.id} className="border-b last:border-0">
+                      <td className="px-4 py-3 font-mono text-xs">{r.receipt_no || "—"}</td>
+                      <td className="px-4 py-3 capitalize">{(r.type || "").replace(/_/g, " ") || "—"}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{(r.payment_date || r.created_at) ? new Date(r.payment_date || r.created_at).toLocaleDateString("en-IN") : "-"}</td>
+                      <td className="px-4 py-3 text-xs capitalize">{(r.payment_mode || "").replace(/_/g, " ") || "—"}</td>
+                      <td className="px-4 py-3 text-right font-medium">{fmt(r.amount)}</td>
+                      <td className="px-4 py-3 text-center">
+                        {r.receipt_url ? (
+                          <a href={r.receipt_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                            <FileText className="h-3.5 w-3.5" /> View
+                          </a>
+                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {feeDetailsReceipts.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee receipts recorded yet</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -1855,6 +2020,16 @@ export default function AcademicPartnerPortal() {
           leadId={payLinkLead.id}
           defaultPurpose="pre_admission_token"
           onCreated={() => { void fetchPortal(partner.id); }}
+        />
+      )}
+
+      {loginLinkLead && (
+        <ApplyMagicLinkButton
+          leadId={loginLinkLead.id}
+          leadName={loginLinkLead.name}
+          leadPhone={loginLinkLead.phone}
+          controlledOpen={!!loginLinkLead}
+          onControlledOpenChange={(open) => !open && setLoginLinkLead(null)}
         />
       )}
 
@@ -1890,6 +2065,21 @@ export default function AcademicPartnerPortal() {
               <label htmlFor="academic-partner-lead-notes" className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
               <textarea id="academic-partner-lead-notes" rows={2} value={leadForm.notes} onChange={(e) => setLeadForm((p) => ({ ...p, notes: e.target.value }))} className={inputCls} />
             </div>
+            <label htmlFor="academic-partner-lead-share" className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 cursor-pointer">
+              <input
+                id="academic-partner-lead-share"
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                checked={leadForm.share_with_nimt}
+                onChange={(e) => setLeadForm((p) => ({ ...p, share_with_nimt: e.target.checked }))}
+              />
+              <span className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Share with NIMT admissions team</span>
+                <br />
+                Let NIMT counsellors call this lead. This also enables the automated AI call and WhatsApp
+                follow-ups. Leave unchecked to keep the lead private to your portal (no calls or messages).
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddLead(false)}>Cancel</Button>

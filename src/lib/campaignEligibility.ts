@@ -9,6 +9,8 @@ export type CampaignLeadLike = {
   phone?: string | null;
   email?: string | null;
   stage?: string | null;
+  /** Academic-partner private leads (false) are never eligible for NIMT campaigns. */
+  shared_with_nimt?: boolean | null;
 };
 
 export type CampaignEligibilityOptions = {
@@ -28,6 +30,7 @@ export type CampaignEligibilityOptions = {
 
 export type CampaignSkipReason =
   | "dnc"
+  | "not_shared"
   | "no_phone"
   | "no_email"
   | "cold"
@@ -41,6 +44,7 @@ export type CampaignEligibilityResult<T extends CampaignLeadLike> = {
     total: number;
     eligible: number;
     dnc: number;
+    notShared: number;
     noContact: number;
     cold: number;
     recentContact: number;
@@ -98,6 +102,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
   const eligible: T[] = [];
   const skipped: Array<{ lead: T; reason: CampaignSkipReason }> = [];
   let dnc = 0;
+  let notShared = 0;
   let noContact = 0;
   let cold = 0;
   let recentContact = 0;
@@ -110,6 +115,13 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
     if (HARD_EXCLUDE_STAGES.has(stage) || stage === "dnc") {
       skipped.push({ lead, reason: "dnc" });
       dnc += 1;
+      continue;
+    }
+
+    // Academic-partner private leads are never part of NIMT outreach.
+    if (lead.shared_with_nimt === false) {
+      skipped.push({ lead, reason: "not_shared" });
+      notShared += 1;
       continue;
     }
 
@@ -156,6 +168,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
     total,
     eligible: eligible.length,
     dnc,
+    notShared,
     noContact,
     cold,
     recentContact,
@@ -166,6 +179,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
     `${counts.eligible.toLocaleString("en-IN")} will receive`,
   ];
   if (dnc) parts.push(`${dnc} DNC excluded`);
+  if (notShared) parts.push(`${notShared} not shared with NIMT`);
   if (noContact) parts.push(`${noContact} missing ${opts.channel === "email" ? "email" : "phone"}`);
   if (cold) parts.push(`${cold} cold`);
   if (recentContact) parts.push(`${recentContact} recent contact (<${quietDays}d)`);

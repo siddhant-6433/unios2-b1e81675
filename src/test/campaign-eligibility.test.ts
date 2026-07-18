@@ -32,6 +32,25 @@ describe("campaign eligibility (DNC + quality)", () => {
     expect(isHardBlockedStage("dnc")).toBe(true);
   });
 
+  it("hard-excludes academic-partner leads not shared with NIMT", () => {
+    const result = filterCampaignRecipients(
+      [
+        { id: "private", phone: "919999999999", stage: "new", shared_with_nimt: false },
+        { id: "shared", phone: "918888888888", stage: "new", shared_with_nimt: true },
+        { id: "default", phone: "917777777777", stage: "new" },
+      ],
+      { channel: "whatsapp", excludeCold: false, quietDays: 0, now },
+    );
+    expect(result.eligible.map((l) => l.id)).toEqual(["shared", "default"]);
+    expect(result.counts.notShared).toBe(1);
+    expect(result.preview).toContain("not shared with NIMT");
+  });
+
+  it("guards the campaign send path against not-shared leads", () => {
+    expect(sender).toContain("shared_with_nimt");
+    expect(sender).toContain("Lead not shared with NIMT — message not sent");
+  });
+
   it("excludes cold by default and recent marketing contacts", () => {
     const last = new Map([
       ["warm-recent", "2026-07-14T12:00:00.000Z"],

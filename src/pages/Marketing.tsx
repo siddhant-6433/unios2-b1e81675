@@ -613,7 +613,7 @@ export default function Marketing() {
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
-          .select("lead_id, leads(id, phone, stage)")
+          .select("lead_id, leads(id, phone, stage, shared_with_nimt)")
           .eq("list_id", selectedList.id);
         if (memErr) throw memErr;
 
@@ -693,7 +693,7 @@ export default function Marketing() {
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
-          .select("lead_id, leads(id, email, stage)")
+          .select("lead_id, leads(id, email, stage, shared_with_nimt)")
           .eq("list_id", selectedList.id);
         if (memErr) throw memErr;
 

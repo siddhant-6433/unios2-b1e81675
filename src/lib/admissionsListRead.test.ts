@@ -105,6 +105,22 @@ describe("admissions list read filters", () => {
     expect(hasActiveAdmissionsListFilters(baseModel({ fromDate: "2026-06-01" }))).toBe(true);
     expect(hasActiveAdmissionsListFilters(baseModel({ role: "counsellor" }))).toBe(true);
     expect(hasActiveAdmissionsListFilters(baseModel({ inactiveIds: new Set(["lead-1"]) }))).toBe(true);
+    expect(hasActiveAdmissionsListFilters(baseModel({ sharedWithNimtFilter: "not_shared" }))).toBe(true);
+    expect(hasActiveAdmissionsListFilters(baseModel({ sharedWithNimtFilter: "all" }))).toBe(false);
+  });
+
+  it("scopes the query by academic-partner NIMT sharing", () => {
+    const shared = new QueryRecorder();
+    applyAdmissionsListQueryFilters(shared, baseModel({ sharedWithNimtFilter: "shared" }));
+    expect(shared.calls).toContainEqual({ method: "eq", args: ["shared_with_nimt", true] });
+
+    const notShared = new QueryRecorder();
+    applyAdmissionsListQueryFilters(notShared, baseModel({ sharedWithNimtFilter: "not_shared" }));
+    expect(notShared.calls).toContainEqual({ method: "eq", args: ["shared_with_nimt", false] });
+
+    const off = new QueryRecorder();
+    applyAdmissionsListQueryFilters(off, baseModel());
+    expect(off.calls.some((c) => c.args[0] === "shared_with_nimt")).toBe(false);
   });
 
   it("applies scope, source, date, search, and intersected id filters", () => {

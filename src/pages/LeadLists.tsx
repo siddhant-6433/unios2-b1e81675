@@ -728,7 +728,7 @@ export default function LeadLists() {
     setPreviewLoading(true);
     const { data, error } = await supabase
       .from("lead_list_members" as any)
-      .select("lead_id, leads(id, name, phone, email, stage)")
+      .select("lead_id, leads(id, name, phone, email, stage, shared_with_nimt)")
       .eq("list_id", list.id)
       .limit(100);
     if (error) console.error("Preview fetch failed:", error);

@@ -1123,6 +1123,11 @@ const LeadDetail = () => {
         </Link>
         <span className="text-muted-foreground/50 shrink-0">/</span>
         <span className="font-medium text-foreground truncate">{lead.name}</span>
+        {(lead as { shared_with_nimt?: boolean | null }).shared_with_nimt === false && (
+          <span className="shrink-0 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
+            Not shared with NIMT
+          </span>
+        )}
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
