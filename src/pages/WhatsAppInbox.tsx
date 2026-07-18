@@ -391,6 +391,10 @@ const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admi
 const HR_BUSINESS_PNID = "970526789470416";
 const HR_BUSINESS_NUMBER = "9599675267";
 const PLIVO_WHATSAPP_NUMBER = "919555192192";
+// 9555192192 moved from Plivo BSP to direct Meta Cloud API (coexistence). Meta
+// delivers it with this phone_number_id; Plivo-era conversations still carry the
+// bare number as their id, so both resolve to the same "9555192192 Inbox" tab.
+const COEXIST_META_PNID = "1216095224919854";
 const PRIMARY_META_WHATSAPP_NUMBER = "919667641872";
 const PRIMARY_META_PNID = "1075269918995469";
 const SECONDARY_META_PNID = "108464108729604";
@@ -399,10 +403,11 @@ const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
 const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
   [PRIMARY_META_PNID]: PRIMARY_META_WHATSAPP_NUMBER,
   [SECONDARY_META_PNID]: SECONDARY_META_WHATSAPP_NUMBER,
+  [COEXIST_META_PNID]: PLIVO_WHATSAPP_NUMBER,
   [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
 };
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
-  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
+  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "meta" },
   { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", provider: "meta" },
   { id: SECONDARY_META_WHATSAPP_NUMBER, label: "8130107839 Inbox", provider: "meta" },
   { id: "917428499849", label: "7428499849 Inbox", provider: "meta" },
