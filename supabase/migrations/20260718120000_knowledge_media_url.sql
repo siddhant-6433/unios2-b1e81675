@@ -25,7 +25,9 @@ CREATE POLICY "Anyone can read navya-knowledge"
   TO anon, authenticated
   USING (bucket_id = 'navya-knowledge');
 
--- Update the match RPC to return media_url
+-- Drop and recreate — return type changed (added media_url)
+DROP FUNCTION IF EXISTS public.match_admissions_ai_reply_examples(text, uuid, text, integer);
+
 CREATE OR REPLACE FUNCTION public.match_admissions_ai_reply_examples(
   p_query text,
   p_course_id uuid DEFAULT NULL,
@@ -81,3 +83,6 @@ AS $$
   ORDER BY score DESC, wre.quality_score DESC, wre.updated_at DESC
   LIMIT least(greatest(coalesce(p_limit, 3), 1), 5);
 $$;
+
+GRANT EXECUTE ON FUNCTION public.match_admissions_ai_reply_examples(text, uuid, text, integer)
+  TO authenticated, service_role;
