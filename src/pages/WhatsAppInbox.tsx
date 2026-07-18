@@ -54,7 +54,7 @@ const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
     "Hi {{student_name}}, this is a reminder that a fee payment of Rs.{{amount}} is due by {{due_date}}. Please complete the payment to avoid any delays.",
   bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
   cnet_not_qualified_bpt_bmrit:
-    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
+    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192",
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
@@ -391,15 +391,25 @@ const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admi
 const HR_BUSINESS_PNID = "970526789470416";
 const HR_BUSINESS_NUMBER = "9599675267";
 const PLIVO_WHATSAPP_NUMBER = "919555192192";
-const PRIMARY_META_WHATSAPP_NUMBER = "919667691872";
+// 9555192192 moved from Plivo BSP to direct Meta Cloud API (coexistence). Meta
+// delivers it with this phone_number_id; Plivo-era conversations still carry the
+// bare number as their id, so both resolve to the same "9555192192 Inbox" tab.
+const COEXIST_META_PNID = "1216095224919854";
+const PRIMARY_META_WHATSAPP_NUMBER = "919667641872";
+const PRIMARY_META_PNID = "1075269918995469";
+const SECONDARY_META_PNID = "108464108729604";
+const SECONDARY_META_WHATSAPP_NUMBER = "918130107839";
 const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
 const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
-  "1075269918995469": "917428499849",
+  [PRIMARY_META_PNID]: PRIMARY_META_WHATSAPP_NUMBER,
+  [SECONDARY_META_PNID]: SECONDARY_META_WHATSAPP_NUMBER,
+  [COEXIST_META_PNID]: PLIVO_WHATSAPP_NUMBER,
   [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
 };
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
-  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
-  { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", provider: "meta" },
+  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "meta" },
+  { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", provider: "meta" },
+  { id: SECONDARY_META_WHATSAPP_NUMBER, label: "8130107839 Inbox", provider: "meta" },
   { id: "917428499849", label: "7428499849 Inbox", provider: "meta" },
 ];
 
@@ -854,7 +864,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (!demoMode) return;
     setConversations(DEMO_CONVERSATIONS);
     setDetectedInboxChannels([
-      { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", n: DEMO_CONVERSATIONS.length },
+      { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", n: DEMO_CONVERSATIONS.length },
       { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", n: 0 },
     ]);
     setCounsellorList([

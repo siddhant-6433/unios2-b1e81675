@@ -60,7 +60,7 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain("max-h-[90vh]");
     expect(leadLists).toContain("overflow-y-auto px-6 py-4");
     expect(leadLists).toContain("knownBulkSenderOptions");
-    expect(leadLists).toContain("919667691872");
+    expect(leadLists).toContain("919667641872");
     expect(leadLists).toContain("917428499849");
     expect(leadLists).toContain("919555192192");
   });

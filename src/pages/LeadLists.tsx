@@ -169,11 +169,11 @@ const defaultWaSenderOption = (): WaSenderOption => ({
 
 const knownBulkSenderOptions = (): WaSenderOption[] => [
   {
-    value: "meta:919667691872",
-    label: "Admissions Meta sender 9667691872",
+    value: "meta:919667641872",
+    label: "Admissions Meta sender 9667641872",
     provider: "meta",
     phoneNumberId: null,
-    businessNumber: "919667691872",
+    businessNumber: "919667641872",
     total: null,
     failed: null,
     failedPct: null,
