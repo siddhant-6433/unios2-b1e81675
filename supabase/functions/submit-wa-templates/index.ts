@@ -33,7 +33,7 @@ For admission Candidates *MUST*
 Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
 
 For any details please call 9555192192
-9667691872
+9667641872
 7428499849`;
 }
 
@@ -48,7 +48,7 @@ Both are mandatory:
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192
+Help: 7428499849, 9667641872, 9555192192
 
 ---
 
@@ -62,7 +62,7 @@ Last date: *14th June 2026*.
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192`;
+Help: 7428499849, 9667641872, 9555192192`;
 }
 
 // Each template has BODY (parameterised) + optionally HEADER / BUTTONS.

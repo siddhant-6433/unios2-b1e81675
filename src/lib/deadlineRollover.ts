@@ -84,6 +84,6 @@ For admission Candidates *MUST*
 Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
 
 For any details please call 9555192192
-9667691872
+9667641872
 7428499849`;
 }

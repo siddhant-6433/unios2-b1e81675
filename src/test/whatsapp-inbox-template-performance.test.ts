@@ -99,7 +99,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("KNOWN_ADMISSIONS_PHONE_CHANNELS");
     expect(inbox).toContain('provider: "plivo"');
     expect(inbox).toContain("PRIMARY_META_WHATSAPP_NUMBER");
-    expect(inbox).toContain("919667691872");
+    expect(inbox).toContain("919667641872");
     expect(inbox).toContain("917428499849");
     expect(inbox).not.toContain("9555192129");
     expect(inbox).not.toContain("919555192129");

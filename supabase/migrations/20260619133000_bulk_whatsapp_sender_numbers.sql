@@ -4,9 +4,9 @@
 
 update public.whatsapp_channels
 set
-  business_number = '919667691872',
+  business_number = '919667641872',
   allow_bulk = true,
-  label = 'Admissions Meta sender 9667691872',
+  label = 'Admissions Meta sender 9667641872',
   quality_risk_level = coalesce(quality_risk_level, 'normal')
 where provider = 'meta'
   and route = 'admissions';
