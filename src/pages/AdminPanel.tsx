@@ -141,6 +141,7 @@ const AdminPanel = () => {
     try {
       const { data, error } = await supabase.rpc("admin_user_directory" as any, {
         _show_archived: showArchivedUsers,
+        _limit: 0,
       }).limit(10000);
 
       if (error) {
