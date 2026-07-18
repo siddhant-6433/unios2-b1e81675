@@ -126,7 +126,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
   });
 
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ success: number; failed: number; duplicates: number; listId?: string | null; listName?: string } | null>(null);
+  const [result, setResult] = useState<{ success: number; failed: number; duplicates: number; listId?: string | null; listName?: string; failedRows?: { name: string; phone: string; error: string }[] } | null>(null);
   const [triggerAiCalls, setTriggerAiCalls] = useState(false);
 
   // Optional manual source override — applied to every imported lead,
@@ -301,6 +301,9 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
     if (!validLeads.length) return;
     setImporting(true);
     let success = 0, failed = 0, duplicates = 0;
+    // Per-row failure reasons — surfaced in the result step + downloadable as
+    // CSV so counsellors know WHY rows dropped instead of a bare "N failed".
+    const failedRows: { name: string; phone: string; error: string }[] = [];
 
     const insertedIds: string[] = [];
     // Map of canonical phone → existing lead_id for the dupes we found in
@@ -342,43 +345,39 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
       }
     }
 
-    // Plain INSERT now — no conflicts because dupes were filtered out.
-    for (let i = 0; i < newLeads.length; i += 50) {
-      const slice = newLeads.slice(i, i + 50);
-      const batch = slice.map(l => ({
-        name: l.name,
-        phone: l.phone,
-        email: l.email || null,
-        // Manual override wins over CSV. Falls back to CSV value, then "other".
-        source: (sourceOverride || l.source || "other") as any,
-        guardian_name: l.guardian_name || null,
-        guardian_phone: l.guardian_phone || null,
-        notes: [
+    // Insert through the `insert_lead` SECURITY DEFINER RPC — a raw
+    // `.insert().select()` fails for counsellors with RLS 42501, because the
+    // RETURNING re-applies the SELECT policy (can_view_lead) to a row that
+    // isn't visible to its own nested query mid-statement. The RPC bypasses
+    // that and also sets skip_ai_call. ponytail: parallel batches of 25 RPC
+    // calls; make a bulk RPC if import throughput ever matters.
+    for (let i = 0; i < newLeads.length; i += 25) {
+      const slice = newLeads.slice(i, i + 25);
+      const results = await Promise.all(slice.map(async (l) => {
+        const notes = [
           sourceOverride === "other" && trimmedOtherSourceName ? `Other source: ${trimmedOtherSourceName}` : "",
           l.notes || "",
-        ].filter(Boolean).join("\n") || null,
-        skip_ai_call: true,
-      } as any));
-
-      const { error, data } = await supabase.from("leads").insert(batch).select("id");
-      if (error) {
-        // Batch failed for a non-dupe reason — fall back to per-row insert.
-        console.warn("Batch insert failed, retrying per-row:", error.message);
-        for (const row of batch) {
-          const { error: rowErr, data: rowData } = await supabase
-            .from("leads").insert([row]).select("id");
-          if (rowErr) {
-            failed++;
-            console.warn("Row insert failed:", rowErr.message, row.phone);
-          } else if (rowData && rowData[0]) {
-            success++;
-            insertedIds.push((rowData[0] as any).id);
-          }
+        ].filter(Boolean).join("\n") || null;
+        const { data, error } = await supabase.rpc("insert_lead" as any, {
+          _name: l.name,
+          _phone: l.phone,
+          _email: l.email || null,
+          _guardian_name: l.guardian_name || null,
+          _guardian_phone: l.guardian_phone || null,
+          // Manual override wins over CSV. Falls back to CSV value, then "other".
+          _source: sourceOverride || l.source || "other",
+          _notes: notes,
+        });
+        return { l, id: (data as string) || null, error };
+      }));
+      for (const r of results) {
+        if (r.error || !r.id) {
+          failed++;
+          failedRows.push({ name: r.l.name, phone: r.l.phone, error: r.error?.message || "Insert returned no id" });
+        } else {
+          success++;
+          insertedIds.push(r.id);
         }
-      } else {
-        const inserted = data?.length || 0;
-        success += inserted;
-        if (data) insertedIds.push(...data.map((d: any) => d.id));
       }
     }
 
@@ -431,7 +430,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
       }
     }
 
-    setResult({ success, failed, duplicates, listId, listName: savedListName });
+    setResult({ success, failed, duplicates, listId, listName: savedListName, failedRows });
     setImporting(false);
     setStep("result");
     if (success > 0) onSuccess();
@@ -444,6 +443,20 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "lead_import_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download the rows that failed to insert, with their reason, so the
+  // counsellor can fix and re-import instead of guessing what went wrong.
+  const downloadFailedRows = () => {
+    const rows = result?.failedRows || [];
+    if (!rows.length) return;
+    const esc = (v: string) => `"${(v || "").replace(/"/g, '""')}"`;
+    const csv = ["name,phone,error", ...rows.map(r => [r.name, r.phone, r.error].map(esc).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "failed_lead_imports.csv"; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -833,6 +846,41 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                 List <strong>{result.listName}</strong> ready — open the Lists page to send bulk WhatsApp / email. Existing leads matched by phone are also included.
               </p>
             )}
+
+            {result.failed > 0 && result.failedRows && result.failedRows.length > 0 && (
+              <div className="text-left rounded-xl border border-destructive/20 bg-destructive/5 p-3 space-y-2 mx-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-destructive">{result.failed} row{result.failed === 1 ? "" : "s"} failed to import</p>
+                  <Button size="sm" variant="outline" onClick={downloadFailedRows} className="h-7 gap-1.5 text-xs border-destructive/30 text-destructive hover:bg-destructive/10">
+                    <Download className="h-3.5 w-3.5" />Download failed rows
+                  </Button>
+                </div>
+                <div className="max-h-[160px] overflow-y-auto rounded-lg border border-destructive/10 bg-white">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-destructive/10 bg-destructive/5 sticky top-0">
+                        <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Name</th>
+                        <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Phone</th>
+                        <th className="px-2 py-1.5 text-left font-semibold text-muted-foreground">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.failedRows.slice(0, 50).map((r, i) => (
+                        <tr key={i} className="border-b border-destructive/10 last:border-0">
+                          <td className="px-2 py-1.5 text-foreground">{r.name || "—"}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground font-mono">{r.phone || "—"}</td>
+                          <td className="px-2 py-1.5 text-destructive">{r.error}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {result.failedRows.length > 50 && (
+                    <p className="px-2 py-1.5 text-[10px] text-muted-foreground bg-muted/30">Showing first 50 — download for all {result.failedRows.length}.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <Button onClick={() => onOpenChange(false)}>Done</Button>
           </div>
         )}
