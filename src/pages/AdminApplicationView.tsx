@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -25,6 +25,7 @@ import { buildApplicationDossier } from "@/lib/applicationDossier";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
+import { ExternalOwnerDialog } from "@/components/admissions/ExternalOwnerDialog";
 import { determineProgramCategory } from "@/components/apply/types";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -183,12 +184,18 @@ export default function AdminApplicationView() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
   const canApproveApplication = role === "super_admin" || role === "principal";
   const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
   const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
     role === "admission_head" || role === "campus_admin";
   const canEditProgram = canManageOffer;
+  const isSuperAdmin = role === "super_admin";
+  const canAssignExternalOwner =
+    isSuperAdmin
+    || role === "principal"
+    || hasPermission("leads:assign_external_owner")
+    || (role === "counsellor" && hasPermission("consultants:view"));
   const { courseOptions, loading: courseOptionsLoading } = useCourseCampusLink();
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
@@ -196,6 +203,10 @@ export default function AdminApplicationView() {
     id: string; name: string; course_id: string | null; campus_id: string | null;
     phone: string | null;
     pre_admission_no: string | null; admission_no: string | null;
+    consultant_id?: string | null;
+    academic_partner_id?: string | null;
+    lead_consultant?: { name: string } | null;
+    lead_academic_partner?: { name: string; organization: string | null } | null;
     course?: { name: string; code: string | null; duration_years: number | null; eligibility: string | null; entrance_exam: string | null; entrance_mandatory: boolean | null } | null;
   } | null>(null);
   const [eligibilityRule, setEligibilityRule] = useState<{
@@ -225,6 +236,7 @@ export default function AdminApplicationView() {
   const [savingProgram, setSavingProgram] = useState(false);
   const [leadPayments, setLeadPayments] = useState<LeadPaymentRow[]>([]);
   const [offlinePaymentOpen, setOfflinePaymentOpen] = useState(false);
+  const [showExternalOwner, setShowExternalOwner] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -276,7 +288,7 @@ export default function AdminApplicationView() {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
         const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, { data: allPmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
-            .select("id, name, phone, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
+            .select("id, name, phone, course_id, campus_id, pre_admission_no, admission_no, consultant_id, academic_partner_id, lead_consultant:consultant_id(name), course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
           supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
           supabase.from("lead_payments")
@@ -323,6 +335,14 @@ export default function AdminApplicationView() {
             .eq("course_id", effectiveLeadRow.course_id)
             .maybeSingle();
           ruleRow = data;
+        }
+        if (effectiveLeadRow?.academic_partner_id) {
+          const { data: apRow } = await supabase
+            .from("academic_partners")
+            .select("name, organization")
+            .eq("id", effectiveLeadRow.academic_partner_id)
+            .maybeSingle();
+          if (apRow) effectiveLeadRow.lead_academic_partner = apRow;
         }
         setLead(effectiveLeadRow as any);
         setEligibilityRule(ruleRow);
@@ -948,6 +968,36 @@ export default function AdminApplicationView() {
         <div className="flex items-center gap-2">
           <Badge className="text-[10px] border-0 bg-primary/10 text-primary">{app.status}</Badge>
           <Badge className="text-[10px] border-0 bg-success/10 text-success">{app.payment_status || "pending"}</Badge>
+          {lead && (() => {
+            const extOwner = lead.consultant_id
+              ? { type: "consultant" as const, id: lead.consultant_id, label: `Consultant: ${(lead.lead_consultant as any)?.name || "Assigned"}` }
+              : lead.academic_partner_id
+                ? { type: "academic_partner" as const, id: lead.academic_partner_id, label: `Admission Partner: ${(lead.lead_academic_partner as any)?.organization || (lead.lead_academic_partner as any)?.name || "Assigned"}` }
+                : { type: "none" as const, id: null, label: "No external owner" };
+            const OwnerIcon = extOwner.type === "academic_partner" ? School : Handshake;
+            return (
+              <>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                    extOwner.type === "consultant"
+                      ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400"
+                      : extOwner.type === "academic_partner"
+                        ? "bg-info/10 text-info-foreground dark:bg-info/80/30 dark:text-info/80"
+                        : "bg-muted text-muted-foreground"
+                  }`}
+                  title="External owner"
+                >
+                  <OwnerIcon className="h-3 w-3" />
+                  {extOwner.label}
+                </span>
+                {canAssignExternalOwner && (
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setShowExternalOwner(true)}>
+                    <Handshake className="h-3.5 w-3.5" /> Assign Owner
+                  </Button>
+                )}
+              </>
+            );
+          })()}
           {(lead?.id || app.lead_id) && (
             <Button
               variant="outline"
@@ -1457,6 +1507,24 @@ export default function AdminApplicationView() {
           leadId={lead.id}
           applicationId={app.application_id}
           onRecorded={refresh}
+        />
+      )}
+
+      {/* External owner assignment */}
+      {lead?.id && (
+        <ExternalOwnerDialog
+          open={showExternalOwner}
+          onOpenChange={setShowExternalOwner}
+          leadId={lead.id}
+          leadName={lead.name}
+          currentOwner={
+            lead.consultant_id
+              ? { type: "consultant", id: lead.consultant_id, label: `Consultant: ${(lead.lead_consultant as any)?.name || "Assigned"}` }
+              : lead.academic_partner_id
+                ? { type: "academic_partner", id: lead.academic_partner_id, label: `Admission Partner: ${(lead.lead_academic_partner as any)?.organization || (lead.lead_academic_partner as any)?.name || "Assigned"}` }
+                : { type: "none", id: null, label: "No external owner" }
+          }
+          onSuccess={refresh}
         />
       )}
     </div>
