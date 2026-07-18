@@ -11,6 +11,8 @@ const corsHeaders = {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const BOARDING_PARENT_INTERACTION_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/boarding_school_parent_interaction_header.png";
 
 type DynamicHeaderComponent =
   | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
@@ -68,6 +70,7 @@ const WA_PARAM_MAPPING_PREFIX = "__lead_field__:";
 const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
   cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
   cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
+  parent_interaction_boarding_july18: BOARDING_PARENT_INTERACTION_IMAGE_URL,
 };
 
 function cleanPersonName(value: unknown): string {
@@ -142,7 +145,13 @@ function templateMediaUrlFromComponents(templateKey: string, components: unknown
     return data.type === "HEADER";
   }) as Record<string, any> | undefined;
   const handle = header?.example?.header_handle?.[0];
-  return typeof handle === "string" && /^https?:\/\//i.test(handle) ? handle : null;
+  // Meta's example `header_handle` is a scontent.whatsapp.net URL usable only as
+  // template *sample* media. Meta's send pipeline rejects it as a message header
+  // link (131053 "Media upload error … 403 Forbidden"), so never use it as the
+  // send-time link — a stable public URL must be registered in KNOWN_TEMPLATE_MEDIA.
+  if (typeof handle !== "string" || !/^https?:\/\//i.test(handle)) return null;
+  if (/scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(handle)) return null;
+  return handle;
 }
 
 function numberedPlaceholders(text: unknown): number[] {
@@ -442,6 +451,22 @@ Deno.serve(async (req) => {
           campaign.template_key,
         ),
       };
+    }
+
+    // Preflight: a media-header template with no usable public header URL would
+    // 403 on *every* recipient at Meta's media download. Fail the whole campaign
+    // once with a clear message instead of silently burning the entire list.
+    const mediaHeader = templateDef.dynamicComponents?.header;
+    if (mediaHeader?.kind === "media") {
+      const hasStaticOverride = Object.values((campaign as any).static_params || {})
+        .some((v) => typeof v === "string" && /^https?:\/\//i.test(v));
+      if (!mediaHeader.defaultUrl && !hasStaticOverride) {
+        await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+        return new Response(JSON.stringify({
+          error: `Template "${campaign.template_key}" has a media header but no downloadable header URL. ` +
+            `Add a public URL to KNOWN_TEMPLATE_MEDIA (Meta rejects the scontent example handle as a send link).`,
+        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     if (campaign.status === "paused" || campaign.status === "terminated") {
