@@ -20,7 +20,7 @@
  *   PORT                 — HTTP port (default 8000)
  */
 
-import { mulawToGeminiPcm, geminiPcmToMulaw } from "./audio-utils.ts";
+import { mulawToGeminiPcm, geminiPcmToMulaw, parsePcmRate } from "./audio-utils.ts";
 import { buildSystemInstruction, VOICE_AGENT_TOOLS, type CallContext } from "./scripts.ts";
 import {
   mulawBase64ToPcm16, pcm16ToMulawBase64, rmsEnergy,
@@ -1883,10 +1883,13 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             prefixPaddingMs: liveSettings.geminiPrefixPaddingMs,
-            // Read from admin-controlled settings (default 1500ms).
-            // Lower = snappier replies, higher = safer (no self-interrupt
-            // on Hindi pauses). Tunable from /admin → AI Voice Agent card.
             silenceDurationMs: getVoiceSettings().geminiSilenceMs,
+          },
+        },
+        realtimeOutputConfig: {
+          audioOutputConfig: {
+            audioEncoding: "PCM",
+            sampleRateHertz: 24000,
           },
         },
         // Surface STT for both sides into serverContent so we can log what
@@ -1908,9 +1911,10 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   };
 
   // Helper: send mulaw audio to Plivo
-  const sendAudioToPlivo = (pcm24kBase64: string) => {
+  let geminiOutputRate = 24000; // updated on first audio chunk from mimeType
+  const sendAudioToPlivo = (pcmBase64: string) => {
     if (plivoWs.readyState !== WebSocket.OPEN) return;
-    const mulawAudio = geminiPcmToMulaw(pcm24kBase64);
+    const mulawAudio = geminiPcmToMulaw(pcmBase64, geminiOutputRate);
     if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
     plivoWs.send(JSON.stringify({
       event: "playAudio",
@@ -2006,6 +2010,11 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
       if (msg.serverContent?.modelTurn?.parts) {
         for (const part of msg.serverContent.modelTurn.parts) {
           if (part.inlineData?.data) {
+            const detected = parsePcmRate(part.inlineData.mimeType);
+            if (detected !== geminiOutputRate) {
+              console.log(`[${callId}] Gemini output rate changed: ${geminiOutputRate} → ${detected}`);
+              geminiOutputRate = detected;
+            }
             sendAudioToPlivo(part.inlineData.data);
           }
         }
