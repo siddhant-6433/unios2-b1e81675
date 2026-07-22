@@ -5,7 +5,7 @@
 // (PAN/AN issuance), and fire notify-event to send WA + finance@ email +
 // receipt PDF.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +35,18 @@ const MODE_OPTIONS: { value: string; label: string }[] = [
   { value: "cheque",        label: "Cheque / DD" },
   { value: "online",        label: "Online (Manual)" },
 ];
+
+// super_admin-only: settle a student's fee against a consultant's credit note
+// instead of cash. Records a confirmed receipt (fee clears) but is booked as a
+// non-cash offset against "due to consultant" — excluded from cash totals.
+const CREDIT_NOTE_MODE = "consultant_credit_note";
+
+type CreditNoteRow = {
+  id: string;
+  credit_note_no: string;
+  remaining: number;
+  status: string;
+};
 
 const WALLET_OPTIONS = [
   "Paytm", "PhonePe", "GPay", "BHIM", "Bharath Pay", "SBI Pay", "Cred", "Other",
@@ -72,11 +84,44 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Consultant credit-note (super_admin only) state.
+  const isSuperAdmin = role === "super_admin";
+  const [consultants, setConsultants] = useState<{ id: string; name: string }[]>([]);
+  const [consultantId, setConsultantId] = useState<string>("");
+  const [creditNotes, setCreditNotes] = useState<CreditNoteRow[]>([]);
+  const [creditNoteId, setCreditNoteId] = useState<string>("");
+  const isCreditNote = mode === CREDIT_NOTE_MODE;
+  const selectedNote = creditNotes.find(n => n.id === creditNoteId) || null;
+
+  // Load active consultants the first time the credit-note mode is opened.
+  useEffect(() => {
+    if (!open || !isCreditNote || !isSuperAdmin || consultants.length) return;
+    (supabase.from("consultants").select("id, name").neq("stage", "inactive").order("name") as any)
+      .then(({ data }: { data: { id: string; name: string }[] | null }) => setConsultants(data || []));
+  }, [open, isCreditNote, isSuperAdmin, consultants.length]);
+
+  // Load the chosen consultant's open credit notes with remaining balance.
+  useEffect(() => {
+    if (!isCreditNote || !consultantId) { setCreditNotes([]); setCreditNoteId(""); return; }
+    (supabase.from("consultant_credit_note_summary" as any)
+      .select("id, credit_note_no, remaining, status")
+      .eq("consultant_id", consultantId).eq("status", "open").gt("remaining", 0)
+      .order("issue_date", { ascending: false }) as any)
+      .then(({ data }: { data: CreditNoteRow[] | null }) => {
+        setCreditNotes(data || []);
+        setCreditNoteId("");
+      });
+  }, [isCreditNote, consultantId]);
+
   // Owner decision: offline cash recording is cashier (accountant) + super_admin
   // only — no counsellors, no campus admins, no consultants.
   const allowedRole = ["super_admin", "accountant"].includes(role || "");
 
   if (!allowedRole) return null;
+
+  const modeOptions = isSuperAdmin
+    ? [...MODE_OPTIONS, { value: CREDIT_NOTE_MODE, label: "Consultant Credit Note (no cash)" }]
+    : MODE_OPTIONS;
 
   const reset = () => {
     const now = getCurrentIndiaDateTimeInput();
@@ -90,6 +135,51 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
     setWallet("");
     setRemarks("");
     setProofFile(null);
+    setConsultantId("");
+    setCreditNoteId("");
+    setCreditNotes([]);
+  };
+
+  // super_admin: settle the fee against a consultant credit note (non-cash).
+  // A SECURITY DEFINER RPC atomically records the confirmed lead_payments
+  // receipt AND draws down the credit note, re-validating the balance so it
+  // can't be overdrawn.
+  const submitCreditNote = async (amt: number) => {
+    if (!consultantId) { toast({ title: "Select a consultant", variant: "destructive" }); return; }
+    if (!creditNoteId) { toast({ title: "Select a credit note", variant: "destructive" }); return; }
+    if (selectedNote && amt > selectedNote.remaining) {
+      toast({ title: "Amount exceeds credit note balance", description: `Remaining ₹${selectedNote.remaining.toLocaleString("en-IN")}.`, variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    const { data, error } = await (supabase.rpc as any)("apply_consultant_credit_note_receipt", {
+      _credit_note_id: creditNoteId,
+      _lead_id: leadId,
+      _amount: amt,
+      _type: type,
+      _application_id: type === "application_fee" ? applicationId || null : null,
+      _payment_date: combineIndiaDateTimeInput(date, time),
+      _notes: remarks.trim() || null,
+    });
+    setSubmitting(false);
+    if (error) {
+      toast({ title: "Could not apply credit note", description: error.message, variant: "destructive" });
+      return;
+    }
+    const paymentId = (data as { lead_payment_id?: string } | null)?.lead_payment_id;
+    if (paymentId) {
+      const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
+      supabase.functions.invoke("notify-event", {
+        body: { event, lead_id: leadId, context: { payment_id: paymentId, application_id: applicationId || undefined } },
+      }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
+    }
+    toast({
+      title: "Credit note applied",
+      description: `${PAY_TYPES.find(p => p.value === type)?.label} of ₹${amt.toLocaleString("en-IN")} settled against the consultant credit note (no cash received).`,
+    });
+    reset();
+    onOpenChange(false);
+    onRecorded?.();
   };
 
   const handleSubmit = async () => {
@@ -98,6 +188,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       toast({ title: "Enter a valid amount", variant: "destructive" });
       return;
     }
+    if (isCreditNote) { await submitCreditNote(amt); return; }
     if (mode === "cheque" && !txnRef.trim()) {
       toast({ title: "Cheque / DD number is required", variant: "destructive" });
       return;
@@ -226,10 +317,38 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
           <SelectField
             value={mode}
             onValueChange={value => { setMode(value); setTxnRef(""); setBank(""); setWallet(""); }}
-            options={MODE_OPTIONS.map(m => ({ value: m.value, label: m.label }))}
+            options={modeOptions.map(m => ({ value: m.value, label: m.label }))}
             label="Payment Mode"
             allowEmpty={false}
           />
+
+          {/* Consultant credit note (super_admin, non-cash offset) */}
+          {isCreditNote && (
+            <div className="space-y-3 rounded-lg border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 p-3">
+              <SelectField
+                value={consultantId}
+                onValueChange={setConsultantId}
+                options={[{ value: "", label: "Select consultant" }, ...consultants.map(c => ({ value: c.id, label: c.name }))]}
+                label="Consultant"
+                placeholder="Select consultant"
+              />
+              <SelectField
+                value={creditNoteId}
+                onValueChange={setCreditNoteId}
+                options={[
+                  { value: "", label: consultantId ? (creditNotes.length ? "Select credit note" : "No open credit notes") : "Select consultant first" },
+                  ...creditNotes.map(n => ({ value: n.id, label: `${n.credit_note_no} · ₹${n.remaining.toLocaleString("en-IN")} left` })),
+                ]}
+                label="Credit Note"
+                placeholder="Select credit note"
+              />
+              {selectedNote && (
+                <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                  Remaining balance ₹{selectedNote.remaining.toLocaleString("en-IN")}. This receipt is booked against the consultant's credit note — no cash is received and it is excluded from cash collections.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Mode-specific fields */}
           {mode === "cheque" && (

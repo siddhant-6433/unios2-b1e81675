@@ -76,16 +76,28 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle();
 
+    // super_admins can act on behalf of whichever partner a lead is attributed
+    // to (including when driving the partner portal via UI impersonation);
+    // real academic partners act only for their own attributed leads.
+    const isSuperAdmin = (roles || []).some((r: any) => r.role === "super_admin");
+    const isPartnerCaller = ["academic_partner", "academic_partner_offer_letter"].includes(String(callerRole)) && !!partner?.id;
+    const actingPartnerId = partner?.id || lead.academic_partner_id || null;
+
     if (mode === "academic_partner_on_behalf") {
-      if (!["academic_partner", "academic_partner_offer_letter"].includes(String(callerRole)) || !partner?.id) {
+      if (!isPartnerCaller && !isSuperAdmin) {
         return json({ error: "Only academic partners can generate on-behalf application links" }, 403);
       }
-      const { data: canOpen, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
-        _user_id: user.id,
-        _lead_id: lead_id,
-      });
-      if (scopeErr || !canOpen || lead.academic_partner_id !== partner.id) {
-        return json({ error: "You can create on-behalf links only for assigned academic partner leads" }, 403);
+      if (isPartnerCaller) {
+        const { data: canOpen, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+          _user_id: user.id,
+          _lead_id: lead_id,
+        });
+        if (scopeErr || !canOpen || lead.academic_partner_id !== partner.id) {
+          return json({ error: "You can create on-behalf links only for assigned academic partner leads" }, 403);
+        }
+      } else if (!lead.academic_partner_id) {
+        // super_admin path: the lead must belong to some academic partner.
+        return json({ error: "This lead is not attributed to any academic partner" }, 403);
       }
     }
 
@@ -98,7 +110,7 @@ Deno.serve(async (req) => {
       mode,
       actor_user_id: mode === "academic_partner_on_behalf" ? user.id : null,
       actor_role: mode === "academic_partner_on_behalf" ? callerRole : null,
-      academic_partner_id: mode === "academic_partner_on_behalf" ? partner?.id : null,
+      academic_partner_id: mode === "academic_partner_on_behalf" ? actingPartnerId : null,
     }).select("token, expires_at").single();
     if (insErr) return json({ error: insErr.message }, 500);
 
@@ -115,7 +127,7 @@ Deno.serve(async (req) => {
         action: "application_on_behalf_link_created",
         lead_id,
         actor_user_id: user.id,
-        academic_partner_id: partner?.id || null,
+        academic_partner_id: actingPartnerId,
         candidate_phone: lead.phone,
         metadata: { expires_in_hours: hours },
       });

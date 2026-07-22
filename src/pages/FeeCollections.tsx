@@ -15,8 +15,9 @@ import { usePermissions } from "@/contexts/PermissionContext";
 
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
-  upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
+  upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint", consultant_credit_note: "bg-pastel-orange",
 };
+const modeLabel = (m: string) => m === "consultant_credit_note" ? "Credit Note" : (m || "").replace(/_/g, " ");
 const gatewayLabels: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici: "ICICI",
@@ -110,9 +111,12 @@ const FeeCollections = () => {
     return result;
   }, [payments, selectedCampusId, modeFilter, search]);
 
-  const todayTotal = filtered.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  // Consultant credit-note receipts are a book offset against "due to consultant",
+  // not money received — exclude them from every cash/collection total.
+  const isCashless = (p: any) => p.payment_mode === "consultant_credit_note";
+  const todayTotal = filtered.filter((p: any) => !isCashless(p)).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
   const cashTotal = filtered.filter((p: any) => p.payment_mode === "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
-  const onlineTotal = filtered.filter((p: any) => p.payment_mode !== "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const onlineTotal = filtered.filter((p: any) => p.payment_mode !== "cash" && !isCashless(p)).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
 
   const isToday = dateFilter === new Date().toISOString().slice(0, 10);
 
@@ -246,7 +250,7 @@ const FeeCollections = () => {
                       <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
                       <td className="px-4 py-3">
                         <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>
-                          {(p.payment_mode || "").replace("_", " ")}
+                          {modeLabel(p.payment_mode)}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>

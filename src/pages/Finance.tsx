@@ -36,8 +36,9 @@ const categoryBadge: Record<string, string> = {
 };
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
-  upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
+  upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint", consultant_credit_note: "bg-pastel-orange",
 };
+const modeLabel = (m: string) => m === "consultant_credit_note" ? "Credit Note" : (m || "").replace(/_/g, " ");
 const gatewayLabels: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici: "ICICI",
@@ -284,7 +285,7 @@ const Finance = () => {
                     <td className="px-4 py-3 text-sm text-muted-foreground">{p.fee_description || "—"}</td>
                     <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
                     <td className="px-4 py-3">
-                      <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{p.payment_mode.replace("_", " ")}</Badge>
+                      <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{modeLabel(p.payment_mode)}</Badge>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>

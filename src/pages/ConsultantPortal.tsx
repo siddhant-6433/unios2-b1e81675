@@ -1,5 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -11,12 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 import {
   Loader2, Plus, Users, TrendingUp, IndianRupee, ArrowUpRight,
   Download, Clock, CreditCard, Eye,
   Building2, CheckCircle2, EyeOff, RotateCcw,
+  Link as LinkIcon, Info,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { useNavigate } from "react-router-dom";
@@ -25,6 +27,10 @@ import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecord
 import { BookOpen } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 import { ConsultantFeesPanel } from "@/components/finance/ConsultantFeesPanel";
+import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
+import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
+import { LeadPipeline, type LeadFunnelStage } from "@/components/admissions/LeadPipeline";
+import { leadStagesForBucket } from "@/lib/leadStages";
 
 interface DashboardStats {
   consultant_id: string;
@@ -274,8 +280,6 @@ const ConsultantPortal = () => {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [paymentLeadId, setPaymentLeadId] = useState<string | null>(null);
   const [consultantId, setConsultantId] = useState<string | null>(null);
   const [consultant, setConsultant] = useState<ConsultantProfile | null>(null);
   const [saving, setSaving] = useState(false);
@@ -286,13 +290,11 @@ const ConsultantPortal = () => {
   const [onboardingFiles, setOnboardingFiles] = useState<OnboardingFiles>(() => emptyOnboardingFiles());
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [viewCourseId, setViewCourseId] = useState<string | null>(null);
+  const [payLinkLead, setPayLinkLead] = useState<{ id: string; name: string } | null>(null);
+  const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
 
   const [form, setForm] = useState({
     name: "", phone: "", email: "", course_id: "", campus_id: "", notes: "",
-  });
-
-  const [payForm, setPayForm] = useState({
-    type: "application_fee", amount: "", mode: "upi", transaction_ref: "", notes: "",
   });
 
   const fetchAll = async (cId: string) => {
@@ -475,44 +477,6 @@ const ConsultantPortal = () => {
     setSaving(false);
   };
 
-  const openPayment = (leadId: string) => {
-    setPaymentLeadId(leadId);
-    setPayForm({ type: "application_fee", amount: "", mode: "upi", transaction_ref: "", notes: "" });
-    setShowPayment(true);
-  };
-
-  const handleRecordPayment = async () => {
-    if (!paymentLeadId || !payForm.amount || !consultantId) return;
-    setSaving(true);
-
-    let profileId: string | null = null;
-    if (user?.id) {
-      const { data: p } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-      profileId = p?.id || null;
-    }
-
-    const portalClient = supabase as unknown as ConsultantPortalDataClient;
-    const { error } = await portalClient.from("lead_payments").insert({
-      lead_id: paymentLeadId,
-      type: payForm.type,
-      amount: parseFloat(payForm.amount),
-      payment_mode: payForm.mode,
-      transaction_ref: payForm.transaction_ref || null,
-      notes: payForm.notes ? `Paid by consultant. ${payForm.notes}` : "Paid by consultant",
-      recorded_by: profileId,
-      status: "confirmed",
-    });
-
-    if (error) {
-      toast({ title: "Payment failed", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Payment recorded", description: `₹${parseFloat(payForm.amount).toLocaleString("en-IN")} recorded` });
-      setShowPayment(false);
-      await fetchAll(consultantId);
-    }
-    setSaving(false);
-  };
-
   const downloadReceipt = (p: Payment) => {
     const lead = leads.find(l => l.id === p.lead_id);
     setReceiptData({
@@ -532,6 +496,20 @@ const ConsultantPortal = () => {
   const filteredCampuses = getCampusesForCourse(form.course_id || null);
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   const fmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
+
+  // Lead-pipeline funnel counts, keyed by raw lead stage (LeadPipeline buckets internally).
+  const leadStageCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    leads.forEach((lead) => { counts[lead.stage] = (counts[lead.stage] || 0) + 1; });
+    return counts;
+  }, [leads]);
+
+  // Leads table filtered to the clicked funnel bucket (or all when no filter).
+  const visibleLeads = useMemo(() => {
+    if (!leadFunnelStage) return leads;
+    const stages = new Set(leadStagesForBucket(leadFunnelStage));
+    return leads.filter((lead) => stages.has(lead.stage));
+  }, [leads, leadFunnelStage]);
 
   if (loading) return <PageLoader />;
   if (!consultantId) return <div className="flex h-64 items-center justify-center"><p className="text-sm text-muted-foreground">No consultant profile linked to your account.</p></div>;
@@ -754,7 +732,29 @@ const ConsultantPortal = () => {
         </TabsList>
 
         {/* LEADS TAB */}
-        <TabsContent value="leads" className="mt-4">
+        <TabsContent value="leads" className="mt-4 space-y-4">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <LeadPipeline
+                stageCounts={leadStageCounts}
+                activeStage={leadFunnelStage}
+                onStageClick={setLeadFunnelStage}
+              />
+            </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="mt-1 shrink-0 text-muted-foreground hover:text-foreground" title="How the pipeline works">
+                  <Info className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="text-xs text-muted-foreground space-y-1.5">
+                <p className="font-semibold text-foreground">How the pipeline works</p>
+                <p>Leads move New Lead → Contacted/Follow-up → Application In Progress → Fee Paid/Submitted → Offer Sent → Token Paid → Admitted.</p>
+                <p>Each stage shows where the applicant currently is.</p>
+                <p>Click a stage box to filter the list below to leads at that stage.</p>
+              </PopoverContent>
+            </Popover>
+          </div>
           <Card className="border-border/60 shadow-none overflow-hidden">
             <CardContent className="p-0">
               <table className="w-full text-sm">
@@ -768,7 +768,7 @@ const ConsultantPortal = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads.map(l => (
+                  {visibleLeads.map(l => (
                     <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{l.name}</div>
@@ -785,21 +785,29 @@ const ConsultantPortal = () => {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(l.created_at).toLocaleDateString("en-IN")}</td>
                       <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex flex-wrap items-center justify-center gap-1">
                           {l.course_id && (
                             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => setViewCourseId(l.course_id)}>
                               <Eye className="h-3 w-3" /> Info
                             </Button>
                           )}
-                          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => openPayment(l.id)}>
-                            <IndianRupee className="h-3 w-3" /> Pay Fee
+                          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setPayLinkLead({ id: l.id, name: l.name })}>
+                            <LinkIcon className="h-3 w-3" /> Payment Link
                           </Button>
+                          <ApplyMagicLinkButton
+                            leadId={l.id}
+                            leadName={l.name}
+                            leadPhone={l.phone}
+                            mode="student"
+                            directOpen
+                            label="View as Applicant"
+                          />
                         </div>
                       </td>
                     </tr>
                   ))}
-                  {leads.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">No leads added yet</td></tr>
+                  {visibleLeads.length === 0 && (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">{leadFunnelStage ? "No leads at this stage" : "No leads added yet"}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -979,61 +987,6 @@ const ConsultantPortal = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Pay Fee Dialog */}
-      <Dialog open={showPayment} onOpenChange={setShowPayment}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <IndianRupee className="h-5 w-5 text-primary" /> Record Payment
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              {leads.find(l => l.id === paymentLeadId)?.name || "Student"}
-            </p>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Payment Type</label>
-                <select value={payForm.type} onChange={e => setPayForm(p => ({ ...p, type: e.target.value }))} className={inputCls}>
-                  <option value="application_fee">Application Fee</option>
-                  <option value="token_fee">Token Fee</option>
-                  <option value="registration_fee">Registration Fee</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Amount *</label>
-                <div className="relative">
-                  <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <input type="number" min="0" value={payForm.amount} onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))} placeholder="0.00" className={`${inputCls} pl-8`} />
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Payment Mode</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[{ v: "cash", l: "Cash" }, { v: "upi", l: "UPI" }, { v: "bank_transfer", l: "Bank Transfer" }, { v: "cheque", l: "Cheque" }, { v: "online", l: "Online" }].map(m => (
-                  <button key={m.v} onClick={() => setPayForm(p => ({ ...p, mode: m.v }))}
-                    className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${payForm.mode === m.v ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
-                    {m.l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Transaction Ref / UTR</label>
-              <input value={payForm.transaction_ref} onChange={e => setPayForm(p => ({ ...p, transaction_ref: e.target.value }))} placeholder="Optional" className={inputCls} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPayment(false)}>Cancel</Button>
-            <Button onClick={handleRecordPayment} disabled={!payForm.amount || parseFloat(payForm.amount) <= 0 || saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />} Record Payment
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Course Info Dialog */}
       <Dialog open={!!viewCourseId} onOpenChange={(o) => { if (!o) setViewCourseId(null); }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
@@ -1048,6 +1001,14 @@ const ConsultantPortal = () => {
       {receiptData && (
         <ReceiptDialog data={receiptData} onClose={() => setReceiptData(null)} />
       )}
+
+      {/* Payment Link Dialog */}
+      <SendPaymentLinkDialog
+        open={!!payLinkLead}
+        onOpenChange={() => setPayLinkLead(null)}
+        leadId={payLinkLead?.id}
+        onCreated={() => consultantId && fetchAll(consultantId)}
+      />
     </div>
   );
 };
