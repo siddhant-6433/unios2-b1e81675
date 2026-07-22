@@ -107,11 +107,18 @@ const LeadDetail = () => {
   const followupQueue = (location.state as { followupQueue?: FollowupQueueState } | null)?.followupQueue;
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { user, role, profile } = useAuth();
+  const { user, role, profile, hasPermission } = useAuth();
   useOpenVisitGuard(id);
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
+  // External owner (consultant / academic partner). Mirrors can_assign_lead_external_owner:
+  // super_admin, principal, leads:assign_external_owner, or counsellor with consultants:view.
+  const canAssignExternalOwner =
+    isSuperAdmin
+    || role === "principal"
+    || hasPermission("leads:assign_external_owner")
+    || (role === "counsellor" && hasPermission("consultants:view"));
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -1118,6 +1125,11 @@ const LeadDetail = () => {
         </Link>
         <span className="text-muted-foreground/50 shrink-0">/</span>
         <span className="font-medium text-foreground truncate">{lead.name}</span>
+        {(lead as { shared_with_nimt?: boolean | null }).shared_with_nimt === false && (
+          <span className="shrink-0 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
+            Not shared with NIMT
+          </span>
+        )}
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
@@ -1161,7 +1173,7 @@ const LeadDetail = () => {
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
             </Button>
           )}
-          {isSuperAdmin && (
+          {canAssignExternalOwner && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowExternalOwner(true)}>
               <Handshake className="h-3.5 w-3.5" /> Assign Owner
             </Button>

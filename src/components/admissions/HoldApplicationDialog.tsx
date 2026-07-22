@@ -23,6 +23,8 @@ export interface HoldApplicationTarget {
   /** Whether the application is already on hold (dialog switches to "release"). */
   on_hold?: boolean;
   hold_reason?: string | null;
+  /** Show "Waiting for Counselling" quick-select (hidden for token_paid and above). */
+  show_counselling_preset?: boolean;
 }
 
 interface Props {
@@ -50,9 +52,11 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
     setNotify(true);
     setReason(
       target.hold_reason ||
-        (examName
-          ? `Not registered for the required entrance exam (${examName}) and not eligible / interested in an alternative course.`
-          : "Does not meet eligibility criteria and not interested in any other available course."),
+        (target.show_counselling_preset
+          ? ""
+          : examName
+            ? `Not registered for the required entrance exam (${examName}) and not eligible / interested in an alternative course.`
+            : "Does not meet eligibility criteria and not interested in any other available course."),
     );
   }, [target?.id]);
 
@@ -145,6 +149,23 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
+            {target.show_counselling_preset && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Quick select</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {["Waiting for Counselling"].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setReason(preset)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${reason === preset ? "border-warning bg-warning/10 text-warning-foreground" : "border-border bg-muted/30 text-muted-foreground hover:border-warning/50 hover:text-warning-foreground"}`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="hold-reason">Reason for hold</Label>
               <Textarea

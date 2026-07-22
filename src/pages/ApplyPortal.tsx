@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
   FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound, AlertCircle,
@@ -1069,12 +1069,52 @@ function AllReceiptsDialog({
   );
 }
 
+/** Offer payload returned by get_applicant_offers_by_phone. */
+type ApplicantOfferInfo = {
+  letter_url: string | null;
+  approval_status: string;
+  course_id?: string | null;
+};
+
+/**
+ * Offers are stored per lead, not per application. When a candidate has a
+ * draft + an approved app on the same lead, only the "owner" app should show
+ * the offer letter / pay CTAs. Prefer approved+paid, course match, then oldest.
+ */
+function pickOfferOwnerAppId(
+  apps: any[],
+  leadId: string,
+  offer: ApplicantOfferInfo | undefined,
+): string | null {
+  if (!offer || offer.approval_status !== "approved") return null;
+  const eligible = apps.filter(
+    (a) => a.lead_id === leadId && a.status !== "draft" && a.status !== "rejected",
+  );
+  if (eligible.length === 0) return null;
+
+  const score = (a: any) => {
+    let s = 0;
+    if (a.status === "approved") s += 100;
+    else if (a.status === "under_review" || a.status === "submitted") s += 50;
+    if (a.payment_status === "paid") s += 20;
+    const courseIds = ((a.course_selections as any[]) || [])
+      .map((c) => c?.course_id)
+      .filter(Boolean);
+    if (offer.course_id && courseIds.includes(offer.course_id)) s += 50;
+    // Prefer earlier applications when scores tie (the one the offer was issued for).
+    const created = a.created_at ? new Date(a.created_at).getTime() : 0;
+    return s * 1e13 - created;
+  };
+
+  return [...eligible].sort((a, b) => score(b) - score(a))[0]?.id ?? null;
+}
+
 function ApplicationDashboardView({
   apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout, onBehalfContext,
 }: {
   apps: any[];
   leadName: string;
-  offerLetters: Record<string, { letter_url: string | null; approval_status: string }>;
+  offerLetters: Record<string, ApplicantOfferInfo>;
   leadAdmissions: Record<string, { pre_admission_no: string | null; admission_no: string | null }>;
   openAppId: string | null;
   setOpenAppId: (id: string | null) => void;
@@ -1090,6 +1130,35 @@ function ApplicationDashboardView({
   const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({});
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const [docStates, setDocStates] = useState<Record<string, DashboardDocState>>({});
+
+  // lead_id → application id that owns the approved offer for that lead
+  const offerOwnerByLead = useMemo(() => {
+    const map: Record<string, string> = {};
+    const leadIds = new Set(
+      apps.map((a) => a.lead_id).filter(Boolean) as string[],
+    );
+    for (const lid of leadIds) {
+      const owner = pickOfferOwnerAppId(apps, lid, offerLetters[lid]);
+      if (owner) map[lid] = owner;
+    }
+    return map;
+  }, [apps, offerLetters]);
+
+  // Offer-owning applications first, then other non-drafts, drafts last
+  const sortedApps = useMemo(() => {
+    const rank = (a: any) => {
+      if (a.lead_id && offerOwnerByLead[a.lead_id] === a.id) return 0;
+      if (a.status === "draft") return 3;
+      if (a.status === "approved") return 1;
+      return 2;
+    };
+    return [...apps].sort((a, b) => {
+      const d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }, [apps, offerOwnerByLead]);
+
   const buildReceiptData = (a: any): ReceiptData => {
     const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
     const courses = (a.course_selections as any[]) || [];
@@ -1188,13 +1257,24 @@ function ApplicationDashboardView({
         {/* Welcome strip — state-aware nudge */}
         {(() => {
           // Priority-ordered state detection across all apps.
-          const admittedApp  = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
-          const preAdmitted  = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
+          // PAN/AN live on the lead — only show them on the offer-owning app.
+          const admittedApp  = apps.find((a: any) =>
+            a.lead_id
+            && leadAdmissions[a.lead_id]?.admission_no
+            && (!offerOwnerByLead[a.lead_id] || offerOwnerByLead[a.lead_id] === a.id)
+          );
+          const preAdmitted  = !admittedApp && apps.find((a: any) =>
+            a.lead_id
+            && leadAdmissions[a.lead_id]?.pre_admission_no
+            && (!offerOwnerByLead[a.lead_id] || offerOwnerByLead[a.lead_id] === a.id)
+          );
           const docActionApp = !admittedApp && !preAdmitted && apps.find((a: DashboardApp) =>
             (docStates[a.application_id]?.rejected || 0) > 0
           );
           const offerApp     = !admittedApp && !preAdmitted && apps.find((a: any) =>
-            (a.lead_id ? offerLetters[a.lead_id] : undefined)?.approval_status === "approved"
+            a.lead_id
+            && offerLetters[a.lead_id]?.approval_status === "approved"
+            && offerOwnerByLead[a.lead_id] === a.id
           );
           const reviewApp    = !admittedApp && !preAdmitted && !docActionApp && !offerApp &&
             apps.find((a: any) => a.status === "submitted" || a.status === "under_review");
@@ -1303,14 +1383,17 @@ function ApplicationDashboardView({
           );
         })()}
 
-        {/* Application cards */}
-        {apps.map((app) => {
+        {/* Application cards — each app separate; offer only on owner app */}
+        {sortedApps.map((app) => {
           const a = app as DashboardApp;
           const courses = (a.course_selections || []).map((c: any) => displayValue(c.course_name)).filter(Boolean);
-          const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          const leadOffer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          // Only the application that owns the offer (not sibling drafts) shows it.
+          const isOfferOwner = !!(a.lead_id && offerOwnerByLead[a.lead_id] === a.id);
+          const offer = isOfferOwner ? leadOffer : undefined;
           const admInfo = a.lead_id ? leadAdmissions[a.lead_id] : undefined;
-          const preAdmNo = admInfo?.pre_admission_no ?? null;
-          const admNo = admInfo?.admission_no ?? null;
+          const preAdmNo = isOfferOwner ? (admInfo?.pre_admission_no ?? null) : null;
+          const admNo = isOfferOwner ? (admInfo?.admission_no ?? null) : null;
           const isAdmitted = !!admNo;
           const hasApprovedOffer = offer?.approval_status === "approved";
           const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
@@ -1326,7 +1409,7 @@ function ApplicationDashboardView({
           const accentClass = needsDocReupload
             ? "border-destructive/20 bg-white"
             : hasApprovedOffer
-            ? "border-info/20 bg-white"
+            ? "border-info/30 ring-2 ring-info/20 bg-white"
             : isUnderReview
             ? "border-success/20 bg-white"
             : "border-gray-200 bg-white";
@@ -1360,10 +1443,17 @@ function ApplicationDashboardView({
                 </div>
               )}
               {!needsDocReupload && !isAdmitted && hasApprovedOffer && (
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center gap-2">
-                  <Award className="h-4 w-4 text-yellow-300 shrink-0" />
-                  <span className="text-xs font-bold text-white tracking-wide">
-                    {preAdmNo ? `Pre-Admitted · ${preAdmNo} · Complete Payment` : "Offer Approved · Action Required"}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Award className="h-4 w-4 text-yellow-300 shrink-0" />
+                    <span className="text-xs font-bold text-white tracking-wide truncate">
+                      {preAdmNo
+                        ? `Pre-Admitted · ${preAdmNo} · Complete Payment`
+                        : `Offer issued for ${a.application_id} · Action Required`}
+                    </span>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {a.application_id}
                   </span>
                 </div>
               )}
@@ -1376,7 +1466,9 @@ function ApplicationDashboardView({
               {isDraft && (
                 <div className="bg-gradient-to-r from-amber-400 to-orange-400 px-4 py-2.5 flex items-center gap-2">
                   <Pencil className="h-4 w-4 text-white shrink-0" />
-                  <span className="text-xs font-bold text-white tracking-wide">Draft · Complete your application</span>
+                  <span className="text-xs font-bold text-white tracking-wide">
+                    Draft · Separate from your offer application
+                  </span>
                 </div>
               )}
 
@@ -1384,7 +1476,19 @@ function ApplicationDashboardView({
                 {/* App ID + course */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="font-mono text-xs font-bold text-gray-400">{a.application_id}</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-xs font-bold text-gray-500">{a.application_id}</span>
+                      {hasApprovedOffer && (
+                        <span className="inline-flex items-center rounded-full bg-info/10 px-2 py-0.5 text-[10px] font-bold text-info-foreground">
+                          Offer linked
+                        </span>
+                      )}
+                      {isDraft && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                          Draft
+                        </span>
+                      )}
+                    </div>
                     <p className="text-base font-bold text-gray-900 mt-0.5 leading-tight">
                       {courses.length > 0 ? courses.join(", ") : <span className="text-gray-400 italic font-normal text-sm">No course selected yet</span>}
                     </p>
@@ -1599,16 +1703,24 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   // the token fee — i.e. everything the student would normally need post-submit.
   const [appsList, setAppsList] = useState<any[] | null>(null);
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
-  const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
+  const [offerLetters, setOfferLetters] = useState<Record<string, ApplicantOfferInfo>>({});
   const [leadAdmissions, setLeadAdmissions] = useState<Record<string, { pre_admission_no: string | null; admission_no: string | null }>>({});
 
-  // Auto-open the token fee panel for whichever app has an approved offer,
-  // but only if the user hasn't manually toggled something already.
+  // Auto-open the token fee panel only on the app that owns the offer
+  // (not a sibling draft on the same lead).
   useEffect(() => {
     if (!appsList || dashboardOpenAppId) return;
-    const approvedApp = appsList.find(a => a.lead_id && offerLetters[a.lead_id]?.approval_status === "approved");
-    if (approvedApp) setDashboardOpenAppId(approvedApp.id);
-  }, [appsList, offerLetters]);
+    for (const a of appsList) {
+      if (!a.lead_id) continue;
+      const offer = offerLetters[a.lead_id];
+      if (offer?.approval_status !== "approved") continue;
+      const ownerId = pickOfferOwnerAppId(appsList, a.lead_id, offer);
+      if (ownerId) {
+        setDashboardOpenAppId(ownerId);
+        break;
+      }
+    }
+  }, [appsList, offerLetters, dashboardOpenAppId]);
   // Uploaded docs for the currently-previewed submission (loaded on demand).
   const [previewDocs, setPreviewDocs] = useState<PreviewDoc[]>([]);
   // Whether the dashboard exists to go back to (i.e. multiple apps OR any non-draft).
@@ -1713,9 +1825,15 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       // (offer_letters table is staff-only via RLS).
       if (phoneVal) {
         const { data: letters } = await (supabase as any).rpc("get_applicant_offers_by_phone", { _phone: phoneVal });
-        const byLead: Record<string, { letter_url: string | null; approval_status: string }> = {};
+        const byLead: Record<string, ApplicantOfferInfo> = {};
         (letters || []).forEach((l: any) => {
-          if (!byLead[l.lead_id]) byLead[l.lead_id] = { letter_url: l.letter_url, approval_status: l.approval_status };
+          if (!byLead[l.lead_id]) {
+            byLead[l.lead_id] = {
+              letter_url: l.letter_url,
+              approval_status: l.approval_status,
+              course_id: l.course_id ?? null,
+            };
+          }
         });
         setOfferLetters(byLead);
 

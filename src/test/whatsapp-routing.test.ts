@@ -155,7 +155,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(campaignSenderMigration).toContain("business_phone_number_id text");
     expect(campaignSenderMigration).toContain("business_phone_number text");
     expect(healthPhoneMigration).toContain("business_phone_number");
-    expect(bulkSenderNumbersMigration).toContain("919667691872");
+    expect(bulkSenderNumbersMigration).toContain("919667641872");
     expect(bulkSenderNumbersMigration).toContain("917428499849");
     expect(bulkSenderNumbersMigration).toContain("919555192192");
     expect(bulkSenderNumbersMigration).toContain("allow_bulk = true");
@@ -235,7 +235,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(plivoWebhook).toContain("invokeConversationOrchestrator");
     expect(plivoWebhook).toContain('source: "plivo_webhook"');
     expect(plivoWebhook).toContain('provider: "plivo"');
-    expect(plivoWebhook).toContain("EdgeRuntime?.waitUntil?.(dispatch)");
+    expect(plivoWebhook).toContain("await invokeConversationOrchestrator");
+    expect(plivoWebhook).toContain("conversation orchestrator dispatch failed");
     expect(metaWebhook).toContain("dispatch_reply: true");
     expect(plivoWebhook).toContain("dispatch_reply: true");
   });

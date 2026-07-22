@@ -352,7 +352,7 @@ Deno.serve(async (req) => {
     case "app_submitted": {
       const application_id = (body.context?.application_id as string) || "";
       const { data: app } = await db
-        .from("applications").select("application_id, form_pdf_url, full_name, phone, email")
+        .from("applications").select("application_id, form_pdf_url, full_name, phone, email, payment_status")
         .eq("application_id", application_id).maybeSingle();
       // CRM application detail page — fallback when form_pdf_url isn't yet
       // populated (PDF generator runs in parallel with notify-event and
@@ -361,11 +361,12 @@ Deno.serve(async (req) => {
       const appDetailUrl = `${CRM_BASE}/applications/${application_id}`;
       const formPdf = app?.form_pdf_url || appDetailUrl;
 
-      // PDF templates use a static URL button to the apply portal —
-      // applicant authenticates there to retrieve the actual signed PDF.
-      // No button_urls passed (template button has no {{1}} placeholder).
+      const formPdfOptions = app?.form_pdf_url
+        ? { header_document_url: app.form_pdf_url, header_document_filename: `Application-${application_id}.pdf` }
+        : undefined;
       await sendWhatsApp("application_submitted",
         [lead.name || app?.full_name || "Student", application_id],
+        undefined, undefined, formPdfOptions,
       );
 
       const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });

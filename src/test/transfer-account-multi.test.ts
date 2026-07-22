@@ -24,8 +24,15 @@ describe("multi-counsellor account transfer", () => {
     expect(dialog).toContain('TransferMode = "round_robin" | "coursewise"');
     expect(dialog).toContain("selectedTargetIds");
     expect(dialog).toContain("courseTargetIds");
-    expect(dialog).toContain('transferRpc("transfer_counsellor_account_multi"');
+    expect(dialog).toContain('transfer_counsellor_account_multi"');
     expect(dialog).toContain("course_target_map: courseTargetMap");
     expect(dialog).toContain("Course routing");
+    // Spinner must never stick on throw/timeout
+    expect(dialog).toContain("finally");
+    expect(dialog).toContain("setSaving(false)");
+    expect(dialog).toContain("withTimeout");
+    // 0-lead / single-target uses simpler RPC
+    expect(dialog).toContain('transfer_counsellor_account"');
   });
 });
+

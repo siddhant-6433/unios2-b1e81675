@@ -11,6 +11,8 @@ const corsHeaders = {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const BOARDING_PARENT_INTERACTION_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/boarding_school_parent_interaction_header.png";
 
 type DynamicHeaderComponent =
   | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
@@ -68,6 +70,7 @@ const WA_PARAM_MAPPING_PREFIX = "__lead_field__:";
 const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
   cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
   cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
+  parent_interaction_boarding_july18: BOARDING_PARENT_INTERACTION_IMAGE_URL,
 };
 
 function cleanPersonName(value: unknown): string {
@@ -142,7 +145,13 @@ function templateMediaUrlFromComponents(templateKey: string, components: unknown
     return data.type === "HEADER";
   }) as Record<string, any> | undefined;
   const handle = header?.example?.header_handle?.[0];
-  return typeof handle === "string" && /^https?:\/\//i.test(handle) ? handle : null;
+  // Meta's example `header_handle` is a scontent.whatsapp.net URL usable only as
+  // template *sample* media. Meta's send pipeline rejects it as a message header
+  // link (131053 "Media upload error … 403 Forbidden"), so never use it as the
+  // send-time link — a stable public URL must be registered in KNOWN_TEMPLATE_MEDIA.
+  if (typeof handle !== "string" || !/^https?:\/\//i.test(handle)) return null;
+  if (/scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(handle)) return null;
+  return handle;
 }
 
 function numberedPlaceholders(text: unknown): number[] {
@@ -444,6 +453,22 @@ Deno.serve(async (req) => {
       };
     }
 
+    // Preflight: a media-header template with no usable public header URL would
+    // 403 on *every* recipient at Meta's media download. Fail the whole campaign
+    // once with a clear message instead of silently burning the entire list.
+    const mediaHeader = templateDef.dynamicComponents?.header;
+    if (mediaHeader?.kind === "media") {
+      const hasStaticOverride = Object.values((campaign as any).static_params || {})
+        .some((v) => typeof v === "string" && /^https?:\/\//i.test(v));
+      if (!mediaHeader.defaultUrl && !hasStaticOverride) {
+        await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+        return new Response(JSON.stringify({
+          error: `Template "${campaign.template_key}" has a media header but no downloadable header URL. ` +
+            `Add a public URL to KNOWN_TEMPLATE_MEDIA (Meta rejects the scontent example handle as a send link).`,
+        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     if (campaign.status === "paused" || campaign.status === "terminated") {
       return new Response(JSON.stringify({
         success: true,
@@ -463,30 +488,92 @@ Deno.serve(async (req) => {
       .update({ status: "sending" })
       .eq("id", campaign_id);
 
-    // Fetch all pending recipients with lead + course + campus joined in.
-    // course/campus are used to auto-fill `course_name` and `campus_name`
-    // template params per recipient — see substitution loop below.
-    const { data: recipients, error: recipientsError } = await adminClient
-      .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
-      .eq("campaign_id", campaign_id)
-      .eq("status", "pending")
-      .limit(batchSize);
+    // Fetch pending recipients that are eligible to send now (wave pacing).
+    // eligible_at defaults to now() for legacy campaigns.
+    const nowIso = new Date().toISOString();
+    const recipientSelect =
+      "id, campaign_id, lead_id, phone, status, eligible_at, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+    let recipients: any[] | null = null;
+    {
+      const paced = await adminClient
+        .from("whatsapp_campaign_recipients")
+        .select(recipientSelect)
+        .eq("campaign_id", campaign_id)
+        .eq("status", "pending")
+        .lte("eligible_at", nowIso)
+        .order("eligible_at", { ascending: true })
+        .limit(batchSize);
 
-    if (recipientsError) {
-      console.error("Failed to fetch recipients:", recipientsError);
-      await adminClient
-        .from("whatsapp_campaigns")
-        .update({ status: "failed" })
-        .eq("id", campaign_id);
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch recipients" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (paced.error && /eligible_at/i.test(paced.error.message || "")) {
+        // Pre-migration fallback
+        const legacy = await adminClient
+          .from("whatsapp_campaign_recipients")
+          .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending")
+          .limit(batchSize);
+        if (legacy.error) {
+          console.error("Failed to fetch recipients:", legacy.error);
+          await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+          return new Response(
+            JSON.stringify({ error: "Failed to fetch recipients" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        recipients = legacy.data || [];
+      } else if (paced.error) {
+        console.error("Failed to fetch recipients:", paced.error);
+        await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
+        return new Response(
+          JSON.stringify({ error: "Failed to fetch recipients" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      } else {
+        recipients = paced.data || [];
+      }
     }
 
     if (!recipients || recipients.length === 0) {
       const counts = await syncCampaignCounts(adminClient, campaign_id);
+
+      // Pending exist but not yet eligible (next wave) — wait, don't complete.
+      if (counts.pendingCount > 0) {
+        const { data: nextRow } = await adminClient
+          .from("whatsapp_campaign_recipients")
+          .select("eligible_at")
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending")
+          .order("eligible_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        const nextAt = (nextRow as { eligible_at?: string } | null)?.eligible_at
+          || new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        await adminClient
+          .from("whatsapp_campaigns")
+          .update({
+            sent_count: counts.totalSent,
+            failed_count: counts.totalFailed,
+            status: "pending",
+            next_attempt_at: nextAt,
+            worker_locked_at: null,
+          })
+          .eq("id", campaign_id);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            sent: 0,
+            failed: 0,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: false,
+            waiting_for_eligible_at: nextAt,
+            message: "No recipients eligible yet — waiting for next wave",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       await adminClient
         .from("whatsapp_campaigns")
         .update({
@@ -550,7 +637,47 @@ Deno.serve(async (req) => {
       const dearLeadName = resolveDearRecipientName(lead, latestApplication);
       const courseName = lead.courses?.name || "";
       const campusName = lead.campuses?.name || "";
-      const waPhone = recipient.phone.replace(/[^0-9]/g, "");
+      const waPhone = (recipient.phone || lead.phone || "").replace(/[^0-9]/g, "");
+
+      // DNC is a hard stop: never send further communications (stage may have
+      // changed after the campaign was queued).
+      if (String(lead.stage || "").toLowerCase() === "dnc") {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Lead is DNC — message not sent",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
+
+      // Academic-partner private leads (shared_with_nimt = false) are never part
+      // of NIMT outreach — hard stop even if they somehow entered the audience.
+      if (lead.shared_with_nimt === false) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Lead not shared with NIMT — message not sent",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
+
+      if (!waPhone) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Missing phone",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        continue;
+      }
 
       // Build template params in the exact order Meta expects. Per-lead
       // values take precedence over staticParams (so an explicit

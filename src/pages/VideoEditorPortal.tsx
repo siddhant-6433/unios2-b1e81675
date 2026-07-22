@@ -176,6 +176,11 @@ export default function VideoEditorPortal() {
     if (!form.title.trim() || !form.drive_url.trim()) {
       toast({ title: "Title and video link are required", variant: "destructive" }); return;
     }
+    // ponytail: client-side dedup against loaded videos; DB unique constraint is the real guard
+    const normalised = form.drive_url.trim().replace(/\/+$/, "").toLowerCase();
+    if (videos.some(v => v.drive_url.replace(/\/+$/, "").toLowerCase() === normalised)) {
+      toast({ title: "Duplicate link", description: "A video with this URL has already been submitted.", variant: "destructive" }); return;
+    }
     setSubmitting(true);
 
     // Validate the link (Drive or YouTube) is publicly viewable before

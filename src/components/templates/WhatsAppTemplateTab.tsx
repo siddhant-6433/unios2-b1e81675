@@ -1,13 +1,14 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  Loader2, Plus, Trash2, MessageSquare, RefreshCw, Send,
+  Loader2, Plus, Trash2, MessageSquare, RefreshCw, Send, Search,
   CheckCircle, Clock, XCircle, AlertTriangle,
 } from "lucide-react";
 import {
@@ -318,6 +319,7 @@ export function WhatsAppTemplateTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [initialForm, setInitialForm] = useState<{ name?: string; category?: string; body?: string } | undefined>();
   const [selectedApprovedId, setSelectedApprovedId] = useState<string | null>(null);
+  const [approvedSearch, setApprovedSearch] = useState("");
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -429,20 +431,39 @@ export function WhatsAppTemplateTab() {
   const existingNames = new Set(rows.map((r) => r.name));
   const pendingSuggested = SUGGESTED_TEMPLATES.filter((s) => !existingNames.has(s.name));
   const approvedRows = rows.filter((r) => r.status === "APPROVED");
+  const filteredApprovedRows = useMemo(() => {
+    const q = approvedSearch.trim().toLowerCase();
+    if (!q) return approvedRows;
+    return approvedRows.filter((row) => {
+      const body = templateBody(row).toLowerCase();
+      const header = (templateHeader(row)?.text || "").toLowerCase();
+      return (
+        row.name.toLowerCase().includes(q)
+        || (row.meta_template_id || "").toLowerCase().includes(q)
+        || (row.category || "").toLowerCase().includes(q)
+        || (row.language || "").toLowerCase().includes(q)
+        || body.includes(q)
+        || header.includes(q)
+      );
+    });
+  }, [approvedRows, approvedSearch]);
   const submittedRows = rows.filter((r) => r.status !== "APPROVED" && r.status !== "REJECTED");
   const attentionRows = rows.filter((r) => r.status === "REJECTED");
   const metaBackedCount = rows.filter((r) => r.meta_template_id).length;
-  const selectedApproved = approvedRows.find((row) => row.id === selectedApprovedId) || approvedRows[0] || null;
+  const selectedApproved =
+    filteredApprovedRows.find((row) => row.id === selectedApprovedId)
+    || filteredApprovedRows[0]
+    || null;
 
   useEffect(() => {
-    if (approvedRows.length === 0) {
-      if (selectedApprovedId !== null) setSelectedApprovedId(null);
+    if (filteredApprovedRows.length === 0) {
+      if (!approvedSearch.trim() && selectedApprovedId !== null) setSelectedApprovedId(null);
       return;
     }
-    if (!selectedApprovedId || !approvedRows.some((row) => row.id === selectedApprovedId)) {
-      setSelectedApprovedId(approvedRows[0].id);
+    if (!selectedApprovedId || !filteredApprovedRows.some((row) => row.id === selectedApprovedId)) {
+      setSelectedApprovedId(filteredApprovedRows[0].id);
     }
-  }, [approvedRows, selectedApprovedId]);
+  }, [filteredApprovedRows, selectedApprovedId, approvedSearch]);
 
   return (
     <div className="space-y-5">
@@ -464,11 +485,29 @@ export function WhatsAppTemplateTab() {
       </div>
 
       <section className="space-y-3">
-        <SectionHeader
-          title="Approved Templates"
-          count={approvedRows.length}
-          description="Ready for one-to-one sends, automations, and bulk campaigns."
-        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <SectionHeader
+            title="Approved Templates"
+            count={approvedSearch.trim() ? filteredApprovedRows.length : approvedRows.length}
+            description={
+              approvedSearch.trim()
+                ? `Showing ${filteredApprovedRows.length} of ${approvedRows.length} approved templates.`
+                : "Ready for one-to-one sends, automations, and bulk campaigns."
+            }
+          />
+          {approvedRows.length > 0 && (
+            <div className="relative w-full sm:max-w-xs shrink-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={approvedSearch}
+                onChange={(e) => setApprovedSearch(e.target.value)}
+                placeholder="Search name, body, category, Meta ID…"
+                className="h-9 pl-9 text-sm"
+                aria-label="Search approved templates"
+              />
+            </div>
+          )}
+        </div>
         {loading ? (
           <PageLoader />
         ) : approvedRows.length === 0 ? (
@@ -479,7 +518,12 @@ export function WhatsAppTemplateTab() {
           <div className="grid min-h-[520px] overflow-hidden rounded-lg border border-border bg-card lg:grid-cols-[360px_minmax(0,1fr)]">
             <div className="border-b border-border lg:border-b-0 lg:border-r">
               <div className="max-h-[70vh] overflow-y-auto p-2">
-                {approvedRows.map((template) => {
+                {filteredApprovedRows.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+                    No approved templates match “{approvedSearch.trim()}”.
+                  </div>
+                ) : (
+                  filteredApprovedRows.map((template) => {
                   const { Icon, color } = statusVisual(template.status);
                   const body = templateBody(template);
                   const active = selectedApproved?.id === template.id;
@@ -511,10 +555,17 @@ export function WhatsAppTemplateTab() {
                       )}
                     </button>
                   );
-                })}
+                })
+                )}
               </div>
             </div>
-            <TemplatePreviewPanel template={selectedApproved} deleting={deleting} onDelete={deleteTemplate} />
+            {selectedApproved ? (
+              <TemplatePreviewPanel template={selectedApproved} deleting={deleting} onDelete={deleteTemplate} />
+            ) : (
+              <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
+                Select a template from the list.
+              </div>
+            )}
           </div>
         )}
       </section>

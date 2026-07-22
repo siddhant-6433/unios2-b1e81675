@@ -36,6 +36,8 @@ type StudentRow = {
   status: string | null;
   campus_id: string | null;
   photo_url: string | null;
+  photo_original_url: string | null;
+  photo_processed_url: string | null;
   joining_class: string | null;
   section: string | null;
   batch_id: string | null;
@@ -43,10 +45,10 @@ type StudentRow = {
   course_name: string;
   batch_name: string;
   campus_name: string;
+  /** Local-only: AI job still pending after this session capture */
+  ai_pending?: boolean;
 };
 
-const PHOTO_STAFF_ROLES = new Set(['office_admin', 'office_assistant']);
-const PHOTO_ADMIN_ROLES = new Set(['super_admin']);
 const ROMAN_GRADE_VALUES: Record<string, number> = {
   i: 1,
   ii: 2,
@@ -119,33 +121,38 @@ function getProgrammeBatchLabel(student: StudentRow): string {
 }
 
 export default function StudentPhotosScreen() {
-  const { role, profile } = useAuth();
+  const { role, profile, user } = useAuth();
   const cameraRef = useRef<CameraView | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [canCapture, setCanCapture] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [gradeFilter, setGradeFilter] = useState('all');
   const [programmeBatchFilter, setProgrammeBatchFilter] = useState('all');
+  const [sectionFilter, setSectionFilter] = useState('all');
   const [gradeDropdownOpen, setGradeDropdownOpen] = useState(false);
   const [programmeBatchDropdownOpen, setProgrammeBatchDropdownOpen] = useState(false);
+  const [sectionDropdownOpen, setSectionDropdownOpen] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
-  const hasPhotoAdminAccess = PHOTO_ADMIN_ROLES.has(role || '');
-  const hasPhotoStaffAccess = PHOTO_STAFF_ROLES.has(role || '');
-  const branchMissing = hasPhotoStaffAccess && !hasPhotoAdminAccess && !profile?.campus_id;
+  const isSuperAdmin = role === 'super_admin';
+  const branchMissing = canCapture && !isSuperAdmin && !profile?.campus_id;
 
   const filteredStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = students.filter((student) => {
       const gradeKey = getStudentGrade(student).value;
       const programmeBatchKey = getProgrammeBatchKey(student);
+      const sectionKey = displaySection(student.section) || 'none';
 
       if (gradeFilter !== 'all' && gradeKey !== gradeFilter) return false;
       if (programmeBatchFilter !== 'all' && programmeBatchKey !== programmeBatchFilter) return false;
+      if (sectionFilter !== 'all' && sectionKey !== sectionFilter) return false;
       if (!q) return true;
 
       return (
@@ -158,11 +165,12 @@ export default function StudentPhotosScreen() {
       );
     });
 
+    // Pending (no photo) first so class photo day walks empty slots
     return [...rows].sort((a, b) => {
       if (Boolean(a.photo_url) !== Boolean(b.photo_url)) return a.photo_url ? 1 : -1;
       return a.name.localeCompare(b.name);
     });
-  }, [students, search, gradeFilter, programmeBatchFilter]);
+  }, [students, search, gradeFilter, programmeBatchFilter, sectionFilter]);
 
   const gradeOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -184,12 +192,48 @@ export default function StudentPhotosScreen() {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
   }, [students]);
 
+  const sectionOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    students.forEach((student) => {
+      const section = displaySection(student.section);
+      if (section) map.set(section, section);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
+  }, [students]);
+
   const currentStudent = filteredStudents[currentIndex] || null;
   const completedCount = students.filter((student) => student.photo_url).length;
+  const pendingCount = students.filter((student) => !student.photo_url).length;
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user?.id) {
+        setCanCapture(false);
+        setAccessChecked(true);
+        setLoading(false);
+        return;
+      }
+      const { data, error } = await supabase.rpc('can_capture_student_photos' as any, {
+        _user_id: user.id,
+      });
+      if (cancelled) return;
+      if (error) {
+        console.warn('[PhotoDay] can_capture check failed:', error.message);
+        // Fallback for roles that had access before permission seed
+        setCanCapture(role === 'super_admin' || role === 'principal' || role === 'office_admin' || role === 'office_assistant');
+      } else {
+        setCanCapture(Boolean(data));
+      }
+      setAccessChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, role]);
+
+  useEffect(() => {
+    if (!accessChecked) return;
     fetchStudents();
-  }, [role, profile?.campus_id]);
+  }, [accessChecked, canCapture, role, profile?.campus_id]);
 
   useEffect(() => {
     if (currentIndex >= filteredStudents.length) {
@@ -199,7 +243,7 @@ export default function StudentPhotosScreen() {
   }, [filteredStudents.length, currentIndex]);
 
   async function fetchStudents() {
-    if ((!hasPhotoAdminAccess && !hasPhotoStaffAccess) || branchMissing) {
+    if (!canCapture || branchMissing) {
       setStudents([]);
       setLoading(false);
       return;
@@ -208,12 +252,12 @@ export default function StudentPhotosScreen() {
     setLoading(true);
     let query = supabase
       .from('students')
-      .select('id, name, admission_no, pre_admission_no, status, campus_id, photo_url, joining_class, section, course_id, batch_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)')
+      .select('id, name, admission_no, pre_admission_no, status, campus_id, photo_url, photo_original_url, photo_processed_url, joining_class, section, course_id, batch_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)')
       .in('status', ['active', 'pre_admitted'])
       .order('name', { ascending: true })
       .limit(500);
 
-    if (!hasPhotoAdminAccess && profile?.campus_id) query = query.eq('campus_id', profile.campus_id);
+    if (!isSuperAdmin && profile?.campus_id) query = query.eq('campus_id', profile.campus_id);
 
     const { data, error } = await query;
     if (error) {
@@ -228,6 +272,8 @@ export default function StudentPhotosScreen() {
         status: student.status || null,
         campus_id: student.campus_id || null,
         photo_url: student.photo_url || null,
+        photo_original_url: student.photo_original_url || null,
+        photo_processed_url: student.photo_processed_url || null,
         joining_class: student.joining_class || null,
         section: student.section || null,
         course_id: student.course_id || null,
@@ -235,6 +281,7 @@ export default function StudentPhotosScreen() {
         course_name: firstRelationName(student.courses),
         batch_name: firstRelationName(student.batches),
         campus_name: firstRelationName(student.campuses),
+        ai_pending: Boolean(student.photo_original_url && !student.photo_processed_url && student.photo_url === student.photo_original_url),
       })));
     }
     setCurrentIndex(0);
@@ -273,19 +320,53 @@ export default function StudentPhotosScreen() {
     if (!currentStudent || !capturedImage) return;
     setSaving(true);
     try {
-      const { data, error } = await supabase.functions.invoke('student-profile-photo-upload', {
+      // Fast path: original stored immediately, AI queued in background
+      const { data, error } = await supabase.functions.invoke('student-photo-capture', {
         body: { student_id: currentStudent.id, image: capturedImage },
       });
       if (error || data?.error) throw new Error(data?.error || error?.message || 'Photo upload failed');
 
+      const photoUrl = (data?.photo_url || data?.photo_original_url) as string;
+      const capturedId = currentStudent.id;
+
       const nextStudents = students.map((student) =>
-        student.id === currentStudent.id ? { ...student, photo_url: data.photo_url as string } : student
+        student.id === capturedId
+          ? {
+              ...student,
+              photo_url: photoUrl,
+              photo_original_url: photoUrl,
+              photo_processed_url: null,
+              ai_pending: true,
+            }
+          : student
       );
       setStudents(nextStudents);
       setCapturedImage(null);
-      setCurrentIndex(Math.min(currentIndex, Math.max(filteredStudents.length - 1, 0)));
+
+      // Auto-advance to next student still missing a photo in the filtered queue
+      const nextPendingIdx = filteredStudents.findIndex(
+        (s, idx) => idx > currentIndex && s.id !== capturedId && !s.photo_url,
+      );
+      if (nextPendingIdx >= 0) {
+        setCurrentIndex(nextPendingIdx);
+      } else {
+        // Prefer first remaining pending after refresh of list order
+        const refreshedPending = nextStudents
+          .filter((s) => {
+            if (s.id === capturedId) return false;
+            if (!s.photo_url) {
+              // still in current filter?
+              return filteredStudents.some((f) => f.id === s.id);
+            }
+            return false;
+          });
+        if (refreshedPending[0]) {
+          const idx = filteredStudents.findIndex((f) => f.id === refreshedPending[0].id);
+          if (idx >= 0) setCurrentIndex(idx);
+        }
+      }
     } catch (err: any) {
-      Alert.alert('Photo not saved', err?.message || 'AI processing or upload failed.');
+      Alert.alert('Photo not saved', err?.message || 'Upload failed. Try again.');
     } finally {
       setSaving(false);
     }
@@ -296,26 +377,41 @@ export default function StudentPhotosScreen() {
     setCurrentIndex((index) => Math.min(Math.max(index + delta, 0), Math.max(filteredStudents.length - 1, 0)));
   }
 
-  if ((!hasPhotoAdminAccess && !hasPhotoStaffAccess) || branchMissing) {
+  function photoStatus(student: StudentRow): { label: string; done: boolean; pendingAi: boolean } {
+    if (!student.photo_url) return { label: 'Pending', done: false, pendingAi: false };
+    if (student.photo_processed_url || (student.photo_url && student.photo_url !== student.photo_original_url && !student.ai_pending)) {
+      return { label: 'Ready', done: true, pendingAi: false };
+    }
+    if (student.ai_pending || (student.photo_original_url && !student.photo_processed_url)) {
+      return { label: 'AI queued', done: true, pendingAi: true };
+    }
+    return { label: 'Done', done: true, pendingAi: false };
+  }
+
+  if (!accessChecked || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerState}>
-          <ShieldAlert size={34} color={colors.destructive} />
-          <Text style={styles.centerTitle}>Branch access required</Text>
-          <Text style={styles.centerText}>
-            This photo capture queue is available to super admins, office admins, and office assistants assigned to a branch.
-          </Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.centerText}>Loading Photo Day...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (loading) {
+  if (!canCapture || branchMissing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.centerText}>Loading students...</Text>
+          <ShieldAlert size={34} color={colors.destructive} />
+          <Text style={styles.centerTitle}>
+            {!canCapture ? 'Photo Day not assigned' : 'Campus required'}
+          </Text>
+          <Text style={styles.centerText}>
+            {!canCapture
+              ? 'Ask a principal or super admin to grant you Photo Day capture for this campus.'
+              : 'Your profile needs a campus before you can photograph students.'}
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -326,8 +422,10 @@ export default function StudentPhotosScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Student Photos</Text>
-            <Text style={styles.subtitle}>{completedCount} of {students.length} completed</Text>
+            <Text style={styles.title}>Photo Day</Text>
+            <Text style={styles.subtitle}>
+              {completedCount} captured · {pendingCount} pending · AI runs in background
+            </Text>
           </View>
           <TouchableOpacity style={styles.iconButton} onPress={refreshStudents} disabled={refreshing}>
             {refreshing ? <ActivityIndicator color={colors.primary} /> : <RefreshCw size={20} color={colors.primary} />}
@@ -376,6 +474,21 @@ export default function StudentPhotosScreen() {
               setCapturedImage(null);
             }}
           />
+          {sectionOptions.length > 0 && (
+            <DropdownFilter
+              label="Section"
+              value={sectionFilter}
+              open={sectionDropdownOpen}
+              setOpen={setSectionDropdownOpen}
+              allLabel="All sections"
+              options={sectionOptions.map(([value, label]) => ({ value, label }))}
+              onChange={(value) => {
+                setSectionFilter(value);
+                setCurrentIndex(0);
+                setCapturedImage(null);
+              }}
+            />
+          )}
         </View>
 
         {!currentStudent ? (
@@ -404,12 +517,17 @@ export default function StudentPhotosScreen() {
                   {getStudentGrade(currentStudent).label}{displaySection(currentStudent.section) ? ` / ${displaySection(currentStudent.section)}` : ''} - {currentStudent.campus_name}
                 </Text>
               </View>
-              <View style={[styles.statusPill, currentStudent.photo_url ? styles.donePill : styles.pendingPill]}>
-                {currentStudent.photo_url ? <Check size={13} color={colors.success} /> : <Camera size={13} color={colors.warning} />}
-                <Text style={[styles.statusText, currentStudent.photo_url ? styles.doneText : styles.pendingText]}>
-                  {currentStudent.photo_url ? 'Done' : 'Pending'}
-                </Text>
-              </View>
+              {(() => {
+                const status = photoStatus(currentStudent);
+                return (
+                  <View style={[styles.statusPill, status.done ? styles.donePill : styles.pendingPill]}>
+                    {status.done ? <Check size={13} color={colors.success} /> : <Camera size={13} color={colors.warning} />}
+                    <Text style={[styles.statusText, status.done ? styles.doneText : styles.pendingText]}>
+                      {status.label}
+                    </Text>
+                  </View>
+                );
+              })()}
             </View>
 
             <View style={styles.cameraPanel}>
@@ -442,7 +560,7 @@ export default function StudentPhotosScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.primaryButton} onPress={savePhoto} disabled={saving}>
                     {saving ? <ActivityIndicator color="#fff" /> : <Check size={18} color="#fff" />}
-                    <Text style={styles.primaryButtonText}>{saving ? 'AI Editing...' : 'Save & Next'}</Text>
+                    <Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Save & Next'}</Text>
                   </TouchableOpacity>
                 </>
               ) : (

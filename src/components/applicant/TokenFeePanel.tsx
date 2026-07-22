@@ -54,6 +54,10 @@ type FeeStatus = {
   paid_toward_course?: number;
   /** Application-fee amount credited against a seat-block fee line. */
   seat_block_application_credit?: number;
+  /** Configured university seat-reservation deposit (e.g. ABVMU ₹40k). */
+  abvmu_deposit_amount?: number;
+  /** Super-admin-approved provisional credit (no receipt until settled). */
+  abvmu_approved_credit?: number;
   twenty_five_pct: number;
   min_token_instalment?: number;
   token_complete: boolean;
@@ -159,8 +163,21 @@ const loadImageForPdf = async (url: string) => {
   return { dataUrl, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
 };
 
+/** Prefer a real phone for gateway checkout — login profile is often empty. */
+function pickPhone(...candidates: Array<string | null | undefined>): string | null {
+  for (const raw of candidates) {
+    const value = (raw || "").trim();
+    if (!value) continue;
+    const digits = value.replace(/\D/g, "");
+    if (digits.length >= 10) return value;
+  }
+  return null;
+}
+
 export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment, onBehalfContext }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
+  const [leadPhone, setLeadPhone] = useState<string | null>(null);
+  const [leadEmail, setLeadEmail] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
   const [yearFees, setYearFees] = useState<Record<string, number>>({});
@@ -188,6 +205,16 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
   });
   const [bankDetails, setBankDetails] = useState<BankDetails>(DEFAULT_BANK_DETAILS);
+  const [abvmuClaims, setAbvmuClaims] = useState<{
+    id: string; amount: number; status: string; challan_number: string | null;
+    submitted_at: string; rejection_reason: string | null;
+  }[]>([]);
+  const [abvmuOpen, setAbvmuOpen] = useState(false);
+  const [abvmuChallanNo, setAbvmuChallanNo] = useState("");
+  const [abvmuChallanDate, setAbvmuChallanDate] = useState("");
+  const [abvmuNotes, setAbvmuNotes] = useState("");
+  const [abvmuFile, setAbvmuFile] = useState<File | null>(null);
+  const [abvmuSubmitting, setAbvmuSubmitting] = useState(false);
   const { gateways: tokenGateways, loading: tokenGatewayLoading } = useScopedPaymentGateways({
     context: "token_fee",
     applicationId,
@@ -346,12 +373,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
     // Fetch per-term waivers and payment history in parallel.
     const offerId = (offerRes.data as any[])?.[0]?.id;
-    const [waiverRes, payRes] = await Promise.all([
+    const [waiverRes, payRes, abvmuRes] = await Promise.all([
       offerId ? (supabase as any).rpc("get_applicant_offer_waivers", { _offer_id: offerId }) : Promise.resolve({ data: [] }),
       (supabase as any).rpc("get_applicant_payments", { _lead_id: resolvedLeadId }),
+      (supabase as any).rpc("get_abvmu_deposit_claims", { _lead_id: resolvedLeadId }),
     ]);
     setOfferWaivers((waiverRes.data || []).map((w: any) => ({ term: w.term, amount: Number(w.amount) })));
     setPayments(payRes.data || []);
+    setAbvmuClaims((abvmuRes.data || []).map((c: any) => ({
+      id: c.id,
+      amount: Number(c.amount),
+      status: c.status,
+      challan_number: c.challan_number,
+      submitted_at: c.submitted_at,
+      rejection_reason: c.rejection_reason,
+    })));
 
     const leadRow = (leadRes.data as any[])?.[0];
     if (!leadRow) {
@@ -364,13 +400,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     const offerRows = offerRes.data as any[] | null;
     const yearMap  = yearRes.data;
 
-    // Merge the applicant-facing fields (name/phone/email come from the parent props)
-    // with the RPC-fetched fields.
+    // Prefer prop phone, then lead phone from RPC (login profile is often blank).
+    const resolvedPhone = pickPhone(applicantPhone, leadRow.phone);
+    const resolvedEmail = (applicantEmail || leadRow.email || null) as string | null;
+    setLeadPhone(resolvedPhone);
+    setLeadEmail(resolvedEmail);
+
+    // Merge the applicant-facing fields with the RPC-fetched fields.
     setLead({
       id: leadRow.id,
       name: applicantName,
-      phone: applicantPhone || "",
-      email: applicantEmail,
+      phone: resolvedPhone || "",
+      email: resolvedEmail,
       stage: leadRow.stage,
       session_id: leadRow.session_id,
       token_amount: null,
@@ -424,11 +465,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const paymentPhone = pickPhone(applicantPhone, leadPhone, lead?.phone);
+  const paymentEmail = (applicantEmail || leadEmail || lead?.email || null) as string | null;
+
   const startPayment = async (
     amount: number,
     opts: { paymentType?: string; productinfo?: string; concession?: number; reason?: string; concessionBreakdown?: Record<string, number> } = {},
   ) => {
-    if (!lead || !applicantPhone) return;
+    if (!lead) {
+      setError("Lead details are still loading. Please wait a moment and try again.");
+      return;
+    }
+    if (!paymentPhone) {
+      setError("Phone number missing on your profile — contact admissions or re-login with WhatsApp OTP so payment can be started.");
+      return;
+    }
     if (amount <= 0) { setError("Enter a valid amount"); return; }
     if (onBehalfContext?.token && !offerConsentVerified) {
       setError("Student WhatsApp OTP consent is required before accepting the offer or paying token/admission fees on behalf of the student.");
@@ -448,8 +499,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           leadId: lead.id,
           paymentType: opts.paymentType || "token_fee",
           customerName: applicantName,
-          customerEmail: applicantEmail || undefined,
-          customerPhone: applicantPhone,
+          customerEmail: paymentEmail || undefined,
+          customerPhone: paymentPhone,
           productInfo: opts.productinfo || "Token Fee",
           concessionAmount: opts.concession || 0,
           waiverReason: opts.reason || null,
@@ -467,9 +518,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       return;
     }
 
-    // Open blank window synchronously — browsers block window.open() called
-    // after an await because the user-gesture chain is broken in async context.
-    const payWin = window.open("about:blank", "_blank");
+    // Open blank window synchronously — browsers (esp. Edge) block window.open()
+    // after await because the user-gesture chain is broken in async context.
+    let payWin: Window | null = null;
+    try {
+      payWin = window.open("about:blank", "_blank");
+    } catch {
+      payWin = null;
+    }
 
     setPaying(true);
     setError(null);
@@ -482,8 +538,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           payment_type: opts.paymentType || "token_fee",
           amount,
           firstname: applicantName.split(" ")[0] || applicantName,
-          email: applicantEmail || undefined,
-          phone: applicantPhone,
+          email: paymentEmail || undefined,
+          phone: paymentPhone,
           productinfo: opts.productinfo || "Token Fee",
           concession_amount: opts.concession || 0,
           waiver_reason: opts.reason || null,
@@ -510,14 +566,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         amount,
         payment_type: opts.paymentType || "token_fee",
       });
-      if (payWin) {
+      if (payWin && !payWin.closed) {
         payWin.location.href = data.pay_url;
       } else {
-        // Popup was blocked — fall back to same-tab redirect
-        window.location.href = data.pay_url;
+        // Popup blocked (common on Edge with strict tracking prevention) — same-tab redirect
+        window.location.assign(data.pay_url);
       }
     } catch (e: any) {
-      payWin?.close();
+      try { payWin?.close(); } catch { /* ignore */ }
       setError(e?.message || "Failed to start payment");
     } finally {
       setPaying(false);
@@ -913,6 +969,90 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
   const useLocalLoanLetterPreview = shouldUseLocalLoanLetterPreview();
+  const abvmuDepositAmount = Math.max(0, Number(feeStatus.abvmu_deposit_amount || 0));
+  const abvmuApprovedCredit = Math.max(0, Number(feeStatus.abvmu_approved_credit || 0));
+  const abvmuOpenClaim = abvmuClaims.find((c) => c.status === "pending" || c.status === "approved");
+  const showAbvmuClaim = abvmuDepositAmount > 0 && abvmuApprovedCredit <= 0;
+
+  const submitAbvmuClaim = async () => {
+    if (!lead || !abvmuFile) {
+      setError("Choose a challan file (PDF or image) to upload.");
+      return;
+    }
+    setAbvmuSubmitting(true);
+    setError(null);
+    try {
+      const safeName = abvmuFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `abvmu-claims/${lead.id}/${Date.now()}-${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from("application-documents")
+        .upload(path, abvmuFile, { contentType: abvmuFile.type || undefined, upsert: false });
+      if (upErr) throw upErr;
+
+      const { data, error: claimErr } = await (supabase as any).rpc("submit_abvmu_deposit_claim", {
+        _lead_id: lead.id,
+        _proof_path: path,
+        _proof_file_name: abvmuFile.name,
+        _proof_content_type: abvmuFile.type || null,
+        _challan_number: abvmuChallanNo || null,
+        _challan_date: abvmuChallanDate || null,
+        _notes: abvmuNotes || null,
+        _amount: abvmuDepositAmount,
+      });
+      if (claimErr) throw claimErr;
+
+      // WhatsApp-style staff alert: in-app notifications are created in the RPC.
+      // Best-effort WA to super admins via fee_reminder template.
+      try {
+        const { data: roles } = await supabase.from("user_roles").select("user_id").eq("role", "super_admin");
+        const ids = (roles || []).map((r: any) => r.user_id).filter(Boolean);
+        if (ids.length) {
+          const { data: profs } = await supabase.from("profiles").select("phone, display_name").in("user_id", ids);
+          for (const p of (profs || []) as any[]) {
+            if (!p.phone) continue;
+            await supabase.functions.invoke("whatsapp-send", {
+              body: {
+                template_key: "fee_reminder",
+                phone: p.phone,
+                params: [
+                  applicantName || "Candidate",
+                  String(Math.round(abvmuDepositAmount)),
+                  "ABVMU challan review (Inbox)",
+                ],
+                lead_id: lead.id,
+              },
+            });
+          }
+        }
+      } catch {
+        /* non-blocking */
+      }
+
+      setAbvmuClaims((prev) => [
+        {
+          id: data?.id || crypto.randomUUID(),
+          amount: abvmuDepositAmount,
+          status: "pending",
+          challan_number: abvmuChallanNo || null,
+          submitted_at: new Date().toISOString(),
+          rejection_reason: null,
+        },
+        ...prev,
+      ]);
+      setAbvmuOpen(false);
+      setAbvmuFile(null);
+      setAbvmuChallanNo("");
+      setAbvmuChallanDate("");
+      setAbvmuNotes("");
+      // Refresh fee status for provisional messaging
+      const { data: statusRes } = await supabase.rpc("lead_fee_status" as any, { _lead_id: lead.id });
+      if (statusRes) setFeeStatus(statusRes as FeeStatus);
+    } catch (e: any) {
+      setError(e?.message || "Could not submit ABVMU deposit claim");
+    } finally {
+      setAbvmuSubmitting(false);
+    }
+  };
 
   // Deadline calculations
   const deadlineDate = offer.acceptance_deadline ? new Date(offer.acceptance_deadline) : null;
@@ -1420,6 +1560,122 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         );
       })()}
 
+      {/* ── ABVMU / university deposit challan claim ── */}
+      {showAbvmuClaim && (
+        <div className="rounded-2xl border border-info/20 bg-info/5 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAbvmuOpen((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-info/10 transition-colors"
+          >
+            <div>
+              <p className="text-sm font-semibold text-info-foreground">
+                Already paid ABVMU deposit (₹{abvmuDepositAmount.toLocaleString("en-IN")})?
+              </p>
+              <p className="text-xs text-info-foreground/80 mt-0.5">
+                Upload your ABVMU challan details here. After super-admin approval, ₹
+                {abvmuDepositAmount.toLocaleString("en-IN")} is reduced from your first-year due
+                (receipt is issued later when the university remits funds to the college).
+              </p>
+            </div>
+            <ChevronRight className={`h-4 w-4 text-info shrink-0 transition-transform ${abvmuOpen ? "rotate-90" : ""}`} />
+          </button>
+
+          {abvmuOpenClaim && (
+            <div className="border-t border-info/15 px-4 py-3 text-xs">
+              {abvmuOpenClaim.status === "pending" && (
+                <p className="text-warning-foreground font-medium">
+                  Claim submitted · pending super-admin review
+                  {abvmuOpenClaim.challan_number ? ` · Challan ${abvmuOpenClaim.challan_number}` : ""}
+                </p>
+              )}
+              {abvmuOpenClaim.status === "approved" && (
+                <p className="text-success font-medium">
+                  Approved · ₹{abvmuOpenClaim.amount.toLocaleString("en-IN")} provisionally reduced from year-1 due
+                  (no receipt yet — remittance pending)
+                </p>
+              )}
+            </div>
+          )}
+
+          {abvmuOpen && !abvmuOpenClaim && (
+            <div className="border-t border-info/15 px-4 pb-4 pt-3 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Challan number</label>
+                  <input
+                    value={abvmuChallanNo}
+                    onChange={(e) => setAbvmuChallanNo(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">Payment date</label>
+                  <input
+                    type="date"
+                    value={abvmuChallanDate}
+                    onChange={(e) => setAbvmuChallanDate(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Notes</label>
+                <input
+                  value={abvmuNotes}
+                  onChange={(e) => setAbvmuNotes(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                  Challan / proof (PDF or image) *
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setAbvmuFile(e.target.files?.[0] || null)}
+                  className="w-full text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={abvmuSubmitting || !abvmuFile}
+                onClick={submitAbvmuClaim}
+                className="w-full rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/90 disabled:opacity-50"
+              >
+                {abvmuSubmitting ? (
+                  <span className="inline-flex items-center gap-2 justify-center">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Submitting…
+                  </span>
+                ) : (
+                  "Submit for super-admin approval"
+                )}
+              </button>
+            </div>
+          )}
+
+          {abvmuClaims.some((c) => c.status === "rejected") && !abvmuOpenClaim && (
+            <div className="border-t border-destructive/15 px-4 py-2 text-xs text-destructive">
+              Previous claim rejected
+              {abvmuClaims.find((c) => c.status === "rejected")?.rejection_reason
+                ? `: ${abvmuClaims.find((c) => c.status === "rejected")!.rejection_reason}`
+                : ""}
+              . You may submit again.
+            </div>
+          )}
+        </div>
+      )}
+
+      {abvmuApprovedCredit > 0 && (
+        <div className="rounded-xl border border-success/20 bg-success/5 px-4 py-3 text-xs text-success">
+          ABVMU deposit credit of ₹{abvmuApprovedCredit.toLocaleString("en-IN")} is applied to your course due.
+          Official receipt will be generated when the university remits this amount to the college.
+        </div>
+      )}
+
       {onBehalfContext?.token && !feeStatus.twenty_five_complete && (
         <div className={`rounded-2xl border p-4 space-y-3 ${offerConsentVerified ? "border-success/20 bg-success/5" : "border-warning/20 bg-warning/5"}`}>
           <div className="flex items-start gap-3">
@@ -1429,7 +1685,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 Student OTP consent required
               </p>
               <p className={`text-xs mt-0.5 leading-relaxed ${offerConsentVerified ? "text-success" : "text-warning-foreground"}`}>
-                Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {applicantPhone || "the candidate phone"}.
+                Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {paymentPhone || "the candidate phone"}.
               </p>
             </div>
           </div>
@@ -1465,6 +1721,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         </div>
       )}
 
+      {!paymentPhone && (
+        <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs text-destructive font-medium">
+          Phone number missing — payment buttons stay disabled until we have a valid mobile for the gateway.
+          Re-login with WhatsApp OTP, or contact admissions.
+        </div>
+      )}
+
       {!feeStatus.twenty_five_complete && !tokenGatewayLoading && tokenGateways.length > 1 && (
         <div className="rounded-2xl border border-gray-200 bg-white p-3 space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Payment Gateway</p>
@@ -1486,181 +1749,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         </div>
       )}
 
-      {/* ── Payment CTAs ──────────────────────────────── */}
-      {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (() => {
-        // Installment presets for the token fee alternative
-        const presets: number[] = [];
-        let p = minInstalment;
-        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
-        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
-
-        const selectedAmt = instalmentPreset !== null
-          ? instalmentPreset
-          : (customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null);
-
-        return (
-          <div className="space-y-3">
-            {/* ── Primary: confirm admission ── */}
-            <div className="rounded-2xl border border-success/20 bg-gradient-to-br from-emerald-50 to-green-50 p-4 shadow-sm space-y-3">
-              <div>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-success">Recommended</span>
-                </div>
-                <p className="text-base font-bold text-success-foreground">Confirm Your Admission</p>
-                <p className="text-xs text-success mt-0.5 leading-relaxed">
-                  Pay the admission threshold and receive your Admission Number — your seat is fully secured.
-                </p>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
-                <div>
-                  <p className="text-[10px] text-gray-400 font-medium">Amount due</p>
-                  <p className="text-lg font-bold text-gray-900">₹{towardsAdmission.toLocaleString("en-IN")}</p>
-                </div>
-                {coursePaid > 0 && (
-                  <p className="text-[10px] text-gray-400 text-right">
-                    Already paid ₹{coursePaid.toLocaleString("en-IN")}<br />
-                    of ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")} target
-                  </p>
-                )}
-              </div>
-              <button
-                disabled={paying || !applicantPhone}
-                onClick={() => startPayment(towardsAdmission, {
-                  paymentType: "token_fee",
-                  productinfo: "Admission Confirmation Fee",
-                })}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
-              >
-                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
-              </button>
-            </div>
-
-            {/* ── Alternative: pay token fee ── */}
-            {!feeStatus.token_complete && tokenOutstanding > 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                {/* Collapsed header */}
-                <button
-                  onClick={() => { setShowInstalment(v => !v); setInstalmentPreset(tokenOutstanding); setCustomAmt(""); }}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-gray-700">Can't pay full amount right now?</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Pay token fee to hold your seat first
-                    </p>
-                  </div>
-                  <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${showInstalment ? "rotate-90" : ""}`} />
-                </button>
-
-                {showInstalment && (
-                  <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
-                    {/* Default: full token amount */}
-                    <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 border border-gray-200 px-3.5 py-2.5">
-                      <div>
-                        <p className="text-[10px] text-gray-400 font-medium">Token fee (holds your seat)</p>
-                        <p className="text-base font-bold text-gray-900">₹{tokenOutstanding.toLocaleString("en-IN")}</p>
-                      </div>
-                      <button
-                        disabled={paying || !applicantPhone}
-                        onClick={() => startPayment(tokenOutstanding)}
-                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
-                      >
-                        {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                        Pay Now
-                      </button>
-                    </div>
-
-                    {/* Pay in parts toggle */}
-                    <button
-                      onClick={() => {
-                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
-                        setCustomAmt("");
-                      }}
-                      className="text-xs text-info-foreground hover:text-info-foreground font-medium underline underline-offset-2"
-                    >
-                      {instalmentPreset !== tokenOutstanding
-                        ? "Hide instalment options"
-                        : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
-                    </button>
-
-                    {/* Instalment chips — revealed on toggle */}
-                    {instalmentPreset !== tokenOutstanding && (
-                      <div className="space-y-3 pt-1">
-                        <div className="flex flex-wrap gap-2">
-                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
-                            <button
-                              key={amt}
-                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
-                              className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                                instalmentPreset === amt
-                                  ? "bg-info border-info/40 text-white shadow-sm"
-                                  : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
-                              }`}
-                            >
-                              ₹{amt.toLocaleString("en-IN")}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
-                            className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                              instalmentPreset === null
-                                ? "bg-info border-info/40 text-white shadow-sm"
-                                : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
-                            }`}
-                          >
-                            Custom
-                          </button>
-                        </div>
-
-                        {instalmentPreset === null && (
-                          <div className="relative">
-                            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                              ref={customAmountInputRef}
-                              type="number" step="500" min={minInstalment} max={tokenOutstanding}
-                              value={customAmt}
-                              onChange={e => setCustomAmt(e.target.value)}
-                              placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-info/30"
-                            />
-                          </div>
-                        )}
-
-                        <p className="text-[11px] text-gray-400">
-                          Min ₹{minInstalment.toLocaleString("en-IN")} per payment · pay multiple times to reach the token fee target
-                        </p>
-
-                        <button
-                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
-                          onClick={() => selectedAmt && startPayment(selectedAmt)}
-                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
-                        >
-                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                          {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
-                        </button>
-                      </div>
-                    )}
-
-                    {!applicantPhone && (
-                      <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
-                        Phone number missing — please contact admissions
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Lump-sum payment options ───────────────────────────────────
-           Hero "Best Value" full-course card with the marketing
-           headline ("Save ₹X on Full Course") plus a collapsible
-           breakdown for transparency. Year-1 sits below as a
-           smaller alternative — visible but visually secondary so the
-           full-course pitch lands first.
+      {/* ── Lump-sum payment options (above token-fee fallback) ─────────
+           Full-course + Year-1 CTAs. Placed above the token-fee
+           "Can't pay full amount" accordion so candidates clear year-1
+           / full course before falling back to a seat-hold token.
       */}
       {(() => {
         const rows = buildApplicantFeeBreakdownRows({
@@ -1700,31 +1792,129 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         return (
           <div className="space-y-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">One-time payment options</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Clear course fees</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
                 {hasDiscount
-                  ? "Calculated on fee after approved waiver."
-                  : "Pay remaining fee in one transaction."}
+                  ? "Prefer Year 1 or full course first — calculated after approved waiver."
+                  : "Prefer Year 1 or full course first; token fee is only a seat-hold fallback."}
               </p>
             </div>
 
+            {/* ── Year 1 (preferred path to clear first-year fee) ─────── */}
+            {(y1Fee > 0) && (
+              <div className={`rounded-2xl border-2 p-4 shadow-md space-y-3 ${
+                y1Covered ? "border-gray-200 bg-gray-50" : "border-success/30 bg-gradient-to-br from-emerald-50 to-green-50"
+              }`}>
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-success">Recommended</span>
+                  </div>
+                  {y1Covered ? (
+                    <p className="text-sm font-bold text-success-foreground flex items-center gap-1.5">
+                      <Check className="h-4 w-4" /> Year 1 covered
+                      {surplusPaidVsY1 > 0 && (
+                        <span className="text-xs font-normal text-gray-500 italic">
+                          · {fmtRupee(surplusPaidVsY1)} surplus carries forward
+                        </span>
+                      )}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-base font-bold text-success-foreground">Pay year 1 fee now</p>
+                      <p className="text-xs text-success mt-0.5 leading-relaxed">
+                        {y1Disc > 0
+                          ? `Clear first-year fee in one go — save ${fmtRupee(y1Disc)}. Best path to complete Year 1.`
+                          : "Clear the full first-year fee and stay on track for admission milestones."}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!y1Covered && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-medium">Year 1 amount due</p>
+                      <p className="text-lg font-bold text-gray-900">{fmtRupee(y1Due)}</p>
+                    </div>
+                    {y1Disc > 0 && (
+                      <p className="text-[10px] text-success text-right font-semibold">
+                        Save {fmtRupee(y1Disc)}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {y1Covered ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2.5 py-1 text-[10px] font-bold">
+                    <Check className="h-3 w-3" /> Covered
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={paying || !paymentPhone || y1Due <= 0}
+                    onClick={() => startPayment(y1Due, {
+                      paymentType: "other",
+                      productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
+                      concession: y1Disc,
+                      reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
+                      concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
+                    })}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
+                  >
+                    {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                    Pay {fmtRupee(y1Due)} · Year 1 fee
+                  </button>
+                )}
+
+
+                {/* Compact breakdown — only show when there's something to pay */}
+                {!y1Covered && (
+                  <details className="mt-2 group">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-warning-foreground hover:text-warning-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
+                      View breakdown
+                    </summary>
+                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Year 1 fee after waiver</span>
+                        <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
+                      </div>
+                      {paid > 0 && (
+                        <div className="flex justify-between text-info-foreground">
+                          <span>Already paid</span>
+                          <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
+                        </div>
+                      )}
+                      {y1Disc > 0 && (
+                        <div className="flex justify-between text-success">
+                          <span>{lumpSumPct}% one-time off</span>
+                          <span>− {fmtRupee(y1Disc)}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
+                        <span className="text-gray-700">Pay now</span>
+                        <span className="text-warning-foreground">{fmtRupee(y1Due)}</span>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
             {/* ── HERO: Full course (Best Value) ──────────────────────────
                 Gated on full_course_payment_deadline — after that date the
                 lump-sum CTA disappears (only year-1 lump-sum remains
                 below). The card stays visible if the candidate already
                 paid in full, so they always see the receipt state. */}
             {hasFullCourse && (fullCourseWindowOpen || fcCovered) && (
-              <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
+              <div className={`rounded-2xl border-2 p-5 shadow-lg ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
                 "border-success/30 bg-success/5"
               }`}>
                 {!fcCovered && (
-                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-success px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                  <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-success px-3 py-1 text-[10px] font-bold text-white shadow-sm">
                     <Sparkles className="h-3 w-3" /> {fcDisc > 0 ? "BEST VALUE" : "FULL COURSE"}
                   </div>
                 )}
 
-                <div className="relative flex items-start justify-between gap-4 mt-2">
+                <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     {fcCovered ? (
                       <>
@@ -1773,7 +1963,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </button>
                   ) : (
                     <button
-                      disabled={paying || !applicantPhone || fcDue <= 0}
+                      type="button"
+                      disabled={paying || !paymentPhone || fcDue <= 0}
                       onClick={() => {
                         const lump  = lumpSumPct / 100;
                         const multi = multiYearPct / 100;
@@ -1847,92 +2038,180 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </div>
             )}
 
-            {/* ── Year 1 only — secondary alternative ─────────────────── */}
-            {(y1Fee > 0) && (
-              <div className={`rounded-xl border p-3 ${
-                y1Covered ? "border-gray-200 bg-gray-50" : "border-warning/20 bg-warning/5/60"
-              }`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">
-                      {hasFullCourse ? "Or pay year 1 only" : "Pay year 1"}
+          </div>
+        );
+      })()}
+
+      {/* ── Payment CTAs: Confirm admission ───────────────── */}
+      {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (
+        <div className="space-y-3">
+            {/* ── Confirm admission threshold (below year-1 full pay) ── */}
+            <div className="rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm space-y-3">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-info-foreground">Admission threshold</span>
+                </div>
+                <p className="text-base font-bold text-gray-900">Confirm Your Admission</p>
+                <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">
+                  Pay the admission threshold and receive your Admission Number — your seat is fully secured.
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
+                <div>
+                  <p className="text-[10px] text-gray-400 font-medium">Amount due</p>
+                  <p className="text-lg font-bold text-gray-900">₹{towardsAdmission.toLocaleString("en-IN")}</p>
+                </div>
+                {coursePaid > 0 && (
+                  <p className="text-[10px] text-gray-400 text-right">
+                    Already paid ₹{coursePaid.toLocaleString("en-IN")}<br />
+                    of ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")} target
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={paying || !paymentPhone}
+                onClick={() => startPayment(towardsAdmission, {
+                  paymentType: "token_fee",
+                  productinfo: "Admission Confirmation Fee",
+                })}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3.5 text-sm font-bold text-white hover:bg-info/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
+              >
+                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
+              </button>
+            </div>
+
+        </div>
+      )}
+
+      {/* ── Token fee (last resort after year-1 / full course options) ── */}
+      {!feeStatus.token_complete && tokenOutstanding > 0 && !feeStatus.twenty_five_complete && (() => {
+        const presets: number[] = [];
+        let p = minInstalment;
+        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
+        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
+
+        const selectedAmt = instalmentPreset !== null
+          ? instalmentPreset
+          : (customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null);
+
+        return (
+          <div className="space-y-3">
+            {/* ── Alternative: pay token fee ── */}
+            {!feeStatus.token_complete && tokenOutstanding > 0 && (
+              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                {/* Collapsed header */}
+                <button
+                  onClick={() => { setShowInstalment(v => !v); setInstalmentPreset(tokenOutstanding); setCustomAmt(""); }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Can't pay full amount right now?</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Pay token fee to hold your seat first
                     </p>
-                    {y1Covered ? (
-                      <p className="text-xs text-gray-600 inline-flex items-center gap-1">
-                        <Check className="h-3 w-3 text-success" />
-                        Year 1 covered.
-                        {surplusPaidVsY1 > 0 && (
-                          <span className="text-gray-500 italic">
-                            {fmtRupee(surplusPaidVsY1)} surplus carries forward.
-                          </span>
+                  </div>
+                  <ChevronRight className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${showInstalment ? "rotate-90" : ""}`} />
+                </button>
+
+                {showInstalment && (
+                  <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
+                    {/* Default: full token amount */}
+                    <div className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 border border-gray-200 px-3.5 py-2.5">
+                      <div>
+                        <p className="text-[10px] text-gray-400 font-medium">Token fee (holds your seat)</p>
+                        <p className="text-base font-bold text-gray-900">₹{tokenOutstanding.toLocaleString("en-IN")}</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={paying || !paymentPhone}
+                        onClick={() => startPayment(tokenOutstanding)}
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                        Pay Now
+                      </button>
+                    </div>
+
+                    {/* Pay in parts toggle */}
+                    <button
+                      onClick={() => {
+                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
+                        setCustomAmt("");
+                      }}
+                      className="text-xs text-info-foreground hover:text-info-foreground font-medium underline underline-offset-2"
+                    >
+                      {instalmentPreset !== tokenOutstanding
+                        ? "Hide instalment options"
+                        : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
+                    </button>
+
+                    {/* Instalment chips — revealed on toggle */}
+                    {instalmentPreset !== tokenOutstanding && (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex flex-wrap gap-2">
+                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
+                            <button
+                              key={amt}
+                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
+                              className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
+                                instalmentPreset === amt
+                                  ? "bg-info border-info/40 text-white shadow-sm"
+                                  : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
+                              }`}
+                            >
+                              ₹{amt.toLocaleString("en-IN")}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
+                            className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
+                              instalmentPreset === null
+                                ? "bg-info border-info/40 text-white shadow-sm"
+                                : "border-gray-200 text-gray-700 hover:border-info/30 hover:bg-info/5"
+                            }`}
+                          >
+                            Custom
+                          </button>
+                        </div>
+
+                        {instalmentPreset === null && (
+                          <div className="relative">
+                            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              ref={customAmountInputRef}
+                              type="number" step="500" min={minInstalment} max={tokenOutstanding}
+                              value={customAmt}
+                              onChange={e => setCustomAmt(e.target.value)}
+                              placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-info/30"
+                            />
+                          </div>
                         )}
+
+                        <p className="text-[11px] text-gray-400">
+                          Min ₹{minInstalment.toLocaleString("en-IN")} per payment · pay multiple times to reach the token fee target
+                        </p>
+
+                        <button
+                          type="button"
+                          disabled={paying || !paymentPhone || selectedAmt === null || selectedAmt < minInstalment}
+                          onClick={() => selectedAmt && startPayment(selectedAmt)}
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                          {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
+                        </button>
+                      </div>
+                    )}
+
+                    {!paymentPhone && (
+                      <p className="text-xs text-destructive text-center bg-destructive/5 rounded-lg py-2 px-3">
+                        Phone number missing on your login profile — re-login with WhatsApp OTP or contact admissions.
                       </p>
-                    ) : (
-                      <>
-                        <p className="text-sm font-semibold text-warning-foreground">
-                          Pay year 1 now
-                        </p>
-                        <p className="text-[11px] text-warning-foreground mt-0.5">
-                          {y1Disc > 0
-                            ? `One-time waiver: save ${fmtRupee(y1Disc)} · pay ${fmtRupee(y1Due)}`
-                            : `Pay remaining first-year fee: ${fmtRupee(y1Due)}`}
-                        </p>
-                      </>
                     )}
                   </div>
-
-                  {y1Covered ? (
-                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2.5 py-1 text-[10px] font-bold">
-                      <Check className="h-3 w-3" /> Covered
-                    </span>
-                  ) : (
-                    <button
-                      disabled={paying || !applicantPhone || y1Due <= 0}
-                      onClick={() => startPayment(y1Due, {
-                        paymentType: "other",
-                        productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
-                        concession: y1Disc,
-                        reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
-                        concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
-                      })}
-                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-warning px-3.5 py-2 text-xs font-bold text-white hover:bg-warning/60 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
-                    >
-                      {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                      Pay {fmtRupee(y1Due)}
-                    </button>
-                  )}
-                </div>
-
-                {/* Compact breakdown — only show when there's something to pay */}
-                {!y1Covered && (
-                  <details className="mt-2 group">
-                    <summary className="cursor-pointer text-[10px] font-semibold text-warning-foreground hover:text-warning-foreground inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
-                      <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
-                      View breakdown
-                    </summary>
-                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Year 1 fee after waiver</span>
-                        <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
-                      </div>
-                      {paid > 0 && (
-                        <div className="flex justify-between text-info-foreground">
-                          <span>Already paid</span>
-                          <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
-                        </div>
-                      )}
-                      {y1Disc > 0 && (
-                        <div className="flex justify-between text-success">
-                          <span>{lumpSumPct}% one-time off</span>
-                          <span>− {fmtRupee(y1Disc)}</span>
-                        </div>
-                      )}
-                      <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
-                        <span className="text-gray-700">Pay now</span>
-                        <span className="text-warning-foreground">{fmtRupee(y1Due)}</span>
-                      </div>
-                    </div>
-                  </details>
                 )}
               </div>
             )}

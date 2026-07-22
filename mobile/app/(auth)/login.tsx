@@ -1,48 +1,54 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, SafeAreaView,
-  ScrollView, Alert, Dimensions,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { router } from 'expo-router';
-import { colors, spacing, radius, typography } from '../../constants/Colors';
 import { isStaffApp } from '../../lib/appVariant';
+import { useTheme } from '../../theme/ThemeContext';
+import { spacing, radius } from '../../theme/tokens';
 
-type LoginMethod = 'email' | 'google' | 'whatsapp';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+type StaffStep = 'main' | 'whatsapp' | 'whatsapp_otp' | 'email';
 
 export default function LoginScreen() {
   const {
-    session, loading: authLoading,
-    signInWithPassword, signInWithGoogle, sendWhatsAppOtp, verifyWhatsAppOtp,
+    session,
+    loading: authLoading,
+    signInWithPassword,
+    signInWithGoogle,
+    sendWhatsAppOtp,
+    verifyWhatsAppOtp,
   } = useAuth();
-  const [method, setMethod] = useState<LoginMethod>(isStaffApp ? 'email' : 'whatsapp');
+  const { colors } = useTheme();
+
+  const [step, setStep] = useState<StaffStep>('main');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [otpSentAt, setOtpSentAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
 
-  // Redirect if already signed in
   useEffect(() => {
-    if (!authLoading && session) {
-      console.log('[Login] Session detected, navigating to tabs');
-      router.replace('/');
-    }
+    if (!authLoading && session) router.replace('/');
   }, [session, authLoading]);
 
-  // Countdown timer for OTP resend
   useEffect(() => {
-    if (!otpSent || !otpSentAt) return;
+    if (step !== 'whatsapp_otp' || !otpSentAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [otpSent, otpSentAt]);
+  }, [step, otpSentAt]);
 
   const elapsed = otpSentAt ? (now - otpSentAt) / 1000 : 0;
   const canResend = elapsed >= 60;
@@ -76,20 +82,17 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-
     const { error: err } = await sendWhatsAppOtp(cleaned);
     if (err) {
       setError(err);
       setLoading(false);
       return;
     }
-
-    // Only show OTP screen if send succeeded
     const ts = Date.now();
     setOtpSentAt(ts);
     setNow(ts);
-    setOtpSent(true);
     setOtp('');
+    setStep('whatsapp_otp');
     setLoading(false);
   };
 
@@ -101,473 +104,529 @@ export default function LoginScreen() {
     }
     setLoading(true);
     setError(null);
-
     const { error: err } = await verifyWhatsAppOtp(phone.replace(/\D/g, ''), cleaned);
-
     if (err) {
       setError(err);
       setLoading(false);
       return;
     }
-
-    // Don't manually navigate — the useEffect watching `session` will handle it
-    // once onAuthStateChange fires from setSession in the auth context
-    // But add a fallback timeout in case the state update is slow
-    setTimeout(() => {
-      setLoading(false);
-    }, 3000);
+    setTimeout(() => setLoading(false), 3000);
   };
 
-  const handleResend = async () => {
-    setError(null);
-    await handleSendOtp();
-  };
-
-  const resetOtp = () => {
-    setOtpSent(false);
-    setOtp('');
-    setOtpSentAt(null);
-    setError(null);
-  };
-
-  const switchMethod = (m: LoginMethod) => {
-    setMethod(m);
-    resetOtp();
-    setPhone('');
-  };
-
-  // If auth is still loading, show spinner
   if (authLoading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+      <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.inkSecondary} />
         </View>
       </SafeAreaView>
     );
   }
 
+  // ── Family: WhatsApp-only (unchanged product rule) ────────────────────────
+  if (!isStaffApp) {
+    return (
+      <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Brand colors={colors} title="NIMT Campus" tagline="For students and parents" />
+            {error ? <ErrorBox colors={colors} text={error} /> : null}
+            {step !== 'whatsapp_otp' ? (
+              <WhatsAppPhoneForm
+                colors={colors}
+                phone={phone}
+                setPhone={setPhone}
+                setError={setError}
+                loading={loading}
+                onSend={handleSendOtp}
+              />
+            ) : (
+              <WhatsAppOtpForm
+                colors={colors}
+                phone={phone}
+                otp={otp}
+                setOtp={setOtp}
+                setError={setError}
+                loading={loading}
+                canResend={canResend}
+                resendCountdown={resendCountdown}
+                onVerify={handleVerify}
+                onResend={handleSendOtp}
+                onBack={() => {
+                  setStep('main');
+                  setOtp('');
+                  setOtpSentAt(null);
+                  setError(null);
+                }}
+              />
+            )}
+            <Terms colors={colors} />
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Staff: sleek multi-method ─────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Branding */}
-          <View style={styles.brandSection}>
-            <View style={styles.logoBox}>
-              <Text style={styles.logoText}>N</Text>
-            </View>
-            <Text style={styles.title}>{isStaffApp ? 'NIMT Staff' : 'NIMT Campus'}</Text>
-            <Text style={styles.subtitle}>NIMT University</Text>
-          </View>
+          <Brand colors={colors} title="NIMT Staff" tagline="Campus operations, secured." />
 
-          {/* Method selector — staff only; family always signs in via WhatsApp OTP */}
-          {isStaffApp && (
-            <View style={styles.methodSelector}>
-              {(['email', 'google', 'whatsapp'] as const).map((m) => (
-                <TouchableOpacity
-                  key={m}
-                  style={[styles.methodTab, method === m && styles.methodTabActive]}
-                  onPress={() => switchMethod(m)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.methodTabText, method === m && styles.methodTabTextActive]}>
-                    {m === 'email' ? 'Email' : m === 'google' ? 'Google' : 'WhatsApp'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+          {error ? <ErrorBox colors={colors} text={error} /> : null}
+
+          {step === 'main' && (
+            <View style={styles.stack}>
+              <PrimaryButton
+                colors={colors}
+                label="Continue with Google"
+                loading={loading}
+                onPress={handleGoogle}
+              />
+
+              <View style={styles.orRow}>
+                <View style={[styles.orLine, { backgroundColor: colors.line }]} />
+                <Text style={[styles.orText, { color: colors.inkMuted }]}>or</Text>
+                <View style={[styles.orLine, { backgroundColor: colors.line }]} />
+              </View>
+
+              <SecondaryButton
+                colors={colors}
+                label="Continue with WhatsApp"
+                onPress={() => {
+                  setError(null);
+                  setStep('whatsapp');
+                }}
+              />
+
+              <TouchableOpacity
+                onPress={() => {
+                  setError(null);
+                  setStep('email');
+                }}
+                style={styles.linkBtn}
+                hitSlop={12}
+              >
+                <Text style={[styles.linkText, { color: colors.accent }]}>
+                  Sign in with email instead
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Error */}
-          {error && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
+          {step === 'whatsapp' && (
+            <View style={styles.stack}>
+              <WhatsAppPhoneForm
+                colors={colors}
+                phone={phone}
+                setPhone={setPhone}
+                setError={setError}
+                loading={loading}
+                onSend={handleSendOtp}
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  setStep('main');
+                  setError(null);
+                }}
+                style={styles.linkBtn}
+              >
+                <Text style={[styles.linkText, { color: colors.inkSecondary }]}>Back</Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Email / password (staff) */}
-          {method === 'email' && (
-            <View style={styles.formSection}>
-              <Text style={styles.label}>Work email</Text>
+          {step === 'whatsapp_otp' && (
+            <WhatsAppOtpForm
+              colors={colors}
+              phone={phone}
+              otp={otp}
+              setOtp={setOtp}
+              setError={setError}
+              loading={loading}
+              canResend={canResend}
+              resendCountdown={resendCountdown}
+              onVerify={handleVerify}
+              onResend={handleSendOtp}
+              onBack={() => {
+                setStep('whatsapp');
+                setOtp('');
+                setOtpSentAt(null);
+                setError(null);
+              }}
+            />
+          )}
+
+          {step === 'email' && (
+            <View style={styles.stack}>
+              <Text style={[styles.label, { color: colors.ink }]}>Work email</Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.input,
+                  { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+                ]}
                 placeholder="you@nimt.ac.in"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.inkMuted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={email}
-                onChangeText={(t) => { setEmail(t); setError(null); }}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  setError(null);
+                }}
               />
-              <Text style={styles.label}>Password</Text>
+              <Text style={[styles.label, { color: colors.ink }]}>Password</Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.input,
+                  { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+                ]}
                 placeholder="••••••••"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.inkMuted}
                 secureTextEntry
                 value={password}
-                onChangeText={(t) => { setPassword(t); setError(null); }}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  setError(null);
+                }}
               />
-              <TouchableOpacity
-                style={[styles.button, (loading || !email || !password) && styles.buttonDisabled]}
+              <PrimaryButton
+                colors={colors}
+                label="Sign in"
+                loading={loading}
+                disabled={!email || !password}
                 onPress={handleEmailLogin}
-                disabled={loading || !email || !password}
-                activeOpacity={0.8}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.buttonText}>Sign in</Text>
-                )}
-              </TouchableOpacity>
-              <Text style={styles.hint}>
-                Use the same email and password as the UniOs web portal.
-              </Text>
-            </View>
-          )}
-
-          {/* Google */}
-          {method === 'google' && (
-            <View style={styles.formSection}>
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleGoogle}
-                disabled={loading}
-                activeOpacity={0.8}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.buttonText}>Continue with Google</Text>
-                )}
-              </TouchableOpacity>
-              <Text style={styles.hint}>
-                Sign in with your Google account linked to NIMT.
-              </Text>
-            </View>
-          )}
-
-          {/* WhatsApp — Phone Entry */}
-          {method === 'whatsapp' && !otpSent && (
-            <View style={styles.formSection}>
-              <Text style={styles.label}>WhatsApp Number</Text>
-              <View style={styles.phoneRow}>
-                <View style={styles.countryCode}>
-                  <Text style={styles.countryCodeText}>+91</Text>
-                </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  placeholder="9876543210"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  value={phone}
-                  onChangeText={(t) => { setPhone(t.replace(/\D/g, '')); setError(null); }}
-                  autoFocus
-                />
-              </View>
-              <Text style={styles.hint}>
-                OTP will be sent to this number via WhatsApp.
-              </Text>
-              <TouchableOpacity
-                style={[styles.button, (loading || phone.replace(/\D/g, '').length < 10) && styles.buttonDisabled]}
-                onPress={handleSendOtp}
-                disabled={loading || phone.replace(/\D/g, '').length < 10}
-                activeOpacity={0.8}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.buttonText}>Send WhatsApp OTP</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* WhatsApp — OTP Verify */}
-          {method === 'whatsapp' && otpSent && (
-            <View style={styles.formSection}>
-              <View style={styles.otpInfoBox}>
-                <Text style={styles.otpInfoText}>
-                  OTP sent to +91 {phone.slice(0, 2)}****{phone.slice(-2)} via WhatsApp
-                </Text>
-              </View>
-
-              <Text style={styles.label}>Enter 6-digit OTP</Text>
-              <TextInput
-                style={styles.otpInput}
-                placeholder="0  0  0  0  0  0"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="number-pad"
-                maxLength={6}
-                value={otp}
-                onChangeText={(t) => { setOtp(t.replace(/\D/g, '')); setError(null); }}
-                autoFocus
               />
-
+              <Text style={[styles.hint, { color: colors.inkMuted }]}>
+                Same email and password as the UniOs web portal.
+              </Text>
               <TouchableOpacity
-                style={[styles.button, (loading || otp.replace(/\D/g, '').length < 6) && styles.buttonDisabled]}
-                onPress={handleVerify}
-                disabled={loading || otp.replace(/\D/g, '').length < 6}
-                activeOpacity={0.8}
+                onPress={() => {
+                  setStep('main');
+                  setError(null);
+                }}
+                style={styles.linkBtn}
               >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.buttonText}>Verify & Sign In</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.secondaryButton, (!canResend || loading) && styles.buttonDisabled]}
-                onPress={handleResend}
-                disabled={loading || !canResend}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {canResend ? 'Resend OTP' : `Resend in ${resendCountdown}s`}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={resetOtp} style={styles.linkButton}>
-                <Text style={styles.linkText}>Use a different number</Text>
+                <Text style={[styles.linkText, { color: colors.inkSecondary }]}>Back</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          <Text style={styles.terms}>
-            By signing in, you agree to our Terms of Service and Privacy Policy.
-          </Text>
+          <Terms colors={colors} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+function Brand({
+  colors,
+  title,
+  tagline,
+}: {
+  colors: { accent: string; ink: string; inkSecondary: string };
+  title: string;
+  tagline: string;
+}) {
+  return (
+    <View style={styles.brand}>
+      <View style={[styles.logo, { backgroundColor: colors.accent }]}>
+        <Text style={styles.logoText}>N</Text>
+      </View>
+      <Text style={[styles.title, { color: colors.ink }]}>{title}</Text>
+      <Text style={[styles.tagline, { color: colors.inkSecondary }]}>{tagline}</Text>
+    </View>
+  );
+}
+
+function ErrorBox({ colors, text }: { colors: { danger: string; tint: { red: { bg: string } } }; text: string }) {
+  return (
+    <View style={[styles.errorBox, { backgroundColor: colors.tint.red.bg }]}>
+      <Text style={[styles.errorText, { color: colors.danger }]}>{text}</Text>
+    </View>
+  );
+}
+
+function PrimaryButton({
+  colors,
+  label,
+  loading,
+  disabled,
+  onPress,
+}: {
+  colors: { pillBg: string; pillFg: string };
+  label: string;
+  loading?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.primaryBtn,
+        { backgroundColor: colors.pillBg },
+        (loading || disabled) && styles.disabled,
+      ]}
+      onPress={onPress}
+      disabled={loading || disabled}
+      activeOpacity={0.85}
+    >
+      {loading ? (
+        <ActivityIndicator color={colors.pillFg} />
+      ) : (
+        <Text style={[styles.primaryBtnText, { color: colors.pillFg }]}>{label}</Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function SecondaryButton({
+  colors,
+  label,
+  onPress,
+}: {
+  colors: { card: string; line: string; ink: string };
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.line }]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <Text style={[styles.secondaryBtnText, { color: colors.ink }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function WhatsAppPhoneForm({
+  colors,
+  phone,
+  setPhone,
+  setError,
+  loading,
+  onSend,
+}: {
+  colors: any;
+  phone: string;
+  setPhone: (t: string) => void;
+  setError: (t: string | null) => void;
+  loading: boolean;
+  onSend: () => void;
+}) {
+  return (
+    <View style={styles.stack}>
+      <Text style={[styles.label, { color: colors.ink }]}>WhatsApp number</Text>
+      <View style={styles.phoneRow}>
+        <View style={[styles.cc, { backgroundColor: colors.card, borderColor: colors.line }]}>
+          <Text style={{ color: colors.inkSecondary, fontSize: 16 }}>+91</Text>
+        </View>
+        <TextInput
+          style={[
+            styles.input,
+            styles.phoneInput,
+            { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+          ]}
+          placeholder="9876543210"
+          placeholderTextColor={colors.inkMuted}
+          keyboardType="phone-pad"
+          maxLength={10}
+          value={phone}
+          onChangeText={(t) => {
+            setPhone(t.replace(/\D/g, ''));
+            setError(null);
+          }}
+        />
+      </View>
+      <PrimaryButton
+        colors={colors}
+        label="Send code on WhatsApp"
+        loading={loading}
+        disabled={phone.replace(/\D/g, '').length < 10}
+        onPress={onSend}
+      />
+    </View>
+  );
+}
+
+function WhatsAppOtpForm({
+  colors,
+  phone,
+  otp,
+  setOtp,
+  setError,
+  loading,
+  canResend,
+  resendCountdown,
+  onVerify,
+  onResend,
+  onBack,
+}: {
+  colors: any;
+  phone: string;
+  otp: string;
+  setOtp: (t: string) => void;
+  setError: (t: string | null) => void;
+  loading: boolean;
+  canResend: boolean;
+  resendCountdown: number;
+  onVerify: () => void;
+  onResend: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <View style={styles.stack}>
+      <View style={[styles.otpBanner, { backgroundColor: colors.accentSoft }]}>
+        <Text style={{ color: colors.accent, textAlign: 'center', fontSize: 14, lineHeight: 20 }}>
+          Code sent to +91 {phone.slice(0, 2)}****{phone.slice(-2)} on WhatsApp
+        </Text>
+      </View>
+      <Text style={[styles.label, { color: colors.ink }]}>Enter 6-digit code</Text>
+      <TextInput
+        style={[
+          styles.otpInput,
+          { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+        ]}
+        placeholder="000000"
+        placeholderTextColor={colors.inkMuted}
+        keyboardType="number-pad"
+        maxLength={6}
+        value={otp}
+        onChangeText={(t) => {
+          setOtp(t.replace(/\D/g, ''));
+          setError(null);
+        }}
+        autoFocus
+      />
+      <PrimaryButton
+        colors={colors}
+        label="Verify & sign in"
+        loading={loading}
+        disabled={otp.replace(/\D/g, '').length < 6}
+        onPress={onVerify}
+      />
+      <SecondaryButton
+        colors={colors}
+        label={canResend ? 'Resend code' : `Resend in ${resendCountdown}s`}
+        onPress={() => {
+          if (canResend && !loading) onResend();
+        }}
+      />
+      <TouchableOpacity onPress={onBack} style={styles.linkBtn}>
+        <Text style={[styles.linkText, { color: colors.inkSecondary }]}>Use a different number</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function Terms({ colors }: { colors: { inkMuted: string } }) {
+  return (
+    <Text style={[styles.terms, { color: colors.inkMuted }]}>
+      By signing in, you agree to our Terms of Service and Privacy Policy.
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollContent: {
+  root: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  scroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 40,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xxl,
   },
-
-  // Branding
-  brandSection: {
-    alignItems: 'center',
-    marginBottom: 36,
-  },
-  logoBox: {
+  brand: { alignItems: 'center', marginBottom: spacing.xxl },
+  logo: {
     width: 64,
     height: 64,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
-  logoText: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '800',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
-
-  // Method selector
-  methodSelector: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: 12,
+  logoText: { color: '#fff', fontSize: 32, fontWeight: '800' },
+  title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.5 },
+  tagline: { fontSize: 15, marginTop: 6 },
+  stack: { gap: spacing.md },
+  label: { fontSize: 14, fontWeight: '600' },
+  hint: { fontSize: 13, lineHeight: 18 },
+  input: {
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: 4,
-    marginBottom: 20,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    height: 52,
+    fontSize: 16,
   },
-  methodTab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  methodTabActive: {
-    backgroundColor: colors.primary,
-  },
-  methodTabText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  methodTabTextActive: {
-    color: '#fff',
-  },
-
-  // Error
-  errorBox: {
-    backgroundColor: colors.destructiveLight,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 16,
-  },
-  errorText: {
-    fontSize: 14,
-    color: colors.destructive,
-    lineHeight: 20,
-  },
-
-  // Form
-  formSection: {
-    gap: 16,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  hint: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 18,
-  },
-  phoneRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  countryCode: {
-    backgroundColor: colors.card,
+  phoneRow: { flexDirection: 'row', gap: spacing.sm },
+  cc: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    height: 52,
     justifyContent: 'center',
-    height: 52,
   },
-  countryCodeText: {
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
-  phoneInput: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 52,
-    fontSize: 18,
-    color: colors.text,
-    letterSpacing: 1,
-  },
-  textInput: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 52,
-    fontSize: 16,
-    color: colors.text,
-  },
+  phoneInput: { flex: 1, letterSpacing: 1 },
   otpInput: {
-    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    borderRadius: radius.md,
     height: 56,
     fontSize: 24,
-    color: colors.text,
     textAlign: 'center',
-    letterSpacing: 12,
+    letterSpacing: 10,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-
-  // Buttons
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
+  otpBanner: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  primaryBtn: {
     height: 52,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButton: {
+  primaryBtnText: { fontSize: 16, fontWeight: '600' },
+  secondaryBtn: {
+    height: 52,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.textSecondary,
+  secondaryBtnText: { fontSize: 16, fontWeight: '600' },
+  disabled: { opacity: 0.45 },
+  orRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.xs },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  orText: { fontSize: 13, fontWeight: '500' },
+  linkBtn: { alignItems: 'center', paddingVertical: spacing.sm },
+  linkText: { fontSize: 14, fontWeight: '500' },
+  errorBox: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
   },
-  linkButton: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  linkText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '500',
-  },
-
-  // OTP info
-  otpInfoBox: {
-    backgroundColor: colors.primaryLight,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  otpInfoText: {
-    fontSize: 14,
-    color: colors.primary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-
-  terms: {
-    fontSize: 12,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: 32,
-    lineHeight: 18,
-  },
+  errorText: { fontSize: 14, lineHeight: 20 },
+  terms: { fontSize: 12, textAlign: 'center', marginTop: spacing.xxl, lineHeight: 18 },
 });

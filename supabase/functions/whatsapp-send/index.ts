@@ -30,7 +30,7 @@ For admission Candidates *MUST*
 Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
 
 For any details please call 9555192192
-9667691872
+9667641872
 7428499849`;
 }
 
@@ -45,7 +45,7 @@ Both are mandatory:
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192
+Help: 7428499849, 9667641872, 9555192192
 
 ---
 
@@ -59,18 +59,23 @@ Last date: *14th June 2026*.
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192`;
+Help: 7428499849, 9667641872, 9555192192`;
 }
 
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
+  // Navya (AI voice agent): staff alert when a campus visit is booked mid-call.
+  navya_visit_alert: { name: "navya_visit_alert", params: ["staff_name", "student_name", "course_name", "visit_datetime", "owner_name"] },
+  // Navya: transactional post-call details (UTILITY — replaces marketing-capped
+  // course templates for "send me the apply link" requests).
+  call_requested_details: { name: "call_requested_details", params: ["student_name", "course_context"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
-  // Meta-approved template is named `application_submitted` (see
+  // Meta-approved template is named `application_submitted_v2` (see
   // submit-wa-templates). Internal key stays `application_received` for
   // backwards compatibility with callers, AutomationRules, and the inbox UI.
-  application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
+  application_received: { name: "application_submitted_v2", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
@@ -133,8 +138,8 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // approved there, sends fail gracefully and the trigger logs the URL
   // for manual delivery via lead_activities.
 
-  // 1. Application submitted — confirms receipt, attaches form PDF as button URL.
-  application_submitted:  { name: "application_submitted",  params: ["student_name", "application_id"] },
+  // 1. Application submitted — confirms receipt, attaches form PDF as document header.
+  application_submitted:  { name: "application_submitted_v2",  params: ["student_name", "application_id"] },
   // 2. Application fee paid — receipt PDF as document-header template.
   app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
   app_fee_receipt_pdf:    { name: "app_fee_receipt_pdf",    params: ["student_name", "amount", "application_id"] },
@@ -370,6 +375,9 @@ Deno.serve(async (req) => {
       header_document_filename,
       clear_unread_after_send,
       rendered_template,
+      provider,
+      business_number,
+      business_phone_number_id,
     } = requestBody;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
@@ -661,9 +669,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sendResult = await sendWhatsAppTemplate(admin as any, {
-      route: channelRoute,
-    }, waPhone, {
+    const requestedProvider = provider === "plivo" || provider === "meta" ? provider : null;
+    const requestedBusinessNumber = typeof business_number === "string" ? business_number.replace(/[^0-9]/g, "") : null;
+    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const sendResult = await sendWhatsAppTemplate(admin as any, requestedProvider
+      ? {
+        provider: requestedProvider,
+        route: requestedProvider === "plivo" ? "plivo_admissions" : channelRoute,
+        businessNumber: requestedBusinessNumber || requestedPhoneNumberId,
+        businessPhoneNumberId: requestedPhoneNumberId,
+      }
+      : {
+        route: channelRoute,
+      }, waPhone, {
       name: templateDef.name,
       language: "en",
       components,
@@ -701,7 +719,7 @@ Deno.serve(async (req) => {
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
-      application_submitted: "Hi {{1}}, your application ({{2}}) has been received. Please pay the application fee to begin processing. The completed form PDF is attached for your records.",
+      application_submitted: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
       app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       app_fee_receipt_pdf: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",

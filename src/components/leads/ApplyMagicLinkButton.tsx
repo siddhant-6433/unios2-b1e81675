@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
 interface Props {
   leadId: string;
@@ -16,6 +17,14 @@ interface Props {
   /** Skip the share dialog: generate a short-lived link and open it in a new
    *  tab immediately (lets staff preview the portal as the student). */
   directOpen?: boolean;
+  /** Render as a dropdown-menu item instead of a standalone button.
+   *  (Direct-open only — for the share dialog use the controlled mode below.) */
+  asMenuItem?: boolean;
+  /** Controlled, trigger-less mode: render just the share dialog, open state
+   *  driven by the parent. Used to surface "Send Login Link" from a menu
+   *  without nesting a Dialog inside a (self-unmounting) dropdown. */
+  controlledOpen?: boolean;
+  onControlledOpenChange?: (open: boolean) => void;
 }
 
 const EXPIRY_OPTIONS: { label: string; hours: number }[] = [
@@ -44,9 +53,18 @@ export function ApplyMagicLinkButton({
   label,
   startNew = false,
   directOpen = false,
+  asMenuItem = false,
+  controlledOpen,
+  onControlledOpenChange,
 }: Props) {
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = (o: boolean) => {
+    if (isControlled) onControlledOpenChange?.(o);
+    else setInternalOpen(o);
+  };
   const [hours, setHours] = useState(168);
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<{ url: string; expiresAt: string } | null>(null);
@@ -198,6 +216,107 @@ export function ApplyMagicLinkButton({
     setCopied(false);
   };
 
+  const menuLabel = label || (mode === "academic_partner_on_behalf"
+    ? (directOpen ? "Open Application" : "Copy On-Behalf Link")
+    : (directOpen ? "View as Student" : "Send Login Link"));
+
+  const shareDialog = (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
+      <DialogContent className="max-w-md w-[min(92vw,28rem)]">
+        <DialogHeader>
+          <DialogTitle>{mode === "academic_partner_on_behalf" ? "On-Behalf Application Link" : "Apply Portal Login Link"}</DialogTitle>
+        </DialogHeader>
+
+        {!generated ? (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {mode === "academic_partner_on_behalf"
+                ? `Generate a scoped link so you can complete the application for ${leadName || "this lead"}. Actions are audited under your academic partner account.`
+                : `Generate a one-click login link for ${leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.`}
+            </p>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Validity</label>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                {EXPIRY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.hours}
+                    type="button"
+                    onClick={() => setHours(opt.hours)}
+                    className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                      hours === opt.hours
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button onClick={generate} disabled={generating || !leadPhone} className="w-full">
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate Link"}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Link valid until <span className="font-medium text-foreground">
+                {new Date(generated.expiresAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+              </span>.
+            </p>
+
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 overflow-hidden">
+              <code className="flex-1 min-w-0 break-all text-xs text-foreground leading-snug" title={generated.url}>{generated.url}</code>
+              <button
+                onClick={copy}
+                className="shrink-0 rounded-md p-1.5 hover:bg-background transition-colors"
+                aria-label="Copy link"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="pill-outline" size="pill" onClick={openGeneratedLink}>
+                <ExternalLink className="h-4 w-4" /> Open
+              </Button>
+              <Button variant="pill-outline" size="pill" onClick={copy}>
+                {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
+              </Button>
+              <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-success hover:bg-success/60">
+                <MessageCircle className="h-4 w-4" /> Send via WhatsApp
+              </Button>
+            </div>
+
+            <button
+              onClick={reset}
+              className="w-full text-xs text-muted-foreground hover:text-foreground"
+            >
+              Generate a different link
+            </button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
+  // Controlled, trigger-less mode: just the dialog, driven by the parent.
+  if (isControlled) return shareDialog;
+
+  // Menu-item mode: direct-open actions are a plain onClick, so they nest
+  // safely in a dropdown. (Dialog actions can't — the dropdown unmounts them
+  // when it closes; use controlled mode for those instead.)
+  if (asMenuItem && directOpen) {
+    return (
+      <DropdownMenuItem disabled={!leadPhone || opening} onSelect={() => openAsStudent()}>
+        {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+        {menuLabel}
+      </DropdownMenuItem>
+    );
+  }
+
   // Direct-open mode: bypass the share dialog and open the portal in a new tab
   // immediately. Two flavours — compact icon (table cells) and labelled button.
   if (directOpen) {
@@ -243,86 +362,7 @@ export function ApplyMagicLinkButton({
   return (
     <>
       {trigger}
-
-      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
-        <DialogContent className="max-w-md w-[min(92vw,28rem)]">
-          <DialogHeader>
-            <DialogTitle>{mode === "academic_partner_on_behalf" ? "On-Behalf Application Link" : "Apply Portal Login Link"}</DialogTitle>
-          </DialogHeader>
-
-          {!generated ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {mode === "academic_partner_on_behalf"
-                  ? `Generate a scoped link so you can complete the application for ${leadName || "this lead"}. Actions are audited under your academic partner account.`
-                  : `Generate a one-click login link for ${leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.`}
-              </p>
-
-              <div>
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Validity</label>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  {EXPIRY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.hours}
-                      type="button"
-                      onClick={() => setHours(opt.hours)}
-                      className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
-                        hours === opt.hours
-                          ? "border-primary bg-primary/10 text-primary font-medium"
-                          : "border-border hover:bg-muted"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <Button onClick={generate} disabled={generating || !leadPhone} className="w-full">
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate Link"}
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Link valid until <span className="font-medium text-foreground">
-                  {new Date(generated.expiresAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
-                </span>.
-              </p>
-
-              <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 overflow-hidden">
-                <code className="flex-1 min-w-0 break-all text-xs text-foreground leading-snug" title={generated.url}>{generated.url}</code>
-                <button
-                  onClick={copy}
-                  className="shrink-0 rounded-md p-1.5 hover:bg-background transition-colors"
-                  aria-label="Copy link"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button variant="pill-outline" size="pill" onClick={openGeneratedLink}>
-                  <ExternalLink className="h-4 w-4" /> Open
-                </Button>
-                <Button variant="pill-outline" size="pill" onClick={copy}>
-                  {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
-                </Button>
-                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-success hover:bg-success/60">
-                  <MessageCircle className="h-4 w-4" /> Send via WhatsApp
-                </Button>
-              </div>
-
-              <button
-                onClick={reset}
-                className="w-full text-xs text-muted-foreground hover:text-foreground"
-              >
-                Generate a different link
-              </button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {shareDialog}
     </>
   );
 }

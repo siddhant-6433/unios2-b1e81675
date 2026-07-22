@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import uniosLogo from "@/assets/unios-logo.png";
 import { Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck } from "lucide-react";
 
-// Public payment-link landing page. Used when the gateway isn't a Razorpay
-// hosted link, and as the callback landing page for Razorpay links. The URL
-// token is the only credential; all reads/writes go through the pay-link edge
-// function (service role) — there is no anon RLS on payment_links.
+// Public payment-link landing page.
+// - Razorpay hosted: redirect to short_url when present
+// - Razorpay checkout: Standard Checkout on this page
+// - Easebuzz: open pay_url popup and poll until payment_links.status=paid
 
 type Step = "loading" | "ready" | "paying" | "done" | "error";
 
@@ -52,6 +52,15 @@ export default function PayLink() {
   const [step, setStep] = useState<Step>("loading");
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<Resolved | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const popupRef = useRef<Window | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
 
   const callFn = async (action: string, extra: Record<string, unknown> = {}) => {
     const { data, error: fnErr } = await supabase.functions.invoke("pay-link", {
@@ -67,6 +76,10 @@ export default function PayLink() {
     if (data?.error) throw new Error(data.error);
     return data;
   };
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
   useEffect(() => {
     if (!token) { setStep("error"); setError("Missing payment token."); return; }
@@ -96,8 +109,9 @@ export default function PayLink() {
         }
         if (data.status === "paid") { setStep("done"); return; }
         if (data.status !== "active") { setStep("error"); setError(`This link is ${data.status}.`); return; }
-        // If the link is a Razorpay hosted link, redirect the payer there.
-        if (data.gateway === "razorpay" && data.short_url) {
+        // If the link is a Razorpay or Easebuzz *hosted* short URL, redirect there.
+        // UniOs /pay page with gateway=easebuzz (no short_url) stays here for popup checkout.
+        if (data.short_url && (data.gateway === "razorpay" || data.gateway === "easebuzz")) {
           window.location.href = data.short_url;
           return;
         }
@@ -110,13 +124,71 @@ export default function PayLink() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handlePay = async () => {
+  const pollUntilPaid = () => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const data = (await callFn("resolve")) as Resolved;
+        setLink(data);
+        if (data.status === "paid") {
+          stopPolling();
+          if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+          setStep("done");
+        }
+      } catch {
+        // keep polling
+      }
+    }, 2000);
+  };
+
+  const handlePayEasebuzz = async () => {
+    if (!link) return;
+    setStep("paying");
+    setError(null);
+    try {
+      const order = await callFn("create-order", { gateway: "easebuzz" });
+      if (!order?.pay_url) throw new Error("Could not start Easebuzz checkout.");
+      popupRef.current = window.open(
+        order.pay_url,
+        "easebuzz_pay_link",
+        "width=680,height=720,scrollbars=yes,resizable=yes",
+      );
+      if (!popupRef.current) {
+        throw new Error("Popup was blocked. Please allow popups and try again.");
+      }
+      pollUntilPaid();
+      // Also stop when popup closes
+      const closeWatch = setInterval(async () => {
+        if (popupRef.current?.closed) {
+          clearInterval(closeWatch);
+          try {
+            const data = (await callFn("resolve")) as Resolved;
+            setLink(data);
+            if (data.status === "paid") {
+              stopPolling();
+              setStep("done");
+              return;
+            }
+          } catch { /* ignore */ }
+          stopPolling();
+          setStep("ready");
+          setError("Payment window closed. If money was deducted it will update automatically within a few minutes.");
+        }
+      }, 800);
+    } catch (e) {
+      stopPolling();
+      setStep("ready");
+      setError(e instanceof Error ? e.message : "Payment failed. Please try again.");
+    }
+  };
+
+  const handlePayRazorpay = async () => {
     if (!link) return;
     setStep("paying");
     setError(null);
     try {
       await loadRazorpayScript();
-      const order = await callFn("create-order");
+      const order = await callFn("create-order", { gateway: "razorpay" });
       const key = order.key_id;
       if (!key || !window.Razorpay) throw new Error("Payment gateway unavailable.");
       await new Promise<void>((resolve, reject) => {
@@ -151,6 +223,16 @@ export default function PayLink() {
       setError(e instanceof Error ? e.message : "Payment failed. Please try again.");
     }
   };
+
+  const handlePay = () => {
+    const gw = (link?.gateway || "razorpay").toLowerCase();
+    if (gw === "easebuzz") return handlePayEasebuzz();
+    return handlePayRazorpay();
+  };
+
+  const gatewayLabel = (link?.gateway || "razorpay").toLowerCase() === "easebuzz"
+    ? "Easebuzz"
+    : "Razorpay";
 
   return (
     <div className="min-h-screen bg-muted/30 flex flex-col items-center justify-center p-4 animate-fade-in">
@@ -204,7 +286,7 @@ export default function PayLink() {
               {step === "paying" ? "Processing…" : `Pay ₹${Number(link.amount).toLocaleString("en-IN")}`}
             </button>
             <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-3 w-3" /> Secured by Razorpay
+              <ShieldCheck className="h-3 w-3" /> Secured by {gatewayLabel}
             </p>
           </div>
         )}

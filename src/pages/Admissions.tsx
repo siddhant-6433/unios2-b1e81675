@@ -47,6 +47,7 @@ import {
   applyAdmissionsListQueryFilters,
   hasActiveAdmissionsListFilters,
   type AdmissionsListFilterModel,
+  type AdmissionsSharedWithNimtFilter,
 } from "@/lib/admissionsListRead";
 
 const AddLeadDialog = lazy(() =>
@@ -201,6 +202,7 @@ interface Lead {
   lead_temperature: "hot" | "warm" | "cold";
   lead_institution_type: "school" | "college" | null;
   ai_called?: boolean;
+  shared_with_nimt?: boolean;
   course_name?: string;
   campus_name?: string;
   counsellor_name?: string;
@@ -268,6 +270,7 @@ const Admissions = () => {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
+  const [sharedWithNimtFilter, setSharedWithNimtFilter] = useState<AdmissionsSharedWithNimtFilter>("all");
   const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -473,6 +476,7 @@ const Admissions = () => {
     applicationStageLeadScope,
     roleFilter,
     tempFilter,
+    sharedWithNimtFilter,
     debouncedSearch,
     fromDate,
     toDate,
@@ -498,6 +502,7 @@ const Admissions = () => {
     applicationStageLeadScope,
     roleFilter,
     tempFilter,
+    sharedWithNimtFilter,
     debouncedSearch,
     fromDate,
     toDate,
@@ -827,7 +832,7 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
-    stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
+    stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter, sharedWithNimtFilter,
     applicationStageFilter, applicationStageLeadScope, fromDate, toDate, leadSortOrder, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds, newLeadAssignmentFilter,
   ]);
@@ -1315,7 +1320,7 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, newLeadAssignmentFilter, fromDate, toDate, leadSortOrder]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, sharedWithNimtFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, newLeadAssignmentFilter, fromDate, toDate, leadSortOrder]);
 
   const handleNewLeadAssignmentClick = (assignment: NewLeadAssignmentFilter | null) => {
     setNewLeadAssignmentFilter(assignment);
@@ -2423,6 +2428,17 @@ const Admissions = () => {
             <option value="warm">Warm</option>
             <option value="cold">Cold</option>
           </select>
+          {isSuperAdmin && (
+            <select
+              value={sharedWithNimtFilter}
+              onChange={(e) => setSharedWithNimtFilter(e.target.value as AdmissionsSharedWithNimtFilter)}
+              title="Academic-partner sharing with the NIMT admissions team"
+              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+              <option value="all">All NIMT sharing</option>
+              <option value="shared">Shared with NIMT</option>
+              <option value="not_shared">Not shared with NIMT</option>
+            </select>
+          )}
           {canFilterByCounsellor && (
             <select value={counsellorFilter} onChange={(e) => setCounsellorFilter(e.target.value)}
               className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
@@ -2510,6 +2526,7 @@ const Admissions = () => {
                 setSourceFilter("all");
                 setRoleFilter("all");
                 setTempFilter("all");
+                setSharedWithNimtFilter("all");
                 setSearch("");
                 setView("list");
                 setPage(1);
@@ -2556,9 +2573,14 @@ const Admissions = () => {
                         <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
                           <div className="flex items-start justify-between">
                             <div className="pr-6">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
                                 <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                                {lead.shared_with_nimt === false && (
+                                  <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
+                                    Not shared with NIMT
+                                  </span>
+                                )}
                               </div>
                               <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
                             </div>
@@ -2672,6 +2694,11 @@ const Admissions = () => {
                       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <span className="font-medium text-foreground text-sm truncate">{lead.name}</span>
                         <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                        {lead.shared_with_nimt === false && (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 shrink-0" title="Academic-partner lead not shared with the NIMT team">
+                            Not shared with NIMT
+                          </span>
+                        )}
                         <span onClick={(e) => e.stopPropagation()}>
                           <ExamPendingBadge
                             leadId={lead.id}

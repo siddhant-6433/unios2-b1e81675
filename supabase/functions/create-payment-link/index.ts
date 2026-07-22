@@ -52,6 +52,76 @@ async function razorpayCreatePaymentLink(
   return { ok: true, id: String(data.id || ""), short_url: String(data.short_url || "") };
 }
 
+async function sha512(message: string): Promise<string> {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-512", msgBuffer);
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Optional Easebuzz EasyCollect Create Link API.
+ * Hash: key|merchant_txn|name|email|phone|amount|udf1|udf2|udf3|udf4|udf5|message|salt
+ * Only used when EASEBUZZ_EASYCOLLECT_URL is set (merchant-enabled product).
+ */
+async function easebuzzEasyCollectCreateLink(opts: {
+  merchantTxn: string;
+  name: string;
+  email: string;
+  phone: string;
+  amount: number;
+  message: string;
+  udf1?: string;
+}): Promise<{ ok: boolean; id?: string; short_url?: string; error?: string }> {
+  const key = Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY") || "";
+  const salt = Deno.env.get("EASEBUZZ_SALT") || Deno.env.get("EASEBUZZ_MERCHANT_SALT") || "";
+  const endpoint = Deno.env.get("EASEBUZZ_EASYCOLLECT_URL") || "";
+  if (!key || !salt || !endpoint) {
+    return { ok: false, error: "EasyCollect not configured (set EASEBUZZ_EASYCOLLECT_URL)" };
+  }
+  const amountStr = Number(opts.amount).toFixed(2);
+  const email = opts.email || "noreply@nimteducation.com";
+  const phone = opts.phone.replace(/\D/g, "").slice(-10) || "9999999999";
+  const udf1 = opts.udf1 || "";
+  const message = (opts.message || "Payment").slice(0, 200);
+  const hashInput = [key, opts.merchantTxn, opts.name, email, phone, amountStr, udf1, "", "", "", "", message, salt].join("|");
+  const hash = await sha512(hashInput);
+  const body = new URLSearchParams({
+    key,
+    merchant_txn: opts.merchantTxn,
+    name: opts.name,
+    email,
+    phone,
+    amount: amountStr,
+    udf1,
+    udf2: "",
+    udf3: "payment_link",
+    udf4: "",
+    udf5: "",
+    message,
+    hash,
+  });
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    const data = await res.json().catch(() => ({}));
+    // Response shapes vary by account; accept common fields.
+    const link = data?.data?.payment_url || data?.data?.link || data?.payment_url || data?.link || data?.data;
+    const id = data?.data?.id || data?.data?.merchant_txn || data?.id || opts.merchantTxn;
+    if (!res.ok || data?.status === 0 || data?.status === false) {
+      return { ok: false, error: data?.error_desc || data?.message || JSON.stringify(data).slice(0, 200) };
+    }
+    if (typeof link === "string" && link.startsWith("http")) {
+      return { ok: true, id: String(id), short_url: link };
+    }
+    return { ok: false, error: "EasyCollect response missing payment URL" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "EasyCollect request failed" };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -88,6 +158,9 @@ Deno.serve(async (req) => {
     const sendChannel = String(parsed.send_channel || "none"); // 'whatsapp' | 'email' | 'both' | 'none'
     const wantsWhatsApp = sendChannel === "whatsapp" || sendChannel === "both";
     const wantsEmail = sendChannel === "email" || sendChannel === "both";
+    // gateway: 'razorpay' | 'easebuzz' | 'auto' (default)
+    // auto = Razorpay hosted link if keys exist, else Easebuzz on /pay/<token>
+    const gatewayPref = String(parsed.gateway || "auto").toLowerCase();
 
     if (!["pre_admission_token", "fee_due", "custom"].includes(purpose)) {
       return json({ error: "Invalid purpose" }, 400);
@@ -111,7 +184,16 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const consultantId: string | null = consultantRow?.id || null;
 
-    if (!isStaff && !consultantId) {
+    // Academic partner identity (if any). Partners send payment links from their
+    // portal, scoped to leads/students attributed to them.
+    const { data: partnerRow } = await admin
+      .from("academic_partners")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const academicPartnerId: string | null = partnerRow?.id || null;
+
+    if (!isStaff && !consultantId && !academicPartnerId) {
       return json({ error: "Not authorised to send payment links" }, 403);
     }
 
@@ -132,6 +214,26 @@ Deno.serve(async (req) => {
         }
       }
       if (!linked) return json({ error: "This candidate is not linked to your consultant account" }, 403);
+    }
+
+    // If an academic partner (and not staff), verify the target is attributed to
+    // their partner account.
+    if (!isStaff && !consultantId && academicPartnerId) {
+      let linked = false;
+      if (leadId) {
+        const { data: lead } = await admin
+          .from("leads").select("academic_partner_id").eq("id", leadId).maybeSingle();
+        linked = lead?.academic_partner_id === academicPartnerId;
+      } else if (studentId) {
+        const { data: student } = await admin
+          .from("students").select("lead_id").eq("id", studentId).maybeSingle();
+        if (student?.lead_id) {
+          const { data: lead } = await admin
+            .from("leads").select("academic_partner_id").eq("id", student.lead_id).maybeSingle();
+          linked = lead?.academic_partner_id === academicPartnerId;
+        }
+      }
+      if (!linked) return json({ error: "This candidate is not attributed to your academic partner account" }, 403);
     }
 
     // --- Resolve payer contact -----------------------------------------------
@@ -174,24 +276,25 @@ Deno.serve(async (req) => {
     let gateway: string | null = null;
     let gatewayLinkId: string | null = null;
     let shortUrl: string | null = null;
+    const purposeLabel = purpose === "pre_admission_token"
+      ? "Token fee prior to admission"
+      : purpose === "fee_due" ? "Fee due" : "Payment";
 
-    // --- Razorpay hosted payment link (preferred when configured) ------------
-    if (keyId && keySecret) {
+    // --- Gateway: Razorpay hosted, Easebuzz EasyCollect, or UniOs /pay page --
+    const wantRazorpay = gatewayPref === "razorpay" || gatewayPref === "auto";
+    const wantEasebuzz = gatewayPref === "easebuzz" || gatewayPref === "auto";
+
+    if (wantRazorpay && keyId && keySecret && gatewayPref !== "easebuzz") {
       const rp = await razorpayCreatePaymentLink(keyId, keySecret, {
         amount: Math.round(amount * 100),
         currency: "INR",
         accept_partial: false,
-        description: note || (purpose === "pre_admission_token"
-          ? "Token fee prior to admission"
-          : purpose === "fee_due" ? "Fee due" : "Payment"),
+        description: note || purposeLabel,
         customer: {
           name: payerName,
           ...(payerEmail ? { email: payerEmail } : {}),
           ...(payerPhone ? { contact: payerPhone } : {}),
         },
-        // Razorpay delivers the link natively. SMS stands in for WhatsApp until
-        // a Meta template for payment links is approved (whatsapp-send is
-        // template-only and no approved template carries an arbitrary pay URL).
         notify: { sms: wantsWhatsApp && !!payerPhone, email: wantsEmail && !!payerEmail },
         reminder_enable: true,
         notes: { payment_link_id: linkRow.id, purpose },
@@ -204,9 +307,39 @@ Deno.serve(async (req) => {
         shortUrl = rp.short_url || null;
         payUrl = shortUrl || ourUrl;
       } else {
-        // Fall back to our own page; log but don't fail the request.
         console.error("[create-payment-link] razorpay link failed:", rp.error);
       }
+    }
+
+    // Easebuzz EasyCollect hosted link (optional product — needs EASEBUZZ_EASYCOLLECT_URL)
+    if (!gateway && wantEasebuzz) {
+      const merchantTxn = `EC${linkRow.id.replace(/-/g, "").slice(0, 16)}${Date.now()}`.slice(0, 40);
+      const ec = await easebuzzEasyCollectCreateLink({
+        merchantTxn,
+        name: payerName,
+        email: payerEmail || "noreply@nimteducation.com",
+        phone: payerPhone || "",
+        amount,
+        message: note || purposeLabel,
+        udf1: linkRow.id,
+      });
+      if (ec.ok && ec.short_url) {
+        gateway = "easebuzz";
+        gatewayLinkId = ec.id || merchantTxn;
+        shortUrl = ec.short_url;
+        payUrl = shortUrl;
+      } else {
+        // Fall back: UniOs /pay page will open Easebuzz checkout on Pay click
+        console.warn("[create-payment-link] EasyCollect unavailable, using /pay page:", ec.error);
+        gateway = "easebuzz";
+        payUrl = ourUrl;
+      }
+    }
+
+    // Final fallback if nothing selected
+    if (!gateway) {
+      gateway = keyId && keySecret ? "razorpay" : "easebuzz";
+      payUrl = ourUrl;
     }
 
     await admin

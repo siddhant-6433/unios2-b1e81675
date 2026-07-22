@@ -33,7 +33,7 @@ For admission Candidates *MUST*
 Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
 
 For any details please call 9555192192
-9667691872
+9667641872
 7428499849`;
 }
 
@@ -48,7 +48,7 @@ Both are mandatory:
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192
+Help: 7428499849, 9667641872, 9555192192
 
 ---
 
@@ -62,7 +62,7 @@ Last date: *14th June 2026*.
 1. NIMT application: https://apply.nimt.ac.in
 2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-Help: 7428499849, 9667691872, 9555192192`;
+Help: 7428499849, 9667641872, 9555192192`;
 }
 
 // Each template has BODY (parameterised) + optionally HEADER / BUTTONS.
@@ -93,18 +93,19 @@ const TEMPLATES = [
     ],
   },
   {
-    name: "application_submitted",
+    name: "application_submitted_v2",
     category: "UTILITY",
     language: "en",
     components: [
       {
-        type: "BODY",
-        text: "Hi {{1}}, your application ({{2}}) has been received at NIMT Educational Institutions. Please complete the application fee payment to begin processing. Your form PDF is available in the apply portal.",
-        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
       },
       {
-        type: "BUTTONS",
-        buttons: [{ type: "URL", text: "Open Apply Portal", url: "https://uni.nimt.ac.in/apply" }],
+        type: "BODY",
+        text: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
+        example: { body_text: [["Rahul Sharma", "APP-26-AB12"]] },
       },
     ],
   },
@@ -586,6 +587,44 @@ const TEMPLATES = [
       {
         type: "BUTTONS",
         buttons: [{ type: "URL", text: "Open Video Portal", url: "https://uni.nimt.ac.in/video-editor" }],
+      },
+    ],
+  },
+  // ── Navya (AI voice agent) notifications ─────────────────────────────────
+  // Staff alert when Navya books a campus visit during a live call. Sent to
+  // the lead owner + leadership phones (config: navya_visit_wa_staff_recipients).
+  {
+    name: "navya_visit_alert",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, Navya (AI counsellor) booked a campus visit during a live call.\n\nStudent: {{2}}\nCourse: {{3}}\nVisit: {{4}}\nLead owner: {{5}}\n\nPlease prepare for the visit and confirm with the student.",
+        example: { body_text: [["Kushal Chauhan", "Rahul Sharma", "MBA", "Sun 13 Jul, 11:00 AM", "Rahul Bhati"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Lead", url: "https://uni.nimt.ac.in/admissions" }],
+      },
+    ],
+  },
+  // Post-call details the caller explicitly requested — transactional wording
+  // keeps this UTILITY (course_info* templates get flipped to MARKETING and
+  // hit Meta's per-user frequency cap; this one must not).
+  {
+    name: "call_requested_details",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, sharing the details you requested during our call today regarding {{2}}. Tap below to open your application. If you need anything else, simply reply to this message and our admissions team will assist you.",
+        example: { body_text: [["Rahul Sharma", "GNM admission at NIMT"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Application", url: "https://uni.nimt.ac.in/apply/nimt" }],
       },
     ],
   },

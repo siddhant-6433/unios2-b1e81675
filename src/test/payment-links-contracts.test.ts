@@ -108,6 +108,15 @@ describe("create-payment-link edge function", () => {
     expect(createLinkFn).toContain('from("leads").select("consultant_id").eq("id", leadId)');
   });
 
+  it("authorizes academic partners for their own attributed leads/students only", () => {
+    // Partner identity is resolved and included in the auth gate.
+    expect(createLinkFn).toContain('from("academic_partners")');
+    expect(createLinkFn).toContain("if (!isStaff && !consultantId && !academicPartnerId)");
+    // Scope is verified against leads.academic_partner_id server-side.
+    expect(createLinkFn).toContain('from("leads").select("academic_partner_id").eq("id", leadId)');
+    expect(createLinkFn).toContain('return json({ error: "This candidate is not attributed to your academic partner account" }, 403);');
+  });
+
   it("requires auth and validates purpose/amount at the boundary", () => {
     expect(createLinkFn).toContain('if (!authHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);');
     expect(createLinkFn).toContain('if (!["pre_admission_token", "fee_due", "custom"].includes(purpose))');

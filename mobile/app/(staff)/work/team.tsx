@@ -161,6 +161,19 @@ export default function TeamScreen() {
 
         {/* Employee Directory */}
         <Text style={styles.sectionTitle}>Employee Directory ({filtered.length})</Text>
+        {filtered.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Users size={28} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>
+              {employees.length === 0 ? 'No staff in directory' : 'No matches'}
+            </Text>
+            <Text style={styles.emptySub}>
+              {employees.length === 0
+                ? 'Staff profiles with roles will appear here. If you expect people, check user_roles and profile permissions.'
+                : 'Try a different search.'}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.listCard}>
           {filtered.map((emp) => {
             const isPunchedIn = todayPunched.has(emp.user_id);
@@ -220,6 +233,20 @@ const styles = StyleSheet.create({
   offName: { fontSize: 11, color: colors.textSecondary, marginTop: 4, textAlign: 'center' },
 
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: 8 },
+
+  emptyBox: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginTop: 4 },
+  emptySub: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', lineHeight: 18 },
 
   listCard: {
     backgroundColor: colors.card, borderRadius: 14,

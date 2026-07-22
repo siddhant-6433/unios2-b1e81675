@@ -17,7 +17,7 @@ import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
-  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2,
+  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -54,7 +54,7 @@ const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
     "Hi {{student_name}}, this is a reminder that a fee payment of Rs.{{amount}} is due by {{due_date}}. Please complete the payment to avoid any delays.",
   bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
   cnet_not_qualified_bpt_bmrit:
-    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
+    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192",
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
@@ -391,15 +391,25 @@ const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admi
 const HR_BUSINESS_PNID = "970526789470416";
 const HR_BUSINESS_NUMBER = "9599675267";
 const PLIVO_WHATSAPP_NUMBER = "919555192192";
-const PRIMARY_META_WHATSAPP_NUMBER = "919667691872";
+// 9555192192 moved from Plivo BSP to direct Meta Cloud API (coexistence). Meta
+// delivers it with this phone_number_id; Plivo-era conversations still carry the
+// bare number as their id, so both resolve to the same "9555192192 Inbox" tab.
+const COEXIST_META_PNID = "1216095224919854";
+const PRIMARY_META_WHATSAPP_NUMBER = "919667641872";
+const PRIMARY_META_PNID = "1075269918995469";
+const SECONDARY_META_PNID = "108464108729604";
+const SECONDARY_META_WHATSAPP_NUMBER = "918130107839";
 const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
 const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
-  "1075269918995469": "917428499849",
+  [PRIMARY_META_PNID]: PRIMARY_META_WHATSAPP_NUMBER,
+  [SECONDARY_META_PNID]: SECONDARY_META_WHATSAPP_NUMBER,
+  [COEXIST_META_PNID]: PLIVO_WHATSAPP_NUMBER,
   [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
 };
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
-  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
-  { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", provider: "meta" },
+  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "meta" },
+  { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", provider: "meta" },
+  { id: SECONDARY_META_WHATSAPP_NUMBER, label: "8130107839 Inbox", provider: "meta" },
   { id: "917428499849", label: "7428499849 Inbox", provider: "meta" },
 ];
 
@@ -802,13 +812,22 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const loadingConversationsRef = useRef(false);
 
+  // Reply media attachment
+  const [replyMedia, setReplyMedia] = useState<{ file: File; url: string; type: string } | null>(null);
+  const replyMediaInputRef = useRef<HTMLInputElement>(null);
+
+  // Flag & correct bot replies
+  const [flaggingMsgId, setFlaggingMsgId] = useState<string | null>(null);
+  const [correctionDraft, setCorrectionDraft] = useState("");
+  const [sendingCorrection, setSendingCorrection] = useState(false);
+
   // Admin-only state
   const [counsellorList, setCounsellorList] = useState<{ id: string; name: string }[]>([]);
   const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
-  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned">("all");
+  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned" | "marketing_outbound">("all");
 
   // Quick-action followup dialog
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -845,7 +864,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (!demoMode) return;
     setConversations(DEMO_CONVERSATIONS);
     setDetectedInboxChannels([
-      { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", n: DEMO_CONVERSATIONS.length },
+      { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", n: DEMO_CONVERSATIONS.length },
       { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", n: 0 },
     ]);
     setCounsellorList([
@@ -1124,47 +1143,62 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     const variants = businessChannelVariants(selectedBusinessNumber);
     if (variants.length === 0) return [];
 
-    const messageColumns = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read";
-    const applyChannelFilter = (query: any) => query.or(
-      variants
-        .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+    const messageColumnsFull = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read";
+    const messageColumnsLegacy = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, is_read";
+
+    const applyChannelFilter = (query: any, includeBusinessNumber = true) => query.or(
+      (includeBusinessNumber
+        ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+        : variants.map(v => `business_phone_number_id.eq.${v}`))
         .join(","),
     );
 
-    const recentMessagesQuery = applyChannelFilter(
-      supabase
-        .from("whatsapp_messages" as any)
-        .select(messageColumns)
-        .order("created_at", { ascending: false })
-        .limit(CONVERSATION_PAGE_SIZE * 5),
-    );
+    let seedRows: MessageConversationSeed[] = [];
+    let lastMessageError: any = null;
+    for (const includeBusinessNumber of [true, false]) {
+      const messageColumns = includeBusinessNumber ? messageColumnsFull : messageColumnsLegacy;
+      const recentMessagesQuery = applyChannelFilter(
+        supabase
+          .from("whatsapp_messages" as any)
+          .select(messageColumns)
+          .order("created_at", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE * 5),
+        includeBusinessNumber,
+      );
+      const inboundMessagesQuery = applyChannelFilter(
+        supabase
+          .from("whatsapp_messages" as any)
+          .select(messageColumns)
+          .eq("direction", "inbound")
+          .order("created_at", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE * 5),
+        includeBusinessNumber,
+      );
 
-    const inboundMessagesQuery = applyChannelFilter(
-      supabase
-        .from("whatsapp_messages" as any)
-        .select(messageColumns)
-        .eq("direction", "inbound")
-        .order("created_at", { ascending: false })
-        .limit(CONVERSATION_PAGE_SIZE * 5),
-    );
+      const [recentMessages, inboundMessages] = await Promise.all([
+        recentMessagesQuery,
+        inboundMessagesQuery,
+      ]);
 
-    const [recentMessages, inboundMessages] = await Promise.all([
-      recentMessagesQuery,
-      inboundMessagesQuery,
-    ]);
+      const error = recentMessages.error || inboundMessages.error;
+      if (!error) {
+        lastMessageError = null;
+        const seedById = new Map<string, MessageConversationSeed>();
+        for (const row of ([...(recentMessages.data || []), ...(inboundMessages.data || [])] as any[] as MessageConversationSeed[])) {
+          const key = row.id || `${row.phone}:${row.created_at}:${row.direction}:${row.content || ""}`;
+          if (!seedById.has(key)) seedById.set(key, row);
+        }
+        seedRows = [...seedById.values()]
+          .filter(row => row.phone && row.created_at)
+          .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+        break;
+      }
 
-    const error = recentMessages.error || inboundMessages.error;
-    if (error) throw error;
-
-    const seedById = new Map<string, MessageConversationSeed>();
-    for (const row of ([...(recentMessages.data || []), ...(inboundMessages.data || [])] as any[] as MessageConversationSeed[])) {
-      const key = row.id || `${row.phone}:${row.created_at}:${row.direction}:${row.content || ""}`;
-      if (!seedById.has(key)) seedById.set(key, row);
+      lastMessageError = error;
+      if (!/business_phone_number/i.test(error.message || "")) break;
     }
 
-    const seedRows = [...seedById.values()]
-      .filter(row => row.phone && row.created_at)
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    if (lastMessageError) throw lastMessageError;
     if (seedRows.length === 0) return [];
 
     const leadIds = Array.from(new Set(seedRows.map(row => row.lead_id).filter((id): id is string => Boolean(id))));
@@ -1341,11 +1375,17 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         lastError = error;
       }
 
-      if (lastError && rows.length === 0) throw lastError;
       if (reset && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
-        const messageBackedRows = await fetchMessageBackedConversationRows(businessNumber);
-        rows = rows.length === 0 ? messageBackedRows : mergeConversationRows(rows, messageBackedRows);
+        const messageBackedRows = await fetchMessageBackedConversationRows(businessNumber).catch(error => {
+          if (!lastError && rows.length === 0) throw error;
+          return [] as Conversation[];
+        });
+        if (messageBackedRows.length > 0) {
+          rows = rows.length === 0 ? messageBackedRows : mergeConversationRows(rows, messageBackedRows);
+          lastError = null;
+        }
       }
+      if (lastError && rows.length === 0) throw lastError;
 
       setConversations(prev => {
         if (reset) return rows;
@@ -1567,6 +1607,18 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     })();
   }, [role, counsellorList]);
 
+  // Honor an inbox channel from the URL (timeline "Go to conversation" deep-link).
+  // Messages store a Meta phone_number_id (e.g. "1075269918995469"); the tabs use
+  // the phone number, so resolve pnid → number before normalizing. Keyed on the
+  // param alone so it applies once and doesn't fight manual tab clicks.
+  const channelParam = searchParams.get("channel");
+  useEffect(() => {
+    if (!channelParam) return;
+    const mapped = KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[channelParam] || channelParam;
+    const resolved = normalizeBusinessChannel(mapped);
+    if (resolved) setBusinessNumber(resolved);
+  }, [channelParam]);
+
   // Auto-select conversation from URL param (notification deep-link)
   const phoneFromUrl = searchParams.get("phone");
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
@@ -1641,7 +1693,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       // Pick the active business pnid for filtering. "primary" matches the
       // most-used pnid + legacy NULL rows; otherwise exact match.
       const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
-      const applyBusinessNumberFilter = (query: any) => {
+      const applyBusinessNumberFilter = (query: any, includeBusinessNumber = true) => {
         if (isHrScope) {
           // HR view shows the candidate's full thread: messages on the HR
           // number AND any messages on the admissions number that were
@@ -1654,8 +1706,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
           const variants = businessChannelVariants(businessNumber);
           return query.or(
-            variants
-              .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+            (includeBusinessNumber
+              ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+              : variants.map(v => `business_phone_number_id.eq.${v}`))
               .join(","),
           );
         }
@@ -1666,14 +1719,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         return query.eq("business_phone_number_id", businessNumber);
       };
 
-      const buildMessageQuery = (selectColumns: string) => {
-        let query = supabase
+      const buildMessageQuery = (selectColumns: string, includeBusinessNumber = true) => {
+        const query = supabase
           .from("whatsapp_messages" as any)
           .select(selectColumns)
           .eq("phone", selectedPhone)
           .order("created_at", { ascending: true })
           .limit(200);
-        return applyBusinessNumberFilter(query);
+        return applyBusinessNumberFilter(query, includeBusinessNumber);
       };
 
       const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id, status_error";
@@ -1692,6 +1745,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
       if (error && /render_metadata/i.test(error.message || "")) {
         const fallback = await buildMessageQuery(messageColumns);
+        data = fallback.data;
+        error = fallback.error;
+      }
+      if (error && /business_phone_number/i.test(error.message || "")) {
+        const fallback = await buildMessageQuery(messageColumns, false);
         data = fallback.data;
         error = fallback.error;
       }
@@ -1799,8 +1857,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { supabase.removeChannel(channel); };
   }, [selectedPhone]);
 
+  const uploadReplyMedia = async (file: File): Promise<string | null> => {
+    const ext = file.name.split(".").pop() ?? "bin";
+    const path = `inbox/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage
+      .from("navya-knowledge")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (error) {
+      toast({ title: "Media upload failed", description: error.message, variant: "destructive" });
+      return null;
+    }
+    const { data: urlData } = supabase.storage.from("navya-knowledge").getPublicUrl(path);
+    return urlData.publicUrl;
+  };
+
+  const waMediaType = (mime: string): string => {
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (mime.startsWith("audio/")) return "audio";
+    return "document";
+  };
+
   const handleSendReply = async () => {
-    if (!reply.trim() || !selectedPhone) return;
+    if ((!reply.trim() && !replyMedia) || !selectedPhone) return;
     setSending(true);
 
     const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
@@ -1809,35 +1888,47 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     const currentSenderName = profile?.display_name || user?.email || "You";
     const messageText = reply.trim();
     const localSenderSignature = `${selectedPhone}:${messageText}`;
+
+    // Upload media to storage first if attached
+    let mediaPublicUrl: string | null = null;
+    let mediaType: string | null = null;
+    if (replyMedia) {
+      mediaPublicUrl = await uploadReplyMedia(replyMedia.file);
+      if (!mediaPublicUrl) { setSending(false); return; }
+      mediaType = waMediaType(replyMedia.file.type);
+    }
+
     if (demoMode) {
       const now = new Date().toISOString();
       const localMessage: Message = {
         id: `demo-local-${Date.now()}`,
         direction: "outbound",
-        content: messageText,
-        message_type: "text",
+        content: messageText || (mediaPublicUrl ? `[${mediaType}]` : ""),
+        message_type: mediaType || "text",
         status: "sent",
         template_key: "manual_reply",
-        media_url: null,
+        media_url: mediaPublicUrl,
         created_at: now,
         sender_user_id: "demo-profile",
       };
       setMessages(prev => [...prev, localMessage]);
       setConversations(prev => prev.map(c => c.phone === selectedPhone
-        ? { ...c, last_message: messageText, last_direction: "outbound", last_message_at: now, unread_count: 0 }
+        ? { ...c, last_message: messageText || `[${mediaType}]`, last_direction: "outbound", last_message_at: now, unread_count: 0 }
         : c
       ));
       setLocalSenderNamesBySignature(prev => ({ ...prev, [localSenderSignature]: currentSenderName }));
       setReply("");
+      setReplyMedia(null);
       setSending(false);
       return;
     }
     const { data, error } = await invokeEdge<{ message_id?: string; conversation_message_id?: string | null }>("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-        message: messageText,
+        message: messageText || undefined,
         lead_id: conv?.lead_id || null,
         ...replyChannelPayload(conv),
+        ...(mediaPublicUrl ? { media_url: mediaPublicUrl, media_type: mediaType } : {}),
       },
     });
 
@@ -1861,8 +1952,60 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         });
       }
       setReply("");
+      setReplyMedia(null);
     }
     setSending(false);
+  };
+
+  const handleCorrectBotReply = async (botMsg: Message) => {
+    const corrected = correctionDraft.trim();
+    if (!corrected || !selectedPhone) return;
+    setSendingCorrection(true);
+
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
+
+    // 1. Send corrected reply to the lead
+    const { error: sendErr } = await invokeEdge<any>("whatsapp-reply", {
+      body: {
+        phone: selectedPhone,
+        message: corrected,
+        lead_id: conv?.lead_id || null,
+        ...replyChannelPayload(conv),
+      },
+    });
+
+    if (sendErr) {
+      toast({ title: "Failed to send correction", description: sendErr.message, variant: "destructive" });
+      setSendingCorrection(false);
+      return;
+    }
+
+    // 2. Insert into knowledge base so Navya learns from the correction
+    const botQuery = (() => {
+      const idx = messages.findIndex(m => m.id === botMsg.id);
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].direction === "inbound" && messages[i].content) return messages[i].content!;
+      }
+      return botMsg.content || "General enquiry";
+    })();
+
+    await (supabase as any).from("admissions_ai_reply_examples").insert({
+      query_text: botQuery,
+      reply_text: corrected,
+      source_channel: "whatsapp",
+      target_channels: ["whatsapp", "voice"],
+      language: "hinglish",
+      status: "active",
+      quality_score: 0.95,
+      tags: ["bot_correction"],
+      lead_id: conv?.lead_id || null,
+    });
+
+    toast({ title: "Correction sent & Navya learned" });
+    setFlaggingMsgId(null);
+    setCorrectionDraft("");
+    setSendingCorrection(false);
   };
 
   const KB_TEMPLATE_KEYS = new Set([
@@ -2348,6 +2491,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
   const isUnassignedOps = (c: Conversation) =>
     !c.owner_user_id && !c.counsellor_id && c.has_inbound;
+  // Bulk marketing blast we sent that the lead has not replied to yet: last
+  // message is outbound with no unread inbound waiting. Lets counsellors set
+  // these aside and focus on threads that actually need a reply.
+  // ponytail: conversation view has no template_key, so this also catches
+  // AI/manual outbound-last threads; tighten if template-only precision needed.
+  const isMarketingOutbound = (c: Conversation) =>
+    c.last_direction === "outbound" && c.unread_count === 0;
   const isWithinMetaReplyWindow = (iso: string | null | undefined) =>
     Boolean(iso && Date.now() - new Date(iso).getTime() < 24 * 60 * 60 * 1000);
   const isReplyWindowConversation = (c: Conversation) =>
@@ -2370,6 +2520,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (opsFilter === "sla" && !isSlaBreached(c)) return false;
     if (opsFilter === "knowledge" && !isKnowledgeGap(c)) return false;
     if (opsFilter === "unassigned" && !isUnassignedOps(c)) return false;
+    if (opsFilter === "marketing_outbound" && !isMarketingOutbound(c)) return false;
     // Tab filter
     if (inboxTab === "all") { /* show everything */ }
     else if (inboxTab === "leads" && (!c.lead_id || isOtherCategory(c))) return false;
@@ -2414,6 +2565,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     { key: "sla" as const, label: "SLA", count: modeFiltered.filter(isSlaBreached).length },
     { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
     { key: "unassigned" as const, label: "Unassigned", count: modeFiltered.filter(isUnassignedOps).length },
+    { key: "marketing_outbound" as const, label: "Marketing Outbound", count: modeFiltered.filter(isMarketingOutbound).length },
   ];
 
   const formatTime = (iso: string) => {
@@ -3313,6 +3465,42 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             <DeliveryReceipt status={m.status} />
                           )}
                         </div>
+                        {isOutbound && getOutboundSenderLabel(m) === "Bot" && flaggingMsgId !== m.id && (
+                          <button
+                            onClick={() => { setFlaggingMsgId(m.id); setCorrectionDraft(""); }}
+                            className="flex items-center gap-1 text-[10px] text-orange-600/70 hover:text-orange-700 mt-1 transition-colors"
+                          >
+                            <Flag className="h-3 w-3" /> Flag & correct
+                          </button>
+                        )}
+                        {flaggingMsgId === m.id && (
+                          <div className="mt-2 space-y-2 border-t border-orange-200 pt-2">
+                            <p className="text-[10px] font-medium text-orange-700">Send corrected reply & teach Navya:</p>
+                            <textarea
+                              value={correctionDraft}
+                              onChange={(e) => setCorrectionDraft(e.target.value)}
+                              rows={3}
+                              placeholder="Correct answer…"
+                              className="w-full rounded-md border border-orange-200 bg-white p-2 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-orange-400 resize-none"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleCorrectBotReply(m)}
+                                disabled={sendingCorrection || !correctionDraft.trim()}
+                                className="flex items-center gap-1 rounded-md bg-orange-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                              >
+                                {sendingCorrection ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                                Send & Teach
+                              </button>
+                              <button
+                                onClick={() => setFlaggingMsgId(null)}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -3603,20 +3791,61 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         >
                           <Zap className="h-4 w-4" />
                         </Button>
-                        <input
-                          type="text"
-                          value={reply}
-                          onChange={(e) => setReply(e.target.value)}
-                          placeholder={withinWindow ? "Type a message..." : "Window expired — use template"}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-10 w-10 shrink-0 rounded-full text-slate-600 hover:bg-slate-200"
+                          onClick={() => replyMediaInputRef.current?.click()}
+                          title="Attach media"
                           disabled={!withinWindow}
-                          className="h-11 flex-1 rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                        </Button>
+                        <input
+                          ref={replyMediaInputRef}
+                          type="file"
+                          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              setReplyMedia({ file: f, url: URL.createObjectURL(f), type: f.type });
+                            }
+                            e.target.value = "";
+                          }}
                         />
-                        <Button type="submit" disabled={!withinWindow || !reply.trim() || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
+                        <div className="flex-1 min-w-0">
+                          {replyMedia && (
+                            <div className="flex items-center gap-2 mb-1 rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                              {replyMedia.type.startsWith("image/") ? (
+                                <img src={replyMedia.url} alt="" className="h-10 w-10 rounded object-cover" />
+                              ) : (
+                                <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-100">
+                                  <Paperclip className="h-4 w-4 text-slate-500" />
+                                </div>
+                              )}
+                              <span className="flex-1 truncate text-xs text-slate-600">{replyMedia.file.name}</span>
+                              <button onClick={() => setReplyMedia(null)} className="text-slate-400 hover:text-slate-600">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
+                          <input
+                            type="text"
+                            value={reply}
+                            onChange={(e) => setReply(e.target.value)}
+                            placeholder={withinWindow ? (replyMedia ? "Add a caption…" : "Type a message...") : "Window expired — use template"}
+                            disabled={!withinWindow}
+                            className="h-11 w-full rounded-full border-0 bg-white px-4 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                        </div>
+                        <Button type="submit" disabled={!withinWindow || (!reply.trim() && !replyMedia) || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
                           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                       </form>
                       {withinWindow && !showTemplatePicker && !showQuickReplies && (
-                        <p className="text-[10px] text-muted-foreground mt-1">Free-form replies only work within 24hrs of last inbound message. Use templates otherwise.</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">Free-form replies work within 24hrs of last inbound message. Attach images, PDFs, or documents. Use templates otherwise.</p>
                       )}
                     </div>
                   );

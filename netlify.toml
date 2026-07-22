@@ -21,6 +21,12 @@
   force = true
 
 [[redirects]]
+  from = "/api/reconcile-order"
+  to = "https://deylhigsisuexszsmypq.supabase.co/functions/v1/razorpay-payment?action=reconcile-order"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

@@ -36,6 +36,13 @@ function detectLanguage(text: string): string {
   return "en";
 }
 
+// admissions_ai_reply_examples.counsellor_id FKs profiles.id, not auth.users.
+async function profileIdForUser(admin: any, userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  const { data } = await admin.from("profiles").select("id").eq("user_id", userId).maybeSingle();
+  return (data as { id?: string } | null)?.id ?? null;
+}
+
 async function userRole(
   admin: ReturnType<typeof createClient>,
   authHeader: string,
@@ -43,6 +50,21 @@ async function userRole(
 ): Promise<{ ok: boolean; userId: string | null; role: string | null; error?: string; status?: number }> {
   if (authHeader === `Bearer ${serviceRoleKey}`) {
     return { ok: true, userId: null, role: "service_role" };
+  }
+
+  // Legacy service-role JWT (what the _app_config-based crons send) — the
+  // runtime env holds the new sb_secret_ format, so the strict equality
+  // above misses it. Decode and check the role claim (same fix as
+  // counsellor-call-miner). Without this every hourly cron run 401s and
+  // the learning table stays empty.
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  if (token.split(".").length === 3) {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (payload?.role === "service_role") {
+        return { ok: true, userId: null, role: "service_role" };
+      }
+    } catch { /* not a JWT — fall through to user auth */ }
   }
 
   if (!authHeader) return { ok: false, userId: null, role: null, error: "Unauthorized", status: 401 };
@@ -100,13 +122,25 @@ async function ingestReplyExample(
     courseId = lead?.course_id || null;
   }
 
+  // counsellor_id FKs profiles.id — sender_user_id is an AUTH user id.
+  // Resolve via profiles; null when no profile exists (FK 23503 otherwise).
+  let counsellorProfileId: string | null = null;
+  if (reply.sender_user_id) {
+    const { data: prof } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("user_id", reply.sender_user_id)
+      .maybeSingle();
+    counsellorProfileId = (prof as { id?: string } | null)?.id ?? null;
+  }
+
   const { error: upsertError } = await admin
     .from("admissions_ai_reply_examples")
     .upsert({
       source_message_id: reply.id,
       lead_id: reply.lead_id || null,
       course_id: courseId,
-      counsellor_id: reply.sender_user_id || null,
+      counsellor_id: counsellorProfileId,
       source_channel: "whatsapp",
       target_channels: ["whatsapp", "voice"],
       phone,
@@ -200,7 +234,7 @@ Deno.serve(async (req) => {
           query_text: gap.query_text,
           reply_text: redactForLearning(answerText),
           course_id: courseId,
-          counsellor_id: auth.userId,
+          counsellor_id: await profileIdForUser(admin, auth.userId),
           source_channel: gap.source || "whatsapp",
           target_channels: ["whatsapp", "voice"],
           language: detectLanguage(`${gap.query_text} ${answerText}`),
@@ -244,7 +278,7 @@ Deno.serve(async (req) => {
           query_text: redactForLearning(queryText),
           reply_text: redactForLearning(answerText),
           course_id: courseId,
-          counsellor_id: auth.userId,
+          counsellor_id: await profileIdForUser(admin, auth.userId),
           source_channel: "admin_override",
           target_channels: ["whatsapp", "voice"],
           language: detectLanguage(`${queryText} ${answerText}`),
@@ -464,7 +498,13 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // Thrown Supabase errors are plain objects — String() yields
+    // "[object Object]" and hides the cause. Serialize properly.
+    const message = err instanceof Error
+      ? err.message
+      : typeof err === "object" && err !== null
+        ? JSON.stringify(err).slice(0, 500)
+        : String(err);
     console.error("whatsapp-reply-learning error:", message);
     return new Response(JSON.stringify({ error: message || "Reply learning failed" }), {
       status: 500,

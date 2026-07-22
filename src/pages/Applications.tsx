@@ -31,6 +31,8 @@ import {
 import {
   APPLICATION_FUNNEL_ORDER,
   applicationFunnelStageOf,
+  funnelStageHoldSplits,
+  isApplicationOnHold,
   isPaidBeforeOfferStage,
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
@@ -123,6 +125,7 @@ interface AppRow {
   counsellor_name?: string;
   lead_stage?: string;
   lead_counsellor_id?: string;
+  lead_shared_with_nimt?: boolean | null;
   lead_pre_admission_no?: string | null;
   lead_admission_no?: string | null;
   has_offer?: boolean;
@@ -378,7 +381,10 @@ export default function Applications() {
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted" | "on_hold">("all");
   const [courseFilter, setCourseFilter] = useState("all");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const [sharedWithNimtFilter, setSharedWithNimtFilter] = useState<"all" | "shared" | "not_shared">("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
+  /** When a funnel stage is active: further narrow to on-hold vs not-on-hold at that stage. */
+  const [stageHoldSplit, setStageHoldSplit] = useState<"all" | "on_hold" | "active">("all");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -537,6 +543,7 @@ export default function Applications() {
       const counsellorMap: Record<string, string> = {};
       const leadStageMap: Record<string, string> = {};
       const leadCounsellorIdMap: Record<string, string> = {};
+      const leadSharedMap: Record<string, boolean | null> = {};
       const leadPanMap: Record<string, string | null> = {};
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
@@ -593,6 +600,7 @@ export default function Applications() {
               registrationNo: rec?.registration_no || null,
             };
           })(),
+          lead_shared_with_nimt: leadSharedMap[leadId] ?? null,
         };
       });
 
@@ -677,7 +685,7 @@ export default function Applications() {
 
         const leadResults = await Promise.all(leadBatches.map(async (batch) => {
           const { data, error } = await supabase.from("leads")
-            .select("id, counsellor_id, stage, pre_admission_no, admission_no")
+            .select("id, counsellor_id, stage, pre_admission_no, admission_no, shared_with_nimt")
             .in("id", batch);
           if (error) {
             console.error("leads batch failed:", error);
@@ -691,12 +699,14 @@ export default function Applications() {
           stage: string;
           pre_admission_no: string | null;
           admission_no: string | null;
+          shared_with_nimt: boolean | null;
         }[];
         leads.forEach((l) => {
           leadStageMap[l.id] = l.stage;
           leadCounsellorIdMap[l.id] = l.counsellor_id;
           leadPanMap[l.id] = l.pre_admission_no;
           leadAnMap[l.id] = l.admission_no;
+          leadSharedMap[l.id] = l.shared_with_nimt;
         });
 
         const counsellorIds = [...new Set(leads.map((l) => l.counsellor_id).filter(Boolean))] as string[];
@@ -867,6 +877,8 @@ export default function Applications() {
   const filtered = useMemo(() => apps.filter(a => {
     if (!matchesCourseFilter(a)) return false;
     if (!matchesCounsellorFilter(a)) return false;
+    if (sharedWithNimtFilter === "shared" && a.lead_shared_with_nimt === false) return false;
+    if (sharedWithNimtFilter === "not_shared" && a.lead_shared_with_nimt !== false) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -878,6 +890,9 @@ export default function Applications() {
       // Funnel filter → show only apps currently STUCK at that stage
       // (the leakage cohort — didn't progress beyond).
       if (funnelStageOf(a) !== stageFilter) return false;
+      // Optional hold split within the stuck cohort (on-hold vs otherwise).
+      if (stageHoldSplit === "on_hold" && !isApplicationOnHold(a)) return false;
+      if (stageHoldSplit === "active" && isApplicationOnHold(a)) return false;
     } else if (stageFilter && a.lead_stage !== stageFilter) {
       // Legacy stage-key passthrough (kept for any external callers).
       return false;
@@ -928,7 +943,7 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
@@ -1058,6 +1073,7 @@ export default function Applications() {
     paymentFilter,
     statusFilter,
     stageFilter,
+    stageHoldSplit,
     fromDate: fromDate || null,
     toDate: toDate || null,
     search: search || null,
@@ -1173,11 +1189,13 @@ export default function Applications() {
   // Bucket every app into exactly one stage (the furthest reached) so counts
   // never overlap. Then derive cumulative "reached" counts for the funnel
   // display: reached[s] = apps that landed at s OR any later stage.
+  // On-hold is a blocker flag within each stage (not its own funnel step).
+  const stageHoldSplits = funnelStageHoldSplits(dashboardApps);
   const stageBucket: Record<FunnelStage, number> = {
     in_progress: 0, submitted: 0, paid: 0, approved: 0,
     offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
   };
-  for (const a of dashboardApps) stageBucket[funnelStageOf(a)]++;
+  for (const s of FUNNEL_ORDER) stageBucket[s] = stageHoldSplits[s].stuck;
 
   const stageReached: Record<FunnelStage, number> = {} as any;
   {
@@ -1189,7 +1207,7 @@ export default function Applications() {
   }
   const totalApps = dashboardApps.length;
   const paidNoOffer = dashboardApps.filter(isPaidBeforeOfferStage).length;
-  const onHoldCount = dashboardApps.filter(a => a.status === "on_hold").length;
+  const onHoldCount = dashboardApps.filter(isApplicationOnHold).length;
 
   const handleDelete = async () => {
     if (!deleteTarget || !isSuperAdmin) return;
@@ -1444,7 +1462,7 @@ export default function Applications() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-baseline gap-2">
               <h2 className="text-sm font-semibold text-foreground">Application Pipeline</h2>
-              <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · click to see who's stuck</span>
+              <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · hold/active on every stage</span>
             </div>
             <div className="flex items-center gap-2">
               {paidNoOffer > 0 && (
@@ -1452,6 +1470,7 @@ export default function Applications() {
                   onClick={() => {
                     const isActive = stageFilter === "paid_no_offer";
                     setStageFilter(isActive ? null : "paid_no_offer");
+                    setStageHoldSplit("all");
                     setPaymentFilter("all");
                     setStatusFilter("all");
                     if (!isActive) {
@@ -1483,19 +1502,20 @@ export default function Applications() {
                 <div className="w-px self-stretch bg-border/50 shrink-0 mx-1" />
                 <button
                   onClick={() => {
-                    const active = statusFilter === "on_hold";
+                    const active = statusFilter === "on_hold" && !stageFilter;
                     setStatusFilter(active ? "all" : "on_hold");
                     setStageFilter(null);
+                    setStageHoldSplit("all");
                     setPaymentFilter("all");
-                    if (!active) selectApplicationCohort(dashboardApps.filter(a => a.status === "on_hold"), "On Hold");
+                    if (!active) selectApplicationCohort(dashboardApps.filter(isApplicationOnHold), "On Hold");
                   }}
                   className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
-                    statusFilter === "on_hold"
+                    statusFilter === "on_hold" && !stageFilter
                       ? "bg-amber-50 ring-2 ring-amber-400 border-transparent"
                       : "border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-300"
                   }`}
                   style={{ flex: "0 0 124px", width: 124 }}
-                  title={`${onHoldCount} application${onHoldCount === 1 ? "" : "s"} currently on hold`}
+                  title={`${onHoldCount} application${onHoldCount === 1 ? "" : "s"} currently on hold (also counted in their progress stage)`}
                 >
                   <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
                     <div className="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
@@ -1507,7 +1527,7 @@ export default function Applications() {
                   <div className="mt-2 h-1 rounded-full bg-amber-100 overflow-hidden">
                     <div className="h-full bg-amber-400 transition-all" style={{ width: totalApps > 0 ? `${(onHoldCount / totalApps) * 100}%` : "0%" }} />
                   </div>
-                  <p className="mt-1.5 truncate text-[10px] text-amber-600/70">blocked</p>
+                  <p className="mt-1.5 truncate text-[10px] text-amber-600/70">across stages</p>
                 </button>
               </>
             )}
@@ -1515,18 +1535,37 @@ export default function Applications() {
               const meta = FUNNEL_META[stage];
               const Icon = meta.icon;
               const reached = stageReached[stage];
-              const stuck = stageBucket[stage];
+              const split = stageHoldSplits[stage];
+              const stuck = split.stuck;
+              const stuckOnHold = split.onHold;
+              const stuckActive = split.active;
               const prevReached = i > 0 ? stageReached[FUNNEL_ORDER[i - 1]] : null;
               const conversion = prevReached != null && prevReached > 0
                 ? Math.round((reached / prevReached) * 100)
                 : null;
               const isActive = stageFilter === stage;
-              // Proportional width gives the true funnel-narrowing shape;
-              // floor at min-width so single-digit stages stay legible.
+              const holdSplitActive = isActive && stageHoldSplit === "on_hold";
+              const activeSplitActive = isActive && stageHoldSplit === "active";
+              // Proportional width + min room for hold/active chips on every card.
               const widthBasis = totalApps > 0
-                ? Math.max(124, (reached / totalApps) * 220)
-                : 124;
+                ? Math.max(148, (reached / totalApps) * 220)
+                : 148;
               const reachPct = totalApps > 0 ? (reached / totalApps) * 100 : 0;
+
+              const selectStageCohort = (hold: "all" | "on_hold" | "active") => {
+                const atStage = dashboardApps.filter((app) => funnelStageOf(app) === stage);
+                const cohort = hold === "on_hold"
+                  ? atStage.filter(isApplicationOnHold)
+                  : hold === "active"
+                    ? atStage.filter((app) => !isApplicationOnHold(app))
+                    : atStage;
+                const label = hold === "on_hold"
+                  ? `${meta.label} · on hold`
+                  : hold === "active"
+                    ? `${meta.label} · active`
+                    : meta.label;
+                selectApplicationCohort(cohort, label);
+              };
 
               return (
                 <Fragment key={stage}>
@@ -1538,37 +1577,88 @@ export default function Applications() {
                       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 mt-0.5" />
                     </div>
                   )}
-                  <button
-                    onClick={() => {
-                      setStageFilter(isActive ? null : stage);
-                      setPaymentFilter("all");
-                      setStatusFilter("all");
-                      if (!isActive) {
-                        selectApplicationCohort(dashboardApps.filter((app) => funnelStageOf(app) === stage), meta.label);
-                      }
-                    }}
+                  <div
                     className={`group relative rounded-xl border transition-all duration-240 ease-standard text-left p-3 shrink-0 overflow-hidden animate-rs-slide-up ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
                     style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis, animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
-                    title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
+                    title={`${stuck} currently at ${meta.label} (${stuckOnHold} on hold · ${stuckActive} active) · ${reached} reached this stage or beyond`}
                   >
-                    <div className="flex items-center justify-between mb-1.5 min-w-0">
-                      <p className="text-[10px] font-medium text-muted-foreground truncate">{meta.label}</p>
-                      <div className={`w-5 h-5 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-2.5 w-2.5 ${meta.iconColor}`} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const turningOff = isActive && stageHoldSplit === "all";
+                        setStageFilter(turningOff ? null : stage);
+                        setStageHoldSplit("all");
+                        setPaymentFilter("all");
+                        setStatusFilter("all");
+                        if (!turningOff) selectStageCohort("all");
+                      }}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center justify-between mb-1.5 min-w-0">
+                        <p className="text-[10px] font-medium text-muted-foreground truncate">{meta.label}</p>
+                        <div className={`w-5 h-5 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                          <Icon className={`h-2.5 w-2.5 ${meta.iconColor}`} />
+                        </div>
                       </div>
+                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
+                      <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                        <div className={`h-full ${meta.bar} transition-all duration-480 ease-standard`} style={{ width: `${reachPct}%` }} />
+                      </div>
+                      <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
+                        <span className="font-semibold text-foreground/70">{reached}</span> reached
+                      </p>
+                    </button>
+                    {/* Always show hold/active so every stage card has the same control surface. */}
+                    <div className="mt-1.5 flex items-center gap-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const turningOff = holdSplitActive;
+                          setStageFilter(stage);
+                          setStageHoldSplit(turningOff ? "all" : "on_hold");
+                          setPaymentFilter("all");
+                          setStatusFilter("all");
+                          selectStageCohort(turningOff ? "all" : "on_hold");
+                        }}
+                        className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors ${
+                          holdSplitActive
+                            ? "bg-amber-200/80 text-amber-900 ring-1 ring-amber-400"
+                            : stuckOnHold > 0
+                              ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              : "bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                        }`}
+                        title={`${stuckOnHold} on hold at ${meta.label}`}
+                      >
+                        {stuckOnHold} hold
+                      </button>
+                      <span className="text-[10px] text-muted-foreground/50">·</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const turningOff = activeSplitActive;
+                          setStageFilter(stage);
+                          setStageHoldSplit(turningOff ? "all" : "active");
+                          setPaymentFilter("all");
+                          setStatusFilter("all");
+                          selectStageCohort(turningOff ? "all" : "active");
+                        }}
+                        className={`rounded px-1 py-0.5 text-[10px] font-semibold tabular-nums transition-colors truncate ${
+                          activeSplitActive
+                            ? "bg-muted text-foreground ring-1 ring-border"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        }`}
+                        title={`${stuckActive} not on hold at ${meta.label}`}
+                      >
+                        {stuckActive} active
+                      </button>
                     </div>
-                    <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
-                    <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
-                      <div className={`h-full ${meta.bar} transition-all duration-480 ease-standard`} style={{ width: `${reachPct}%` }} />
-                    </div>
-                    <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
-                      <span className="font-semibold text-foreground/70">{reached}</span> reached
-                    </p>
-                  </button>
+                  </div>
                 </Fragment>
               );
             })}
@@ -1637,6 +1727,7 @@ export default function Applications() {
                                 selectApplicationCohort(rows, `${row.course} beyond In Progress`);
                                 setCourseFilter(row.course);
                                 setStageFilter(null);
+                                setStageHoldSplit("all");
                               }}
                               className="rounded-md px-2 py-1 font-semibold tabular-nums text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:text-muted-foreground/40"
                               title={`Select ${row.course} applications beyond In Progress`}
@@ -1655,6 +1746,7 @@ export default function Applications() {
                                     selectApplicationCohort(row.stageApps[stage], `${row.course} · ${meta.label}`);
                                     setCourseFilter(row.course);
                                     setStageFilter(stage);
+                                    setStageHoldSplit("all");
                                     setPaymentFilter("all");
                                     setStatusFilter("all");
                                   }}
@@ -1759,6 +1851,20 @@ export default function Applications() {
           triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
           ariaLabel="Filter applications by application status"
         />
+        {isSuperAdmin && (
+          <SelectField
+            value={sharedWithNimtFilter}
+            onValueChange={(value) => setSharedWithNimtFilter(value as "all" | "shared" | "not_shared")}
+            options={[
+              { value: "all", label: "All NIMT sharing" },
+              { value: "shared", label: "Shared with NIMT" },
+              { value: "not_shared", label: "Not shared with NIMT" },
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+            ariaLabel="Filter applications by academic-partner NIMT sharing"
+          />
+        )}
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}
@@ -1781,8 +1887,8 @@ export default function Applications() {
             Save filter ({filteredListApps.length})
           </Button>
         )}
-        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
@@ -1907,6 +2013,11 @@ export default function Applications() {
                       <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
+                      {app.lead_shared_with_nimt === false && (
+                        <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
+                          Not shared with NIMT
+                        </span>
+                      )}
                       {app.exam_registration && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           <ExamRegistrationBadge
@@ -2039,6 +2150,7 @@ export default function Applications() {
                                 course_name: primaryCourseName(app),
                                 exam_code: app.exam_registration?.examCode ?? null,
                                 on_hold: false,
+                                show_counselling_preset: !new Set(["token_paid", "pre_admitted", "admitted"]).has(funnelStageOf(app)),
                               })}
                               className="p-1.5 rounded text-muted-foreground hover:text-warning-foreground hover:bg-warning/5 transition-colors"
                               title="Put application on hold (ineligible)"

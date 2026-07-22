@@ -266,7 +266,7 @@ const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
 const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?: boolean }[] = [
   { value: "agreement", label: "Agreement", required: true },
   { value: "gst", label: "GST Certificate" },
-  { value: "pan", label: "PAN Card", required: true },
+  { value: "pan", label: "PAN Card" },
   { value: "tan", label: "TAN Certificate" },
   { value: "fee_structure", label: "Fee Structure" },
   { value: "brochure", label: "Brochures" },
@@ -693,7 +693,6 @@ export default function AcademicPartners() {
   const validateOnboardingForCompletion = () => {
     if (!onboardingForm.company_name.trim()) return "Company name is required.";
     if (!onboardingForm.company_address.trim()) return "Company address is required.";
-    if (!onboardingForm.pan_number.trim()) return "PAN is required.";
     if (!onboardingForm.authorised_signatory_name.trim()) return "Authorised signatory name is required.";
     if (!onboardingForm.authorised_signatory_contact.trim()) return "Authorised signatory contact number is required.";
     if (!onboardingForm.authorised_signatory_email.trim()) return "Authorised signatory email is required.";
@@ -1016,7 +1015,7 @@ export default function AcademicPartners() {
       </div>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open && !saving) resetForm(); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? "Edit Academic Partner" : "Add Academic Partner"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -1198,7 +1197,7 @@ export default function AcademicPartners() {
             {onboardingStep === 1 && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">PAN *</label>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">PAN</label>
                   <input value={onboardingForm.pan_number} onChange={(e) => updateOnboardingField("pan_number", e.target.value.toUpperCase())} className={inputCls} />
                 </div>
                 <div>

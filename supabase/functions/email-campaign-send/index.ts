@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
 
     const { data: recipients, error: recError } = await admin
       .from("email_campaign_recipients")
-      .select("id, campaign_id, lead_id, to_email, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
+      .select("id, campaign_id, lead_id, to_email, status, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -277,6 +277,14 @@ Deno.serve(async (req) => {
       if (lead.stage === "dnc") {
         await admin.from("email_campaign_recipients")
           .update({ status: "skipped", error_message: "Lead is DNC" })
+          .eq("id", r.id);
+        skipped++;
+        continue;
+      }
+      // Academic-partner private leads are never part of NIMT outreach.
+      if (lead.shared_with_nimt === false) {
+        await admin.from("email_campaign_recipients")
+          .update({ status: "skipped", error_message: "Lead not shared with NIMT" })
           .eq("id", r.id);
         skipped++;
         continue;

@@ -549,6 +549,139 @@ function finalizeQualityMetrics(callCtx: ActiveCall): Record<string, unknown> | 
   };
 }
 
+// Clamp an ISO timestamp into the AI-call business window (9 AM–8 PM IST).
+// ai-call-batch's cron (`process-ai-call-queue`, every minute) only fires rows
+// whose scheduled_at has passed AND the current wall-clock is inside the
+// window, so a callback promised for 9 PM would otherwise sit idle until the
+// next morning tick anyway — clamp it forward to the next 9 AM IST. Mirrors the
+// inline logic in the /status/ retry path.
+function clampToBusinessHoursIso(iso: string): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return iso;
+  const istDate = new Date(t + IST_OFFSET_MS);
+  const totalMins = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+  if (totalMins >= 540 && totalMins < 1200) return new Date(t).toISOString(); // within 9AM–8PM
+  const y = istDate.getUTCFullYear(), mo = istDate.getUTCMonth(), d = istDate.getUTCDate();
+  const dayOffset = totalMins >= 1200 ? 1 : 0; // past 8PM → next day; before 9AM → same day
+  return new Date(Date.UTC(y, mo, d + dayOffset, 3, 30, 0)).toISOString(); // 03:30 UTC = 09:00 IST
+}
+
+// Queue an AI callback: ai-call-batch's process-ai-call-queue cron picks up
+// pending rows and dials the lead via the voice-call edge fn. Mirrors the exact
+// row shape the /status/ retry path inserts. The partial unique index
+// (lead_id) WHERE status='pending' means a duplicate pending row 409s and is
+// harmlessly ignored — the lead_followups row keeps CRM visibility either way.
+async function queueAiCallback(
+  leadId: string,
+  scheduledAtIso: string,
+  dbHeaders: Record<string, string>,
+): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/ai_call_queue`, {
+    method: "POST",
+    headers: { ...dbHeaders, Prefer: "return=minimal" },
+    body: JSON.stringify({
+      lead_id: leadId,
+      status: "pending",
+      scheduled_at: clampToBusinessHoursIso(scheduledAtIso),
+    }),
+  }).catch((e) => console.error(`[queueAiCallback] failed for ${leadId}:`, e?.message));
+}
+
+// Notify the lead's current counsellor that Navya booked a campus visit.
+// In-app notification (→ push via the notifications fan-out trigger). Staff
+// WhatsApp is intentionally NOT sent: the only staff-WA mechanism
+// (resend-staff-wa) is a hardcoded broadcast of the `nimt_new_staff` template
+// to a fixed list — not reusable for a per-visit message, and we won't invent a
+// new template. notifications.user_id FKs auth.users, so we resolve
+// profiles.user_id from the lead's counsellor_id (which is profiles.id).
+async function notifyVisitBooked(
+  leadId: string,
+  visitDateIso: string,
+  dbHeaders: Record<string, string>,
+): Promise<void> {
+  try {
+    const ldRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=name,counsellor_id,courses:course_id(name)`,
+      { headers: dbHeaders },
+    );
+    const ld = (await ldRes.json().catch(() => []))?.[0];
+    if (!ld) return;
+
+    const when = new Date(visitDateIso).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    const courseName = (ld.courses as any)?.name || "course not set";
+
+    // 1) In-app + push notification to the lead owner
+    let ownerName = "Unassigned";
+    let ownerPhone = "";
+    if (ld.counsellor_id) {
+      const pRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${ld.counsellor_id}&select=user_id,display_name,phone`,
+        { headers: dbHeaders },
+      );
+      const prof = (await pRes.json().catch(() => []))?.[0];
+      ownerName = prof?.display_name || "Unassigned";
+      ownerPhone = prof?.phone || "";
+      if (prof?.user_id) {
+        await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            user_id: prof.user_id,
+            type: "visit_due",
+            title: `Campus visit booked by Navya: ${ld.name || "lead"}`,
+            body: `Visit scheduled for ${when}.`,
+            link: `/admissions/${leadId}`,
+            lead_id: leadId,
+          }),
+        });
+      }
+    }
+
+    // 2) Staff WhatsApp (navya_visit_alert UTILITY template — exempt from
+    //    Meta's marketing frequency cap): lead owner + leadership phones from
+    //    _app_config.navya_visit_wa_staff_recipients (JSON [{name, phone}]).
+    //    Fails soft (logged) until Meta approves the template.
+    const staffTargets: { name: string; phone: string }[] = [];
+    if (ownerPhone) staffTargets.push({ name: ownerName, phone: ownerPhone });
+    try {
+      const cfgRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/_app_config?key=eq.navya_visit_wa_staff_recipients&select=value`,
+        { headers: dbHeaders },
+      );
+      const raw = (await cfgRes.json().catch(() => []))?.[0]?.value;
+      const extra = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(extra)) {
+        for (const t of extra) {
+          if (t?.phone && !staffTargets.some(s => s.phone === String(t.phone))) {
+            staffTargets.push({ name: t.name || "Team", phone: String(t.phone) });
+          }
+        }
+      }
+    } catch { /* config missing/malformed — owner-only */ }
+
+    for (const target of staffTargets) {
+      fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        body: JSON.stringify({
+          template_key: "navya_visit_alert",
+          phone: target.phone,
+          params: [target.name.split(" ")[0], ld.name || "Unknown", courseName, when, ownerName],
+        }),
+      }).then(async (r) => {
+        if (!r.ok) console.warn(`[notifyVisitBooked] staff WA to ${target.phone} failed ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+      }).catch((e) => console.warn(`[notifyVisitBooked] staff WA to ${target.phone} threw:`, e?.message));
+    }
+  } catch (e: any) {
+    console.error(`[notifyVisitBooked] failed for ${leadId}:`, e?.message);
+  }
+}
+
 async function reconcilePostCall(
   callCtx: ActiveCall | null,
   leadId: string,
@@ -600,7 +733,7 @@ async function reconcilePostCall(
     );
     const dedupRows = await dedupRes.json().catch(() => []);
     if (!dedupRows?.length) {
-      const visitBody: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      const visitBody: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled", booked_by: "navya" };
       if (campusId) visitBody.campus_id = campusId;
       const vRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
         method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody),
@@ -617,6 +750,7 @@ async function reconcilePostCall(
           body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${visitDate} (${visitTime}). AI promised but didn't call schedule_visit.` }),
         });
         await assignLeadRoundRobin(leadId);
+        await notifyVisitBooked(leadId, visitTimestamp, dbHeaders);
         fireAutomation("visit_scheduled", leadId);
       }
     }
@@ -650,7 +784,13 @@ async function reconcilePostCall(
       method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
       body: JSON.stringify({ lead_id: leadId, content: reasonNote }),
     });
-    await assignLeadRoundRobin(leadId);
+    if (wantsHuman) {
+      // Human callback needs a responsible counsellor.
+      await assignLeadRoundRobin(leadId);
+    } else {
+      // AI callback: Navya calls back herself — no human owner, enqueue instead.
+      await queueAiCallback(leadId, scheduledAt, dbHeaders);
+    }
     actions.push(extractedAt ? `${followupType}_created:${scheduledAt}` : `${followupType}_created`);
   }
 
@@ -716,7 +856,7 @@ async function reconcilePostCall(
       const ldData2 = await ldRes2.json();
       const campusId2 = ldData2?.[0]?.campus_id || null;
 
-      const visitBody2: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      const visitBody2: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled", booked_by: "navya" };
       if (campusId2) visitBody2.campus_id = campusId2;
       const createRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
         method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody2),
@@ -733,6 +873,7 @@ async function reconcilePostCall(
           body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${extractedDate} — disposition was visit_scheduled but no visit record existed.` }),
         });
         await assignLeadRoundRobin(leadId);
+        await notifyVisitBooked(leadId, visitTimestamp, dbHeaders);
         fireAutomation("visit_scheduled", leadId);
       }
     }
@@ -951,6 +1092,7 @@ async function executeTool(
           lead_id: callCtx.leadId,
           visit_date: visitTimestamp,
           status: "scheduled",
+          booked_by: "navya",
         };
         if (campusId) body.campus_id = campusId;
 
@@ -981,6 +1123,8 @@ async function executeTool(
           });
           // Assign counsellor via round-robin so the visit has a responsible counsellor
           await assignLeadRoundRobin(callCtx.leadId);
+          // Notify the (now-assigned) counsellor that Navya booked this visit.
+          await notifyVisitBooked(callCtx.leadId, visitTimestamp, headers);
           // Fire automations for visit_scheduled and stage_change
           fireAutomation("visit_scheduled", callCtx.leadId);
           fireAutomation("stage_change", callCtx.leadId, { old_stage: "counsellor_call", new_stage: "visit_scheduled" });
@@ -1125,7 +1269,10 @@ async function executeTool(
         // Assign counsellor via round-robin for actionable dispositions, then
         // resolve the user_id so the followup we create can be owned by them
         // (and therefore picked up by the counsellor-reminders cron).
-        const needsAssignment = ["interested", "callback_requested", "call_back", "partial_conversation"].includes(args.disposition);
+        // NOTE: call_back / callback_requested are AI callbacks — Navya calls the
+        // lead back herself via ai_call_queue, so they need no human owner and
+        // are deliberately excluded from assignment below.
+        const needsAssignment = ["interested", "partial_conversation"].includes(args.disposition);
         let dispCounsellorUserId: string | null = null;
         if (needsAssignment) {
           let counsellorProfileId = await assignLeadRoundRobin(callCtx.leadId);
@@ -1167,6 +1314,8 @@ async function executeTool(
             headers: { ...headers, Prefer: "return=minimal" },
             body: JSON.stringify({
               lead_id: callCtx.leadId,
+              // AI callbacks have no human owner (user_id stays null via the
+              // needsAssignment exclusion) — the followup row is CRM-visibility only.
               user_id: dispCounsellorUserId,
               scheduled_at: followupDate,
               type: isAiCallback ? "ai_callback" : "call",
@@ -1175,6 +1324,13 @@ async function executeTool(
             }),
           });
           console.log(`[Followup] Scheduled for ${callCtx.leadId}: ${args.disposition} → ${followupDate} (user=${dispCounsellorUserId || "unassigned"})`);
+
+          // AI callback → actually make Navya call back: enqueue in ai_call_queue
+          // so process-ai-call-queue dials the lead at the requested time.
+          if (isAiCallback) {
+            await queueAiCallback(callCtx.leadId, followupDate, headers);
+            console.log(`[AI Callback] Queued for ${callCtx.leadId} at ${clampToBusinessHoursIso(followupDate)}`);
+          }
         }
 
         // Mark do_not_contact
@@ -1218,9 +1374,12 @@ async function executeTool(
         switch (args.message_type) {
           case "course_info":
           case "apply_link":
-            // Post-call summary — opens with "as discussed on our call".
-            waTemplateKey = "ai_call_post_summary";
-            waParams = [waLead.name, waCourse, waCampus, courseUrl, applyUrl, videoUrl];
+            // UTILITY template — transactional "details you requested on our
+            // call". Not subject to Meta's marketing frequency cap (which
+            // silently killed course_info_* deliveries). Falls back to
+            // ai_call_post_summary below if not yet approved.
+            waTemplateKey = "call_requested_details";
+            waParams = [waLead.name, `${waCourse} admission at NIMT`];
             break;
           case "visit_confirmation":
             waTemplateKey = "visit_confirmation";
@@ -1235,11 +1394,23 @@ async function executeTool(
 
         if (waTemplateKey) {
           try {
-            const waRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
-              body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
-            });
+            const sendTemplate = async (key: string, params: string[]) =>
+              fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+                body: JSON.stringify({ template_key: key, phone: waLead.phone, params, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
+              });
+
+            let waRes = await sendTemplate(waTemplateKey, waParams);
+            // call_requested_details may not be Meta-approved yet — fall back
+            // to the legacy post-summary template rather than failing the send.
+            if (!waRes.ok && waTemplateKey === "call_requested_details") {
+              const body = await waRes.text().catch(() => "");
+              console.warn(`[WhatsApp] call_requested_details failed ${waRes.status} (${body.slice(0, 150)}) — falling back to ai_call_post_summary`);
+              waTemplateKey = "ai_call_post_summary";
+              waParams = [waLead.name, waCourse, waCampus, courseUrl, applyUrl, videoUrl];
+              waRes = await sendTemplate(waTemplateKey, waParams);
+            }
             if (!waRes.ok) {
               const body = await waRes.text().catch(() => "");
               console.error(`[WhatsApp] send failed ${waRes.status}: ${body.slice(0, 300)}`);

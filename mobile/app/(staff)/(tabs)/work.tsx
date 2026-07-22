@@ -9,6 +9,7 @@ import {
   BookOpen,
   Calendar,
   CalendarOff,
+  Camera,
   CheckCircle2,
   Clock,
   IndianRupee,
@@ -209,6 +210,13 @@ function LeadershipWork({ displayName, role }: { displayName: string; role: stri
       </View>
       <SectionTitle title="Leadership actions" />
       <View style={styles.actionGrid}>
+        <ActionTile
+          icon={Camera}
+          label="Photo Day"
+          subtitle="Class-wise ID photos"
+          tone="blue"
+          onPress={() => router.push('/(staff)/work/student-photos' as any)}
+        />
         <ActionTile icon={Users} label="Staff attendance" subtitle="Today and trends" tone="green" />
         <ActionTile icon={BookOpen} label="Student attendance" subtitle="Course and class view" tone="blue" />
         <ActionTile icon={Calendar} label="Timetable" subtitle="Substitution planning" tone="purple" />
@@ -219,6 +227,17 @@ function LeadershipWork({ displayName, role }: { displayName: string; role: stri
 }
 
 function FacultyWork({ displayName }: { displayName: string }) {
+  const { user } = useAuth();
+  const [showPhotoDay, setShowPhotoDay] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      const { data } = await supabase.rpc('can_capture_student_photos' as any, { _user_id: user.id });
+      setShowPhotoDay(Boolean(data));
+    })();
+  }, [user?.id]);
+
   return (
     <WorkScaffold title="Teaching Work" subtitle={`${displayName}, your classes and students`}>
       <StatusCard
@@ -231,6 +250,15 @@ function FacultyWork({ displayName }: { displayName: string }) {
       />
       <SectionTitle title="Faculty actions" />
       <View style={styles.actionGrid}>
+        {showPhotoDay && (
+          <ActionTile
+            icon={Camera}
+            label="Photo Day"
+            subtitle="Class-wise ID photos"
+            tone="blue"
+            onPress={() => router.push('/(staff)/work/student-photos' as any)}
+          />
+        )}
         <ActionTile icon={BookOpen} label="Classes" subtitle="Today’s schedule" tone="blue" onPress={() => router.push('/(staff)/work/classes' as any)} />
         <ActionTile icon={CheckCircle2} label="Attendance" subtitle="Mark class attendance" tone="green" onPress={() => router.push('/(staff)/work/classes' as any)} />
         <ActionTile icon={Users} label="Students" subtitle="Student records" tone="purple" />
@@ -241,6 +269,17 @@ function FacultyWork({ displayName }: { displayName: string }) {
 }
 
 function EmployeeWork({ displayName }: { displayName: string }) {
+  const { user } = useAuth();
+  const [showPhotoDay, setShowPhotoDay] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      const { data } = await supabase.rpc('can_capture_student_photos' as any, { _user_id: user.id });
+      setShowPhotoDay(Boolean(data));
+    })();
+  }, [user?.id]);
+
   return (
     <WorkScaffold title="My Work" subtitle={`${displayName}, quick access to work tools`}>
       <StatusCard
@@ -251,6 +290,15 @@ function EmployeeWork({ displayName }: { displayName: string }) {
       />
       <SectionTitle title="Work actions" />
       <View style={styles.actionGrid}>
+        {showPhotoDay && (
+          <ActionTile
+            icon={Camera}
+            label="Photo Day"
+            subtitle="Class-wise ID photos"
+            tone="blue"
+            onPress={() => router.push('/(staff)/work/student-photos' as any)}
+          />
+        )}
         <ActionTile icon={CalendarOff} label="Leave" subtitle="Apply or view history" tone="purple" onPress={() => router.push('/(staff)/work/hr' as any)} />
         <ActionTile icon={Clock} label="Attendance" subtitle="Logs and shifts" tone="green" onPress={() => router.push('/(staff)/work/hr' as any)} />
         <ActionTile icon={Bell} label="Inbox" subtitle="Approvals and alerts" tone="yellow" onPress={() => router.push('/(staff)/(tabs)/inbox' as any)} />

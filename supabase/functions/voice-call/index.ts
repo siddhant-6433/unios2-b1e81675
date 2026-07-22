@@ -29,7 +29,7 @@ async function loadAdmissionsMemoryExamples(
   db: ReturnType<typeof createClient>,
   query: string,
   courseId: string | null,
-): Promise<{ leadAsked: string; counsellorReplied: string; sourceChannel: string | null }[]> {
+): Promise<{ leadAsked: string; counsellorReplied: string; mediaUrl: string | null; sourceChannel: string | null }[]> {
   if (!query || query.trim().length < 3) return [];
   try {
     const { data, error } = await db.rpc("match_admissions_ai_reply_examples", {
@@ -48,6 +48,7 @@ async function loadAdmissionsMemoryExamples(
       .map((example) => ({
         leadAsked: example.query_text,
         counsellorReplied: example.reply_text,
+        mediaUrl: example.media_url || null,
         sourceChannel: example.source_channel || null,
       }));
   } catch (err) {

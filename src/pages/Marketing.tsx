@@ -33,6 +33,13 @@ import {
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
+import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
+import {
+  DEFAULT_QUIET_DAYS,
+  filterCampaignRecipients,
+} from "@/lib/campaignEligibility";
+import { fetchLastWhatsAppMarketingAtByLeadIds } from "@/lib/campaignEligibilityFetch";
+import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
@@ -266,6 +273,12 @@ export default function Marketing() {
   const [campaignName, setCampaignName] = useState("");
   const [campaignScheduleMode, setCampaignScheduleMode] = useState<"now" | "scheduled">("now");
   const [campaignScheduledAt, setCampaignScheduledAt] = useState("");
+  const [waSendMode, setWaSendMode] = useState<"immediate" | "paced">("immediate");
+  const [waDailyCap, setWaDailyCap] = useState(String(DEFAULT_DAILY_UNIQUE_CAP));
+  const [waExcludeCold, setWaExcludeCold] = useState(true);
+  const [waQuietDaysEnabled, setWaQuietDaysEnabled] = useState(true);
+  const [waQuietDays, setWaQuietDays] = useState(String(DEFAULT_QUIET_DAYS));
+  const [waTemplateQualityByKey, setWaTemplateQualityByKey] = useState<Record<string, string | null>>({});
   const [waTemplate, setWaTemplate] = useState(WA_BULK_TEMPLATES[0]?.key || "");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
@@ -319,6 +332,10 @@ export default function Marketing() {
   const selectedWaTemplate = useMemo(
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
     [availableWaBulkTemplates, waTemplate],
+  );
+  const waTemplateQuality = useMemo(
+    () => evaluateTemplateQualityForBulk(waTemplateQualityByKey[selectedWaTemplate?.key || waTemplate]),
+    [waTemplateQualityByKey, selectedWaTemplate?.key, waTemplate],
   );
   const waStaticFields = useMemo(
     () => (selectedWaTemplate?.params || []).filter((param) => param.source === "static" && !AUTO_FILLED_PARAMS.includes(param.name as any)),
@@ -503,7 +520,7 @@ export default function Marketing() {
       }>);
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
-        .select("name, components, placeholder_count, has_media, header_format")
+        .select("name, components, placeholder_count, has_media, header_format, quality_score")
         .eq("status", "APPROVED");
       const dynamicTemplateKeys = settingsRows
         .map((setting) => setting.template_key)
@@ -515,6 +532,10 @@ export default function Marketing() {
 
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
       const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
+      const qualityByKey: Record<string, string | null> = {};
+      (approvedRows || []).forEach((row: { name?: string; quality_score?: string | null }) => {
+        if (row.name) qualityByKey[row.name] = row.quality_score ?? null;
+      });
       approvedTemplateRows.forEach((row) => {
         if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
@@ -539,6 +560,7 @@ export default function Marketing() {
 
       setWaMetaTemplateOverrides(overrides);
       setWaTemplateComponentsByKey(componentsByKey);
+      setWaTemplateQualityByKey(qualityByKey);
       setDynamicWaBulkTemplates(dynamic);
     })();
   }, [role]);
@@ -587,23 +609,51 @@ export default function Marketing() {
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
+        if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
-          .select("lead_id, leads(id, phone, stage)")
+          .select("lead_id, leads(id, phone, stage, shared_with_nimt)")
           .eq("list_id", selectedList.id);
         if (memErr) throw memErr;
 
-        const valid = ((members as any[]) || [])
+        const rawLeads = ((members as any[]) || [])
           .map((member) => member.leads)
-          .filter((lead) => lead && lead.phone && lead.stage !== "dnc");
-        if (!valid.length) throw new Error("No reachable WhatsApp recipients on this list.");
+          .filter((lead) => lead && lead.id);
+
+        const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
+        let lastMarketingAtByLeadId = new Map<string, string>();
+        if (quietDays > 0 && rawLeads.length > 0) {
+          lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByLeadIds(
+            supabase as any,
+            rawLeads.map((lead: { id: string }) => lead.id),
+            Math.max(quietDays, 30),
+          );
+        }
+
+        const eligibility = filterCampaignRecipients(rawLeads, {
+          channel: "whatsapp",
+          excludeCold: waExcludeCold,
+          quietDays,
+          lastMarketingAtByLeadId,
+        });
+        const valid = eligibility.eligible;
+        if (!valid.length) {
+          throw new Error(eligibility.preview || "No reachable WhatsApp recipients after DNC/quality filters.");
+        }
 
         const staticParamsToSend: Record<string, string> = {};
         for (const field of waStaticFields) {
           const value = effectiveWaParamValue(waStaticParams, field.name).trim();
           if (value) staticParamsToSend[field.name] = value;
         }
+
+        const pacePlan = buildCampaignPacePlan({
+          recipientCount: valid.length,
+          sendMode: waSendMode,
+          dailyUniqueCap: waSendMode === "paced" ? Number(waDailyCap) : null,
+          startAt: nextAttemptAt,
+        });
 
         const { data: campaign, error: campErr } = await supabase
           .from("whatsapp_campaigns" as any)
@@ -617,15 +667,19 @@ export default function Marketing() {
             next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
+            send_mode: pacePlan.sendMode,
+            daily_unique_cap: pacePlan.dailyUniqueCap,
+            paced_wave_count: pacePlan.waveCount,
           })
           .select("id")
           .single();
         if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
 
-        const rows = valid.map((lead) => ({
+        const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
           lead_id: lead.id,
           phone: lead.phone,
+          eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
         }));
         for (let i = 0; i < rows.length; i += 500) {
           const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(rows.slice(i, i + 500));
@@ -639,14 +693,22 @@ export default function Marketing() {
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
-          .select("lead_id, leads(id, email, stage)")
+          .select("lead_id, leads(id, email, stage, shared_with_nimt)")
           .eq("list_id", selectedList.id);
         if (memErr) throw memErr;
 
-        const valid = ((members as any[]) || [])
+        const rawEmailLeads = ((members as any[]) || [])
           .map((member) => member.leads)
-          .filter((lead) => lead && lead.email && lead.stage !== "dnc");
-        if (!valid.length) throw new Error("No reachable email recipients on this list.");
+          .filter((lead) => lead && lead.id);
+        const emailEligibility = filterCampaignRecipients(rawEmailLeads, {
+          channel: "email",
+          excludeCold: false,
+          quietDays: 0,
+        });
+        const valid = emailEligibility.eligible;
+        if (!valid.length) {
+          throw new Error(emailEligibility.preview || "No reachable email recipients on this list (DNC excluded).");
+        }
 
         const { data: campaign, error: campErr } = await supabase
           .from("email_campaigns" as any)
@@ -689,6 +751,8 @@ export default function Marketing() {
       setCampaignName("");
       setCampaignScheduleMode("now");
       setCampaignScheduledAt("");
+      setWaSendMode("immediate");
+      setWaDailyCap(String(DEFAULT_DAILY_UNIQUE_CAP));
       await load();
     } catch (error: any) {
       setLaunchError(error?.message || "Could not queue campaign.");
@@ -1140,6 +1204,104 @@ export default function Marketing() {
             )}
           </div>
 
+          {campaignChannel === "whatsapp" && (
+            <div className="max-w-2xl space-y-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">Quality guards (Meta)</p>
+                <p className="text-[11px] text-muted-foreground">
+                  <span className="font-medium text-foreground">DNC is always excluded</span> — stage Do Not Contact stops all further outreach.
+                </p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                    checked={waExcludeCold}
+                    onChange={(e) => setWaExcludeCold(e.target.checked)}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-foreground">Exclude cold leads</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      Cold-stage leads usually hurt read rates and quality ratings.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                    checked={waQuietDaysEnabled}
+                    onChange={(e) => setWaQuietDaysEnabled(e.target.checked)}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-foreground">Skip recent WhatsApp templates</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      Avoid blasting the same person again within a few days.
+                    </span>
+                  </span>
+                </label>
+                {waQuietDaysEnabled && (
+                  <div className="pl-6 flex items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground">Quiet days</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={waQuietDays}
+                      onChange={(e) => setWaQuietDays(e.target.value)}
+                      className="h-9 w-20"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                    checked={waSendMode === "paced"}
+                    onChange={(e) => setWaSendMode(e.target.checked ? "paced" : "immediate")}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-foreground">Pace over days (Meta unique-user limit)</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      Split recipients into waves ~24h apart so you stay under Meta&apos;s rolling 24h unique-user tier.
+                    </span>
+                  </span>
+                </label>
+                {waSendMode === "paced" && (
+                  <div className="pl-6 space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Max recipients per day</label>
+                    <Input
+                      type="number"
+                      min={50}
+                      step={50}
+                      value={waDailyCap}
+                      onChange={(e) => setWaDailyCap(e.target.value)}
+                      className="h-9 w-40"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {(() => {
+                        try {
+                          const start = campaignScheduleMode === "scheduled" && campaignScheduledAt
+                            ? new Date(campaignScheduledAt)
+                            : new Date();
+                          return buildCampaignPacePlan({
+                            recipientCount: selectedList?.member_count || 0,
+                            sendMode: "paced",
+                            dailyUniqueCap: Number(waDailyCap) || DEFAULT_DAILY_UNIQUE_CAP,
+                            startAt: start,
+                          }).preview;
+                        } catch {
+                          return "Enter a valid daily cap.";
+                        }
+                      })()}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
@@ -1155,6 +1317,15 @@ export default function Marketing() {
                     allowEmpty={false}
                     triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${waTemplateQuality.badgeClass}`}>
+                      Meta: {waTemplateQuality.label}
+                    </span>
+                    {!waTemplateQuality.allowBulk && (
+                      <span className="text-[11px] text-destructive font-medium">Bulk send blocked</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{waTemplateQuality.detail}</p>
                   {selectedWaTemplate?.description && (
                     <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
                   )}
@@ -1340,7 +1511,14 @@ export default function Marketing() {
             <p className="text-xs text-muted-foreground">
               DNC leads and members without the selected channel destination are skipped at queue time.
             </p>
-            <Button onClick={launchCampaign} disabled={launching || !selectedList || (campaignChannel === "whatsapp" && waMissingStatic)}>
+            <Button
+              onClick={launchCampaign}
+              disabled={
+                launching
+                || !selectedList
+                || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
+              }
+            >
               {launching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
               Queue Campaign
             </Button>

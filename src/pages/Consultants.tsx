@@ -125,7 +125,7 @@ type AdminOnboardingClient = {
 const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
 const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?: boolean }[] = [
   { value: "agreement", label: "Consultant Agreement", required: true },
-  { value: "pan", label: "PAN Card", required: true },
+  { value: "pan", label: "PAN Card" },
   { value: "gst", label: "GST Certificate" },
   { value: "tan", label: "TAN Certificate" },
   { value: "bank_details", label: "Bank Details" },
@@ -309,7 +309,6 @@ const Consultants = () => {
   const validateOnboardingForCompletion = () => {
     if (!onboardingForm.company_name.trim()) return "Company name is required.";
     if (!onboardingForm.company_address.trim()) return "Company address is required.";
-    if (!onboardingForm.pan_number.trim()) return "PAN is required.";
     if (!onboardingForm.authorised_signatory_name.trim()) return "Authorised signatory name is required.";
     if (!onboardingForm.authorised_signatory_contact.trim()) return "Authorised signatory contact number is required.";
     if (!onboardingForm.authorised_signatory_email.trim()) return "Authorised signatory email is required.";
@@ -719,7 +718,7 @@ const Consultants = () => {
             {onboardingStep === 1 && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">PAN *</label>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">PAN</label>
                   <input value={onboardingForm.pan_number} onChange={(e) => updateOnboardingField("pan_number", e.target.value.toUpperCase())} className={inputCls} />
                 </div>
                 <div>

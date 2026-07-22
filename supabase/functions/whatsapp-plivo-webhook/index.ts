@@ -21,20 +21,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function invokeConversationOrchestrator(payload: Record<string, unknown>): void {
+async function invokeConversationOrchestrator(payload: Record<string, unknown>): Promise<void> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceRoleKey) return;
 
-  const dispatch = fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
+  const res = await fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${serviceRoleKey}`,
     },
     body: JSON.stringify(payload),
-  }).catch((err) => console.error("conversation orchestrator dispatch error:", err));
-  (globalThis as any).EdgeRuntime?.waitUntil?.(dispatch);
+  });
+
+  if (!res.ok) {
+    console.error("conversation orchestrator dispatch failed:", res.status, await res.text());
+  }
 }
 
 // Strip everything but digits. Plivo sends E.164 (+919555192192); the existing
@@ -283,20 +286,24 @@ Deno.serve(async (req) => {
       });
     }
 
-    invokeConversationOrchestrator({
-      source: "plivo_webhook",
-      provider: "plivo",
-      phone: fromDigits,
-      business_number: toDigitsVal,
-      message_id: inboundMessageId,
-      lead_id: lead?.id || null,
-      lead_stage: lead?.stage || null,
-      person_role: lead?.person_role || null,
-      owner_user_id: lead?.counsellor_id || null,
-      message_type: msgType,
-      content: text || "",
-      dispatch_reply: true,
-    });
+    try {
+      await invokeConversationOrchestrator({
+        source: "plivo_webhook",
+        provider: "plivo",
+        phone: fromDigits,
+        business_number: toDigitsVal,
+        message_id: inboundMessageId,
+        lead_id: lead?.id || null,
+        lead_stage: lead?.stage || null,
+        person_role: lead?.person_role || null,
+        owner_user_id: lead?.counsellor_id || null,
+        message_type: msgType,
+        content: text || "",
+        dispatch_reply: true,
+      });
+    } catch (dispatchErr) {
+      console.error("conversation orchestrator dispatch error:", dispatchErr);
+    }
 
     // ── Activity + engagement signal (only when we have a lead) ──────────────
     if (lead?.id) {

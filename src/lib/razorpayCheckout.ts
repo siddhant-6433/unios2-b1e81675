@@ -71,6 +71,12 @@ export type RazorpayCheckoutInput = {
   concessionBreakdown?: Record<string, number> | null;
 };
 
+export type RazorpayCheckoutResult = {
+  paymentId: string;
+  orderId: string;
+  already?: boolean;
+};
+
 const RAZORPAY_SCRIPT_ID = "razorpay-checkout-js";
 
 function loadRazorpayScript(): Promise<void> {
@@ -94,23 +100,34 @@ function loadRazorpayScript(): Promise<void> {
   });
 }
 
-async function postRazorpay(action: "create-order" | "verify-payment", body: Record<string, unknown>) {
-  const endpoint = action === "create-order" ? "/api/create-order" : "/api/verify-payment";
+async function postRazorpay(
+  action: "create-order" | "verify-payment" | "reconcile-order",
+  body: Record<string, unknown>,
+) {
+  const endpoint =
+    action === "create-order" ? "/api/create-order"
+    : action === "verify-payment" ? "/api/verify-payment"
+    : "/api/reconcile-order";
 
+  // Prefer Netlify proxy, but always fall back to authenticated edge invoke.
+  // Production must not throw away the fallback path on proxy failures.
   try {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ action, ...body }),
     });
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       const data = await response.json();
-      if (!response.ok || data?.error) throw new Error(data?.error || "Razorpay request failed");
-      return data;
+      if (response.ok && !data?.error) return data;
+      // Fall through to edge invoke on non-OK so missing proxy auth can't brick payments.
+      if (import.meta.env.DEV && data?.error) {
+        // In dev keep trying edge path too.
+      }
     }
-  } catch (error) {
-    if (!import.meta.env.DEV) throw error;
+  } catch {
+    // Fall through to edge invoke.
   }
 
   const { data, error } = await supabase.functions.invoke("razorpay-payment", {
@@ -131,12 +148,28 @@ async function postRazorpay(action: "create-order" | "verify-payment", body: Rec
   return data;
 }
 
+/** Best-effort server reconcile when browser verify was missed. Never double-marks. */
+export async function reconcileRazorpayOrder(input: {
+  orderId?: string | null;
+  applicationId?: string | null;
+  context?: string | null;
+}) {
+  if (!input.orderId && !input.applicationId) {
+    throw new Error("orderId or applicationId is required to reconcile");
+  }
+  return postRazorpay("reconcile-order", {
+    order_id: input.orderId || undefined,
+    application_id: input.applicationId || undefined,
+    context: input.context || undefined,
+  });
+}
+
 function shortReceipt(prefix: string, id?: string | null) {
   const cleanId = (id || "payment").replace(/[^A-Za-z0-9_-]/g, "").slice(-18);
   return `${prefix}_${cleanId}_${Date.now()}`.slice(0, 40);
 }
 
-export async function openRazorpayCheckout(input: RazorpayCheckoutInput) {
+export async function openRazorpayCheckout(input: RazorpayCheckoutInput): Promise<RazorpayCheckoutResult> {
   await loadRazorpayScript();
   const RazorpayConstructor = window.Razorpay;
   if (!RazorpayConstructor) throw new Error("Razorpay Checkout is unavailable.");
@@ -165,8 +198,51 @@ export async function openRazorpayCheckout(input: RazorpayCheckoutInput) {
   const key = order.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
   if (!key) throw new Error("Razorpay key ID is not configured.");
 
-  return new Promise<{ paymentId: string; orderId: string }>((resolve, reject) => {
+  return new Promise<RazorpayCheckoutResult>((resolve, reject) => {
     let settled = false;
+    let capture: RazorpayResponse | null = null;
+    let settling = false;
+
+    const finishSuccess = (paymentId: string, orderId: string, already?: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve({ paymentId, orderId, already });
+    };
+
+    const settleCapture = async (response: RazorpayResponse) => {
+      if (settling || settled) return;
+      settling = true;
+      capture = response;
+      try {
+        const verified = await postRazorpay("verify-payment", {
+          order_id: order.order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_signature: response.razorpay_signature,
+          context: input.context,
+        });
+        if (!verified?.success) throw new Error("Payment could not be verified.");
+        finishSuccess(response.razorpay_payment_id, order.order_id, Boolean(verified.already));
+      } catch (verifyError) {
+        // Money may already be captured — try server reconcile (idempotent).
+        try {
+          const reconciled = await postRazorpay("reconcile-order", {
+            order_id: order.order_id,
+            application_id: input.applicationId || undefined,
+            context: input.context,
+          });
+          if (reconciled?.success && reconciled.payment_id) {
+            finishSuccess(String(reconciled.payment_id), order.order_id, Boolean(reconciled.already));
+            return;
+          }
+        } catch {
+          // Fall through to original verify error.
+        }
+        settling = false;
+        reject(verifyError instanceof Error ? verifyError : new Error("Payment verification failed."));
+      }
+    };
+
     const checkout = new RazorpayConstructor({
       key,
       amount: order.amount,
@@ -186,29 +262,55 @@ export async function openRazorpayCheckout(input: RazorpayCheckoutInput) {
         student_id: input.studentId || "",
       },
       theme: { color: "#33B063" },
-      handler: async (response) => {
-        try {
-          const verified = await postRazorpay("verify-payment", {
-            order_id: order.order_id,
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_order_id: response.razorpay_order_id,
-            razorpay_signature: response.razorpay_signature,
-          });
-          if (!verified?.success) throw new Error("Payment could not be verified.");
-          settled = true;
-          resolve({ paymentId: response.razorpay_payment_id, orderId: order.order_id });
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error("Payment verification failed."));
-        }
+      handler: (response) => {
+        void settleCapture(response);
       },
       modal: {
         ondismiss: () => {
-          if (!settled) reject(new Error("Payment was cancelled."));
+          if (settled) return;
+          // If Razorpay already handed us a capture, do not treat dismiss as cancel.
+          if (capture || settling) {
+            void (async () => {
+              try {
+                const reconciled = await postRazorpay("reconcile-order", {
+                  order_id: order.order_id,
+                  application_id: input.applicationId || undefined,
+                  context: input.context,
+                });
+                if (reconciled?.success && reconciled.payment_id) {
+                  finishSuccess(String(reconciled.payment_id), order.order_id, Boolean(reconciled.already));
+                  return;
+                }
+              } catch {
+                // ignore
+              }
+              if (!settled) reject(new Error("Payment is processing. If money was deducted it will update automatically."));
+            })();
+            return;
+          }
+          // Last-chance reconcile for UPI where handler never fired but bank debited.
+          void (async () => {
+            try {
+              const reconciled = await postRazorpay("reconcile-order", {
+                order_id: order.order_id,
+                application_id: input.applicationId || undefined,
+                context: input.context,
+              });
+              if (reconciled?.success && reconciled.payment_id) {
+                finishSuccess(String(reconciled.payment_id), order.order_id, Boolean(reconciled.already));
+                return;
+              }
+            } catch {
+              // ignore
+            }
+            if (!settled) reject(new Error("Payment was cancelled."));
+          })();
         },
       },
     });
 
     checkout.on("payment.failed", (response) => {
+      if (settled) return;
       const message = response.error?.description || response.error?.reason || "Payment failed. Please try again.";
       reject(new Error(message));
     });

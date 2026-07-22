@@ -48,3 +48,33 @@ export function isPaidBeforeOfferStage(a: ApplicationFunnelInput): boolean {
   const stage = applicationFunnelStageOf(a);
   return APPLICATION_FUNNEL_ORDER.indexOf(stage) < APPLICATION_FUNNEL_ORDER.indexOf("offer_sent");
 }
+
+/** On-hold is a blocker flag, not a funnel stage — apps stay in their progress bucket. */
+export function isApplicationOnHold(a: Pick<ApplicationFunnelInput, "status">): boolean {
+  return a.status === "on_hold";
+}
+
+export type FunnelStageHoldSplit = {
+  stuck: number;
+  onHold: number;
+  active: number;
+};
+
+/** Stuck-at-stage counts with on-hold vs otherwise (active) breakdown per stage. */
+export function funnelStageHoldSplits(
+  apps: ApplicationFunnelInput[],
+): Record<ApplicationFunnelStage, FunnelStageHoldSplit> {
+  const empty = (): FunnelStageHoldSplit => ({ stuck: 0, onHold: 0, active: 0 });
+  const out = Object.fromEntries(
+    APPLICATION_FUNNEL_ORDER.map((s) => [s, empty()]),
+  ) as Record<ApplicationFunnelStage, FunnelStageHoldSplit>;
+
+  for (const a of apps) {
+    const stage = applicationFunnelStageOf(a);
+    const bucket = out[stage];
+    bucket.stuck += 1;
+    if (isApplicationOnHold(a)) bucket.onHold += 1;
+    else bucket.active += 1;
+  }
+  return out;
+}

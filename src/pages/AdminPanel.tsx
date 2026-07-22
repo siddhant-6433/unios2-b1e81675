@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -60,6 +60,23 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
 
 const PARTNER_PORTAL_ROLES: AppRole[] = ["academic_partner", "academic_partner_offer_letter"];
 
+const PAGE_SIZE = 50;
+
+// Server-side aggregate counts from admin_user_directory_counts — badges/stat
+// cards read from this instead of counting a client-fetched array (which is
+// capped at 1000 rows by PostgREST and structurally wrong past that: employees,
+// consultants and partners get sorted behind ~1900 lead rows and vanish).
+interface DirectoryCounts {
+  total: number; active: number; inactive: number; online_now: number;
+  employees: number; consultants: number; academic_partners: number; families: number; leads: number;
+  admins: number; counsellors: number;
+  consultants_with_phone: number; consultants_with_email: number;
+  partners_with_phone: number; partners_with_email: number;
+  families_students: number; families_parents: number;
+  leads_with_phone: number; leads_with_email: number;
+  by_role: Record<string, number>;
+}
+
 interface UserWithRole {
   user_id: string;
   profile_id: string;
@@ -74,6 +91,7 @@ interface UserWithRole {
   login_disabled: boolean;
   last_seen_at: string | null;
   archived_at: string | null;
+  deleted_at: string | null;
 }
 
 function isOnline(lastSeenAt: string | null): boolean {
@@ -108,6 +126,10 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
+  const [counts, setCounts] = useState<DirectoryCounts | null>(null);
+  const [tabTotal, setTabTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [publishers, setPublishers] = useState<any[]>([]);
   const [publishersLoading, setPublishersLoading] = useState(false);
@@ -134,21 +156,45 @@ const AdminPanel = () => {
   const [linkUserId, setLinkUserId] = useState<string>("");
   const [linking, setLinking] = useState(false);
   const [inviteDefaults, setInviteDefaults] = useState<{ role?: AppRole; source?: string; publisherId?: string }>({});
+  const [campusEditUser, setCampusEditUser] = useState<{ userId: string; profileId: string; selected: string[] } | null>(null);
+  const [campusList, setCampusList] = useState<{ id: string; name: string }[]>([]);
+  const [savingCampus, setSavingCampus] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    supabase.from("campuses").select("id, name").order("name").then(({ data }) => {
+      if (data) setCampusList(data);
+    });
+  }, []);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
+      // Filter, paginate and count server-side. PostgREST caps every response at
+      // db-max-rows (1000), so we never fetch the whole table into the browser —
+      // each tab pulls one PAGE_SIZE page of its own category and a window
+      // total_count. Publishers is the exception: it renders from the publishers
+      // table but needs a broad user list for the "link existing user" picker.
+      const onPublishers = userSubTab === "publishers";
       const { data, error } = await supabase.rpc("admin_user_directory" as any, {
         _show_archived: showArchivedUsers,
-      }).limit(10000);
+        _category: onPublishers ? null : userSubTab,
+        _role: !onPublishers && userSubTab === "employees" && roleFilter !== "all" && roleFilter !== "none" ? roleFilter : null,
+        _search: onPublishers ? null : (debouncedSearch || null),
+        _status: onPublishers ? null : statusFilter,
+        _limit: onPublishers ? 1000 : PAGE_SIZE,
+        _offset: onPublishers ? 0 : page * PAGE_SIZE,
+      });
 
       if (error) {
         toast({ title: "Error loading users", description: error.message, variant: "destructive" });
         return;
       }
 
-      const merged: UserWithRole[] = ((data || []) as any[]).map((row) => ({
+      const rows = (data || []) as any[];
+      setTabTotal(rows.length > 0 ? Number(rows[0].total_count) : 0);
+
+      const merged: UserWithRole[] = rows.map((row) => ({
         user_id: row.user_id,
         profile_id: row.profile_id,
         display_name: row.display_name,
@@ -162,6 +208,7 @@ const AdminPanel = () => {
         login_disabled: !!row.login_disabled,
         last_seen_at: row.last_seen_at || null,
         archived_at: row.archived_at || null,
+        deleted_at: row.deleted_at || null,
       }));
 
       setUsers(merged);
@@ -171,6 +218,17 @@ const AdminPanel = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCounts = async () => {
+    const { data, error } = await supabase.rpc("admin_user_directory_counts" as any, {
+      _show_archived: showArchivedUsers,
+    });
+    if (error) {
+      console.error("fetchCounts failed:", error.message);
+      return;
+    }
+    setCounts(data as unknown as DirectoryCounts);
   };
 
   const isSuperAdmin = role === "super_admin";
@@ -186,8 +244,24 @@ const AdminPanel = () => {
     setPublishersLoading(false);
   };
 
+  // Debounce the search box so each keystroke doesn't hit the server; reset to
+  // the first page whenever the query changes.
   useEffect(() => {
-    if (canManageUsers) { fetchUsers(); fetchPublishers(); }
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetch the current page whenever the tab, filters, page, or archived toggle change.
+  useEffect(() => {
+    if (canManageUsers) fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageUsers, showArchivedUsers, userSubTab, roleFilter, statusFilter, debouncedSearch, page]);
+
+  // Counts and the publisher list only change on mutations or the archived
+  // toggle — not on page/tab navigation.
+  useEffect(() => {
+    if (canManageUsers) { fetchCounts(); fetchPublishers(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManageUsers, showArchivedUsers]);
 
   const handleLinkPublisher = async (publisherId: string, userId: string) => {
@@ -217,6 +291,7 @@ const AdminPanel = () => {
       setLinkUserId("");
       await fetchPublishers();
       await fetchUsers();
+      await fetchCounts();
     } catch (err: any) {
       toast({ title: "Link failed", description: err.message, variant: "destructive" });
     } finally {
@@ -290,11 +365,28 @@ const AdminPanel = () => {
 
       toast({ title: "Role updated", description: `Role ${newRole === "none" ? "removed" : `set to ${newRole.replace("_", " ")}`} successfully.` });
       await fetchUsers();
+      await fetchCounts();
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
       setSavingUser(null);
       setEditingUser(null);
+    }
+  };
+
+  const handleCampusChange = async (profileId: string, selectedCampuses: string[]) => {
+    setSavingCampus(true);
+    try {
+      const campusValue = selectedCampuses.length > 0 ? selectedCampuses.join(", ") : null;
+      const { error } = await supabase.from("profiles").update({ campus: campusValue }).eq("id", profileId);
+      if (error) throw error;
+      toast({ title: "Campus updated", description: campusValue ? `Set to ${campusValue}` : "Campus removed" });
+      await fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSavingCampus(false);
+      setCampusEditUser(null);
     }
   };
 
@@ -320,6 +412,7 @@ const AdminPanel = () => {
       toast({ title: "User deleted", description: `${deleteTarget.name} has been removed from active user management.` });
       setDeleteTarget(null);
       await fetchUsers();
+      await fetchCounts();
     } catch (err: any) {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
     } finally {
@@ -354,6 +447,7 @@ const AdminPanel = () => {
       });
       setDisableTarget(null);
       await fetchUsers();
+      await fetchCounts();
     } catch (err: any) {
       toast({ title: "Action failed", description: err.message, variant: "destructive" });
     } finally {
@@ -384,6 +478,7 @@ const AdminPanel = () => {
           : `${target.display_name || "User"} is visible in the main user list again.`,
       });
       await fetchUsers();
+      await fetchCounts();
     } catch (err: any) {
       toast({ title: archived ? "Archive failed" : "Restore failed", description: err.message, variant: "destructive" });
     } finally {
@@ -411,26 +506,6 @@ const AdminPanel = () => {
   // Allow access if super_admin or has user_management permission
   if (!canManageUsers) return <Navigate to="/" replace />;
 
-  const filtered = users.filter((u) => {
-    const matchesSearch =
-      !search ||
-      (u.display_name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.email || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.phone || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.campus || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.role || "").toLowerCase().includes(search.toLowerCase());
-
-    const matchesRole =
-      roleFilter === "all" ||
-      (roleFilter === "none" ? !u.role : u.role === roleFilter);
-
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" ? !u.login_disabled : u.login_disabled);
-
-    return matchesSearch && matchesRole && matchesStatus;
-  });
-
   const getRoleBadgeClass = (r: AppRole | null) => {
     if (!r) return "bg-muted text-muted-foreground";
     if (r === "super_admin") return "bg-pastel-purple text-foreground/80";
@@ -456,8 +531,7 @@ const AdminPanel = () => {
       {isSuperAdmin && (
         <div className="space-y-3">
           <OverdueFollowupEnforcementCard />
-          <VoiceProviderCard />
-          <NavyaKnowledgeCard />
+          <NavyaVoiceAgentCard />
         </div>
       )}
 
@@ -513,7 +587,7 @@ const AdminPanel = () => {
 
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-medium text-muted-foreground mr-1">
-                {users.length} total users
+                {counts?.total ?? 0} total users
               </span>
               {([
                 { key: "employees" as const, label: "Employees" },
@@ -522,19 +596,22 @@ const AdminPanel = () => {
                 { key: "publishers" as const, label: "Publishers" },
                 { key: "families" as const, label: "Students & Families" },
                 { key: "leads" as const, label: "Leads & Applicants" },
-              ]).map((tab) => (
+              ]).map((tab) => {
+                const count = tab.key === "publishers" ? publishers.length : counts?.[tab.key];
+                return (
                 <button
                   key={tab.key}
-                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}
+                  onClick={() => { setUserSubTab(tab.key); setPage(0); setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}
                   className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                     userSubTab === tab.key
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-input bg-background text-muted-foreground hover:bg-muted"
                   }`}
                 >
-                  {tab.label}
+                  {tab.label}{count !== undefined ? ` (${count})` : ""}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
@@ -546,22 +623,22 @@ const AdminPanel = () => {
               </div>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
+                onChange={(e) => { setStatusFilter(e.target.value as "all" | "active" | "inactive"); setPage(0); }}
                 className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
               >
                 <option value="all">All Status</option>
-                <option value="active">Active ({users.filter((u) => !u.login_disabled).length})</option>
-                <option value="inactive">Inactive ({users.filter((u) => u.login_disabled).length})</option>
+                <option value="active">Active ({counts?.active ?? 0})</option>
+                <option value="inactive">Inactive ({counts?.inactive ?? 0})</option>
               </select>
               {userSubTab === "employees" && (
                 <select
                   value={roleFilter}
-                  onChange={(e) => setRoleFilter(e.target.value as AppRole | "all" | "none")}
+                  onChange={(e) => { setRoleFilter(e.target.value as AppRole | "all" | "none"); setPage(0); }}
                   className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
                   <option value="all">All Roles</option>
                   {ALL_ROLES.filter((r) => !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter"].includes(r.value)).map((r) => (
-                    <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
+                    <option key={r.value} value={r.value}>{r.label} ({counts?.by_role?.[r.value] ?? 0})</option>
                   ))}
                 </select>
               )}
@@ -574,41 +651,30 @@ const AdminPanel = () => {
             </div>
 
             {(() => {
-              const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
-                if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
-                if (userSubTab === "publishers") return u.role === "publisher";
-                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
-                return !u.role;
-              });
-              const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
-                if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
-                if (userSubTab === "publishers") return u.role === "publisher";
-                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
-                return !u.role;
-              });
+              // Rows come from the server-fetched page (`users`); every count comes
+              // from the aggregate `counts`/`tabTotal`, never from filtering an
+              // array capped at the 1000-row API limit.
+              const subFiltered = users;
+              const c = counts;
               return (<>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {userSubTab === "employees" && (<>
-                <SummaryCard label="Total Employees" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="Admins" value={allSubUsers.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
-                <SummaryCard label="Counsellors" value={allSubUsers.filter((u) => u.role === "counsellor").length} bg="bg-pastel-green" />
-                <SummaryCard label="Online Now" value={allSubUsers.filter((u) => isOnline(u.last_seen_at)).length} bg="bg-pastel-mint" />
+                <SummaryCard label="Total Employees" value={c?.employees ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Admins" value={c?.admins ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="Counsellors" value={c?.counsellors ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="Online Now" value={c?.online_now ?? 0} bg="bg-pastel-mint" />
               </>)}
               {userSubTab === "consultants" && (<>
-                <SummaryCard label="Total Consultants" value={allSubUsers.length} bg="bg-pastel-purple" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-blue" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Consultants" value={c?.consultants ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="With Phone" value={c?.consultants_with_phone ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={c?.consultants_with_email ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "academic_partners" && (<>
-                <SummaryCard label="Total Partners" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-purple" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Partners" value={c?.academic_partners ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="With Phone" value={c?.partners_with_phone ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={c?.partners_with_email ?? 0} bg="bg-pastel-purple" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "publishers" && (<>
                 <SummaryCard label="Total Publishers" value={publishers.length} bg="bg-pastel-blue" />
@@ -617,16 +683,16 @@ const AdminPanel = () => {
                 <SummaryCard label="Pending Login" value={publishers.filter((p) => !p.user_id).length} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "families" && (<>
-                <SummaryCard label="Total" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="Students" value={allSubUsers.filter((u) => u.role === "student").length} bg="bg-pastel-green" />
-                <SummaryCard label="Parents" value={allSubUsers.filter((u) => u.role === "parent").length} bg="bg-pastel-mint" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total" value={c?.families ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="Students" value={c?.families_students ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="Parents" value={c?.families_parents ?? 0} bg="bg-pastel-mint" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "leads" && (<>
-                <SummaryCard label="Total Leads" value={allSubUsers.length} bg="bg-pastel-blue" />
-                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-green" />
-                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-orange" />
-                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+                <SummaryCard label="Total Leads" value={c?.leads ?? 0} bg="bg-pastel-blue" />
+                <SummaryCard label="With Email" value={c?.leads_with_email ?? 0} bg="bg-pastel-green" />
+                <SummaryCard label="With Phone" value={c?.leads_with_phone ?? 0} bg="bg-pastel-orange" />
+                <SummaryCard label="Shown" value={tabTotal} bg="bg-pastel-yellow" />
               </>)}
             </div>
 
@@ -808,6 +874,11 @@ const AdminPanel = () => {
                                     <Archive className="h-2.5 w-2.5" /> Archived
                                   </span>
                                 )}
+                                {user.deleted_at && (
+                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                                    Soft-deleted · still holds phone
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -823,7 +894,19 @@ const AdminPanel = () => {
                               </button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{user.campus || "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {isSuperAdmin ? (
+                              <button
+                                onClick={() => setCampusEditUser({ userId: user.user_id, profileId: user.profile_id, selected: user.campus ? user.campus.split(", ").filter(Boolean) : [] })}
+                                className="text-sm hover:text-primary cursor-pointer"
+                                title="Change campus"
+                              >
+                                {user.campus || "—"}
+                              </button>
+                            ) : (
+                              <span className="text-sm">{user.campus || "—"}</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -960,6 +1043,33 @@ const AdminPanel = () => {
                 </table>
               )}
             </div>
+
+            {userSubTab !== "publishers" && tabTotal > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs text-muted-foreground">
+                  Showing {tabTotal === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, tabTotal)} of {tabTotal}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0 || loading}
+                    className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page + 1} of {Math.max(1, Math.ceil(tabTotal / PAGE_SIZE))}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => ((p + 1) * PAGE_SIZE < tabTotal ? p + 1 : p))}
+                    disabled={(page + 1) * PAGE_SIZE >= tabTotal || loading}
+                    className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
               </>);
             })()}
 
@@ -968,13 +1078,13 @@ const AdminPanel = () => {
                 <InviteUserDialog
                   open={inviteOpen}
                   onClose={() => { setInviteOpen(false); setInviteDefaults({}); }}
-                  onSuccess={() => { fetchUsers(); fetchPublishers(); }}
+                  onSuccess={() => { fetchUsers(); fetchCounts(); fetchPublishers(); }}
                   defaultRole={inviteDefaults.role}
                   defaultPublisherSource={inviteDefaults.source}
                   publisherId={inviteDefaults.publisherId}
                 />
               )}
-              {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />}
+              {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => { fetchUsers(); fetchCounts(); }} />}
               {phoneEdit && (
                 <EditPhoneDialog open onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
                   userId={phoneEdit.userId} userName={phoneEdit.name} currentPhone={phoneEdit.phone || null} />
@@ -993,6 +1103,44 @@ const AdminPanel = () => {
                   userId={permTarget.userId} userName={permTarget.name} userRole={permTarget.role || null} />
               )}
             </Suspense>
+
+            <AlertDialog open={!!campusEditUser} onOpenChange={(o) => !o && setCampusEditUser(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Change Campus Access</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Select which campuses this user can access.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="max-h-60 overflow-y-auto py-1 -mx-1">
+                  {campusList.map((c) => {
+                    const isSelected = campusEditUser?.selected.includes(c.name) ?? false;
+                    return (
+                      <button key={c.id} type="button"
+                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 rounded-lg cursor-pointer text-sm w-full text-left"
+                        onClick={() => setCampusEditUser((prev) =>
+                          prev ? { ...prev, selected: isSelected ? prev.selected.filter((n) => n !== c.name) : [...prev.selected, c.name] } : prev
+                        )}>
+                        <span className={`h-4 w-4 flex items-center justify-center rounded border ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-input"}`}>
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="text-foreground">{c.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={savingCampus}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => campusEditUser && handleCampusChange(campusEditUser.profileId, campusEditUser.selected)}
+                    disabled={savingCampus}
+                  >
+                    {savingCampus && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Save
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
               <AlertDialogContent>
@@ -1055,7 +1203,7 @@ const AdminPanel = () => {
                     role: u.role,
                   }))}
                   onClose={() => setTransferTarget(null)}
-                  onDone={() => { setTransferTarget(null); fetchUsers(); }}
+                  onDone={() => { setTransferTarget(null); fetchUsers(); fetchCounts(); }}
                 />
               </Suspense>
             )}
@@ -1106,49 +1254,9 @@ const AdminPanel = () => {
   );
 };
 
-// Voice agent provider toggle + tunable knobs. Flips the AI call backend
-// between Gemini Live native-audio and the cascaded Sarvam STT → Gemini
-// text → Sarvam TTS path, AND exposes the latency/voice-quality knobs
-// the voice-agent reads on a 30s cache. Switching propagates within
-// ~30s of the save (no redeploy required).
-type VoiceTuning = {
-  gemini_silence_ms: number;
-  sarvam_filler_threshold_ms: number;
-  sarvam_pace: number;
-  sarvam_speaker: string;
-  sarvam_bulbul_model: string;
-  // Round 2 — high & medium value
-  gemini_voice: string;
-  gemini_model: string;
-  gemini_prefix_padding_ms: number;
-  cascade_max_tokens: number;
-  cascade_temperature: number;
-  cascade_lang_override: "auto" | "hi-IN" | "en-IN";
-  // Round 3 — ElevenLabs as alternative cascade TTS
-  cascade_tts_provider: "sarvam" | "elevenlabs";
-  elevenlabs_voice_id: string;
-};
-
-// v3-beta speakers (per Sarvam API): aditya/ritu/ashutosh/priya/neha/
-// rahul/pooja/rohan/simran/kavya. v3-stable accepts a different mostly-
-// disjoint set including suhani/anushka/manisha/shubh/etc. — using the
-// v3-beta list here since that's our default model and the API rejects
-// mismatched (model, speaker) pairs with HTTP 400.
-const SARVAM_SPEAKERS = ["priya", "neha", "ritu", "pooja", "kavya", "simran", "aditya", "ashutosh", "rahul", "rohan"] as const;
-const BULBUL_MODELS = ["bulbul:v3", "bulbul:v3-beta"] as const;
-const GEMINI_VOICES = ["Aoede", "Charon", "Fenrir", "Kore", "Leda", "Puck", "Zephyr"] as const;
-const GEMINI_MODELS = [
-  "gemini-2.5-flash-native-audio-latest",
-  "gemini-2.5-flash-native-audio-preview-09-2025",
-  "gemini-2.5-flash-native-audio-preview-12-2025",
-] as const;
-const CASCADE_LANGS = [
-  { v: "auto",  label: "Auto-detect from script" },
-  { v: "hi-IN", label: "Force Hindi (hi-IN)" },
-  { v: "en-IN", label: "Force English (en-IN)" },
-] as const;
-
-function NavyaKnowledgeCard() {
+// Entry card to the Navya Voice Agent page (settings + knowledge + learning).
+// Badge reuses the pending voice-knowledge-gap count.
+function NavyaVoiceAgentCard() {
   const navigate = useNavigate();
   const [pending, setPending] = useState<number>(0);
 
@@ -1164,352 +1272,21 @@ function NavyaKnowledgeCard() {
 
   return (
     <button
-      onClick={() => navigate("/admin/navya-knowledge")}
+      onClick={() => navigate("/admin/navya")}
       className="w-full flex items-center gap-4 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/40"
     >
       <div className="rounded-xl bg-pastel-purple p-2">
         <Sparkles className="h-5 w-5 text-foreground/70" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground">Navya Knowledge</p>
-        <p className="text-[12px] text-muted-foreground mt-0.5">Review questions Navya couldn't answer and teach her the right replies.</p>
+        <p className="text-sm font-semibold text-foreground">Navya Voice Agent</p>
+        <p className="text-[12px] text-muted-foreground mt-0.5">Voice provider settings, knowledge base and learning for the AI admissions counsellor.</p>
       </div>
       {pending > 0 && (
         <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">{pending} pending</span>
       )}
       <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
     </button>
-  );
-}
-
-function VoiceProviderCard() {
-  const { toast } = useToast();
-  const [provider, setProvider] = useState<"gemini" | "sarvam" | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [tuning, setTuning] = useState<VoiceTuning | null>(null);
-  const [tuningSaving, setTuningSaving] = useState(false);
-
-  useEffect(() => {
-    (supabase.rpc("get_voice_agent_provider" as any) as any).then(({ data }: any) => {
-      setProvider((data === "sarvam" ? "sarvam" : "gemini"));
-    });
-    (supabase.rpc("get_voice_agent_settings" as any) as any).then(({ data }: any) => {
-      // Defaults match the migration so the UI always renders something useful
-      setTuning({
-        gemini_silence_ms:          data?.gemini_silence_ms          ?? 1500,
-        sarvam_filler_threshold_ms: data?.sarvam_filler_threshold_ms ?? 700,
-        sarvam_pace:                Number(data?.sarvam_pace ?? 1.0),
-        sarvam_speaker:             data?.sarvam_speaker             ?? "suhani",
-        sarvam_bulbul_model:        data?.sarvam_bulbul_model        ?? "bulbul:v3-beta",
-        gemini_voice:               data?.gemini_voice               ?? "Aoede",
-        gemini_model:               data?.gemini_model               ?? "gemini-2.5-flash-native-audio-latest",
-        gemini_prefix_padding_ms:   data?.gemini_prefix_padding_ms   ?? 300,
-        cascade_max_tokens:         data?.cascade_max_tokens         ?? 150,
-        cascade_temperature:        Number(data?.cascade_temperature ?? 0.4),
-        cascade_lang_override:      (data?.cascade_lang_override === "hi-IN" || data?.cascade_lang_override === "en-IN") ? data.cascade_lang_override : "auto",
-        cascade_tts_provider:       data?.cascade_tts_provider === "elevenlabs" ? "elevenlabs" : "sarvam",
-        elevenlabs_voice_id:        data?.elevenlabs_voice_id ?? "",
-      });
-    });
-  }, []);
-
-  const flip = async (next: "gemini" | "sarvam") => {
-    if (next === provider) return;
-    setSaving(true);
-    const { error } = await supabase.rpc("set_voice_agent_provider" as any, { _provider: next });
-    setSaving(false);
-    if (error) {
-      toast({ title: "Couldn't change provider", description: error.message, variant: "destructive" });
-      return;
-    }
-    setProvider(next);
-    toast({ title: `Voice provider switched to ${next}`, description: "New calls land on the new engine within ~30s." });
-  };
-
-  // Patch one or more tuning fields. Only the changed field needs to be
-  // sent — set_voice_agent_settings does a partial JSONB merge.
-  const patchTuning = async (patch: Partial<VoiceTuning>) => {
-    if (!tuning) return;
-    const next: VoiceTuning = { ...tuning, ...patch };
-    setTuning(next);
-    setTuningSaving(true);
-    const { error } = await supabase.rpc("set_voice_agent_settings" as any, { _settings: patch });
-    setTuningSaving(false);
-    if (error) {
-      toast({ title: "Couldn't save setting", description: error.message, variant: "destructive" });
-      // Refetch on failure so the UI snaps back to the actual stored value
-      const { data } = await (supabase.rpc("get_voice_agent_settings" as any) as any);
-      if (data) setTuning(data);
-      return;
-    }
-    toast({ title: "Saved", description: "Active on new calls within ~30s." });
-  };
-
-  if (!provider) return null;
-
-  return (
-    <div className="rounded-2xl border border-border bg-card p-4 space-y-4">
-      {/* ── Provider toggle (existing) ── */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">AI Voice Agent backend</p>
-          <p className="text-[12px] text-muted-foreground mt-0.5">
-            <span className="font-medium">Gemini Live</span> = end-to-end native audio (lower latency, less resilient).
-            <span className="font-medium"> Sarvam</span> = STT + Gemini text + TTS (higher latency, more resilient, Indian-language native voices).
-          </p>
-        </div>
-        <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1">
-          <button
-            disabled={saving}
-            onClick={() => flip("gemini")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "gemini" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            Gemini Live
-          </button>
-          <button
-            disabled={saving}
-            onClick={() => flip("sarvam")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "sarvam" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            Sarvam
-          </button>
-        </div>
-      </div>
-
-      {/* ── Tunable settings ── only the section for the ACTIVE provider
-              is shown so admins aren't editing knobs that don't apply. */}
-      {tuning && (
-        <div className="border-t border-border pt-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold text-foreground/80 uppercase tracking-wide">
-              Tuning · {provider === "gemini" ? "Gemini Live" : "Sarvam Cascade"}
-            </p>
-            {tuningSaving && <span className="text-[11px] text-muted-foreground">Saving…</span>}
-          </div>
-
-          {/* ── Gemini Live tuning ── */}
-          {provider === "gemini" && (
-            <div className="space-y-3">
-              {/* Turn-end VAD timeout */}
-              <div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <label className="text-xs font-medium text-foreground">Turn-end timeout</label>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.gemini_silence_ms} ms</span>
-                </div>
-                <input
-                  type="range" min={500} max={3000} step={100}
-                  value={tuning.gemini_silence_ms}
-                  onChange={(e) => setTuning({ ...tuning, gemini_silence_ms: Number(e.target.value) })}
-                  onMouseUp={(e) => patchTuning({ gemini_silence_ms: Number((e.target as HTMLInputElement).value) })}
-                  onTouchEnd={(e) => patchTuning({ gemini_silence_ms: Number((e.target as HTMLInputElement).value) })}
-                  className="w-full"
-                />
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  How long Gemini's VAD waits before declaring the caller done. Lower = snappier. Below ~1200 ms risks self-interrupt on Hindi pauses.
-                </p>
-              </div>
-
-              {/* Prefix padding */}
-              <div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <label className="text-xs font-medium text-foreground">Prefix padding</label>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.gemini_prefix_padding_ms} ms</span>
-                </div>
-                <input
-                  type="range" min={100} max={500} step={50}
-                  value={tuning.gemini_prefix_padding_ms}
-                  onChange={(e) => setTuning({ ...tuning, gemini_prefix_padding_ms: Number(e.target.value) })}
-                  onMouseUp={(e) => patchTuning({ gemini_prefix_padding_ms: Number((e.target as HTMLInputElement).value) })}
-                  onTouchEnd={(e) => patchTuning({ gemini_prefix_padding_ms: Number((e.target as HTMLInputElement).value) })}
-                  className="w-full"
-                />
-                <p className="text-[10px] text-muted-foreground mt-0.5">VAD pre-speech context window. Default 300 ms. Lower = miss first phoneme; higher = small lag.</p>
-              </div>
-
-              {/* Voice + model side-by-side */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-foreground block mb-1">Voice</label>
-                  <select
-                    value={tuning.gemini_voice}
-                    onChange={(e) => patchTuning({ gemini_voice: e.target.value })}
-                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                  >
-                    {GEMINI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Aoede=measured female · Kore=energetic · Charon=deep · Leda/Zephyr=calm.</p>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-foreground block mb-1">Model</label>
-                  <select
-                    value={tuning.gemini_model}
-                    onChange={(e) => patchTuning({ gemini_model: e.target.value })}
-                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                  >
-                    {GEMINI_MODELS.map(m => <option key={m} value={m}>{m.replace("gemini-", "")}</option>)}
-                  </select>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">native-audio = best quality. flash-live = lower latency, more synthetic.</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Sarvam Cascade tuning ── */}
-          {provider === "sarvam" && (
-            <div className="space-y-3">
-              {/* TTS provider switch — Sarvam Bulbul vs ElevenLabs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3 border-b border-border/40">
-                <div>
-                  <label className="text-xs font-medium text-foreground block mb-1">Cascade TTS provider</label>
-                  <select
-                    value={tuning.cascade_tts_provider}
-                    onChange={(e) => patchTuning({ cascade_tts_provider: e.target.value as VoiceTuning["cascade_tts_provider"] })}
-                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                  >
-                    <option value="sarvam">Sarvam Bulbul</option>
-                    <option value="elevenlabs">ElevenLabs (Turbo v2.5)</option>
-                  </select>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Bulbul = cheaper, faster (~500ms). ElevenLabs = better Hinglish prosody, ~$0.30/1k chars, ~800ms.
-                  </p>
-                </div>
-                {tuning.cascade_tts_provider === "elevenlabs" && (
-                  <div>
-                    <label className="text-xs font-medium text-foreground block mb-1">ElevenLabs voice ID</label>
-                    <input
-                      type="text"
-                      value={tuning.elevenlabs_voice_id}
-                      onChange={(e) => setTuning({ ...tuning, elevenlabs_voice_id: e.target.value })}
-                      onBlur={(e) => patchTuning({ elevenlabs_voice_id: e.target.value.trim() })}
-                      placeholder="paste voice_id from ElevenLabs"
-                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs font-mono"
-                    />
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Find in ElevenLabs dashboard → Voices → click voice → "View ID". e.g. for Anjura.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Filler-ack threshold */}
-              <div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <label className="text-xs font-medium text-foreground">Filler-ack threshold</label>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.sarvam_filler_threshold_ms} ms</span>
-                </div>
-                <input
-                  type="range" min={0} max={2500} step={100}
-                  value={tuning.sarvam_filler_threshold_ms}
-                  onChange={(e) => setTuning({ ...tuning, sarvam_filler_threshold_ms: Number(e.target.value) })}
-                  onMouseUp={(e) => patchTuning({ sarvam_filler_threshold_ms: Number((e.target as HTMLInputElement).value) })}
-                  onTouchEnd={(e) => patchTuning({ sarvam_filler_threshold_ms: Number((e.target as HTMLInputElement).value) })}
-                  className="w-full"
-                />
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  How long after the caller stops speaking before we play a short "ji…" filler while the LLM thinks. 0 = always. ≥2000 = effectively never.
-                </p>
-              </div>
-
-              {/* Bulbul pace */}
-              <div>
-                <div className="flex items-baseline justify-between mb-1">
-                  <label className="text-xs font-medium text-foreground">Bulbul pace</label>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.sarvam_pace.toFixed(2)}×</span>
-                </div>
-                <input
-                  type="range" min={0.7} max={1.4} step={0.05}
-                  value={tuning.sarvam_pace}
-                  onChange={(e) => setTuning({ ...tuning, sarvam_pace: Number(e.target.value) })}
-                  onMouseUp={(e) => patchTuning({ sarvam_pace: Number((e.target as HTMLInputElement).value) })}
-                  onTouchEnd={(e) => patchTuning({ sarvam_pace: Number((e.target as HTMLInputElement).value) })}
-                  className="w-full"
-                />
-                <p className="text-[10px] text-muted-foreground mt-0.5">Bulbul speech speed. 1.0 = natural default. Higher = faster.</p>
-              </div>
-
-              {/* Bulbul speaker + model side-by-side — hidden when
-                  ElevenLabs is the active TTS provider (those settings
-                  don't apply to EL). */}
-              {tuning.cascade_tts_provider === "sarvam" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-foreground block mb-1">Bulbul speaker</label>
-                    <select
-                      value={tuning.sarvam_speaker}
-                      onChange={(e) => patchTuning({ sarvam_speaker: e.target.value })}
-                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                    >
-                      {SARVAM_SPEAKERS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Filler audio re-renders automatically when the voice changes.</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-foreground block mb-1">Bulbul model</label>
-                    <select
-                      value={tuning.sarvam_bulbul_model}
-                      onChange={(e) => patchTuning({ sarvam_bulbul_model: e.target.value })}
-                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                    >
-                      {BULBUL_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">v3-beta = better prosody · v3 = stable fallback.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* LLM tuning sub-section */}
-              <div className="border-t border-border/60 pt-3 space-y-3">
-                <p className="text-[10px] font-semibold text-foreground/70 uppercase tracking-wide">LLM (Gemini text)</p>
-
-                <div>
-                  <div className="flex items-baseline justify-between mb-1">
-                    <label className="text-xs font-medium text-foreground">Reply max tokens</label>
-                    <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.cascade_max_tokens}</span>
-                  </div>
-                  <input
-                    type="range" min={50} max={500} step={10}
-                    value={tuning.cascade_max_tokens}
-                    onChange={(e) => setTuning({ ...tuning, cascade_max_tokens: Number(e.target.value) })}
-                    onMouseUp={(e) => patchTuning({ cascade_max_tokens: Number((e.target as HTMLInputElement).value) })}
-                    onTouchEnd={(e) => patchTuning({ cascade_max_tokens: Number((e.target as HTMLInputElement).value) })}
-                    className="w-full"
-                  />
-                  <p className="text-[10px] text-muted-foreground mt-0.5">~150 tokens ≈ 2-3 short sentences. Tighter = faster TTS, but cuts off long answers.</p>
-                </div>
-
-                <div>
-                  <div className="flex items-baseline justify-between mb-1">
-                    <label className="text-xs font-medium text-foreground">Temperature</label>
-                    <span className="text-[11px] tabular-nums text-muted-foreground">{tuning.cascade_temperature.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range" min={0} max={1.5} step={0.05}
-                    value={tuning.cascade_temperature}
-                    onChange={(e) => setTuning({ ...tuning, cascade_temperature: Number(e.target.value) })}
-                    onMouseUp={(e) => patchTuning({ cascade_temperature: Number((e.target as HTMLInputElement).value) })}
-                    onTouchEnd={(e) => patchTuning({ cascade_temperature: Number((e.target as HTMLInputElement).value) })}
-                    className="w-full"
-                  />
-                  <p className="text-[10px] text-muted-foreground mt-0.5">0 = deterministic. 0.4 = default. 0.7+ = more variety, occasionally off-script.</p>
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-foreground block mb-1">Bulbul language override</label>
-                  <select
-                    value={tuning.cascade_lang_override}
-                    onChange={(e) => patchTuning({ cascade_lang_override: e.target.value as VoiceTuning["cascade_lang_override"] })}
-                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs"
-                  >
-                    {CASCADE_LANGS.map(l => <option key={l.v} value={l.v}>{l.label}</option>)}
-                  </select>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Auto reads phonetics from the script the LLM emitted. Force one if you see persistent mispronunciations.</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

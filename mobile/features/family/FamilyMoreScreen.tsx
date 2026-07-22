@@ -1,7 +1,7 @@
 import { ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { BookOpen, LogOut, User } from 'lucide-react-native';
+import { BookOpen, CalendarDays, LogOut, User } from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, ListRow } from '../../components/ui';
@@ -16,6 +16,13 @@ export function FamilyMoreScreen() {
         <Text style={[type.h1, { color: colors.ink }]}>More</Text>
 
         <Card padded={false}>
+          <ListRow
+            icon={CalendarDays}
+            title="Timetable"
+            subtitle="Weekly class schedule"
+            showChevron
+            onPress={() => router.push('/(family)/timetable' as never)}
+          />
           <ListRow
             icon={BookOpen}
             title="Library"

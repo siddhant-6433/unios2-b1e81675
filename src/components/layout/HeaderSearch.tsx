@@ -138,7 +138,7 @@ export function HeaderSearch() {
       >
         <Search className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Search...</span>
-        <kbd className="hidden sm:inline text-[10px] font-mono bg-muted rounded px-1.5 py-0.5 border border-border/60">⌘K</kbd>
+        <kbd className="hidden sm:inline text-[10px] font-mono bg-muted rounded px-1.5 py-0.5 border border-border/60 sm:ml-auto">⌘K</kbd>
       </button>
 
       {/* Dropdown */}
