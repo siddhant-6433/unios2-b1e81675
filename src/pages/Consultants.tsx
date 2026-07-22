@@ -25,7 +25,7 @@ const stageColors: Record<string, string> = { new: "bg-pastel-blue", contacted: 
 interface Consultant {
   id: string; name: string; organization: string | null; phone: string | null; email: string | null;
   city: string | null; stage: string; commission_type: string | null; commission_value: number | null;
-  notes: string | null; created_at: string; user_id: string | null;
+  notes: string | null; created_at: string; user_id: string | null; payout_model: string | null;
   company_name: string | null; company_address: string | null; pan_number: string | null; gst_number: string | null; tan_number: string | null;
   authorised_signatory_name: string | null; authorised_signatory_contact: string | null; authorised_signatory_email: string | null;
   onboarding_status: string; onboarding_step: number;
@@ -100,6 +100,16 @@ type ConsultantSavePayload = {
   commission_value: number;
   notes: string | null;
   user_id: string | null;
+  payout_model: string;
+};
+
+type FeeCollectionRemittance = {
+  id: string;
+  amount_collected: number | null;
+  amount_remitted: number;
+  remittance_ref: string | null;
+  note: string | null;
+  created_at: string;
 };
 type AdminOnboardingClient = {
   from: {
@@ -204,7 +214,11 @@ const Consultants = () => {
   const [form, setForm] = useState({
     name: "", organization: "", phone: "", email: "", city: "",
     stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "",
+    payout_model: "commission_pct_first_year",
   });
+  const [feeRemittances, setFeeRemittances] = useState<FeeCollectionRemittance[]>([]);
+  const [remittanceForm, setRemittanceForm] = useState({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
+  const [remittanceSaving, setRemittanceSaving] = useState(false);
   const [consultantUsers, setConsultantUsers] = useState<{ user_id: string; display_name: string | null; email: string | null }[]>([]);
   const canAccessConsultantOnboarding =
     role === "super_admin"
@@ -263,11 +277,12 @@ const Consultants = () => {
       commission_value: Number(form.commission_value) || 0,
       notes: form.notes.trim() || null,
       user_id: form.user_id || null,
+      payout_model: form.payout_model,
     };
 
     const { error } = editingId
-      ? await supabase.from("consultants").update(payload).eq("id", editingId)
-      : await supabase.from("consultants").insert(payload);
+      ? await supabase.from("consultants").update(payload as any).eq("id", editingId)
+      : await supabase.from("consultants").insert(payload as any);
 
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
     else { toast({ title: editingId ? "Updated" : "Consultant added" }); resetForm(); fetchConsultants(); }
@@ -276,7 +291,9 @@ const Consultants = () => {
 
   const resetForm = () => {
     setShowForm(false); setEditingId(null);
-    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "" });
+    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "", payout_model: "commission_pct_first_year" });
+    setFeeRemittances([]);
+    setRemittanceForm({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
   };
 
   const editConsultant = (c: Consultant) => {
@@ -284,10 +301,46 @@ const Consultants = () => {
       name: c.name, organization: c.organization || "", phone: c.phone || "", email: c.email || "",
       city: c.city || "", stage: c.stage, commission_type: c.commission_type || "percentage",
       commission_value: String(c.commission_value || 0), notes: c.notes || "", user_id: c.user_id || "",
+      payout_model: c.payout_model || "commission_pct_first_year",
     });
     setEditingId(c.id);
     setShowForm(true);
     fetchConsultantUsers();
+    if ((c.payout_model || "commission_pct_first_year") === "fee_collection") fetchFeeRemittances(c.id);
+  };
+
+  const fetchFeeRemittances = async (consultantId: string) => {
+    const { data, error } = await (supabase.from("consultant_fee_collection_remittances" as any) as any)
+      .select("id, amount_collected, amount_remitted, remittance_ref, note, created_at")
+      .eq("consultant_id", consultantId)
+      .order("created_at", { ascending: false });
+    if (error) { toast({ title: "Error loading remittances", description: error.message, variant: "destructive" }); return; }
+    setFeeRemittances((data || []) as FeeCollectionRemittance[]);
+  };
+
+  const recordFeeRemittance = async () => {
+    if (!editingId) return;
+    const amountRemitted = Number(remittanceForm.amount_remitted);
+    if (!remittanceForm.amount_remitted || Number.isNaN(amountRemitted)) {
+      toast({ title: "Amount remitted is required", variant: "destructive" });
+      return;
+    }
+    setRemittanceSaving(true);
+    const { error } = await (supabase.rpc as any)("record_consultant_fee_remittance", {
+      _consultant_id: editingId,
+      _amount_remitted: amountRemitted,
+      _amount_collected: remittanceForm.amount_collected ? Number(remittanceForm.amount_collected) : null,
+      _remittance_ref: remittanceForm.remittance_ref.trim() || null,
+      _note: remittanceForm.note.trim() || null,
+    });
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Remittance recorded" });
+      setRemittanceForm({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
+      fetchFeeRemittances(editingId);
+    }
+    setRemittanceSaving(false);
   };
 
   const openOnboarding = (consultant: Consultant, step?: number) => {
@@ -519,9 +572,14 @@ const Consultants = () => {
                 {c.email && <span className="flex items-center gap-1.5"><Mail className="h-3 w-3" />{c.email}</span>}
               </div>
               <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <IndianRupee className="h-3 w-3" />
-                  {c.commission_value}{c.commission_type === "percentage" ? "%" : " flat"} commission
+                <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span className="flex items-center gap-1">
+                    <IndianRupee className="h-3 w-3" />
+                    {c.commission_value}{c.commission_type === "percentage" ? "%" : " flat"} commission
+                  </span>
+                  <Badge variant="outline" className="text-[9px] font-normal">
+                    {c.payout_model === "fee_collection" ? "Fee Collection" : c.payout_model === "commission_fixed" ? "Fixed" : "% First-Year"}
+                  </Badge>
                 </span>
                 <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
@@ -628,9 +686,86 @@ const Consultants = () => {
                 <input type="number" value={form.commission_value} onChange={e => setForm(p => ({ ...p, commission_value: e.target.value }))} className={inputCls} />
               </div>
             </div>
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Payout Model</label>
+              <select
+                value={form.payout_model}
+                onChange={e => {
+                  const payout_model = e.target.value;
+                  setForm(p => ({ ...p, payout_model }));
+                  if (editingId && payout_model === "fee_collection") fetchFeeRemittances(editingId);
+                }}
+                className={inputCls}
+              >
+                <option value="commission_pct_first_year">Commission — % of First-Year Fee</option>
+                <option value="commission_fixed">Commission — Fixed Amount</option>
+                <option value="fee_collection">Fee-Collection Consultant</option>
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {form.payout_model === "fee_collection"
+                  ? "Fee-collection consultant: the consultant collects fees directly from students and remits a discounted/fixed amount to the college. The college waives the student's fee (via the existing waiver approval) and pays the consultant NO commission. Record what the college receives under \"Remittances\" below."
+                  : form.payout_model === "commission_fixed"
+                  ? "Commission — fixed amount: college pays a fixed rupee amount per admission, released proportionally as the student pays their first-year fee."
+                  : "Commission — % of first-year fee: college pays the consultant a percentage of the student's first-year fee, released proportionally as the student pays. (Percentage comes from the commission rate below / per-course rates.)"}
+              </p>
+            </div>
             {editingId && (
               <div className="border-t border-border pt-4">
                 <CourseCommissions consultantId={editingId} />
+              </div>
+            )}
+            {editingId && form.payout_model === "fee_collection" && (
+              <div className="border-t border-border pt-4 space-y-3">
+                <label className="block text-[11px] font-medium text-muted-foreground">Fee-Collection Remittances</label>
+                <div className="space-y-2">
+                  {feeRemittances.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No remittances recorded.</p>
+                  ) : feeRemittances.map(r => (
+                    <div key={r.id} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 text-xs">
+                      <div>
+                        <p className="font-medium text-foreground">
+                          ₹{Number(r.amount_remitted).toLocaleString("en-IN")} remitted
+                          {r.amount_collected != null && ` (of ₹${Number(r.amount_collected).toLocaleString("en-IN")} collected)`}
+                        </p>
+                        <p className="text-muted-foreground">
+                          {r.remittance_ref || "No ref"} · {new Date(r.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder="Amount remitted *"
+                    value={remittanceForm.amount_remitted}
+                    onChange={e => setRemittanceForm(p => ({ ...p, amount_remitted: e.target.value }))}
+                    className={inputCls}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Amount collected"
+                    value={remittanceForm.amount_collected}
+                    onChange={e => setRemittanceForm(p => ({ ...p, amount_collected: e.target.value }))}
+                    className={inputCls}
+                  />
+                  <input
+                    placeholder="Remittance ref"
+                    value={remittanceForm.remittance_ref}
+                    onChange={e => setRemittanceForm(p => ({ ...p, remittance_ref: e.target.value }))}
+                    className={inputCls}
+                  />
+                  <input
+                    placeholder="Note"
+                    value={remittanceForm.note}
+                    onChange={e => setRemittanceForm(p => ({ ...p, note: e.target.value }))}
+                    className={inputCls}
+                  />
+                </div>
+                <Button size="sm" onClick={recordFeeRemittance} disabled={remittanceSaving} className="gap-1.5">
+                  {remittanceSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Record
+                </Button>
               </div>
             )}
             {editingId && (
