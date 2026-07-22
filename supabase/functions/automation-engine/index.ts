@@ -181,6 +181,32 @@ Deno.serve(async (req) => {
       const courseName = (lead as any).courses?.name || "our programmes";
       const campusName = (lead as any).campuses?.name || "our campus";
 
+      // Resolve latest visit date for {{visit_date}} replacement
+      let visitDateFormatted = "the scheduled date";
+      if (trigger_type === "visit_scheduled" || trigger_type === "visit_completed") {
+        const { data: latestVisit } = await admin
+          .from("campus_visits")
+          .select("visit_date")
+          .eq("lead_id", lead_id)
+          .eq("status", "scheduled")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        if (latestVisit?.visit_date) {
+          const d = new Date(latestVisit.visit_date);
+          if (!isNaN(d.getTime())) {
+            const day = d.getDate();
+            const sx = [, "st", "nd", "rd"][day % 10 > 3 ? 0 : (day % 100 - day % 10 !== 10 ? day % 10 : 0)] || "th";
+            const mon = ["January","February","March","April","May","June","July","August","September","October","November","December"][d.getMonth()];
+            const wd = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()];
+            const h = d.getHours(), ampm = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
+            const mm = d.getMinutes();
+            const time = mm > 0 ? `${h12}:${String(mm).padStart(2, "0")} ${ampm}` : `${h12} ${ampm}`;
+            visitDateFormatted = `${day}${sx} ${mon} ${d.getFullYear()}, ${wd} ${time}`;
+          }
+        }
+      }
+
       for (const action of actions) {
         try {
           switch (action.type) {
@@ -211,6 +237,7 @@ Deno.serve(async (req) => {
                      .replace("{{app_id}}", lead.application_id || "N/A")
                      .replace("{{counsellor_name}}", counsellorName || "Counsellor")
                      .replace("{{phone_last4}}", phoneLastFour)
+                     .replace("{{visit_date}}", visitDateFormatted)
                   )
                 : [lead.name, courseName, lead.source || "website"];
 

@@ -306,7 +306,7 @@ export const VOICE_AGENT_TOOLS = [
       type: "object",
       properties: {
         visit_date: { type: "string", description: "Visit date YYYY-MM-DD" },
-        visit_time: { type: "string", description: "morning / afternoon / evening" },
+        visit_time: { type: "string", description: "Specific time like '11:00' or slot: morning / afternoon / evening" },
       },
       required: ["visit_date"],
     },

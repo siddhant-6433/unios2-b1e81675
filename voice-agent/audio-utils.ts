@@ -75,23 +75,29 @@ export function mulawToGeminiPcm(mulawBase64: string): string {
 }
 
 /**
- * Encode Gemini PCM 24kHz base64 → mulaw 8kHz base64 (for Plivo output).
- * Downsample 24k→8k (take every 3rd sample) then encode mulaw.
+ * Encode Gemini PCM base64 → mulaw 8kHz base64 (for Plivo output).
+ * Downsample from sourceSampleRate → 8kHz, then encode mulaw.
  */
-export function geminiPcmToMulaw(pcm24kBase64: string): string {
-  const raw = Uint8Array.from(atob(pcm24kBase64), c => c.charCodeAt(0));
-  const pcm24k = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+export function geminiPcmToMulaw(pcmBase64: string, sourceSampleRate = 24000): string {
+  const raw = Uint8Array.from(atob(pcmBase64), c => c.charCodeAt(0));
+  const pcm = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
 
-  // Downsample 24kHz → 8kHz (factor 3)
-  const pcm8kLen = Math.floor(pcm24k.length / 3);
+  const factor = Math.round(sourceSampleRate / 8000);
+  const pcm8kLen = Math.floor(pcm.length / factor);
   const mulaw = new Uint8Array(pcm8kLen);
 
   for (let i = 0; i < pcm8kLen; i++) {
-    mulaw[i] = pcmToMulawSample(pcm24k[i * 3]);
+    mulaw[i] = pcmToMulawSample(pcm[i * factor]);
   }
 
   // Convert to base64
   let binary = "";
   for (let i = 0; i < mulaw.length; i++) binary += String.fromCharCode(mulaw[i]);
   return btoa(binary);
+}
+
+/** Parse sample rate from a Gemini audio mimeType like "audio/pcm;rate=24000" */
+export function parsePcmRate(mimeType: string | undefined): number {
+  const m = mimeType?.match(/rate=(\d+)/);
+  return m ? parseInt(m[1], 10) : 24000;
 }

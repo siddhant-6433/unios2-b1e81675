@@ -20,7 +20,7 @@
  *   PORT                 — HTTP port (default 8000)
  */
 
-import { mulawToGeminiPcm, geminiPcmToMulaw } from "./audio-utils.ts";
+import { mulawToGeminiPcm, geminiPcmToMulaw, parsePcmRate } from "./audio-utils.ts";
 import { buildSystemInstruction, VOICE_AGENT_TOOLS, type CallContext } from "./scripts.ts";
 import {
   mulawBase64ToPcm16, pcm16ToMulawBase64, rmsEnergy,
@@ -295,6 +295,24 @@ async function fireAutomation(triggerType: string, leadId: string, extra: Record
 }
 
 // ── Post-call reconciliation helpers ─────────────────────────────────
+
+/** Format a date/timestamp for WhatsApp: "23rd July 2026, Wednesday 11:00 AM" */
+function formatVisitDate(raw: string): string {
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    const day = d.getDate();
+    const suffix = [, "st", "nd", "rd"][day % 10 > 3 ? 0 : (day % 100 - day % 10 !== 10 ? day % 10 : 0)] || "th";
+    const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getMonth()];
+    const weekday = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][d.getDay()];
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    const time = m > 0 ? `${h12}:${String(m).padStart(2, "0")} ${ampm}` : `${h12} ${ampm}`;
+    return `${day}${suffix} ${month} ${d.getFullYear()}, ${weekday} ${time}`;
+  } catch { return raw; }
+}
 
 function xmlEsc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -878,13 +896,19 @@ async function reconcilePostCall(
       }
     }
 
-    visitDate = visitDate || "the scheduled date";
-    // Format date for WhatsApp if it's a full timestamp
-    if (typeof visitDate === "string" && visitDate.includes("T")) {
-      visitDate = visitDate.slice(0, 10);
+    // Skip if visit_confirmation WA was already sent during the call
+    const alreadySentVisitWa = toolsMade.some(
+      (tc: any) => tc.name === "send_whatsapp_to_lead" && tc.args?.message_type === "visit_confirmation" && tc.result?.success === true,
+    );
+    if (alreadySentVisitWa) {
+      actions.push("wa:visit_confirmation:skipped_dedup");
+      return { templateKey: null, phone: waLd.phone, actions };
     }
+
+    visitDate = visitDate || "the scheduled date";
+    const formattedVisitDate = formatVisitDate(visitDate);
     actions.push("wa:visit_confirmation");
-    return { templateKey: "visit_confirmation", templateParams: [waLd.name, visitDate, cm], buttonUrls: ["1820424915210710582"], phone: waLd.phone, actions };
+    return { templateKey: "visit_confirmation", templateParams: [waLd.name, formattedVisitDate, cm], buttonUrls: ["1820424915210710582"], phone: waLd.phone, actions };
   }
 
   if (isCallbackAction) {
@@ -1072,21 +1096,24 @@ async function executeTool(
           return { success: true, message: "Visit already scheduled", date: args.visit_date };
         }
 
-        // Build visit_date as timestamp — if only date provided, set to 10:00 AM IST
+        // Build visit_date as timestamp — parse specific time or slot
         let visitTimestamp = args.visit_date;
         if (visitTimestamp && !visitTimestamp.includes("T")) {
           const timeMap: Record<string, string> = { morning: "10:00", afternoon: "14:00", evening: "16:00" };
-          const time = timeMap[args.visit_time] || "10:00";
+          const specificTime = args.visit_time?.match(/^(\d{1,2}):?(\d{2})?$/);
+          const time = specificTime
+            ? `${specificTime[1].padStart(2, "0")}:${specificTime[2] || "00"}`
+            : timeMap[args.visit_time] || "10:00";
           visitTimestamp = `${args.visit_date}T${time}:00+05:30`;
         }
 
-        // Get campus_id from lead
+        // Get campus_id — prefer the course's campus over the lead's default
         const leadRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=campus_id`,
+          `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=campus_id,courses:course_id(campus_id)`,
           { headers },
         );
         const leadData = await leadRes.json();
-        const campusId = leadData?.[0]?.campus_id || null;
+        const campusId = (leadData?.[0]?.courses as any)?.campus_id || leadData?.[0]?.campus_id || null;
 
         const body: Record<string, any> = {
           lead_id: callCtx.leadId,
@@ -1381,11 +1408,24 @@ async function executeTool(
             waTemplateKey = "call_requested_details";
             waParams = [waLead.name, `${waCourse} admission at NIMT`];
             break;
-          case "visit_confirmation":
+          case "visit_confirmation": {
             waTemplateKey = "visit_confirmation";
-            waParams = [waLead.name, args.visit_date || "the scheduled date", waCampus];
+            // Resolve campus from the course's campus, not the lead's default
+            let visitCampus = waCampus;
+            if (callCtx.leadId) {
+              const cRes = await fetch(
+                `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=courses:course_id(campus:campus_id(name))`,
+                { headers },
+              );
+              const cData = (await cRes.json())?.[0];
+              const courseCampus = (cData?.courses as any)?.campus?.name;
+              if (courseCampus) visitCampus = courseCampus;
+            }
+            const rawVisitDate = args.visit_date || "the scheduled date";
+            waParams = [waLead.name, formatVisitDate(rawVisitDate), visitCampus];
             waButtonUrls = ["1820424915210710582"];
             break;
+          }
           case "callback_scheduled":
             waTemplateKey = "callback_scheduled";
             waParams = [waLead.name, waCourse];
@@ -1883,10 +1923,13 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             prefixPaddingMs: liveSettings.geminiPrefixPaddingMs,
-            // Read from admin-controlled settings (default 1500ms).
-            // Lower = snappier replies, higher = safer (no self-interrupt
-            // on Hindi pauses). Tunable from /admin → AI Voice Agent card.
             silenceDurationMs: getVoiceSettings().geminiSilenceMs,
+          },
+        },
+        realtimeOutputConfig: {
+          audioOutputConfig: {
+            audioEncoding: "PCM",
+            sampleRateHertz: 24000,
           },
         },
         // Surface STT for both sides into serverContent so we can log what
@@ -1908,9 +1951,10 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   };
 
   // Helper: send mulaw audio to Plivo
-  const sendAudioToPlivo = (pcm24kBase64: string) => {
+  let geminiOutputRate = 24000; // updated on first audio chunk from mimeType
+  const sendAudioToPlivo = (pcmBase64: string) => {
     if (plivoWs.readyState !== WebSocket.OPEN) return;
-    const mulawAudio = geminiPcmToMulaw(pcm24kBase64);
+    const mulawAudio = geminiPcmToMulaw(pcmBase64, geminiOutputRate);
     if (!callCtx.firstAudioSentAtMs) callCtx.firstAudioSentAtMs = Date.now();
     plivoWs.send(JSON.stringify({
       event: "playAudio",
@@ -2006,6 +2050,11 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
       if (msg.serverContent?.modelTurn?.parts) {
         for (const part of msg.serverContent.modelTurn.parts) {
           if (part.inlineData?.data) {
+            const detected = parsePcmRate(part.inlineData.mimeType);
+            if (detected !== geminiOutputRate) {
+              console.log(`[${callId}] Gemini output rate changed: ${geminiOutputRate} → ${detected}`);
+              geminiOutputRate = detected;
+            }
             sendAudioToPlivo(part.inlineData.data);
           }
         }
