@@ -48,6 +48,7 @@ export interface ReceiptData {
   // Branding
   logo?: string;
   primaryColor?: string;
+  slug?: string | null;
   // Pre-generated PDF URL — if present, "Download PDF" opens it directly
   // instead of re-rendering via html2canvas (faster + no CORS issues).
   receipt_url?: string | null;
@@ -256,6 +257,14 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
           <p style={{ margin: 0, fontSize: "10px", color: "#94a3b8" }}>
             This is a computer-generated receipt.
           </p>
+          <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>
+            Note: All fees paid are strictly non-refundable under any circumstances.
+          </p>
+          {(d.slug === "mirai" || d.slug === "beacon") && (
+            <p style={{ margin: "1px 0 0", fontSize: "10px", color: "#94a3b8" }}>
+              Only Security Deposit amount paid against boarding admissions are refundable.
+            </p>
+          )}
           {d.contact_email && (
             <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#94a3b8" }}>For queries: {d.contact_email}</p>
           )}

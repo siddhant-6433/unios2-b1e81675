@@ -294,9 +294,19 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   page.drawText("This is a computer-generated receipt.", {
     x: margin, y, size: 9, font, color: muted,
   });
+  page.drawText("Note: All fees paid are strictly non-refundable under any circumstances.", {
+    x: margin, y: y - 12, size: 9, font: bold, color: muted,
+  });
+  const isBoarding = opts.branding.slug === "mirai" || opts.branding.slug === "beacon";
+  if (isBoarding) {
+    page.drawText("Only Security Deposit amount paid against boarding admissions are refundable.", {
+      x: margin, y: y - 23, size: 9, font, color: muted,
+    });
+  }
+  const contactY = y - (isBoarding ? 36 : 24);
   if (opts.branding.contact_email) {
     page.drawText(`For queries: ${opts.branding.contact_email}`, {
-      x: margin, y: y - 12, size: 9, font, color: muted,
+      x: margin, y: contactY, size: 9, font, color: muted,
     });
   }
   const siteText = opts.branding.website || "unios.nimt.ac.in";
