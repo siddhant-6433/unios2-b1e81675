@@ -187,6 +187,8 @@ interface BuildOpts {
   paymentRef: string;
   paymentDate: string;
   campusName: string | null;
+  institutionName: string | null;   // college/school offering the course (course → dept → institution)
+  letterheadAddress: string | null; // address of that institution's campus
   brandHex: string;
   logoUrl: string | null;
   branding: Branding;
@@ -230,14 +232,18 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     }
     page.drawImage(logoImg, { x: margin, y: y - logoH, width: logoW, height: logoH });
     textLeftX = margin + logoW + 14;
-    // Campus + address line under/next to logo (kept small so it doesn't compete).
-    if (opts.campusName) {
-      page.drawText(opts.campusName, {
+    // Institution (from the course) + its campus address, drawn small next to
+    // the logo. Institution name comes from course → dept → institution; falls
+    // back to the campus name when the lead has no course.
+    const headLine = opts.institutionName || opts.campusName;
+    const headAddr = opts.letterheadAddress || opts.branding.address;
+    if (headLine) {
+      page.drawText(headLine.slice(0, 60), {
         x: textLeftX, y: y - 18, size: 10, font: bold, color: subtle,
       });
     }
-    if (opts.branding.address) {
-      page.drawText(opts.branding.address.slice(0, 70), {
+    if (headAddr) {
+      page.drawText(headAddr.slice(0, 70), {
         x: textLeftX, y: y - 32, size: 8.5, font, color: muted,
       });
     }
@@ -255,8 +261,9 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     page.drawText(opts.branding.name, {
       x: margin + fallbackSize + 12, y: y - 14, size: 13, font: bold, color: text,
     });
-    if (opts.campusName) {
-      page.drawText(opts.campusName, {
+    const fbLine = opts.institutionName || opts.campusName;
+    if (fbLine) {
+      page.drawText(fbLine.slice(0, 60), {
         x: margin + fallbackSize + 12, y: y - 28, size: 10, font, color: subtle,
       });
     }
@@ -420,6 +427,16 @@ Deno.serve(async (req) => {
     const courseName = isApp ? firstChoice.course_name ?? lead?.courses?.name ?? null : lead?.courses?.name ?? null;
     const campusName = lead?.campuses?.name ?? null;
 
+    // Institution name (from the lead's course → dept → institution) and the
+    // address of that institution's campus. This is what the header prints, so
+    // a Greater Noida nursing receipt shows its nursing institute + Greater
+    // Noida address, a Kotputli B.Ed shows the Mahila B.Ed College + Kotputli
+    // address, etc. Falls back to campus name / branding address when absent.
+    const { data: lh } = await admin.rpc("lead_letterhead" as any, { _lead_id: lead?.id });
+    const letterhead = Array.isArray(lh) ? lh[0] : lh;
+    const institutionName: string | null = letterhead?.institution_name ?? null;
+    const letterheadAddress: string | null = letterhead?.address ?? null;
+
     const { data: branding } = await admin.rpc("lead_branding" as any, {
       _lead_id: lead?.id, _doc_type: "receipt",
     });
@@ -493,6 +510,8 @@ Deno.serve(async (req) => {
       paymentRef:    lp.transaction_ref || "—",
       paymentDate:   lp.payment_date || lp.created_at,
       campusName,
+      institutionName,
+      letterheadAddress,
       brandHex,
       logoUrl,
       branding:      brandingResolved,
