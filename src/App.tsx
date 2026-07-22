@@ -57,6 +57,7 @@ const NavyaKnowledge       = lazy(() => import("./pages/admin/NavyaKnowledge"));
 const IdCardCenter         = lazy(() => import("./pages/IdCardCenter"));
 const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
 const Consultants          = lazy(() => import("./pages/Consultants"));
+const IncentiveApprovalPage = lazy(() => import("./pages/IncentiveApprovalPage"));
 const AcademicPartners     = lazy(() => import("./pages/AcademicPartners"));
 const AdmissionAnalytics   = lazy(() => import("./pages/AdmissionAnalytics"));
 const CounsellorDashboard  = lazy(() => import("./pages/CounsellorDashboard"));
@@ -311,7 +312,7 @@ const App = () => (
                       <Route path="/marketing" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
-                      <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
+                      <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
                       <Route path="/visit-center" element={<RequirePermission module="leads" action="view"><VisitCenter /></RequirePermission>} />
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
@@ -362,6 +363,7 @@ const App = () => (
                       {/* Analytics & reporting */}
                       <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />
                       <Route path="/counsellor-dashboard" element={<RequirePermission module="performance" action="view"><CounsellorDashboard /></RequirePermission>} />
+                      <Route path="/incentive-approvals" element={<RequireRole roles={["super_admin", "accountant"]}><IncentiveApprovalPage /></RequireRole>} />
                       <Route path="/reports" element={<RequirePermission module="reports" action="view"><Reports /></RequirePermission>} />
 
                       {/* Portals */}

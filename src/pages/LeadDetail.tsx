@@ -4,6 +4,7 @@ import { useParams, Link, useNavigate, useSearchParams, useLocation } from "reac
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
@@ -107,6 +108,7 @@ const LeadDetail = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { user, role, profile } = useAuth();
+  useOpenVisitGuard(id);
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;

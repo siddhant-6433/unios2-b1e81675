@@ -15,6 +15,8 @@ import {
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
 import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
+import { MorningBrief } from "@/components/dashboard/MorningBrief";
+import { IncentiveWidget } from "@/components/dashboard/IncentiveWidget";
 
 interface CounsellorStats {
   counsellor_id: string;
@@ -854,6 +856,11 @@ const CounsellorDashboard = () => {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Counsellor Performance</h1>
         <p className="text-sm text-muted-foreground mt-1">Team activity, conversions & overdue follow-ups</p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2"><MorningBrief /></div>
+        <IncentiveWidget />
       </div>
 
       {/* Summary cards — reference-inspired stat-card shape (rounded-2xl,
