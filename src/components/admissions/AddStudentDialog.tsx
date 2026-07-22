@@ -120,17 +120,20 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   // with a 42501. Other roles (admin / admission_head / counsellor / ...) keep the
   // full list.
   const isCampusScoped = role === "office_assistant" || role === "principal";
-  const assignedCampus = (profile?.campus || "").trim().toLowerCase();
+  const assignedCampusNames = useMemo(
+    () => (profile?.campus || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    [profile?.campus],
+  );
   const allowedCampuses = useMemo(
     () =>
       isCampusScoped
         ? allCampuses.filter(
             (c) =>
-              c.name.toLowerCase() === assignedCampus ||
-              (c.code || "").toLowerCase() === assignedCampus,
+              assignedCampusNames.includes(c.name.toLowerCase()) ||
+              assignedCampusNames.includes((c.code || "").toLowerCase()),
           )
         : allCampuses,
-    [allCampuses, assignedCampus, isCampusScoped],
+    [allCampuses, assignedCampusNames, isCampusScoped],
   );
   const noCampusAssigned = isCampusScoped && campusesLoaded && allowedCampuses.length === 0;
   const campusLocked = isCampusScoped && allowedCampuses.length === 1;
