@@ -21,6 +21,8 @@ interface Visit {
   updated_at: string;
   campus_id: string | null;
   scheduled_by: string | null;
+  checked_in_at: string | null;
+  checked_out_at: string | null;
   lead_name: string;
   lead_phone: string;
   counsellor_name: string;
@@ -102,7 +104,7 @@ export default function VisitMonitor() {
       .from("campus_visits")
       .select(`
         id, lead_id, visit_date, status, visit_type, feedback, created_at, updated_at,
-        campus_id, scheduled_by,
+        campus_id, scheduled_by, checked_in_at, checked_out_at,
         leads!inner(name, phone, counsellor_id,
           profiles:counsellor_id(display_name)),
         campuses(name)
@@ -128,6 +130,8 @@ export default function VisitMonitor() {
       updated_at: r.updated_at,
       campus_id: r.campus_id,
       scheduled_by: r.scheduled_by,
+      checked_in_at: r.checked_in_at ?? null,
+      checked_out_at: r.checked_out_at ?? null,
       lead_name: r.leads?.name ?? "—",
       lead_phone: r.leads?.phone ?? "",
       counsellor_name: r.leads?.profiles?.display_name ?? "Unassigned",
@@ -344,6 +348,9 @@ function VisitTable({ rows, tab }: { rows: Visit[]; tab: Tab }) {
                 {tab === "walkins" ? "Logged At" : "Visit Date"}
               </th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
+              {tab === "walkins" && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Time In / Out</th>
+              )}
               {(tab === "walkins" || tab === "completed" || tab === "post_visit") && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Feedback / Notes</th>
               )}
@@ -418,6 +425,28 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
           )}
         </div>
       </td>
+
+      {/* Time in / out (walk-ins tab only) */}
+      {tab === "walkins" && (
+        <td className="px-4 py-3">
+          {v.checked_in_at ? (
+            <p className="text-xs text-foreground whitespace-nowrap">
+              {new Date(v.checked_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+              {" → "}
+              {v.checked_out_at
+                ? new Date(v.checked_out_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })
+                : "on campus"}
+              {v.checked_out_at && (
+                <span className="text-muted-foreground">
+                  {" "}({Math.max(1, Math.round((new Date(v.checked_out_at).getTime() - new Date(v.checked_in_at).getTime()) / 60000))}m)
+                </span>
+              )}
+            </p>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
 
       {/* Feedback / Notes (conditionally shown) */}
       {(tab === "walkins" || tab === "completed" || tab === "post_visit") && (

@@ -126,8 +126,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 5. Snapshot today's KPI counts for the incentive engine (counsellor_daily_kpis)
+    let kpiRows = 0;
+    const { data: kpiData, error: kpiError } = await supabase.rpc("fn_snapshot_daily_kpis", { p_date: today });
+    if (kpiError) {
+      console.error("Daily KPI snapshot error:", kpiError);
+    } else {
+      kpiRows = kpiData ?? 0;
+    }
+
     return new Response(
-      JSON.stringify({ message: `Applied ${penalties} penalties`, penalties }),
+      JSON.stringify({ message: `Applied ${penalties} penalties, snapshotted ${kpiRows} KPI rows`, penalties, kpiRows }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
