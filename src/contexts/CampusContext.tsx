@@ -44,16 +44,15 @@ export const CampusProvider = ({ children }: { children: ReactNode }) => {
         // Office assistants are branch-scoped. The database enforces the same
         // profile.campus -> campuses.name/code match via RLS helper functions.
         if (role && role !== "super_admin" && profile?.campus) {
-          const match = data.find(
-            (c) =>
-              c.name.toLowerCase() === profile.campus!.toLowerCase() ||
-              c.code.toLowerCase() === profile.campus!.toLowerCase()
+          const assignedNames = profile.campus.split(",").map((s) => s.trim().toLowerCase());
+          const matches = data.filter(
+            (c) => assignedNames.includes(c.name.toLowerCase()) || assignedNames.includes(c.code.toLowerCase())
           );
           if (role === "office_assistant") {
-            visibleCampuses = match ? [match] : [];
+            visibleCampuses = matches.length ? matches : [];
           }
-          if (match) {
-            setSelectedCampusId(match.id);
+          if (matches.length > 0) {
+            setSelectedCampusId(matches[0].id);
           } else if (role === "office_assistant") {
             setSelectedCampusId("all");
           }

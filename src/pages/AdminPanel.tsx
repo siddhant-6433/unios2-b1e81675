@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -156,7 +156,16 @@ const AdminPanel = () => {
   const [linkUserId, setLinkUserId] = useState<string>("");
   const [linking, setLinking] = useState(false);
   const [inviteDefaults, setInviteDefaults] = useState<{ role?: AppRole; source?: string; publisherId?: string }>({});
+  const [campusEditUser, setCampusEditUser] = useState<{ userId: string; profileId: string; selected: string[] } | null>(null);
+  const [campusList, setCampusList] = useState<{ id: string; name: string }[]>([]);
+  const [savingCampus, setSavingCampus] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    supabase.from("campuses").select("id, name").order("name").then(({ data }) => {
+      if (data) setCampusList(data);
+    });
+  }, []);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -362,6 +371,22 @@ const AdminPanel = () => {
     } finally {
       setSavingUser(null);
       setEditingUser(null);
+    }
+  };
+
+  const handleCampusChange = async (profileId: string, selectedCampuses: string[]) => {
+    setSavingCampus(true);
+    try {
+      const campusValue = selectedCampuses.length > 0 ? selectedCampuses.join(", ") : null;
+      const { error } = await supabase.from("profiles").update({ campus: campusValue }).eq("id", profileId);
+      if (error) throw error;
+      toast({ title: "Campus updated", description: campusValue ? `Set to ${campusValue}` : "Campus removed" });
+      await fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSavingCampus(false);
+      setCampusEditUser(null);
     }
   };
 
@@ -869,7 +894,19 @@ const AdminPanel = () => {
                               </button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{user.campus || "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {isSuperAdmin ? (
+                              <button
+                                onClick={() => setCampusEditUser({ userId: user.user_id, profileId: user.profile_id, selected: user.campus ? user.campus.split(", ").filter(Boolean) : [] })}
+                                className="text-sm hover:text-primary cursor-pointer"
+                                title="Change campus"
+                              >
+                                {user.campus || "—"}
+                              </button>
+                            ) : (
+                              <span className="text-sm">{user.campus || "—"}</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -1066,6 +1103,44 @@ const AdminPanel = () => {
                   userId={permTarget.userId} userName={permTarget.name} userRole={permTarget.role || null} />
               )}
             </Suspense>
+
+            <AlertDialog open={!!campusEditUser} onOpenChange={(o) => !o && setCampusEditUser(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Change Campus Access</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Select which campuses this user can access.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="max-h-60 overflow-y-auto py-1 -mx-1">
+                  {campusList.map((c) => {
+                    const isSelected = campusEditUser?.selected.includes(c.name) ?? false;
+                    return (
+                      <button key={c.id} type="button"
+                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 rounded-lg cursor-pointer text-sm w-full text-left"
+                        onClick={() => setCampusEditUser((prev) =>
+                          prev ? { ...prev, selected: isSelected ? prev.selected.filter((n) => n !== c.name) : [...prev.selected, c.name] } : prev
+                        )}>
+                        <span className={`h-4 w-4 flex items-center justify-center rounded border ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-input"}`}>
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="text-foreground">{c.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={savingCampus}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => campusEditUser && handleCampusChange(campusEditUser.profileId, campusEditUser.selected)}
+                    disabled={savingCampus}
+                  >
+                    {savingCampus && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Save
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
               <AlertDialogContent>
