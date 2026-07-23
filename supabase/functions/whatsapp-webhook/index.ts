@@ -307,6 +307,23 @@ Deno.serve(async (req) => {
             },
           });
 
+          // Idempotency: Meta retries on non-200 / timeout. Skip if already logged.
+          if (waMessageId) {
+            const { data: dupe } = await admin
+              .from("whatsapp_messages")
+              .select("id")
+              .eq("wa_message_id", waMessageId)
+              .limit(1);
+            if (dupe && dupe.length > 0) {
+              await markWhatsAppInboundEvent(admin, inboundEventId, {
+                processingStatus: "skipped",
+                skipReason: "duplicate_provider_message",
+                messageId: dupe[0]?.id || null,
+              });
+              continue;
+            }
+          }
+
           // ── WhatsApp sign-in intent ──────────────────────────────────────
           // The browser creates a short-lived intent, then opens WhatsApp with
           // a prefilled "UNIOS-XXXXXXXX" message. When that message arrives
