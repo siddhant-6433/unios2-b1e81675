@@ -303,12 +303,25 @@ export default function AdminApplicationView() {
           fetchCahetRegistration(supabase, appRow.lead_id),
           fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, appRow.lead_id),
         ]);
+        // Academic-partner PRIVATE leads (shared_with_nimt=false) are hidden from
+        // non-super_admin staff by RLS, so the direct read above returns null even
+        // though the lead exists. Resolve it via a role-gated definer RPC so
+        // admission staff can process the application (writes already allow them)
+        // instead of seeing a false "lead deleted" — and, critically, so
+        // "issue offer" does not create a duplicate lead.
+        let baseLeadRow: any = leadRow;
+        if (!baseLeadRow && appRow.lead_id) {
+          const { data: rpcLead } = await (supabase as unknown as {
+            rpc: (fn: "get_application_lead", args: { _application_id: string }) => Promise<{ data: any }>;
+          }).rpc("get_application_lead", { _application_id: appRow.application_id });
+          if (rpcLead) baseLeadRow = rpcLead;
+        }
         const resolvedSelection = await resolvePrimaryCourseSelection(primarySelection);
-        let effectiveLeadRow = leadRow as any;
-        if (leadRow && resolvedSelection?.course_id) {
+        let effectiveLeadRow = baseLeadRow as any;
+        if (baseLeadRow && resolvedSelection?.course_id) {
           const shouldRepairLeadCourse =
-            leadRow.course_id !== resolvedSelection.course_id ||
-            (!!resolvedSelection.campus_id && leadRow.campus_id !== resolvedSelection.campus_id);
+            baseLeadRow.course_id !== resolvedSelection.course_id ||
+            (!!resolvedSelection.campus_id && baseLeadRow.campus_id !== resolvedSelection.campus_id);
 
           if (shouldRepairLeadCourse) {
             const repairPayload: Record<string, string> = { course_id: resolvedSelection.course_id };
@@ -320,9 +333,9 @@ export default function AdminApplicationView() {
             if (repairError) console.warn("[AdminApplicationView] lead course repair failed:", repairError);
 
             effectiveLeadRow = {
-              ...leadRow,
+              ...baseLeadRow,
               course_id: resolvedSelection.course_id,
-              campus_id: resolvedSelection.campus_id || leadRow.campus_id,
+              campus_id: resolvedSelection.campus_id || baseLeadRow.campus_id,
               course: await fetchCourseDetails(resolvedSelection.course_id),
             };
           }
