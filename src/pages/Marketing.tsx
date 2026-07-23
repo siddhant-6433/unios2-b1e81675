@@ -43,7 +43,7 @@ import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
-  templateMediaUrlFromComponents,
+  resolveSendableTemplateMediaUrl,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -342,7 +342,7 @@ export default function Marketing() {
     [selectedWaTemplate],
   );
   const selectedWaTemplateDefaultMediaUrl = useMemo(
-    () => templateMediaUrlFromComponents(
+    () => resolveSendableTemplateMediaUrl(
       selectedWaTemplate?.key,
       waTemplateComponentsByKey[selectedWaTemplate?.key || ""],
     ),

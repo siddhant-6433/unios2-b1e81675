@@ -21,7 +21,7 @@ import {
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
-  templateMediaUrlFromComponents,
+  resolveSendableTemplateMediaUrl,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -391,7 +391,7 @@ export default function LeadLists() {
     [waTemplateDef]
   );
   const waTemplateDefaultMediaUrl = useMemo(
-    () => templateMediaUrlFromComponents(
+    () => resolveSendableTemplateMediaUrl(
       waTemplateDef.key,
       waTemplateComponentsByKey[waTemplateDef.key],
     ),
