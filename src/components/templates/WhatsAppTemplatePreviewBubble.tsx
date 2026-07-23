@@ -56,6 +56,22 @@ export const templateMediaUrlFromComponents = (
   components?: WhatsAppTemplateComponent[] | null,
 ) => resolveTemplateMediaUrl(templateKey, templateHeaderFromComponents(components));
 
+// Meta's example `header_handle` is an scontent.whatsapp.net / lookaside sample
+// URL — viewable (fine for the preview bubble) but rejected by Meta's send
+// pipeline as a message header link. It must NOT count as a usable campaign
+// send default, or the bulk UI hides the "Header media URL" field and the whole
+// campaign fails at send. Mirrors the guard in whatsapp-campaign-send.
+const isSampleHeaderHandle = (url: string) =>
+  /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(url);
+
+export const resolveSendableTemplateMediaUrl = (
+  templateKey?: string | null,
+  components?: WhatsAppTemplateComponent[] | null,
+) => {
+  const url = templateMediaUrlFromComponents(templateKey, components);
+  return url && isSampleHeaderHandle(url) ? null : url;
+};
+
 const buttonIcon = (type?: string) => {
   const normalized = normalizeType(type);
   if (normalized === "URL") return ExternalLink;
