@@ -100,6 +100,25 @@ Deno.serve(async (req) => {
           }).eq("id", leadId);
         }
 
+        // Skip if the orchestrator already sent an AI reply for this phone
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: alreadyReplied } = await admin
+          .from("whatsapp_messages")
+          .select("id")
+          .eq("phone", digits(buffer.phone))
+          .eq("direction", "outbound")
+          .in("template_key", ["ai_auto_reply", "counsellor_handoff", "hr_handoff", "procurement_handoff"])
+          .gte("created_at", fiveMinAgo)
+          .limit(1);
+        if (alreadyReplied && alreadyReplied.length > 0) {
+          await admin.from("whatsapp_message_buffers").update({
+            status: "processed",
+            processed_at: new Date().toISOString(),
+            error: "orchestrator_already_replied",
+          }).eq("id", buffer.id);
+          continue;
+        }
+
         if (state?.mode === "human") {
           await admin.from("whatsapp_ai_drafts").insert({
             conversation_key: `${digits(buffer.phone)}:${buffer.provider}:${buffer.business_number}`,
