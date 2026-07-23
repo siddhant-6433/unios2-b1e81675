@@ -9,6 +9,10 @@ const expandedAccessMigration = readFileSync(
   "supabase/migrations/20260713160000_assign_owner_principal_counsellor.sql",
   "utf8",
 );
+const sourceLockBypassMigration = readFileSync(
+  "supabase/migrations/20260723120000_owner_assign_bypasses_source_lock.sql",
+  "utf8",
+);
 const leadDetail = readFileSync("src/pages/LeadDetail.tsx", "utf8");
 const externalOwnerDialog = readFileSync("src/components/admissions/ExternalOwnerDialog.tsx", "utf8");
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
@@ -74,6 +78,16 @@ describe("manual external owner assignment", () => {
     expect(leadDetail).toContain('{canAssignExternalOwner &&');
     expect(externalOwnerDialog).toContain("assign_lead_external_owner");
     expect(externalOwnerDialog).toContain("A lead can have only one external owner.");
+  });
+
+  it("lets owner assignment re-stamp source past the lock trigger without unlocking manual edits", () => {
+    // RPC raises a tx-local flag before its source-changing UPDATEs...
+    expect(sourceLockBypassMigration).toContain("set_config('app.assign_owner_source', 'on', true)");
+    // ...and the lock trigger honors that flag while still auditing.
+    expect(sourceLockBypassMigration).toContain("current_setting('app.assign_owner_source', true)");
+    expect(sourceLockBypassMigration).toContain("INSERT INTO public.lead_source_audit");
+    // Manual edits by non-whitelisted roles remain blocked.
+    expect(sourceLockBypassMigration).toContain("Lead source is locked after creation");
   });
 
   it("routes academic partners directly to their portal", () => {
