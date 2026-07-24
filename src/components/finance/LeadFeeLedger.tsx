@@ -2,9 +2,10 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { useEffect, useMemo, useState, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle, Plus, Pencil, History, Send } from "lucide-react";
+import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 import { PaymentEditDialog } from "./PaymentEditDialog";
 import { PaymentAuditDialog } from "./PaymentAuditDialog";
@@ -74,12 +75,16 @@ interface Props {
   leadId?: string;
   studentId?: string;
   refreshKey?: number;
+  /** Fired when the empty/non-empty state settles so the parent can host the
+      "Record Offline Payment" trigger elsewhere (e.g. the quick-action bar)
+      when there's no ledger to show. */
+  onEmptyChange?: (empty: boolean) => void;
 }
 
 const fmt = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
+export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: Props) {
   const { role } = useAuth();
   const [resolvedLeadId, setResolvedLeadId] = useState<string | null>(leadId ?? null);
   const [resolvedStudentId, setResolvedStudentId] = useState<string | null>(studentId ?? null);
@@ -236,33 +241,19 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     return rows;
   }, [preview, payments]);
 
+  const isEmpty = !loading && payments.length === 0 && ledger.length === 0 && preview.length === 0;
+  useEffect(() => { onEmptyChange?.(isEmpty); }, [isEmpty, onEmptyChange]);
+
   if (loading) return <PageLoader />;
-  if (payments.length === 0 && ledger.length === 0 && preview.length === 0) {
-    return (
-      <>
-        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground space-y-3">
-          <AlertCircle className="mx-auto h-5 w-5" />
-          <p>No fee activity yet.</p>
-          {canRecordOffline && resolvedLeadId && (
-            <Button size="sm" onClick={() => setOfflineOpen(true)} className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> Record Offline Payment
-            </Button>
-          )}
-        </div>
-        {canRecordOffline && resolvedLeadId && (
-          <OfflinePaymentDialog
-            open={offlineOpen}
-            onOpenChange={setOfflineOpen}
-            leadId={resolvedLeadId}
-            onRecorded={() => setInternalRefresh(n => n + 1)}
-          />
-        )}
-      </>
-    );
-  }
+  // No fee activity → hide the ledger entirely. The parent (LeadDetail) is
+  // notified via onEmptyChange and hosts the "Record Offline Payment" trigger
+  // up in the quick-action bar, so nothing renders here.
+  if (isEmpty) return null;
 
   return (
-    <div className="space-y-4">
+    <Card className="border-border/60">
+    <CardContent className="p-4 space-y-4">
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
       {/* Header bar with offline-payment trigger (super_admin / campus_admin / accountant) */}
       {canRecordOffline && resolvedLeadId && (
         <div className="flex items-center justify-between">
@@ -621,7 +612,8 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
           />
         </>
       )}
-    </div>
+    </CardContent>
+    </Card>
   );
 }
 
