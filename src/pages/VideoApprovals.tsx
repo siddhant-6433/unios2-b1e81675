@@ -10,8 +10,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Video, ExternalLink, CheckCircle, XCircle, Users, Plus, Pencil,
-  Instagram, Linkedin, Youtube, Trash2, Undo2,
+  Loader2, Video, ExternalLink, CheckCircle, Users, Plus, Pencil,
+  Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X,
 } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
@@ -27,6 +27,7 @@ type VideoRow = {
   drive_url: string;
   status: VideoStatus;
   rejection_reason: string | null;
+  rejection_screenshots: string[] | null;
   instagram_url: string | null;
   instagram_posted_on: string | null;
   linkedin_url: string | null;
@@ -47,6 +48,22 @@ const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.
 // Label a source link by host so the UI doesn't say "Drive" for a YouTube URL.
 function sourceLabel(url: string): string {
   return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
+}
+
+// Upload correction screenshots to the public application-documents bucket and
+// return their public URLs. Throws on the first failed upload.
+async function uploadScreenshots(videoId: string, files: File[]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const f of files) {
+    const ext = f.name.split(".").pop() || "jpg";
+    const path = `video-rejections/${videoId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage
+      .from("application-documents")
+      .upload(path, f, { contentType: f.type, upsert: false });
+    if (error) throw error;
+    urls.push(supabase.storage.from("application-documents").getPublicUrl(path).data.publicUrl);
+  }
+  return urls;
 }
 
 function fmtPostedAt(iso: string | null): string {
@@ -92,6 +109,7 @@ export default function VideoApprovals() {
 
   const [selected, setSelected] = useState<VideoRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [screenshots, setScreenshots] = useState<File[]>([]);
   const [acting, setActing] = useState(false);
 
   // Editor management
@@ -122,6 +140,7 @@ export default function VideoApprovals() {
       approved_by: user?.id,
       approved_at: new Date().toISOString(),
       rejection_reason: null,
+      rejection_screenshots: null,
     }).eq("id", selected.id);
     if (error) {
       toast({ title: "Approve failed", description: error.message, variant: "destructive" });
@@ -150,6 +169,7 @@ export default function VideoApprovals() {
       approved_by: null,
       approved_at: null,
       rejection_reason: null,
+      rejection_screenshots: null,
     }).eq("id", selected.id);
     if (error) {
       toast({ title: "Revoke failed", description: error.message, variant: "destructive" });
@@ -176,21 +196,37 @@ export default function VideoApprovals() {
     fetchAll();
   };
 
-  const handleReject = async () => {
+  // Send a video back to the editor for correction — reuses the "rejected"
+  // status (relabelled "Needs Correction") plus notes and optional screenshots
+  // pointing at exactly what to fix. The editor can then resubmit.
+  const handleSendForCorrection = async () => {
     if (!selected) return;
     if (!rejectReason.trim()) {
-      toast({ title: "Please add a reason for rejection", variant: "destructive" }); return;
+      toast({ title: "Please add correction notes", variant: "destructive" }); return;
     }
     setActing(true);
-    await supabase.from("videos" as any).update({
+    let urls: string[] = [];
+    try {
+      urls = await uploadScreenshots(selected.id, screenshots);
+    } catch (e: any) {
+      toast({ title: "Screenshot upload failed", description: e.message, variant: "destructive" });
+      setActing(false); return;
+    }
+    const { error } = await supabase.from("videos" as any).update({
       status: "rejected",
       approved_by: user?.id,
       approved_at: new Date().toISOString(),
       rejection_reason: rejectReason.trim(),
+      rejection_screenshots: urls.length ? urls : null,
     }).eq("id", selected.id);
-    toast({ title: "Video rejected" });
+    if (error) {
+      toast({ title: "Failed to send for correction", description: error.message, variant: "destructive" });
+      setActing(false); return;
+    }
+    toast({ title: "Sent back for correction" });
     setActing(false);
     setRejectReason("");
+    setScreenshots([]);
     setSelected(null);
     fetchAll();
   };
@@ -392,7 +428,7 @@ export default function VideoApprovals() {
       )}
 
       {/* Review dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setRejectReason(""); } }}>
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setRejectReason(""); setScreenshots([]); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Video className="h-5 w-5 text-primary" /> Review Video</DialogTitle>
@@ -430,24 +466,52 @@ export default function VideoApprovals() {
 
               <PostedLinks v={selected} />
 
-              {selected.status === "rejected" && selected.rejection_reason && (
+              {selected.status === "rejected" && (selected.rejection_reason || selected.rejection_screenshots?.length) && (
                 <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
-                  <p className="font-semibold text-destructive mb-1">Rejection reason</p>
-                  <p>{selected.rejection_reason}</p>
+                  <p className="font-semibold text-destructive mb-1">Correction requested</p>
+                  {selected.rejection_reason && <p>{selected.rejection_reason}</p>}
+                  {selected.rejection_screenshots?.length ? (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {selected.rejection_screenshots.map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noreferrer">
+                          <img src={u} alt={`Screenshot ${i + 1}`} className="h-16 w-16 rounded-lg object-cover border border-border" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               )}
 
               {selected.status === "pending_approval" && isSuperAdmin && (
                 <>
                   <div>
-                    <label className="text-xs font-medium mb-1 block">Rejection reason (only required if rejecting)</label>
+                    <label className="text-xs font-medium mb-1 block">Correction notes (required if sending back)</label>
                     <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2}
-                      className={inputCls + " resize-none"} placeholder="e.g. Drive link not accessible, off-brand, etc." />
+                      className={inputCls + " resize-none"} placeholder="e.g. Drive link not accessible, off-brand, fix the intro, etc." />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium mb-1 block">Screenshots (optional — show what to fix)</label>
+                    <input type="file" accept="image/*" multiple
+                      onChange={e => { setScreenshots(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ""; }}
+                      className="text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs" />
+                    {screenshots.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {screenshots.map((f, i) => (
+                          <div key={i} className="relative">
+                            <img src={URL.createObjectURL(f)} alt={f.name} className="h-14 w-14 rounded-lg object-cover border border-border" />
+                            <button type="button" onClick={() => setScreenshots(s => s.filter((_, j) => j !== i))}
+                              className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-white flex items-center justify-center">
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-2 pt-2 border-t border-border">
                     <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
-                            onClick={handleReject} disabled={acting}>
-                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />} Reject
+                            onClick={handleSendForCorrection} disabled={acting}>
+                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Send for correction
                     </Button>
                     <Button className="flex-1 gap-1.5 bg-success hover:bg-success/90"
                             onClick={handleApprove} disabled={acting}>

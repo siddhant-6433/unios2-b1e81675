@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube,
+  Loader2, Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube, RotateCcw,
 } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPES, CONTENT_TYPE_LABEL,
@@ -26,6 +26,7 @@ type VideoRow = {
   drive_url: string;
   status: VideoStatus;
   rejection_reason: string | null;
+  rejection_screenshots: string[] | null;
   instagram_url: string | null;
   instagram_posted_on: string | null;
   linkedin_url: string | null;
@@ -100,6 +101,7 @@ export default function VideoEditorPortal() {
   const [showSubmit, setShowSubmit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
+    id: "",
     brand: VIDEO_BRANDS[0].value as VideoBrand,
     title: "",
     content_type: "video" as VideoContentType,
@@ -178,7 +180,7 @@ export default function VideoEditorPortal() {
     }
     // ponytail: client-side dedup against loaded videos; DB unique constraint is the real guard
     const normalised = form.drive_url.trim().replace(/\/+$/, "").toLowerCase();
-    if (videos.some(v => v.drive_url.replace(/\/+$/, "").toLowerCase() === normalised)) {
+    if (videos.some(v => v.id !== form.id && v.drive_url.replace(/\/+$/, "").toLowerCase() === normalised)) {
       toast({ title: "Duplicate link", description: "A video with this URL has already been submitted.", variant: "destructive" }); return;
     }
     setSubmitting(true);
@@ -206,26 +208,44 @@ export default function VideoEditorPortal() {
       setSubmitting(false); return;
     }
 
-    const { data: inserted, error } = await supabase.from("videos" as any).insert({
-      editor_id: editor.id,
-      brand: form.brand,
-      title: form.title.trim(),
-      content_type: form.content_type,
-      drive_url: form.drive_url.trim(),
-    }).select("id").single();
+    // Resubmit updates the existing row back to pending and clears the prior
+    // correction notes/screenshots; a fresh submission inserts a new row.
+    let videoId = form.id;
+    let error;
+    if (form.id) {
+      ({ error } = await supabase.from("videos" as any).update({
+        brand: form.brand,
+        title: form.title.trim(),
+        content_type: form.content_type,
+        drive_url: form.drive_url.trim(),
+        status: "pending_approval",
+        rejection_reason: null,
+        rejection_screenshots: null,
+      }).eq("id", form.id));
+    } else {
+      const { data: inserted, error: insErr } = await supabase.from("videos" as any).insert({
+        editor_id: editor.id,
+        brand: form.brand,
+        title: form.title.trim(),
+        content_type: form.content_type,
+        drive_url: form.drive_url.trim(),
+      }).select("id").single();
+      error = insErr;
+      videoId = (inserted as any)?.id || "";
+    }
     if (error) {
       toast({ title: "Submission failed", description: error.message, variant: "destructive" });
       setSubmitting(false); return;
     }
     // Notify super admins on WhatsApp that a video is awaiting approval.
     // Fire-and-forget — never block the editor's submit on a notification.
-    if ((inserted as any)?.id) {
+    if (videoId) {
       supabase.functions.invoke("video-notify", {
-        body: { event: "submitted", video_id: (inserted as any).id },
+        body: { event: "submitted", video_id: videoId },
       }).catch(() => { /* notification failure is non-fatal */ });
     }
-    toast({ title: "Video submitted for approval" });
-    setForm({ brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
+    toast({ title: form.id ? "Video resubmitted for approval" : "Video submitted for approval" });
+    setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
     setShowSubmit(false);
     setSubmitting(false);
     if (editor) fetchVideos(editor.id);
@@ -291,7 +311,10 @@ export default function VideoEditorPortal() {
             Welcome, {editor.name} · Rate ₹{Number(editor.per_video_rate).toLocaleString("en-IN")} per video
           </p>
         </div>
-        <Button className="gap-1.5" onClick={() => setShowSubmit(true)}>
+        <Button className="gap-1.5" onClick={() => {
+          setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
+          setShowSubmit(true);
+        }}>
           <Plus className="h-4 w-4" /> Submit New Video
         </Button>
       </div>
@@ -377,6 +400,15 @@ export default function VideoEditorPortal() {
                           {v.status === "rejected" && v.rejection_reason && (
                             <div className="mt-1 text-[10px] text-destructive max-w-[180px] mx-auto">{v.rejection_reason}</div>
                           )}
+                          {v.status === "rejected" && v.rejection_screenshots?.length ? (
+                            <div className="mt-1.5 flex flex-wrap justify-center gap-1 max-w-[180px] mx-auto">
+                              {v.rejection_screenshots.map((u, i) => (
+                                <a key={i} href={u} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                  <img src={u} alt={`Fix ${i + 1}`} className="h-10 w-10 rounded object-cover border border-border" />
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3 text-center">
                           <SocialLinkIcons v={v} />
@@ -390,6 +422,13 @@ export default function VideoEditorPortal() {
                           {v.status === "approved" || v.status === "published" ? (
                             <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => openSocialDialog(v)}>
                               <Video className="h-3 w-3" /> Add Links
+                            </Button>
+                          ) : v.status === "rejected" ? (
+                            <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => {
+                              setForm({ id: v.id, brand: v.brand, title: v.title, content_type: v.content_type, drive_url: v.drive_url });
+                              setShowSubmit(true);
+                            }}>
+                              <RotateCcw className="h-3 w-3" /> Resubmit
                             </Button>
                           ) : <span className="text-[10px] text-muted-foreground">—</span>}
                         </td>
@@ -406,7 +445,9 @@ export default function VideoEditorPortal() {
       {/* Submit dialog */}
       <Dialog open={showSubmit} onOpenChange={setShowSubmit}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5" /> Submit Video</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2">
+            {form.id ? <RotateCcw className="h-5 w-5" /> : <Plus className="h-5 w-5" />} {form.id ? "Resubmit Video" : "Submit Video"}
+          </DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium mb-1 block">Brand *</label>
@@ -437,7 +478,7 @@ export default function VideoEditorPortal() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSubmit(false)}>Cancel</Button>
             <Button onClick={handleSubmitVideo} disabled={submitting} className="gap-2">
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Submit for Approval
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : (form.id ? <RotateCcw className="h-4 w-4" /> : <Plus className="h-4 w-4" />)} {form.id ? "Resubmit for Approval" : "Submit for Approval"}
             </Button>
           </DialogFooter>
         </DialogContent>
