@@ -365,6 +365,7 @@ const StudentProfile = () => {
   const [inferredBatch, setInferredBatch] = useState<BatchLabelRecord | null>(null);
   const [studentDocs, setStudentDocs] = useState<StudentDocument[]>([]);
   const [auditRows, setAuditRows] = useState<StudentAuditRow[]>([]);
+  const [auditActors, setAuditActors] = useState<Record<string, string>>({});
   const [documentName, setDocumentName] = useState("");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentInputKey, setDocumentInputKey] = useState(0);
@@ -509,7 +510,20 @@ const StudentProfile = () => {
       if (attendanceRes.data) setAttendance(attendanceRes.data as AttendanceRow[]);
       if (examsRes.data) setExams(examsRes.data as ExamRow[]);
       setStudentDocs((studentDocsRes.data ?? []) as StudentDocument[]);
-      setAuditRows((auditRes.data ?? []) as StudentAuditRow[]);
+      const auditData = (auditRes.data ?? []) as StudentAuditRow[];
+      setAuditRows(auditData);
+      const actorIds = [...new Set(auditData.map((r) => r.actor_user_id).filter(Boolean) as string[])];
+      if (actorIds.length > 0) {
+        const { data: actorRows } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, email")
+          .in("user_id", actorIds);
+        setAuditActors(Object.fromEntries(
+          (actorRows ?? []).map((p) => [p.user_id as string, (p.display_name || p.email || "") as string])
+        ));
+      } else {
+        setAuditActors({});
+      }
 
       // Sibling lookup. Parent auth IDs are best, but bulk imports usually only
       // have parent phones/names, so include those as family signals.
@@ -864,8 +878,19 @@ const StudentProfile = () => {
 
     setEditSaving(true);
     try {
-      const { error } = await supabase.from("students").update(changes).eq("id", student.id);
+      // .select() returns the affected rows so we can detect a silent 0-row
+      // update — RLS filters the row out instead of erroring, so without this
+      // the save would "succeed" and log a phantom audit entry without changing
+      // anything. See student UPDATE policies (office_assistant lacks access).
+      const { data: updated, error } = await supabase
+        .from("students")
+        .update(changes)
+        .eq("id", student.id)
+        .select("id");
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error("You do not have permission to update this student, so no changes were saved.");
+      }
       await logStudentAudit(auditEvents);
       toast({ title: "Student information updated" });
       setEditDialogOpen(false);
@@ -1569,7 +1594,7 @@ const StudentProfile = () => {
             ) : (
               <div className="space-y-3">
                 {auditRows.map((row) => (
-                  <AuditEvent key={row.id} row={row} fmtDate={fmtDate} />
+                  <AuditEvent key={row.id} row={row} fmtDate={fmtDate} actorName={row.actor_user_id ? auditActors[row.actor_user_id] : undefined} />
                 ))}
               </div>
             )}
@@ -1732,7 +1757,7 @@ const StudentProfile = () => {
   );
 };
 
-const AuditEvent = ({ row, fmtDate }: { row: StudentAuditRow; fmtDate: (value: string | null | undefined) => string }) => {
+const AuditEvent = ({ row, fmtDate, actorName }: { row: StudentAuditRow; fmtDate: (value: string | null | undefined) => string; actorName?: string }) => {
   const metadata = row.metadata || {};
   const eventLabel: Record<string, string> = {
     profile_update: "Profile updated",
@@ -1748,7 +1773,10 @@ const AuditEvent = ({ row, fmtDate }: { row: StudentAuditRow; fmtDate: (value: s
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">{title}</p>
-          <p className="text-[11px] text-muted-foreground">{fmtDate(row.created_at)}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {fmtDate(row.created_at)}
+            {(actorName || row.actor_user_id) && <> · by {actorName || "Unknown user"}</>}
+          </p>
         </div>
         {row.field_name && (
           <span className="w-fit rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
