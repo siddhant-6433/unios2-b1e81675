@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon,
+  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -57,6 +57,7 @@ const loadCallDispositionDialog = () => import("@/components/admissions/CallDisp
 const CallDispositionDialog        = lazy(() => loadCallDispositionDialog().then(m => ({ default: m.CallDispositionDialog })));
 const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
 const SendPaymentLinkDialog        = lazy(() => import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
+const OfflinePaymentDialog         = lazy(() => import("@/components/finance/OfflinePaymentDialog").then(m => ({ default: m.OfflinePaymentDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
 const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
@@ -163,6 +164,11 @@ const LeadDetail = () => {
   const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
+  // When the fee ledger has no activity it renders nothing; we surface the
+  // "Record Offline Payment" trigger in the quick-action bar instead.
+  const [feeLedgerEmpty, setFeeLedgerEmpty] = useState(false);
+  const [showOfflinePayment, setShowOfflinePayment] = useState(false);
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
   const [deletingLead, setDeletingLead] = useState(false);
   const [showNotInterested, setShowNotInterested] = useState(false);
   const [notInterestedReason, setNotInterestedReason] = useState("");
@@ -1269,6 +1275,13 @@ const LeadDetail = () => {
             badge: new Date() < PAYMENT_LINK_NEW_BADGE_VISIBLE_UNTIL ? "New" : undefined,
             tooltip: "Send a payment link via WhatsApp/Email. Pick purpose (token/fee due/custom), set amount & expiry, then send or copy the link.",
           },
+          // Only when the fee ledger is empty (renders nothing) — otherwise the
+          // "Record Offline Payment" button lives inside the ledger header.
+          ...(feeLedgerEmpty && canRecordOffline ? [{
+            icon: Wallet, label: "Offline Payment", color: "text-emerald-700 bg-emerald-100 dark:bg-emerald-900/30",
+            action: () => setShowOfflinePayment(true),
+            tooltip: "Record an offline (cash / UPI / bank) payment for this lead",
+          }] : []),
           { icon: ThumbsDown, label: "Not Interested", color: "text-destructive bg-destructive/10 dark:bg-destructive/80/30", action: () => setShowNotInterested(true) },
         ];
 
@@ -1371,13 +1384,10 @@ const LeadDetail = () => {
       )}
 
       {/* Fee Ledger — full width so the receipts table and Record Offline
-          Payment header have room to breathe (was cramped in the 380px column). */}
-      <Card className="border-border/60">
-        <CardContent className="p-4 space-y-3">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
-          <LeadFeeLedger leadId={lead.id} refreshKey={paymentRefreshKey} />
-        </CardContent>
-      </Card>
+          Payment header have room to breathe (was cramped in the 380px column).
+          The card chrome + header now live inside LeadFeeLedger so it can drop
+          them entirely when there's no fee activity (just shows the button). */}
+      <LeadFeeLedger leadId={lead.id} refreshKey={paymentRefreshKey} onEmptyChange={setFeeLedgerEmpty} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
@@ -1657,6 +1667,17 @@ const LeadDetail = () => {
         leadName={lead.name}
         onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
       />
+
+      {/* Offline payment — surfaced from the quick-action bar when the fee
+          ledger is empty (super_admin / campus_admin / accountant only). */}
+      {canRecordOffline && (
+        <OfflinePaymentDialog
+          open={showOfflinePayment}
+          onOpenChange={setShowOfflinePayment}
+          leadId={lead.id}
+          onRecorded={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+        />
+      )}
 
       {/* Send Payment Link — custom-amount pre-application token or dues */}
       <SendPaymentLinkDialog
