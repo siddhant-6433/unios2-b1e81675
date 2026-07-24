@@ -28,6 +28,7 @@ import {
 } from "./sarvam.ts";
 import { elevenLabsTTS } from "./elevenlabs.ts";
 import { cartesiaTTS, cartesiaTTSPcm, cartesiaSTT, CartesiaSttStream, CartesiaTtsStream } from "./cartesia.ts";
+import { courseSearchTerms } from "./courseMatch.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
@@ -970,27 +971,30 @@ async function executeTool(
         //      — "Nursing", "Pharmacy", "Administration") so even a
         //      garbled query gets a reasonable hit instead of a flat miss.
         const rawName = String(args.course_name || "");
-        const cleaned = rawName.replace(/\./g, "").replace(/\s+/g, " ").trim();
-        const lastWord = cleaned.split(/\s+/).filter(Boolean).pop() || cleaned;
+        const terms = courseSearchTerms(rawName);
 
         const tryFetch = async (term: string) => {
+          const q = encodeURIComponent(term);
           const r = await fetch(
-            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(term)}*&select=id,name,code,duration_years,type,eligibility,entrance_exam,entrance_mandatory,departments(name,institutions(name,type,campuses(name,city,state)))`,
+            `${SUPABASE_URL}/rest/v1/courses?or=(name.ilike.*${q}*,code.ilike.*${q}*)&select=id,name,code,duration_years,type,eligibility,entrance_exam,entrance_mandatory,departments(name,institutions(name,type,campuses(name,city,state)))`,
             { headers },
           );
           return (await r.json().catch(() => [])) as any[];
         };
 
-        let courses: any[] = await tryFetch(cleaned);
-        if (!courses?.length && lastWord && lastWord.length >= 3 && lastWord !== cleaned) {
-          console.log(`[get_course_info] Fallback search "${cleaned}" → "${lastWord}"`);
-          courses = await tryFetch(lastWord);
+        let courses: any[] = [];
+        for (const term of terms) {
+          courses = await tryFetch(term);
+          if (courses?.length) {
+            if (term !== terms[0]) console.log(`[get_course_info] Matched "${rawName}" via "${term}"`);
+            break;
+          }
         }
         if (!courses?.length) {
           return {
             found: false,
             queried: rawName,
-            normalised: cleaned,
+            normalised: terms[0] || rawName,
             message: `No course found matching "${rawName}". Try the field name (e.g. Nursing, Pharmacy, MBA, BBA, BSc Nursing, BTech).`,
           };
         }
@@ -1476,16 +1480,28 @@ async function executeTool(
           callCtx.leadName = args.name;
         }
 
-        // Look up course by name if provided
+        // Look up course by name if provided. The LLM spells initialisms
+        // ("L L B"), so try normalised term variants and match name OR code.
         if (args.course_name) {
-          const courseRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(args.course_name)}*&select=id,name&limit=1`,
-            { headers },
-          );
-          const courses = await courseRes.json();
-          if (courses?.[0]?.id) {
-            updates.course_id = courses[0].id;
-            console.log(`[update_lead_info] Course updated to: ${courses[0].name} (${courses[0].id})`);
+          for (const term of courseSearchTerms(args.course_name)) {
+            const q = encodeURIComponent(term);
+            const courseRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/courses?or=(name.ilike.*${q}*,code.ilike.*${q}*)&select=id,name&limit=1`,
+              { headers },
+            );
+            const courses = await courseRes.json();
+            if (courses?.[0]?.id) {
+              updates.course_id = courses[0].id;
+              console.log(`[update_lead_info] Course "${args.course_name}" → ${courses[0].name} (${courses[0].id}) via "${term}"`);
+              break;
+            }
+          }
+          if (!updates.course_id) {
+            // ponytail: two "Bachelor of Laws (LLB)" rows differ only by campus;
+            // limit=1 can bind the wrong one. Campus-scoping the query needs a
+            // departments→institutions→campuses join and campus is usually
+            // unknown mid-call — leave it to counsellor review for now.
+            console.warn(`[update_lead_info] No course match for "${args.course_name}" (tried: ${courseSearchTerms(args.course_name).join(", ")})`);
           }
         }
 
