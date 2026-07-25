@@ -6,6 +6,8 @@
  *     phone so they can review it in the approval queue.
  *   - "approved": a super-admin approved a video → notify the editor's phone
  *     asking them to post it and submit the published social links.
+ *   - "correction": a super-admin sent a video back for correction → notify the
+ *     editor's phone with the correction notes so they can fix & resubmit.
  *
  * Both sends go through whatsapp-send (templated, logged to whatsapp_messages).
  * Fire-and-forget per recipient — a failed send never fails the request.
@@ -52,7 +54,7 @@ Deno.serve(async (req) => {
 
   const { data: video } = await db
     .from("videos")
-    .select("id, title, brand, status, editor_id")
+    .select("id, title, brand, status, editor_id, rejection_reason")
     .eq("id", video_id)
     .maybeSingle();
   if (!video) return json({ error: "video not found" }, 404);
@@ -65,16 +67,18 @@ Deno.serve(async (req) => {
 
   const brandLabel = BRAND_LABEL[video.brand as string] || (video.brand as string);
 
-  const sendWhatsApp = async (template_key: string, phone: string, params: string[]) => {
-    if (!phone) return;
+  const sendWhatsApp = async (template_key: string, phone: string, params: string[]): Promise<boolean> => {
+    if (!phone) return false;
     try {
-      await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({ template_key, phone, params }),
       });
+      return res.ok;
     } catch (e) {
       console.error(`[video-notify] ${template_key}→${phone} failed:`, e);
+      return false;
     }
   };
 
@@ -93,7 +97,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, notified: phones.size });
   }
 
-  if (event === "approved") {
+  if (event === "approved" || event === "correction") {
     // Editor's WhatsApp — prefer the explicit editor phone, fall back to the
     // linked user's profile phone.
     let phone: string | null = editor?.phone ? String(editor.phone).trim() : null;
@@ -101,8 +105,20 @@ Deno.serve(async (req) => {
       const { data: prof } = await db.from("profiles").select("phone").eq("user_id", editor.user_id).maybeSingle();
       phone = prof?.phone ? String(prof.phone).trim() : null;
     }
-    if (phone) await sendWhatsApp("video_approved_editor", phone, [editor?.name || "there", video.title]);
-    return json({ ok: true, notified: phone ? 1 : 0 });
+    let sent = false;
+    if (phone) {
+      if (event === "approved") {
+        sent = await sendWhatsApp("video_approved_editor", phone, [editor?.name || "there", video.title]);
+      } else {
+        const notes = (video.rejection_reason as string | null)?.trim() || "See the portal for details.";
+        sent = await sendWhatsApp("video_correction_editor", phone, [editor?.name || "there", video.title, notes]);
+      }
+    }
+    // Stamp the row so the reviewer UI can show a "Editor notified" badge.
+    if (sent) {
+      await db.from("videos").update({ editor_notified_at: new Date().toISOString() }).eq("id", video.id);
+    }
+    return json({ ok: true, notified: sent ? 1 : 0 });
   }
 
   return json({ error: `unknown event: ${event}` }, 400);

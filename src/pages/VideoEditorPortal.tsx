@@ -27,6 +27,7 @@ type VideoRow = {
   status: VideoStatus;
   rejection_reason: string | null;
   rejection_screenshots: string[] | null;
+  editor_notified_at: string | null;
   instagram_url: string | null;
   instagram_posted_on: string | null;
   linkedin_url: string | null;
@@ -221,6 +222,7 @@ export default function VideoEditorPortal() {
         status: "pending_approval",
         rejection_reason: null,
         rejection_screenshots: null,
+        editor_notified_at: null,
       }).eq("id", form.id));
     } else {
       const { data: inserted, error: insErr } = await supabase.from("videos" as any).insert({
@@ -449,6 +451,27 @@ export default function VideoEditorPortal() {
             {form.id ? <RotateCcw className="h-5 w-5" /> : <Plus className="h-5 w-5" />} {form.id ? "Resubmit Video" : "Submit Video"}
           </DialogTitle></DialogHeader>
           <div className="space-y-3">
+            {/* When resubmitting, show the reviewer's correction notes + screenshots
+                so the editor knows exactly what to fix. */}
+            {form.id && (() => {
+              const v = videos.find(x => x.id === form.id);
+              if (!v || (!v.rejection_reason && !v.rejection_screenshots?.length)) return null;
+              return (
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
+                  <p className="font-semibold text-destructive mb-1">Correction requested</p>
+                  {v.rejection_reason && <p>{v.rejection_reason}</p>}
+                  {v.rejection_screenshots?.length ? (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {v.rejection_screenshots.map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noreferrer">
+                          <img src={u} alt={`Fix ${i + 1}`} className="h-16 w-16 rounded-lg object-cover border border-border" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()}
             <div>
               <label className="text-xs font-medium mb-1 block">Brand *</label>
               <select value={form.brand} onChange={e => setForm(p => ({ ...p, brand: e.target.value as VideoBrand }))} className={inputCls}>

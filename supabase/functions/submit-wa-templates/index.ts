@@ -590,6 +590,24 @@ const TEMPLATES = [
       },
     ],
   },
+  // Sent to the editor when their video is sent back for correction — carries
+  // the reviewer's notes so they know what to fix before resubmitting.
+  {
+    name: "video_correction_editor",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, your video \"{{2}}\" needs a correction before it can be approved on the NIMT Video Portal.\n\nWhat to fix: {{3}}\n\nOpen your portal to see any screenshots, make the changes, and resubmit.",
+        example: { body_text: [["Rohit Bhati", "Campus Tour 2026", "Fix the intro and re-upload the drive link"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Video Portal", url: "https://uni.nimt.ac.in/video-editor" }],
+      },
+    ],
+  },
   // ── Navya (AI voice agent) notifications ─────────────────────────────────
   // Staff alert when Navya books a campus visit during a live call. Sent to
   // the lead owner + leadership phones (config: navya_visit_wa_staff_recipients).

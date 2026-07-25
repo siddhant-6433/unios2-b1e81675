@@ -256,6 +256,9 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // Sent to the editor's phone when their video is approved — prompts them to
   // post it and submit the published Instagram/LinkedIn/YouTube links.
   video_approved_editor:   { name: "video_approved_editor",  params: ["editor_name", "video_title"] },
+  // Sent to the editor when their video is sent back for correction — carries
+  // the reviewer's correction notes so they know what to fix before resubmit.
+  video_correction_editor: { name: "video_correction_editor", params: ["editor_name", "video_title", "correction_notes"] },
 };
 
 function templateBodyFromComponents(components: unknown): string | null {
@@ -744,6 +747,7 @@ Deno.serve(async (req) => {
       nimt_not_interested_ack: "Hi {{1}}, thanks for speaking with us about {{2}}. We've marked your enquiry as \"not interested\" and won't reach out unless you'd like us to. If you'd like to revisit this in the future, message {{3}} directly on {{4}}. Reply STOP to fully opt out.",
       video_submitted_admin: "New video submitted for approval on the NIMT Video Portal.\n\nEditor: {{1}}\nTitle: {{2}}\nBrand: {{3}}\n\nPlease review it in the Video Approvals queue.",
       video_approved_editor: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
+      video_correction_editor: "Hi {{1}}, your video \"{{2}}\" needs a correction before it can be approved on the NIMT Video Portal.\n\nWhat to fix: {{3}}\n\nOpen your portal to see any screenshots, make the changes, and resubmit.",
     };
 
     let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Loader2, Video, ExternalLink, CheckCircle, Users, Plus, Pencil,
-  Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X,
+  Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X, BellRing,
 } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
@@ -28,6 +28,7 @@ type VideoRow = {
   status: VideoStatus;
   rejection_reason: string | null;
   rejection_screenshots: string[] | null;
+  editor_notified_at: string | null;
   instagram_url: string | null;
   instagram_posted_on: string | null;
   linkedin_url: string | null;
@@ -106,6 +107,7 @@ export default function VideoApprovals() {
   const [editors, setEditors] = useState<EditorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"queue" | "all" | "editors">("queue");
+  const [statusFilter, setStatusFilter] = useState<VideoStatus | "all">("all");
 
   const [selected, setSelected] = useState<VideoRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -131,6 +133,11 @@ export default function VideoApprovals() {
 
   const editorById = useMemo(() => Object.fromEntries(editors.map(e => [e.id, e])), [editors]);
   const queue = useMemo(() => videos.filter(v => v.status === "pending_approval"), [videos]);
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const v of videos) c[v.status] = (c[v.status] || 0) + 1;
+    return c;
+  }, [videos]);
 
   const handleApprove = async () => {
     if (!selected) return;
@@ -223,6 +230,10 @@ export default function VideoApprovals() {
       toast({ title: "Failed to send for correction", description: error.message, variant: "destructive" });
       setActing(false); return;
     }
+    // Notify the editor on WhatsApp with the correction notes. Fire-and-forget.
+    supabase.functions.invoke("video-notify", {
+      body: { event: "correction", video_id: selected.id },
+    }).catch(() => { /* notification failure is non-fatal */ });
     toast({ title: "Sent back for correction" });
     setActing(false);
     setRejectReason("");
@@ -287,7 +298,9 @@ export default function VideoApprovals() {
     return <PageLoader />;
   }
 
-  const tableRows = tab === "queue" ? queue : videos;
+  const tableRows = tab === "queue"
+    ? queue
+    : statusFilter === "all" ? videos : videos.filter(v => v.status === statusFilter);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -315,6 +328,22 @@ export default function VideoApprovals() {
           </button>
         ))}
       </div>
+
+      {tab === "all" && (
+        <div className="flex flex-wrap gap-2">
+          {([
+            { k: "all", label: "All", count: videos.length },
+            ...(Object.keys(STATUS_BADGE) as VideoStatus[]).map(s => ({
+              k: s, label: STATUS_BADGE[s].label, count: statusCounts[s] || 0,
+            })),
+          ]).map(f => (
+            <button key={f.k} onClick={() => setStatusFilter(f.k as any)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${statusFilter === f.k ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground hover:text-foreground"}`}>
+              {f.label} ({f.count})
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === "editors" ? (
         <Card className="border-border/60 shadow-none overflow-hidden">
@@ -409,6 +438,11 @@ export default function VideoApprovals() {
                           </td>
                           <td className="px-3 py-3 text-center">
                             <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</Badge>
+                            {(v.status === "rejected" || v.status === "approved") && v.editor_notified_at && (
+                              <div className="mt-1 flex items-center justify-center gap-0.5 text-[9px] text-success">
+                                <BellRing className="h-2.5 w-2.5" /> Editor notified
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-3 text-center text-xs text-muted-foreground">
                             {new Date(v.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
@@ -457,6 +491,11 @@ export default function VideoApprovals() {
                   <Badge className={`border-0 text-[10px] font-semibold ${STATUS_BADGE[selected.status].color}`}>
                     {STATUS_BADGE[selected.status].label}
                   </Badge>
+                  {selected.editor_notified_at && (selected.status === "rejected" || selected.status === "approved") && (
+                    <p className="mt-1 flex items-center gap-1 text-[10px] text-success">
+                      <BellRing className="h-3 w-3" /> Editor notified {fmtPostedAt(selected.editor_notified_at)}
+                    </p>
+                  )}
                 </div>
               </div>
               <a href={selected.drive_url} target="_blank" rel="noreferrer"
