@@ -1076,6 +1076,14 @@ type ApplicantOfferInfo = {
   course_id?: string | null;
 };
 
+/** Canonical, order-insensitive signature of a course-selection set. */
+function courseSetSignature(selections: any[]): string {
+  return (selections || [])
+    .map((s) => `${s?.course_id ?? ""}:${s?.campus_id ?? ""}`)
+    .sort()
+    .join("|");
+}
+
 /**
  * Offers are stored per lead, not per application. When a candidate has a
  * draft + an approved app on the same lead, only the "owner" app should show
@@ -2047,6 +2055,25 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
         title: "Course selections updated",
         description: coursesChanged ? "Please review and save each section again." : undefined,
       });
+      return;
+    }
+
+    // Duplicate guard (nicety — the DB trigger is the hard backstop): if the
+    // student already has a non-terminal application for the identical course set
+    // in this session, send them back to it instead of creating a duplicate.
+    const newSig = courseSetSignature(selections);
+    const duplicate = (appsList || []).find((a: any) =>
+      a.session_id === sessionId &&
+      !["rejected", "cancelled", "withdrawn"].includes(a.status) &&
+      courseSetSignature(a.course_selections) === newSig,
+    );
+    if (duplicate) {
+      toast({
+        title: "Application already exists",
+        description: "You already have an application for this course — continue that one instead.",
+        variant: "destructive",
+      });
+      setSaving(false);
       return;
     }
 
