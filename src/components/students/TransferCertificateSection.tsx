@@ -13,7 +13,7 @@ import {
 import { FileText, Download, Loader2, Check, X, AlertCircle, Clock } from "lucide-react";
 
 // Roles allowed to draft/submit a TC vs approve one. Mirrors the RPC guards.
-const CAN_ISSUE = new Set(["office_assistant", "principal", "super_admin", "campus_admin"]);
+const CAN_ISSUE = new Set(["office_assistant", "school_coordinator", "principal", "super_admin", "campus_admin"]);
 const CAN_APPROVE = new Set(["principal", "super_admin"]);
 
 type TcRequest = {

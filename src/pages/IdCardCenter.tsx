@@ -42,8 +42,8 @@ interface CardPerson {
   extraValue: string;
 }
 
-const CENTER_ROLES = new Set(["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"]);
-const STUDENT_CARD_ROLES = new Set(["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"]);
+const CENTER_ROLES = new Set(["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"]);
+const STUDENT_CARD_ROLES = new Set(["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"]);
 
 function relationName(value: any): string {
   if (Array.isArray(value)) return value[0]?.name || "-";
@@ -100,7 +100,7 @@ const IdCardCenter = () => {
   const hasHrAccess = can("hr", "view");
   const canOpenCenter = role === "super_admin" || (role ? CENTER_ROLES.has(role) : false) || hasHrAccess;
   const canStudentCards = role === "super_admin" || (role ? STUDENT_CARD_ROLES.has(role) : false) || hasHrAccess;
-  const canEmployeeCards = role === "super_admin" || (hasHrAccess && !["principal", "office_admin", "office_assistant"].includes(role || ""));
+  const canEmployeeCards = role === "super_admin" || (hasHrAccess && !["principal", "office_admin", "office_assistant", "school_coordinator"].includes(role || ""));
 
   useEffect(() => {
     if (mode === "employees" && !canEmployeeCards) {

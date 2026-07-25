@@ -36,7 +36,7 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "academic_partner_offer_letter" | "student" | "parent"
+  | "data_entry" | "office_admin" | "office_assistant" | "school_coordinator" | "hostel_warden" | "consultant" | "academic_partner" | "academic_partner_offer_letter" | "student" | "parent"
   | "ib_coordinator" | "video_editor" | "librarian";
 
 type MenuItem = {
@@ -162,7 +162,7 @@ const managementMenu: MenuItem[] = [
     title: "ID Card Center",
     url: "/id-card-center",
     icon: CreditCard,
-    roles: ["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"],
+    roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"],
     anyPermission: ["hr:view"],
   },
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
@@ -176,7 +176,7 @@ const roleLabels: Record<string, string> = {
   super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
   consultant: "Consultant",
   academic_partner: "Academic Partner",
   academic_partner_offer_letter: "Academic Partner + Offers",

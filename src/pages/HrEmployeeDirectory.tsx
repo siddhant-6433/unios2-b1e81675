@@ -25,7 +25,7 @@ const roleLabels: Record<string, string> = {
   faculty: "Faculty", teacher: "Teacher", counsellor: "Counsellor",
   accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Admin",
-  office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
   ib_coordinator: "IB Coordinator", librarian: "Librarian",
 };
 
