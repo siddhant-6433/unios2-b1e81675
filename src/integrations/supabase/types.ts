@@ -10681,6 +10681,7 @@ export type Database = {
         | "academic_partner"
         | "academic_partner_offer_letter"
         | "librarian"
+        | "school_coordinator"
       ib_programme: "pyp" | "myp"
       lead_source:
         | "website"

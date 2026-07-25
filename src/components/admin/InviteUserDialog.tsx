@@ -20,6 +20,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "data_entry", label: "Data Entry" },
   { value: "office_admin", label: "Office Administrator" },
   { value: "office_assistant", label: "Office Assistant" },
+  { value: "school_coordinator", label: "School Coordinator" },
   { value: "hostel_warden", label: "Hostel Warden" },
   { value: "librarian", label: "Librarian" },
   { value: "consultant", label: "Consultant" },

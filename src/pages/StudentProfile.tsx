@@ -388,7 +388,7 @@ const StudentProfile = () => {
   const [removalReason, setRemovalReason] = useState("");
   const [removalBusy, setRemovalBusy] = useState(false);
 
-  const canArchive = role === "office_assistant" || role === "principal" || role === "super_admin";
+  const canArchive = role === "office_assistant" || role === "school_coordinator" || role === "principal" || role === "super_admin";
   const canDelete = role === "super_admin";
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
@@ -689,7 +689,7 @@ const StudentProfile = () => {
     return "bg-warning/10 text-warning";
   };
   const canUploadDocuments = can("documents", "upload");
-  const canCorrectProfile = can("students", "update") || ["office_assistant", "office_admin", "principal", "campus_admin", "super_admin"].includes(role || "");
+  const canCorrectProfile = can("students", "update") || ["office_assistant", "school_coordinator", "office_admin", "principal", "campus_admin", "super_admin"].includes(role || "");
   const canUploadPhoto = canCorrectProfile;
 
   const syncFromApplication = async () => {
@@ -903,7 +903,7 @@ const StudentProfile = () => {
     }
   };
 
-  const canRequestContactChange = ["office_assistant", "office_admin", "principal", "super_admin"].includes(role || "");
+  const canRequestContactChange = ["office_assistant", "school_coordinator", "office_admin", "principal", "super_admin"].includes(role || "");
   const selectedContactLabel = CONTACT_FIELDS.find((f) => f.value === contactField)?.label || "Contact number";
   const selectedContactOldValue = student?.[contactField] || "";
 

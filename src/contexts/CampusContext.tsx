@@ -48,12 +48,12 @@ export const CampusProvider = ({ children }: { children: ReactNode }) => {
           const matches = data.filter(
             (c) => assignedNames.includes(c.name.toLowerCase()) || assignedNames.includes(c.code.toLowerCase())
           );
-          if (role === "office_assistant") {
+          if (role === "office_assistant" || role === "school_coordinator") {
             visibleCampuses = matches.length ? matches : [];
           }
           if (matches.length > 0) {
             setSelectedCampusId(matches[0].id);
-          } else if (role === "office_assistant") {
+          } else if (role === "office_assistant" || role === "school_coordinator") {
             setSelectedCampusId("all");
           }
         }

@@ -1496,7 +1496,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       const { data: staffRoles } = await supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden"]);
+        .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden"]);
 
       if (cancelled) return;
       const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));

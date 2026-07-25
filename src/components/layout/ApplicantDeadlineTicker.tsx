@@ -24,6 +24,7 @@ const STAFF_ROLES = new Set([
   "accountant",
   "office_admin",
   "office_assistant",
+  "school_coordinator",
   "data_entry",
 ]);
 

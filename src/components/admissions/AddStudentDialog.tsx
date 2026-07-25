@@ -119,7 +119,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   // Restrict the picker so a scoped user can't pick a campus the DB would reject
   // with a 42501. Other roles (admin / admission_head / counsellor / ...) keep the
   // full list.
-  const isCampusScoped = role === "office_assistant" || role === "principal";
+  const isCampusScoped = role === "office_assistant" || role === "school_coordinator" || role === "principal";
   const assignedCampusNames = useMemo(
     () => (profile?.campus || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     [profile?.campus],

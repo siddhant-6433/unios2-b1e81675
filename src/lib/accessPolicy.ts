@@ -104,7 +104,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/hr-leave", permission: "hr:view", staffOnly: true },
   { path: "/hr-directory", permission: "hr:view", staffOnly: true },
   { path: "/admin", anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"], staffOnly: true },
-  { path: "/id-card-center", roles: ["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },
+  { path: "/id-card-center", roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },
   { path: "/settings", permission: "user_management:view", staffOnly: true },
   { path: "/inbox", permission: "leads:view", staffOnly: true },
   { path: "/whatsapp-inbox", permission: "whatsapp:view", staffOnly: true },
