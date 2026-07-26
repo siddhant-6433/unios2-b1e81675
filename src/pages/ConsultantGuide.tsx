@@ -1,109 +1,25 @@
-import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Download, Plus, Users, TrendingUp, IndianRupee, ArrowUpRight,
   CreditCard, Clock, Mic, Play, Square, Send, FileText, CheckCircle,
-  Sparkles, ChevronRight, Building2, BookOpen, Loader2, MousePointer2,
+  Sparkles, ChevronRight, Building2, BookOpen, MousePointer2,
   Eye, Phone, Mail, Calendar,
 } from "lucide-react";
+
+// The downloadable PDF (real portal screenshots) lives in public/ and is
+// served at the app root. Regenerate with make-pdf from docs/consultant-portal-guide.md.
+const GUIDE_PDF_URL = "/NIMT-Consultant-Portal-Guide.pdf";
 
 /**
  * Visual guide for consultants — rich in-app illustrated walkthrough.
  * Each section has an annotated mock UI showing real portal screens.
- * The "Download PDF" button captures the whole page with html2canvas and
- * exports a multi-page PDF.
+ * The "Download PDF" button links to the static screenshot PDF in public/.
  */
 export default function ConsultantGuide() {
   const navigate = useNavigate();
-  const { toast } = useToast();
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [generating, setGenerating] = useState(false);
-
-  const generatePdf = async () => {
-    if (!contentRef.current) return;
-    setGenerating(true);
-    try {
-      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-        import("jspdf"),
-        import("html2canvas"),
-      ]);
-
-      const sections = contentRef.current.querySelectorAll<HTMLElement>("[data-guide-section]");
-      if (sections.length === 0) {
-        toast({ title: "Nothing to export", variant: "destructive" });
-        setGenerating(false);
-        return;
-      }
-
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const margin = 10;
-
-      // Cover page
-      pdf.setFillColor(99, 102, 241);
-      pdf.rect(0, 0, pageW, 50, "F");
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(24);
-      pdf.setTextColor(255, 255, 255);
-      pdf.text("NIMT Consultant Guide", margin, 30);
-      pdf.setFontSize(11);
-      pdf.setFont("helvetica", "normal");
-      pdf.text("Visual walkthrough of your consultant portal", margin, 40);
-
-      for (let i = 0; i < sections.length; i++) {
-        const section = sections[i];
-        const canvas = await html2canvas(section, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-          logging: false,
-        });
-        const imgData = canvas.toDataURL("image/png");
-
-        // Calculate dimensions to fit the page
-        const availableW = pageW - margin * 2;
-        const imgRatio = canvas.width / canvas.height;
-        let imgW = availableW;
-        let imgH = imgW / imgRatio;
-
-        // If the image is too tall for one page, scale down to fit
-        const availableH = pageH - margin * 2 - (i === 0 ? 60 : 10);
-        if (imgH > availableH) {
-          imgH = availableH;
-          imgW = imgH * imgRatio;
-        }
-
-        const yStart = i === 0 ? 60 : margin;
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, "PNG", (pageW - imgW) / 2, yStart, imgW, imgH);
-      }
-
-      // Footer on all pages
-      const totalPages = pdf.getNumberOfPages();
-      pdf.setFont("helvetica", "italic");
-      pdf.setFontSize(8);
-      pdf.setTextColor(150, 150, 150);
-      for (let p = 1; p <= totalPages; p++) {
-        pdf.setPage(p);
-        pdf.text(
-          `NIMT Consultant Guide  ·  Page ${p} of ${totalPages}  ·  uni.nimt.ac.in`,
-          margin,
-          pageH - 5
-        );
-      }
-
-      pdf.save("NIMT-Consultant-Guide.pdf");
-      toast({ title: "Guide downloaded", description: "PDF saved with visual walkthrough" });
-    } catch (e: any) {
-      toast({ title: "PDF failed", description: e.message, variant: "destructive" });
-    }
-    setGenerating(false);
-  };
 
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
@@ -118,17 +34,19 @@ export default function ConsultantGuide() {
           </button>
           <h1 className="text-2xl font-bold text-foreground">Consultant Portal Guide</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Visual walkthrough of every feature. Scroll through the sections or download as PDF.
+            Visual walkthrough of every feature. Scroll through the sections or download the PDF.
           </p>
         </div>
-        <Button onClick={generatePdf} disabled={generating} className="gap-2">
-          {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          Download as PDF
+        <Button asChild className="gap-2">
+          <a href={GUIDE_PDF_URL} target="_blank" rel="noopener noreferrer" download>
+            <Download className="h-4 w-4" />
+            Download PDF Guide
+          </a>
         </Button>
       </div>
 
       {/* Content */}
-      <div ref={contentRef} className="space-y-6 bg-background">
+      <div className="space-y-6 bg-background">
         {/* ── Intro ── */}
         <Section number={1} title="Welcome to the NIMT Consultant Portal" icon={Sparkles}>
           <p className="text-sm text-foreground/80 leading-relaxed mb-4">
