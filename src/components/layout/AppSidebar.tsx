@@ -167,7 +167,7 @@ const managementMenu: MenuItem[] = [
   },
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
-  { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
+  { title: "Student Services", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
   { title: "Video Approvals", url: "/video-approvals", icon: Video, permission: "video_approval:view" },
   { title: "Video Bills", url: "/video-bills", icon: Receipt, permission: "video_bills:view" },
 ];

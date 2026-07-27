@@ -35,11 +35,13 @@ const POPULAR_COMPANIES = [
 type RequestType = "verification" | "marksheet" | "diploma" | "transcript";
 
 const SERVICE_TYPES: { key: RequestType; label: string; icon: any; desc: string; fee: number }[] = [
-  { key: "verification", label: "Alumni Verification", icon: Shield, desc: "For employers / background check agencies to verify alumni records", fee: 1500 },
+  { key: "verification", label: "Student Verification", icon: Shield, desc: "For employers / background check agencies to verify student or alumni records", fee: 1500 },
   { key: "marksheet", label: "Marksheet Request", icon: ScrollText, desc: "Request original or duplicate marksheets", fee: 2500 },
   { key: "diploma", label: "Degree / Diploma Request", icon: Award, desc: "Request original or duplicate degree certificate", fee: 2500 },
   { key: "transcript", label: "Transcript Request", icon: BookOpen, desc: "Request official academic transcript", fee: 2500 },
 ];
+
+type CourseOption = { id: string; name: string; code?: string | null };
 
 // ---- Phone Input ----
 const ISD_CODES = [
@@ -139,7 +141,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-3">
           <Shield className="h-7 w-7 text-primary" />
         </div>
-        <h2 className="text-xl font-bold text-foreground">Alumni Services Portal</h2>
+        <h2 className="text-xl font-bold text-foreground">Student Services Portal</h2>
         <p className="text-sm text-muted-foreground mt-1">Verify your identity with WhatsApp OTP to proceed</p>
       </div>
       {!otpSent ? (
@@ -224,6 +226,8 @@ export default function AlumniVerification() {
   const [alumniName, setAlumniName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [course, setCourse] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [courseOptions, setCourseOptions] = useState<CourseOption[]>([]);
   const [yearOfPassing, setYearOfPassing] = useState("");
   const [campus, setCampus] = useState("");
   const [enrollmentNo, setEnrollmentNo] = useState("");
@@ -257,6 +261,15 @@ export default function AlumniVerification() {
     const handler = (e: MouseEvent) => { if (companyRef.current && !companyRef.current.contains(e.target as Node)) setShowCompanyDropdown(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    supabase
+      .from("courses")
+      .select("id, name, code")
+      .eq("is_active", true)
+      .order("name")
+      .then(({ data }) => setCourseOptions((data || []) as CourseOption[]));
   }, []);
 
   const filteredCompanies = POPULAR_COMPANIES.filter(c => c.toLowerCase().includes(employerSearch.toLowerCase())).slice(0, 8);
@@ -309,6 +322,7 @@ export default function AlumniVerification() {
         employer_name: requestType === "verification" ? employerName : "Self",
         third_party_company: thirdPartyCompany || null,
         alumni_name: alumniName,
+        course_id: courseId || null,
         course, campus: campus || null,
         year_of_passing: parseInt(yearOfPassing),
         enrollment_no: enrollmentNo || null,
@@ -483,12 +497,12 @@ export default function AlumniVerification() {
 
           {/* Headline */}
           <div className="relative z-10 space-y-3">
-            <p className="text-xs font-semibold text-white/50 uppercase tracking-[0.2em]">Alumni Services</p>
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-[0.2em]">Student Services</p>
             <h1 className="text-3xl xl:text-4xl font-bold text-white leading-tight">
               Verification,{"\n"}Transcripts &{"\n"}Document Requests
             </h1>
             <p className="text-sm text-white/65 leading-relaxed">
-              For employers, background check agencies, and alumni — request verification of academic records, transcripts, and degree certificates.
+              For employers, background check agencies, students, and alumni — request verification of academic records, transcripts, and degree certificates.
             </p>
           </div>
 
@@ -496,7 +510,7 @@ export default function AlumniVerification() {
           <div className="relative z-10 space-y-2">
             <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-1">Available Services</p>
             <div className="flex flex-wrap gap-1.5">
-              {["Alumni Verification", "Marksheet Request", "Degree / Diploma", "Transcript"].map(s => (
+              {["Student Verification", "Marksheet Request", "Degree / Diploma", "Transcript"].map(s => (
                 <span key={s} className="text-[11px] text-white/70 bg-white/10 rounded-md px-2.5 py-1">{s}</span>
               ))}
             </div>
@@ -505,7 +519,7 @@ export default function AlumniVerification() {
           {/* Footer */}
           <div className="relative z-10 flex items-end justify-between">
             <div className="text-xs text-white/40">
-              <p>umesh@nimt.ac.in · +91-7428477664</p>
+              <p>Student Services · NIMT Educational Institutions</p>
             </div>
             <p className="text-xs text-white/30">© 2026 NIMT Educational Institutions</p>
           </div>
@@ -517,11 +531,11 @@ export default function AlumniVerification() {
             {/* Mobile logo */}
             <div className="mb-8 lg:hidden">
               <img src={nimtLogo} alt="NIMT" className="h-9 w-auto object-contain" />
-              <p className="text-xs text-muted-foreground mt-1">Alumni Services Portal</p>
+              <p className="text-xs text-muted-foreground mt-1">Student Services Portal</p>
             </div>
             <OtpLogin onVerified={async (phone) => { setVerifiedPhone(phone); await fetchExistingRequests(phone); setStep("dashboard"); }} />
             <p className="text-center text-[10px] text-muted-foreground mt-6">
-              Need help? <a href="mailto:umesh@nimt.ac.in" className="text-primary hover:underline">umesh@nimt.ac.in</a> · +91-7428477664
+              Need help? Your assigned Student Services handler will be shown after payment.
             </p>
           </div>
         </div>
@@ -537,7 +551,7 @@ export default function AlumniVerification() {
           <img src={nimtLogo} alt="NIMT" className="h-10" />
           <div>
             <h1 className="text-lg font-bold text-foreground">NIMT Educational Institutions</h1>
-            <p className="text-xs text-muted-foreground">Alumni Services Portal</p>
+            <p className="text-xs text-muted-foreground">Student Services Portal</p>
           </div>
         </div>
       </header>
@@ -576,7 +590,7 @@ export default function AlumniVerification() {
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-bold text-foreground">Alumni Services Dashboard</h2>
+                    <h2 className="text-lg font-bold text-foreground">Student Services Dashboard</h2>
                     <p className="text-xs text-muted-foreground">Welcome! Your verified phone: {verifiedPhone}</p>
                   </div>
                   <Button size="sm" className="gap-1.5" onClick={() => setStep("select")}>
@@ -588,7 +602,7 @@ export default function AlumniVerification() {
                   <div className="rounded-xl border-2 border-dashed border-border p-8 text-center">
                     <Shield className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
                     <p className="text-sm font-medium text-muted-foreground">No requests yet</p>
-                    <p className="text-xs text-muted-foreground mt-1">Submit your first alumni service request</p>
+                    <p className="text-xs text-muted-foreground mt-1">Submit your first Student Services request</p>
                     <Button size="sm" className="mt-4 gap-1.5" onClick={() => setStep("select")}>
                       + Submit New Request
                     </Button>
@@ -619,6 +633,11 @@ export default function AlumniVerification() {
                               </div>
                               <p className="text-sm font-medium text-foreground mt-0.5">{req.alumni_name} — {req.course} ({req.year_of_passing})</p>
                               <p className="text-xs text-muted-foreground">{svc?.label || "Verification"} · {req.employer_name !== "Self" ? req.employer_name : ""}</p>
+                              {(req.assigned_handler_email || req.assigned_handler_official_phone) && (
+                                <p className="text-[10px] text-muted-foreground mt-1">
+                                  Handler: {req.assigned_handler_name || "Student Services"} · {req.assigned_handler_email || "email pending"} · {req.assigned_handler_official_phone || "phone pending"}
+                                </p>
+                              )}
                               <p className="text-[10px] text-muted-foreground mt-1">
                                 Submitted {new Date(req.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                                 {req.paid_at && ` · Paid ${new Date(req.paid_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
@@ -634,6 +653,7 @@ export default function AlumniVerification() {
                                   setRequestType(req.request_type || "verification");
                                   setAlumniName(req.alumni_name);
                                   setContactEmail(req.contact_email || "");
+                                  setCourseId(req.course_id || "");
                                   setCourse(req.course);
                                   setYearOfPassing(String(req.year_of_passing));
                                   setContactName(req.contact_name);
@@ -653,8 +673,8 @@ export default function AlumniVerification() {
 
                 <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
                   <p className="font-semibold text-foreground text-sm">Need Help?</p>
-                  <p>Email: <a href="mailto:umesh@nimt.ac.in" className="text-primary hover:underline">umesh@nimt.ac.in</a></p>
-                  <p>Phone: <a href="tel:+917428477664" className="text-primary hover:underline">+91-7428477664</a></p>
+                  <p>Your assigned handler's official email and phone will appear on paid requests.</p>
+                  <p>Fallback desk: <a href="mailto:umesh@nimt.ac.in" className="text-primary hover:underline">umesh@nimt.ac.in</a> · <a href="tel:+917428477664" className="text-primary hover:underline">+91-7428477664</a></p>
                   <p>Office: NIMT Educational Institutions, Knowledge Park-1, Greater Noida, UP - 201310</p>
                 </div>
               </div>
@@ -793,9 +813,21 @@ export default function AlumniVerification() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-medium text-foreground mb-1 block">Course / Programme *</label>
-                      <select value={course} onChange={e => setCourse(e.target.value)} className={inputCls}>
+                      <select
+                        value={courseId || course}
+                        onChange={e => {
+                          const value = e.target.value;
+                          const selected = courseOptions.find(c => c.id === value);
+                          setCourseId(selected?.id || "");
+                          setCourse(selected?.name || value);
+                        }}
+                        className={inputCls}
+                      >
                         <option value="">Select course</option>
-                        {COURSES.map(c => <option key={c} value={c}>{c}</option>)}
+                        {courseOptions.length > 0
+                          ? courseOptions.map(c => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)
+                          : COURSES.map(c => <option key={c} value={c}>{c}</option>)}
+                        <option value="Other">Other</option>
                       </select>
                     </div>
                     <div>
@@ -945,7 +977,7 @@ export default function AlumniVerification() {
             )}
           </CardContent>
         </Card>
-        <p className="text-center text-[10px] text-muted-foreground mt-6">NIMT Educational Institutions · Alumni Services Portal · umesh@nimt.ac.in · +91-7428477664</p>
+        <p className="text-center text-[10px] text-muted-foreground mt-6">NIMT Educational Institutions · Student Services Portal</p>
       </main>
     </div>
   );
