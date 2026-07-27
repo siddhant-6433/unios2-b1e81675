@@ -56,6 +56,58 @@ function isOfferProgrammeFeeTerm(term: string | null | undefined): boolean {
   return /^year_\d+$/.test(normalized) || SCHOOL_OFFER_TERM_ORDER.includes(normalized);
 }
 
+// School fee structures list every boarding tier, every transport tier and a
+// boarder-only security deposit as separate line items on the same term. Which
+// ones belong in the programme fee depends on the chosen mode (persisted on the
+// offer). No selection / day scholar without transport = base fee. Keep in sync
+// with src/lib/offerFeeTerms.ts and provision-student-fees.
+type SchoolStudentType = "day_scholar" | "day_boarder" | "boarder";
+type SchoolHostelType = "non_ac" | "ac_central" | "ac_individual";
+type SchoolTransportZone = "zone_1" | "zone_2" | "zone_3";
+interface SchoolFeeSelection {
+  studentType?: SchoolStudentType | null;
+  hostelType?: SchoolHostelType | null;
+  transportZone?: SchoolTransportZone | null;
+}
+
+const HOSTEL_CODE_SUFFIXES: Record<SchoolHostelType, string[]> = {
+  non_ac: ["NAC", "B5"],
+  ac_central: ["CBA", "B7"],
+  ac_individual: ["IBA"],
+};
+const TRANSPORT_CODE_SUFFIX: Record<SchoolTransportZone, string> = {
+  zone_1: "TR1",
+  zone_2: "TR2",
+  zone_3: "TR3",
+};
+const DAY_BOARDING_CODE_SUFFIX = "DBA";
+const SECURITY_DEPOSIT_CODE_SUFFIX = "SEC";
+
+function includeOfferFeeItem(
+  item: { fee_codes?: { code?: string | null; category?: string | null } | null },
+  selection?: SchoolFeeSelection | null,
+): boolean {
+  const category = String(item?.fee_codes?.category ?? "").trim().toLowerCase();
+  const code = String(item?.fee_codes?.code ?? "").trim().toUpperCase();
+  const studentType: SchoolStudentType = selection?.studentType || "day_scholar";
+
+  if (category === "transport") {
+    const zone = selection?.transportZone;
+    return !!zone && code.endsWith(TRANSPORT_CODE_SUFFIX[zone]);
+  }
+  if (category === "hostel") {
+    if (studentType === "day_scholar") return false;
+    if (studentType === "day_boarder") return code.endsWith(DAY_BOARDING_CODE_SUFFIX);
+    if (code.endsWith(DAY_BOARDING_CODE_SUFFIX)) return false;
+    const hostelType = selection?.hostelType;
+    return !!hostelType && HOSTEL_CODE_SUFFIXES[hostelType].some((s) => code.endsWith(s));
+  }
+  if (category === "enrollment" && code.endsWith(SECURITY_DEPOSIT_CODE_SUFFIX)) {
+    return studentType === "boarder";
+  }
+  return true;
+}
+
 type OfferFeeStructureRow = {
   id: string;
   version?: string | null;
@@ -96,13 +148,16 @@ function offerFeeTermRank(term: string): number {
   const normalized = String(term || "").trim().toLowerCase();
   const yearMatch = normalized.match(/^year_(\d+)$/);
   if (yearMatch) return Number(yearMatch[1]);
+  if (normalized === "security_deposit") return 100.5; // right after admission
   const schoolIndex = SCHOOL_OFFER_TERM_ORDER.indexOf(normalized);
   if (schoolIndex >= 0) return 100 + schoolIndex;
   return 1_000;
 }
 
 function firstOfferFeeTerm(items: { term: string; total: number }[]): string {
-  return items.find(it => it.term === "year_1")?.term || items[0]?.term || "year_1";
+  return items.find(it => it.term === "year_1")?.term
+    || items.find(it => it.term !== "security_deposit")?.term
+    || items[0]?.term || "year_1";
 }
 
 const fmtDate = (d?: string | null) => {
@@ -608,6 +663,7 @@ function isBptOrBmritCourse(course: BuildOpts["course"]) {
 }
 
 function labelForOfferTerm(term: string, isDaott: boolean) {
+  if (term === "security_deposit") return "Security Deposit (Refundable)";
   return isDaott
     ? term.replace(/^year_(\d+)$/, "Sem $1")
     : term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -980,6 +1036,7 @@ Deno.serve(async (req) => {
         id, total_fee, scholarship_amount, net_fee, approval_status,
         source_fee_proposal_id, source_fee_proposal_child_key,
         token_fee_amount, acceptance_deadline, created_at, admission_mode, entrance_exam_name,
+        student_type, hostel_type, transport_zone,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
         courses:course_id ( name, code, duration_years ),
@@ -1014,12 +1071,22 @@ Deno.serve(async (req) => {
     if (feeStructureError) throw feeStructureError;
     const yearRows = pickOfferFeeStructure((feeStructures || []) as OfferFeeStructureRow[]);
 
+    const schoolSelection: SchoolFeeSelection = {
+      studentType: (offer.student_type as SchoolStudentType | null) || null,
+      hostelType: (offer.hostel_type as SchoolHostelType | null) || null,
+      transportZone: (offer.transport_zone as SchoolTransportZone | null) || null,
+    };
+
     const yearMap = new Map<string, number>();
     const feeItems: FeeStructureItem[] = [];
     for (const it of (yearRows?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
       const term = String(it.term || "").trim().toLowerCase();
       if (!isOfferProgrammeFeeTerm(term)) continue;
-      yearMap.set(term, (yearMap.get(term) || 0) + Number(it.amount));
+      if (!includeOfferFeeItem(it, schoolSelection)) continue;
+      // Break the refundable security deposit onto its own line (not the admission fee).
+      const isDeposit = String(it.fee_codes?.code ?? "").trim().toUpperCase().endsWith(SECURITY_DEPOSIT_CODE_SUFFIX);
+      const displayTerm = isDeposit ? "security_deposit" : term;
+      yearMap.set(displayTerm, (yearMap.get(displayTerm) || 0) + Number(it.amount));
       feeItems.push({
         term,
         amount: Number(it.amount || 0),

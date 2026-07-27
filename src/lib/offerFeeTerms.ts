@@ -1,6 +1,10 @@
 export interface OfferFeeItemLike {
   term?: string | null;
   amount?: number | string | null;
+  // Category/code may be flat or nested under fee_codes depending on the query shape.
+  category?: string | null;
+  code?: string | null;
+  fee_codes?: { code?: string | null; category?: string | null } | null;
 }
 
 export interface OfferFeeTermTotal {
@@ -9,6 +13,95 @@ export interface OfferFeeTermTotal {
 }
 
 const SCHOOL_OFFER_TERM_ORDER = ["admission", "q1", "q2", "q3", "q4"];
+
+// ── School fee mode ──────────────────────────────────────────────────────────
+// School fee structures list every boarding tier, every transport tier and the
+// boarder-only security deposit as separate line items on the same term. They are
+// mutually-exclusive add-ons the family picks — NOT all part of one bill. Which
+// ones apply depends on the chosen mode. With no selection we show the base fee
+// (day scholar, no transport): tuition + admission + registration + other. This
+// mirrors provision-student-fees (the ledger builder) and FeeStructureViewer so
+// the offer, the PDF and the eventual student ledger all agree.
+export type SchoolStudentType = "day_scholar" | "day_boarder" | "boarder";
+export type SchoolHostelType = "non_ac" | "ac_central" | "ac_individual";
+export type SchoolTransportZone = "zone_1" | "zone_2" | "zone_3";
+
+export interface SchoolFeeSelection {
+  studentType?: SchoolStudentType | null;
+  hostelType?: SchoolHostelType | null;
+  transportZone?: SchoolTransportZone | null;
+}
+
+// Fee codes are brand-prefixed (NB- beacon, MR- mirai, BSAV- …); match by suffix.
+const HOSTEL_CODE_SUFFIXES: Record<SchoolHostelType, string[]> = {
+  non_ac: ["NAC", "B5"],
+  ac_central: ["CBA", "B7"],
+  ac_individual: ["IBA"],
+};
+const TRANSPORT_CODE_SUFFIX: Record<SchoolTransportZone, string> = {
+  zone_1: "TR1",
+  zone_2: "TR2",
+  zone_3: "TR3",
+};
+const DAY_BOARDING_CODE_SUFFIX = "DBA";
+const SECURITY_DEPOSIT_CODE_SUFFIX = "SEC";
+
+function itemCategory(item: OfferFeeItemLike | null | undefined): string {
+  return String(item?.category ?? item?.fee_codes?.category ?? "").trim().toLowerCase();
+}
+function itemCode(item: OfferFeeItemLike | null | undefined): string {
+  return String(item?.code ?? item?.fee_codes?.code ?? "").trim().toUpperCase();
+}
+
+// Whether a fee item belongs in the programme fee for the chosen school mode.
+// Keep in sync with the same-named helper in generate-offer-letter/index.ts.
+export function includeOfferFeeItem(
+  item: OfferFeeItemLike | null | undefined,
+  selection?: SchoolFeeSelection | null,
+): boolean {
+  const category = itemCategory(item);
+  const code = itemCode(item);
+  const studentType: SchoolStudentType = selection?.studentType || "day_scholar";
+
+  if (category === "transport") {
+    const zone = selection?.transportZone;
+    return !!zone && code.endsWith(TRANSPORT_CODE_SUFFIX[zone]);
+  }
+  if (category === "hostel") {
+    if (studentType === "day_scholar") return false;
+    if (studentType === "day_boarder") return code.endsWith(DAY_BOARDING_CODE_SUFFIX);
+    // boarder: one matching hostel tier, never the day-boarding line
+    if (code.endsWith(DAY_BOARDING_CODE_SUFFIX)) return false;
+    const hostelType = selection?.hostelType;
+    return !!hostelType && HOSTEL_CODE_SUFFIXES[hostelType].some((s) => code.endsWith(s));
+  }
+  if (category === "enrollment" && code.endsWith(SECURITY_DEPOSIT_CODE_SUFFIX)) {
+    return studentType === "boarder"; // security deposit is boarders-only
+  }
+  return true; // tuition, enrollment (non-deposit), other
+}
+
+/** Base programme fee item (day scholar, no add-ons). */
+export function isBaseOfferProgrammeFeeItem(item: OfferFeeItemLike | null | undefined): boolean {
+  return includeOfferFeeItem(item, undefined);
+}
+
+/** True when a structure exposes school boarding/transport add-on options. */
+export function hasSchoolFeeOptions(items: OfferFeeItemLike[] | null | undefined): boolean {
+  return (items || []).some((item) => {
+    const category = itemCategory(item);
+    return category === "hostel" || category === "transport";
+  });
+}
+
+// The refundable, boarder-only security deposit shares the "admission" term in
+// the fee structure. Break it out onto its own synthetic display term so it isn't
+// read as part of the admission fee — it stays in the total, just on its own line.
+export const SECURITY_DEPOSIT_TERM = "security_deposit";
+
+export function isSecurityDepositItem(item: OfferFeeItemLike | null | undefined): boolean {
+  return itemCode(item).endsWith(SECURITY_DEPOSIT_CODE_SUFFIX);
+}
 
 export function isOfferProgrammeFeeTerm(term: string | null | undefined): boolean {
   const normalized = String(term || "").trim().toLowerCase();
@@ -20,19 +113,28 @@ export function offerFeeTermRank(term: string): number {
   const yearMatch = normalized.match(/^year_(\d+)$/);
   if (yearMatch) return Number(yearMatch[1]);
 
+  // Security deposit sorts right after the admission line (both one-time).
+  if (normalized === SECURITY_DEPOSIT_TERM) return 100.5;
+
   const schoolIndex = SCHOOL_OFFER_TERM_ORDER.indexOf(normalized);
   if (schoolIndex >= 0) return 100 + schoolIndex;
 
   return 1_000;
 }
 
-export function collectOfferFeeTermTotals(items: OfferFeeItemLike[] | null | undefined): OfferFeeTermTotal[] {
+export function collectOfferFeeTermTotals(
+  items: OfferFeeItemLike[] | null | undefined,
+  selection?: SchoolFeeSelection | null,
+): OfferFeeTermTotal[] {
   const byTerm = new Map<string, number>();
   for (const item of items || []) {
     const term = String(item?.term || "").trim().toLowerCase();
     const amount = Number(item?.amount || 0);
     if (!isOfferProgrammeFeeTerm(term) || !Number.isFinite(amount) || amount <= 0) continue;
-    byTerm.set(term, (byTerm.get(term) || 0) + amount);
+    if (!includeOfferFeeItem(item, selection)) continue;
+    // Route the security deposit to its own line rather than folding it into admission.
+    const displayTerm = isSecurityDepositItem(item) ? SECURITY_DEPOSIT_TERM : term;
+    byTerm.set(displayTerm, (byTerm.get(displayTerm) || 0) + amount);
   }
 
   return Array.from(byTerm.entries())

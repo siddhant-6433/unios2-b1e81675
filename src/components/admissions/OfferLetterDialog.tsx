@@ -36,7 +36,7 @@ import {
   proposalFeeSnapshotDiff,
   type FeeProposalChildLike,
 } from "@/lib/feeProposalOfferMapping";
-import { collectOfferFeeTermTotals, firstOfferFeeTerm } from "@/lib/offerFeeTerms";
+import { collectOfferFeeTermTotals, firstOfferFeeTerm, hasSchoolFeeOptions, SECURITY_DEPOSIT_TERM, type OfferFeeItemLike, type SchoolFeeSelection, type SchoolStudentType, type SchoolHostelType, type SchoolTransportZone } from "@/lib/offerFeeTerms";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -96,7 +96,7 @@ type OfferFeeStructureRow = {
   created_at?: string | null;
   metadata?: Record<string, unknown> | null;
   policy?: FeeStructurePolicy | null;
-  fee_structure_items?: { term: string; amount: number | string | null }[] | null;
+  fee_structure_items?: { term: string; amount: number | string | null; fee_codes?: { code?: string | null; category?: string | null } | null }[] | null;
 };
 
 interface OfferWaiver {
@@ -199,15 +199,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   });
   const [tokenFeeEdited, setTokenFeeEdited] = useState(false);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
-  // First payable programme-fee period for the picked session, used to default the token fee.
-  const [firstYearFee, setFirstYearFee] = useState<number>(0);
-  // Term keys present in the active fee structure (e.g. ['year_1'] or ['admission', 'q1']) —
-  // drives the year picker in the Add-Waiver inline form.
-  const [availableTerms, setAvailableTerms] = useState<string[]>([]);
-  // Per-period totals from the active fee structure, used for the summary card
-  // at offer-creation time and for stamping offer.total_fee.
-  const [yearTotals, setYearTotals] = useState<{ term: string; total: number; label: string }[]>([]);
+  // Raw fee-structure items + metadata for the picked course+session. yearTotals,
+  // firstYearFee and availableTerms (below) are DERIVED from these plus the chosen
+  // school mode, so changing the mode recomputes the programme fee without a re-query.
+  const [rawFeeItems, setRawFeeItems] = useState<OfferFeeItemLike[]>([]);
+  const [feeMetadata, setFeeMetadata] = useState<Record<string, unknown> | null>(null);
   const [feePolicy, setFeePolicy] = useState<Record<string, unknown> | null>(null);
+  // School fee mode (day scholar / day boarder / boarder + tier + transport zone).
+  // Only meaningful for school structures that expose boarding/transport options;
+  // day_scholar with no transport = base fee. Prefilled from the applicant's
+  // declared choice; staff can override before issuing.
+  const [schoolSelection, setSchoolSelection] = useState<SchoolFeeSelection>({ studentType: "day_scholar", hostelType: null, transportZone: null });
+  const [schoolModePrefilled, setSchoolModePrefilled] = useState(false);
   // offer_id → waivers list, fetched alongside offers.
   const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
   // Which offer's add-waiver inline form is currently visible.
@@ -427,6 +430,45 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     return () => { cancelled = true; };
   }, [open, leadId, updeledRegistrationProp]);
 
+  // Re-arm the prefill when the dialog closes so reopening for another lead
+  // picks up that applicant's declared mode.
+  useEffect(() => {
+    if (!open) {
+      setSchoolModePrefilled(false);
+      setSchoolSelection({ studentType: "day_scholar", hostelType: null, transportZone: null });
+    }
+  }, [open]);
+
+  // Prefill the school mode from what the applicant declared on the application
+  // (school_details.{student_type,hostel_type,transport_zone}). Staff can override.
+  useEffect(() => {
+    if (!open || !leadId || schoolModePrefilled) return;
+    let cancelled = false;
+    (async () => {
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("school_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const sd = ((appRow as { school_details?: Record<string, unknown> } | null)?.school_details ?? {}) as Record<string, unknown>;
+      const studentType = (["day_scholar", "day_boarder", "boarder"] as const).find(v => v === sd.student_type) || null;
+      const hostelType = (["non_ac", "ac_central", "ac_individual"] as const).find(v => v === sd.hostel_type) || null;
+      const transportZone = (["zone_1", "zone_2", "zone_3"] as const).find(v => v === sd.transport_zone) || null;
+      if (studentType || hostelType || transportZone) {
+        setSchoolSelection({
+          studentType: studentType || "day_scholar",
+          hostelType: studentType === "boarder" ? hostelType : null,
+          transportZone,
+        });
+      }
+      setSchoolModePrefilled(true);
+    })().catch(() => { if (!cancelled) setSchoolModePrefilled(true); });
+    return () => { cancelled = true; };
+  }, [open, leadId, schoolModePrefilled]);
+
   // Pull sessions whenever the form opens so the select has data. Prefer a
   // session that actually has active year-wise fees for this course; multiple
   // sessions can be active, and principals cannot change this dropdown.
@@ -465,39 +507,55 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   // picked course+session pair. firstYearFee drives token-fee defaults;
   // availableTerms drives the year picker in the Add-Waiver form.
   useEffect(() => {
-    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
+    if (!courseId) { setRawFeeItems([]); setFeeMetadata(null); setFeePolicy(null); return; }
     // For waiver picker, use the offer's session if any are loaded; otherwise
     // fall back to form.session_id (when the new-offer form is open).
     const sessionId = form.session_id || (offers.find(o => !!o.session_id)?.session_id || "");
-    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
+    if (!sessionId) { setRawFeeItems([]); setFeeMetadata(null); setFeePolicy(null); return; }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("fee_structures")
-        .select("id, version, created_at, metadata, policy, fee_structure_items ( term, amount )")
+        .select("id, version, created_at, metadata, policy, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, category ) )")
         .eq("course_id", courseId)
         .eq("session_id", sessionId)
         .eq("is_active", true);
       if (cancelled) return;
       const feeStructure = pickOfferFeeStructure((data || []) as OfferFeeStructureRow[]);
-      const items = feeStructure?.fee_structure_items ?? [];
-      const metadata = feeStructure?.metadata ?? null;
-      const policy = feeStructure?.policy ?? null;
-      const totals = collectOfferFeeTermTotals(items);
-      const sorted = totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, metadata) }));
-      const firstTerm = firstOfferFeeTerm(totals);
-      const firstPeriodFee = totals.find((item) => item.term === firstTerm)?.total || 0;
-      setFirstYearFee(firstPeriodFee);
-      setYearTotals(sorted);
-      setFeePolicy(policy || null);
-      setAvailableTerms(sorted.length ? sorted.map(s => s.term) : ["year_1"]);
-    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); });
+      setRawFeeItems((feeStructure?.fee_structure_items ?? []) as OfferFeeItemLike[]);
+      setFeeMetadata(feeStructure?.metadata ?? null);
+      setFeePolicy(feeStructure?.policy ?? null);
+    })().catch(() => { setRawFeeItems([]); setFeeMetadata(null); setFeePolicy(null); });
     return () => { cancelled = true; };
   }, [courseId, form.session_id, offers]);
 
-  // Programme total = sum of year_N items from the published fee structure.
-  // This is the canonical source of truth for the offer's "total fee" — the
-  // form no longer asks the user to type it.
+  // Whether the picked structure exposes school boarding/transport add-on options.
+  const hasSchoolOptions = useMemo(() => hasSchoolFeeOptions(rawFeeItems), [rawFeeItems]);
+
+  // Per-period totals, derived from the raw items + the chosen school mode. For
+  // non-school structures the selection is ignored (no hostel/transport items).
+  const yearTotals = useMemo(() => {
+    const totals = collectOfferFeeTermTotals(rawFeeItems, hasSchoolOptions ? schoolSelection : undefined);
+    return totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, feeMetadata) }));
+  }, [rawFeeItems, hasSchoolOptions, schoolSelection, feeMetadata]);
+
+  // Term keys present (drives the Add-Waiver year picker). Exclude the synthetic
+  // security-deposit line — it isn't a real fee-structure term and can't be waived.
+  const availableTerms = useMemo(() => {
+    const terms = yearTotals.map(s => s.term).filter(t => t !== SECURITY_DEPOSIT_TERM);
+    return terms.length ? terms : ["year_1"];
+  }, [yearTotals]);
+
+  // First payable programme-fee period, used to default the token fee. Skip the
+  // refundable deposit so the token defaults off the admission fee.
+  const firstYearFee = useMemo(() => {
+    const payable = yearTotals.filter((item) => item.term !== SECURITY_DEPOSIT_TERM);
+    const firstTerm = firstOfferFeeTerm(payable);
+    return payable.find((item) => item.term === firstTerm)?.total || 0;
+  }, [yearTotals]);
+
+  // Programme total = sum of the mode-adjusted period totals from the published
+  // fee structure. Canonical source of truth for the offer's "total fee".
   const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
   const preWaiverTotal = preWaivers.reduce((sum, waiver) => sum + Number(waiver.amount || 0), 0);
   const selectedSessionName = sessions.find(s => s.id === form.session_id)?.name || null;
@@ -535,6 +593,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const proposalLevelFullYearWaiver = Number(selectedFeeProposal?.proposal?.full_year_payment?.extra_waiver_amount || 0);
   const previewWaiverTotal = preWaiverTotal + importedProposalWaiverTotal;
   const previewNetFee = Math.max(0, programmeTotal - previewWaiverTotal);
+  const schoolModeLabel = (() => {
+    const st = schoolSelection.studentType || "day_scholar";
+    const base = st === "boarder" ? "Boarder" : st === "day_boarder" ? "Day Boarding" : "Day Scholar";
+    const boarding = st === "boarder"
+      ? ({ non_ac: " · Non-AC", ac_central: " · AC (C Block)", ac_individual: " · AC (B Block)" }[schoolSelection.hostelType || ""] || "")
+      : "";
+    const transport = ({ zone_1: " · Transport ≤5km", zone_2: " · Transport 5–10km", zone_3: " · Transport >10km" }[schoolSelection.transportZone || ""] || "");
+    return `${base}${boarding}${transport}`;
+  })();
   const selectedEntranceName = form.entrance_exam_name === "Other"
     ? form.entrance_exam_other.trim()
     : form.entrance_exam_name.trim();
@@ -572,7 +639,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const fetchCourseFeeSnapshot = async (nextCourseId: string, sessionId: string) => {
     const { data, error } = await supabase
       .from("fee_structures")
-      .select("id, version, created_at, policy, fee_structure_items ( term, amount )")
+      .select("id, version, created_at, policy, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, category ) )")
       .eq("course_id", nextCourseId)
       .eq("session_id", sessionId)
       .eq("is_active", true);
@@ -661,6 +728,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       toast({ title: "Entrance details required", description: "Select the entrance/counselling route or type it under Other.", variant: "destructive" });
       return;
     }
+    if (hasSchoolOptions && schoolSelection.studentType === "boarder" && !schoolSelection.hostelType) {
+      toast({ title: "Select boarding type", description: "Choose a boarding type so the offer fee includes it.", variant: "destructive" });
+      return;
+    }
     if (selectedFeeProposal && !selectedProposalChildOption) {
       toast({
         title: "Select proposal student",
@@ -694,6 +765,16 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
     if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
 
+    // School mode to persist on the offer (drives the PDF fee). NULL for non-school
+    // structures or plain day scholars = base fee.
+    const persistSchoolMode = hasSchoolOptions
+      ? {
+          student_type: schoolSelection.studentType || "day_scholar",
+          hostel_type: schoolSelection.studentType === "boarder" ? (schoolSelection.hostelType || null) : null,
+          transport_zone: schoolSelection.transportZone || null,
+        }
+      : { student_type: null, hostel_type: null, transport_zone: null };
+
     let insertedOffer: { id: string } | null = null;
     let error: { message: string } | null = null;
 
@@ -718,6 +799,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
         _admission_mode: form.admission_mode,
         _entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
         _partner_id: isImpersonating && realRole === "super_admin" ? academicPartnerId || null : null,
+        _student_type: persistSchoolMode.student_type,
+        _hostel_type: persistSchoolMode.hostel_type,
+        _transport_zone: persistSchoolMode.transport_zone,
       } as any);
       error = result.error;
       const resultData = result.data as { offer_letter_id?: string } | null;
@@ -746,6 +830,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
         approved_at: autoApproved ? new Date().toISOString() : null,
         source_fee_proposal_id: selectedFeeProposal && selectedProposalChildOption ? selectedFeeProposal.id : null,
         source_fee_proposal_child_key: selectedFeeProposal && selectedProposalChildOption ? selectedProposalChildOption.key : null,
+        student_type: persistSchoolMode.student_type,
+        hostel_type: persistSchoolMode.hostel_type,
+        transport_zone: persistSchoolMode.transport_zone,
       } as any).select("id").single();
       insertedOffer = result.data;
       error = result.error;
@@ -1283,6 +1370,65 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                     Sourced from the published fee structure for the selected session. Add period-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
                   </p>
                 </div>
+
+                {hasSchoolOptions && (
+                  <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+                    <p className="text-[11px] font-semibold text-foreground">School Mode & Add-ons</p>
+                    <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+                      Boarding & transport vary the fee. Prefilled from the applicant's choice — adjust if needed. The programme fee above updates live.
+                    </p>
+                    <div>
+                      <label className="block text-[11px] font-medium text-muted-foreground mb-1">Attendance mode</label>
+                      <select
+                        value={schoolSelection.studentType || "day_scholar"}
+                        onChange={e => {
+                          const studentType = e.target.value as SchoolStudentType;
+                          setSchoolSelection(prev => ({
+                            ...prev,
+                            studentType,
+                            hostelType: studentType === "boarder" ? prev.hostelType : null,
+                          }));
+                        }}
+                        className={inputCls}
+                      >
+                        <option value="day_scholar">Day Scholar</option>
+                        <option value="day_boarder">Day Boarding</option>
+                        <option value="boarder">Boarder</option>
+                      </select>
+                    </div>
+                    {schoolSelection.studentType === "boarder" && (
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Boarding type</label>
+                        <select
+                          value={schoolSelection.hostelType || ""}
+                          onChange={e => setSchoolSelection(prev => ({ ...prev, hostelType: (e.target.value || null) as SchoolHostelType | null }))}
+                          className={inputCls}
+                        >
+                          <option value="">Select boarding type…</option>
+                          <option value="non_ac">Non-AC</option>
+                          <option value="ac_central">AC (C Block)</option>
+                          <option value="ac_individual">AC (B Block)</option>
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-[11px] font-medium text-muted-foreground mb-1">Transport</label>
+                      <select
+                        value={schoolSelection.transportZone || ""}
+                        onChange={e => setSchoolSelection(prev => ({ ...prev, transportZone: (e.target.value || null) as SchoolTransportZone | null }))}
+                        className={inputCls}
+                      >
+                        <option value="">Not required</option>
+                        <option value="zone_1">Within 5 km</option>
+                        <option value="zone_2">5–10 km</option>
+                        <option value="zone_3">Over 10 km</option>
+                      </select>
+                    </div>
+                    {schoolSelection.studentType === "boarder" && !schoolSelection.hostelType && (
+                      <p className="text-[10px] text-warning-foreground">Select a boarding type so the fee includes it.</p>
+                    )}
+                  </div>
+                )}
 
                 {approvedFeeProposals.length > 0 && (
                   <div className="rounded-xl border border-success/20 bg-success/5/70 p-3 text-xs space-y-2 dark:border-success/60/40 dark:bg-success/90/20">
@@ -2180,6 +2326,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                         {[
                           ["Admission Route", form.admission_mode === "entrance" ? `Entrance / Counselling${selectedEntranceName ? ` - ${selectedEntranceName}` : ""}` : "Direct Admission"],
                           ["Academic Session", selectedSessionName || "-"],
+                          ...(hasSchoolOptions ? [["School Mode", schoolModeLabel]] : []),
                           ["Programme Fee", programmeTotal > 0 ? `₹${programmeTotal.toLocaleString("en-IN")}` : "-"],
                           ["Waivers / Discounts", previewWaiverTotal > 0 ? `₹${previewWaiverTotal.toLocaleString("en-IN")}` : "None"],
                           ["Net Programme Fee", previewNetFee > 0 ? `₹${previewNetFee.toLocaleString("en-IN")}` : "-"],

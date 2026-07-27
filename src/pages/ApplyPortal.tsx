@@ -2472,6 +2472,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
                   <ArrowLeft className="h-4 w-4" /> Back to Dashboard
                 </Button>
               )}
+              <img src={portal.logo} alt={portal.name} className="h-10 sm:h-12 w-auto object-contain" />
               <div className="min-w-0">
                 <h1 className="text-lg font-bold text-foreground truncate">{app.full_name || "Application"}</h1>
                 <p className="text-xs font-mono text-primary">{app.application_id}</p>

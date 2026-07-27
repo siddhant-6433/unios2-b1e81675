@@ -25,6 +25,23 @@ const mediumOptions = [
   { value: "hindi", label: "Hindi" },
   { value: "bilingual", label: "Bilingual (English + Hindi)" },
 ];
+// Fee-driving school mode. Values match src/lib/offerFeeTerms (SchoolFeeSelection)
+// so the admissions team's offer prefills from what the parent declares here.
+const attendanceModeOptions = [
+  { value: "day_scholar", label: "Day Scholar" },
+  { value: "day_boarder", label: "Day Boarding" },
+  { value: "boarder", label: "Boarder (Hostel)" },
+];
+const boardingTypeOptions = [
+  { value: "non_ac", label: "Non-AC" },
+  { value: "ac_central", label: "AC (C Block)" },
+  { value: "ac_individual", label: "AC (B Block)" },
+];
+const transportZoneOptions = [
+  { value: "zone_1", label: "Within 5 km" },
+  { value: "zone_2", label: "5–10 km" },
+  { value: "zone_3", label: "Over 10 km" },
+];
 
 const QUESTIONS = [
   { key: "reason_for_choosing", label: "Why have you chosen our school for your child?" },
@@ -88,6 +105,43 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, re
         onValueChange={(value) => onChange({ school_details: { ...schoolDetails, medium_preference: value } })}
         options={mediumOptions}
         placeholder="Select"
+        triggerClassName={inputCls}
+      />
+
+      {/* Attendance mode — drives boarding/transport fees on the admission offer. */}
+      <SelectField
+        label="How will your child attend?"
+        value={String(schoolDetails.student_type || "")}
+        onValueChange={(value) => onChange({ school_details: {
+          ...schoolDetails,
+          student_type: value,
+          // Clear boarding tier if not a boarder.
+          ...(value === "boarder" ? {} : { hostel_type: "" }),
+        } })}
+        options={attendanceModeOptions}
+        placeholder="Select"
+        triggerClassName={inputCls}
+      />
+
+      {/* Boarding tier — only relevant for boarders. */}
+      {schoolDetails.student_type === "boarder" && (
+        <SelectField
+          label="Preferred Boarding Type"
+          value={String(schoolDetails.hostel_type || "")}
+          onValueChange={(value) => onChange({ school_details: { ...schoolDetails, hostel_type: value } })}
+          options={boardingTypeOptions}
+          placeholder="Select"
+          triggerClassName={inputCls}
+        />
+      )}
+
+      {/* Transport zone (by distance) — drives transport fee. */}
+      <SelectField
+        label="School Transport (by distance from home)"
+        value={String(schoolDetails.transport_zone || "")}
+        onValueChange={(value) => onChange({ school_details: { ...schoolDetails, transport_zone: value } })}
+        options={transportZoneOptions}
+        placeholder="Not required"
         triggerClassName={inputCls}
       />
       </fieldset>
