@@ -7,10 +7,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  emptyPgdmCertificateDetails,
+  generatePgdmCertificatePdf,
+  normalizePgdmCertificateDetails,
+  PGDM_CERTIFICATE_NAME_FONT_FAMILY,
+  PGDM_CERTIFICATE_TEMPLATE_URL,
+  pgdmCertificateFileName,
+  type PgdmCertificateDetails,
+} from "@/lib/pgdmCertificate";
+import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail, Trash2,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -18,6 +27,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   paid: { label: "Pending Review", color: "bg-info/10 text-info-foreground" },
   under_review: { label: "Under Review", color: "bg-warning/10 text-warning-foreground" },
   verified: { label: "Completed", color: "bg-success/10 text-success" },
+  rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
 };
 
 const RESULT_LABELS: Record<string, { label: string; color: string }> = {
@@ -33,27 +43,44 @@ const RESULT_OPTIONS = [
 ];
 
 export default function AlumniVerifications() {
-  const { user, role } = useAuth();
+  const { user, role, hasPermission } = useAuth();
   const { toast } = useToast();
   const isSuperAdmin = role === "super_admin";
+  const canManageStudentServices = isSuperAdmin || hasPermission("alumni_verification:manage");
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [courses, setCourses] = useState<any[]>([]);
+  const [handlers, setHandlers] = useState<any[]>([]);
+  const [handlerRules, setHandlerRules] = useState<any[]>([]);
+  const [showRuleForm, setShowRuleForm] = useState(false);
+  const [ruleSaving, setRuleSaving] = useState(false);
+  const [assigningHandler, setAssigningHandler] = useState(false);
+  const [ruleDraft, setRuleDraft] = useState({
+    service_type: "verification",
+    course_id: "",
+    course_text: "",
+    batch_year: "",
+    handler_user_id: "",
+  });
 
   // Detail dialog
   const [selectedReq, setSelectedReq] = useState<any | null>(null);
   const [reviewNotes, setReviewNotes] = useState("");
   const [verificationResult, setVerificationResult] = useState("");
+  const [issuanceDecision, setIssuanceDecision] = useState("verified");
   const [newStatus, setNewStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [reviewDocFile, setReviewDocFile] = useState<File | null>(null);
+  const [pgdmCertificateDetails, setPgdmCertificateDetails] = useState<PgdmCertificateDetails>(emptyPgdmCertificateDetails());
+  const [pgdmCertificateSaving, setPgdmCertificateSaving] = useState(false);
 
   // Manual entry dialog
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualData, setManualData] = useState({
     request_type: "verification", alumni_name: "", course: "", year_of_passing: "",
     employer_name: "", contact_name: "", contact_email: "", contact_phone_spoc: "",
-    enrollment_no: "", campus: "", fee_amount: "1500", status: "paid",
+    enrollment_no: "", campus: "", fee_amount: "1500", status: "paid", course_id: "",
   });
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
@@ -112,7 +139,32 @@ export default function AlumniVerifications() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchRequests(); }, []);
+  const fetchRoutingData = async () => {
+    const [coursesRes, directoryRes, employeeRes, rulesRes] = await Promise.all([
+      supabase.from("courses").select("id, name, code").eq("is_active", true).order("name"),
+      supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
+      supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number, employment_status"),
+      supabase.from("student_service_handler_rules" as any).select("*").eq("is_active", true).order("updated_at", { ascending: false }),
+    ]);
+    setCourses((coursesRes.data || []) as any[]);
+    const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
+    const staff = ((directoryRes.data || []) as any[])
+      .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
+      .map((u: any) => {
+        const emp = employeeByUser.get(u.user_id) || {};
+        return {
+          ...u,
+          display_name: emp.display_name || u.display_name || u.email || u.user_id,
+          work_email: emp.work_email || u.email || "",
+          work_number: emp.work_number || "",
+          personal_mobile: emp.mobile_number || u.phone || "",
+        };
+      });
+    setHandlers(staff);
+    setHandlerRules((rulesRes.data || []) as any[]);
+  };
+
+  useEffect(() => { fetchRequests(); fetchRoutingData(); }, []);
 
   const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
   const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
@@ -121,8 +173,14 @@ export default function AlumniVerifications() {
     setSelectedReq(req);
     setReviewNotes(req.employee_review_notes || req.review_notes || "");
     setVerificationResult(req.employee_review_result || req.verification_result || "");
+    setIssuanceDecision(
+      req.status === "rejected"
+        ? "rejected"
+        : req.employee_review_result === "hold" ? "hold" : "verified"
+    );
     setNewStatus(req.status);
     setReviewDocFile(null);
+    setPgdmCertificateDetails(hydratePgdmDetails(req));
   };
 
   const handleEmployeeReview = async () => {
@@ -162,9 +220,271 @@ export default function AlumniVerifications() {
     fetchRequests();
   };
 
+  const handleDetailsVerifiedForGeneration = async () => {
+    if (!selectedReq || !isIssuanceRequest(selectedReq)) return;
+    setSaving(true);
+
+    try {
+      let docUrl = selectedReq.employee_review_doc_url || "";
+      if (reviewDocFile) {
+        const ext = reviewDocFile.name.split(".").pop();
+        const path = `${selectedReq.id}/details-verified-doc.${ext}`;
+        await supabase.storage.from("alumni-verification-docs").upload(path, reviewDocFile, { upsert: true });
+        docUrl = path;
+      }
+
+      const now = new Date().toISOString();
+      const finalStatus = issuanceDecision === "rejected" ? "rejected" : "under_review";
+      const reviewResult = issuanceDecision === "rejected"
+        ? "recommended_reject"
+        : issuanceDecision === "hold" ? "hold" : "recommended_approve";
+      const updatePayload: Record<string, any> = {
+        status: finalStatus,
+        review_notes: reviewNotes,
+        reviewed_by: user?.id,
+        reviewed_at: now,
+      };
+
+      if (isSuperAdmin) {
+        updatePayload.admin_approved_by = user?.id;
+        updatePayload.admin_approval_notes = reviewNotes;
+        updatePayload.admin_approved_at = now;
+        if (docUrl) updatePayload.employee_review_doc_url = docUrl;
+      } else {
+        updatePayload.employee_reviewed_by = user?.id;
+        updatePayload.employee_review_notes = reviewNotes;
+        updatePayload.employee_review_result = reviewResult;
+        updatePayload.employee_reviewed_at = now;
+        if (docUrl) updatePayload.employee_review_doc_url = docUrl;
+      }
+
+      const { error } = await supabase
+        .from("alumni_verification_requests" as any)
+        .update(updatePayload)
+        .eq("id", selectedReq.id);
+      if (error) throw error;
+
+      toast({
+        title: issuanceDecision === "verified" ? "Details verified" : "Details not verified",
+        description: issuanceActionLabel(selectedReq, issuanceDecision),
+      });
+      // On "verified", keep the dialog open with the updated status so the
+      // PGDM certificate generator (gated on canWorkOnPgdmCertificate) renders
+      // inline — otherwise "proceed to generate" appears to do nothing.
+      if (issuanceDecision === "verified") {
+        setSelectedReq((prev: any) => (prev ? { ...prev, ...updatePayload } : prev));
+      } else {
+        setSelectedReq(null);
+      }
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to update request",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const SERVICE_LABELS: Record<string, string> = {
-    verification: "Alumni Verification", marksheet: "Marksheet Request",
+    verification: "Student Verification", marksheet: "Marksheet Request",
     diploma: "Degree/Diploma Request", transcript: "Transcript Request",
+  };
+  const ISSUANCE_SERVICE_LABELS: Record<string, string> = {
+    marksheet: "marksheet",
+    diploma: "diploma",
+  };
+  const isIssuanceRequest = (req: any) => ["marksheet", "diploma"].includes(req?.request_type);
+  const issuanceDocumentName = (req: any) => ISSUANCE_SERVICE_LABELS[req?.request_type] || "document";
+  const ISSUANCE_DECISION_OPTIONS = [
+    { value: "verified", label: "Details verified - proceed to generate" },
+    { value: "rejected", label: "Details not verified - Reject" },
+    { value: "hold", label: "Details not verified - Hold" },
+  ];
+  const issuanceActionLabel = (req: any, decision = issuanceDecision) => {
+    if (decision === "rejected") return "Details not verified - Reject";
+    if (decision === "hold") return "Details not verified - Hold";
+    return `Details verified - proceed to generate ${issuanceDocumentName(req)}`;
+  };
+
+  const handlerByUserId = new Map(handlers.map((h: any) => [h.user_id, h]));
+  const courseById = new Map(courses.map((c: any) => [c.id, c]));
+  const fallbackContact = {
+    name: "Student Services Team",
+    email: "umesh@nimt.ac.in",
+    phone: "+91-7428477664",
+  };
+  const contactFor = (req: any) => ({
+    name: req.assigned_handler_name || fallbackContact.name,
+    email: req.assigned_handler_email || fallbackContact.email,
+    phone: req.assigned_handler_official_phone || fallbackContact.phone,
+  });
+
+  const isPgdmDiplomaRequest = (req: any) => {
+    const courseText = `${req?.course || ""} ${req?.course_code || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return req?.request_type === "diploma" && (
+      courseText.includes("pgdm") || courseText.includes("postgraduatediplomainmanagement")
+    );
+  };
+
+  const canWorkOnPgdmCertificate = (req: any) => (
+    isPgdmDiplomaRequest(req)
+    && ["paid", "under_review", "verified"].includes(req?.status)
+    && (
+      isSuperAdmin
+      || canManageStudentServices
+      || req?.assigned_handler_user_id === user?.id
+    )
+  );
+
+  const hydratePgdmDetails = (req: any): PgdmCertificateDetails => {
+    const existing = normalizePgdmCertificateDetails(req?.pgdm_certificate_details);
+    return {
+      studentName: existing.studentName || req?.alumni_name || "",
+      completedYear: existing.completedYear || (req?.year_of_passing ? String(req.year_of_passing) : ""),
+      fileNo: existing.fileNo,
+      enrollmentNo: existing.enrollmentNo || req?.enrollment_no || "",
+      cgpa: existing.cgpa,
+      equivalentPercentage: existing.equivalentPercentage,
+      issueDay: existing.issueDay,
+      issueMonthYear: existing.issueMonthYear,
+    };
+  };
+
+  const updatePgdmDetail = (key: keyof PgdmCertificateDetails, value: string) => {
+    setPgdmCertificateDetails(prev => ({ ...prev, [key]: value }));
+  };
+
+  const validatePgdmDetails = (details: PgdmCertificateDetails) => {
+    const required: Array<[keyof PgdmCertificateDetails, string]> = [
+      ["studentName", "Candidate name"],
+      ["completedYear", "Completed year"],
+      ["fileNo", "File no"],
+      ["enrollmentNo", "Enrollment no"],
+      ["cgpa", "CGPA"],
+      ["equivalentPercentage", "Equivalent percentage"],
+      ["issueDay", "Issue day"],
+      ["issueMonthYear", "Issue month and year"],
+    ];
+    const missing = required.find(([key]) => !details[key]?.trim());
+    if (missing) {
+      toast({ title: `${missing[1]} is required`, variant: "destructive" });
+      return false;
+    }
+    return true;
+  };
+
+  const handleCreateRule = async () => {
+    if (!ruleDraft.handler_user_id) {
+      toast({ title: "Select a handler", variant: "destructive" }); return;
+    }
+    if (!ruleDraft.course_id && !ruleDraft.course_text && ruleDraft.batch_year) {
+      toast({ title: "Batch-specific rules need a course", variant: "destructive" }); return;
+    }
+    setRuleSaving(true);
+    const selectedCourse = courses.find((c: any) => c.id === ruleDraft.course_id);
+    const { error } = await supabase.from("student_service_handler_rules" as any).insert({
+      service_type: ruleDraft.service_type,
+      course_id: ruleDraft.course_id || null,
+      course_text: ruleDraft.course_id ? selectedCourse?.name || null : ruleDraft.course_text || null,
+      batch_year: ruleDraft.batch_year ? parseInt(ruleDraft.batch_year) : null,
+      handler_user_id: ruleDraft.handler_user_id,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+    });
+    if (error) {
+      toast({ title: "Failed to save rule", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Handler rule saved" });
+      setRuleDraft({ service_type: "verification", course_id: "", course_text: "", batch_year: "", handler_user_id: "" });
+      setShowRuleForm(false);
+      fetchRoutingData();
+    }
+    setRuleSaving(false);
+  };
+
+  const handleDeactivateRule = async (ruleId: string) => {
+    const { error } = await supabase
+      .from("student_service_handler_rules" as any)
+      .update({ is_active: false, updated_by: user?.id || null })
+      .eq("id", ruleId);
+    if (error) toast({ title: "Failed to remove rule", description: error.message, variant: "destructive" });
+    else { toast({ title: "Handler rule removed" }); fetchRoutingData(); }
+  };
+
+  const isMissingRpcError = (error: any) => (
+    error?.code === "PGRST202"
+    || /Could not find the function|schema cache/i.test(error?.message || "")
+  );
+
+  const assignRequestDirectly = async (handlerUserId: string) => {
+    if (!selectedReq) return;
+    const handler = handlerByUserId.get(handlerUserId) || {};
+    const { data: profile } = await supabase
+      .from("profiles" as any)
+      .select("id, user_id, display_name, email")
+      .eq("user_id", handlerUserId)
+      .maybeSingle();
+
+    const displayName = handler.display_name || (profile as any)?.display_name || (profile as any)?.email || "Assigned handler";
+    const workEmail = handler.work_email || (profile as any)?.email || "";
+    const officialPhone = handler.work_number || "";
+
+    const { error } = await supabase
+      .from("alumni_verification_requests" as any)
+      .update({
+        assigned_handler_user_id: handlerUserId,
+        assigned_handler_profile_id: (profile as any)?.id || null,
+        assigned_handler_name: displayName,
+        assigned_handler_email: workEmail,
+        assigned_handler_official_phone: officialPhone,
+        assigned_at: new Date().toISOString(),
+        assignment_rule_id: null,
+        assignment_status: "manual",
+      })
+      .eq("id", selectedReq.id);
+    if (error) throw error;
+
+    await supabase.from("notifications" as any).insert({
+      user_id: handlerUserId,
+      type: "student_service_assigned",
+      title: "Student Services request assigned",
+      body: `${selectedReq.request_number || "Request"} - ${selectedReq.alumni_name || "Student"} | ${selectedReq.course || "Course"} batch ${selectedReq.year_of_passing || "-"}`,
+      link: "/alumni-verifications",
+    });
+  };
+
+  const handleAssignRequest = async (handlerUserId: string) => {
+    if (!selectedReq || !handlerUserId) return;
+    setAssigningHandler(true);
+    try {
+      const { error } = await supabase.rpc("admin_assign_student_service_request" as any, {
+        _request_id: selectedReq.id,
+        _handler_user_id: handlerUserId,
+      });
+      if (error) {
+        if (!isMissingRpcError(error)) throw error;
+        await assignRequestDirectly(handlerUserId);
+        toast({
+          title: "Handler assigned",
+          description: "Assigned directly because the backend RPC is not deployed yet. Official Allotted No was used.",
+        });
+      } else {
+        toast({ title: "Handler assigned", description: "TAT email and WhatsApp will use the official allotted number." });
+      }
+      setSelectedReq(null);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Assignment failed",
+        description: error instanceof Error ? error.message : "Please apply the Student Services routing migration and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAssigningHandler(false);
+    }
   };
 
   const generateEmailDraft = (req: any, result: string) => {
@@ -183,7 +503,7 @@ This is to inform that the student ${req.alumni_name} is a bonafide alumnus of N
 
 ${req.request_type === "verification" ? `This verification has been done as per the request received from ${req.employer_name}.` : ""}
 
-For any further queries, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+	For any further queries, please contact ${contactFor(req).name} at ${contactFor(req).email} or call ${contactFor(req).phone}.
 
 Regards,
 Office of the Registrar
@@ -203,7 +523,7 @@ With reference to your verification request for ${req.alumni_name} (${req.course
 
 This indicates a possible modification or discrepancy in the documents submitted for verification.${req.enrollment_no ? ` The student's enrollment number on our records is ${req.enrollment_no}.` : ""}
 
-We recommend further investigation at your end. For any clarification, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+	We recommend further investigation at your end. For any clarification, please contact ${contactFor(req).name} at ${contactFor(req).email} or call ${contactFor(req).phone}.
 
 Regards,
 Office of the Registrar
@@ -223,7 +543,7 @@ With reference to your verification request for ${req.alumni_name} (${req.course
 
 The student does not appear in our enrollment records. The documents submitted for verification could not be authenticated.
 
-For any clarification, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+	For any clarification, please contact ${contactFor(req).name} at ${contactFor(req).email} or call ${contactFor(req).phone}.
 
 Regards,
 Office of the Registrar
@@ -314,7 +634,7 @@ registrar@nimt.ac.in`,
         const whatsappToken = (await supabase.functions.invoke("alumni-payment", { body: { action: "noop" } })); // dummy to get env
         // Use direct Graph API via alumni-payment or just call whatsapp-send with a custom approach
         // For now, send via the webhook's plain text pattern
-        const msg = `Dear ${selectedReq.contact_name || selectedReq.alumni_name},\n\nThe result of your alumni verification request (${selectedReq.request_number}) has been emailed to ${selectedReq.contact_email}.\n\nPlease do not reply or call back on this number. This is an automated notification.\n\n— NIMT Educational Institutions`;
+        const msg = `Dear ${selectedReq.contact_name || selectedReq.alumni_name},\n\nThe result of your Student Services request (${selectedReq.request_number}) has been emailed to ${selectedReq.contact_email}.\n\nPlease do not reply or call back on this number. This is an automated notification.\n\n— NIMT Educational Institutions`;
 
         // Use whatsapp-send function but pass as a plain text via a workaround
         // Actually, let's call the Graph API directly through alumni-payment function
@@ -346,6 +666,7 @@ registrar@nimt.ac.in`,
       .from("alumni_verification_requests" as any)
       .insert({
         request_type: manualData.request_type,
+        course_id: manualData.course_id || null,
         requestor_phone: manualData.contact_phone_spoc || "+910000000000",
         contact_name: manualData.contact_name,
         contact_phone_spoc: manualData.contact_phone_spoc || "",
@@ -385,7 +706,7 @@ registrar@nimt.ac.in`,
     setShowManualEntry(false);
     setManualData({ request_type: "verification", alumni_name: "", course: "", year_of_passing: "",
       employer_name: "", contact_name: "", contact_email: "", contact_phone_spoc: "",
-      enrollment_no: "", campus: "", fee_amount: "1500", status: "paid" });
+      enrollment_no: "", campus: "", fee_amount: "1500", status: "paid", course_id: "" });
     setManualPaymentProof(null);
     fetchRequests();
   };
@@ -393,6 +714,169 @@ registrar@nimt.ac.in`,
   const getDocUrl = async (path: string) => {
     const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+  };
+
+  const uploadPgdmCertificatePdf = async (req: any, details: PgdmCertificateDetails) => {
+    const pdfBlob = await generatePgdmCertificatePdf(details);
+    const path = `${req.id}/pgdm-certificate.pdf`;
+    const { error } = await supabase.storage
+      .from("alumni-verification-docs")
+      .upload(path, pdfBlob, { contentType: "application/pdf", upsert: true });
+    if (error) throw error;
+    return path;
+  };
+
+  const handleSubmitPgdmCertificate = async () => {
+    if (!selectedReq || !validatePgdmDetails(pgdmCertificateDetails)) return;
+    setPgdmCertificateSaving(true);
+    try {
+      const path = await uploadPgdmCertificatePdf(selectedReq, pgdmCertificateDetails);
+      const { error } = await supabase.rpc("submit_pgdm_certificate_for_approval" as any, {
+        _request_id: selectedReq.id,
+        _details: pgdmCertificateDetails as any,
+        _pdf_path: path,
+      });
+      if (error) throw error;
+      toast({ title: "PGDM certificate submitted", description: "Superadmin has been notified for approval." });
+      // Advance the open dialog to pending_approval so the approve step is
+      // reachable without reopening the request.
+      setSelectedReq((prev: any) => prev ? {
+        ...prev,
+        pgdm_certificate_status: "pending_approval",
+        pgdm_certificate_details: pgdmCertificateDetails,
+        pgdm_certificate_pdf_path: path,
+        pgdm_certificate_submitted_at: new Date().toISOString(),
+        status: prev.status === "paid" ? "under_review" : prev.status,
+      } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to submit certificate",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPgdmCertificateSaving(false);
+    }
+  };
+
+  const handleApprovePgdmCertificate = async () => {
+    if (!selectedReq) return;
+    setPgdmCertificateSaving(true);
+    try {
+      const { error } = await supabase.rpc("approve_pgdm_certificate" as any, {
+        _request_id: selectedReq.id,
+        _approval_notes: reviewNotes || null,
+      });
+      if (error) throw error;
+      toast({ title: "PGDM certificate approved", description: "The assigned handler has been notified." });
+      // Advance the open dialog to approved so Download for Print appears inline.
+      setSelectedReq((prev: any) => prev ? {
+        ...prev,
+        pgdm_certificate_status: "approved",
+        pgdm_certificate_approved_at: new Date().toISOString(),
+        pgdm_certificate_approval_notes: reviewNotes || null,
+      } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Approval failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPgdmCertificateSaving(false);
+    }
+  };
+
+  const handleDownloadPgdmCertificate = async () => {
+    if (!selectedReq) return;
+    if (!["approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)) {
+      toast({ title: "Approval required before download", variant: "destructive" });
+      return;
+    }
+    setPgdmCertificateSaving(true);
+    try {
+      if (selectedReq.pgdm_certificate_pdf_path) {
+        await getDocUrl(selectedReq.pgdm_certificate_pdf_path);
+      } else {
+        const pdfBlob = await generatePgdmCertificatePdf(pgdmCertificateDetails);
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = pgdmCertificateFileName(selectedReq.request_number, pgdmCertificateDetails.studentName);
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      await supabase.rpc("mark_pgdm_certificate_downloaded" as any, { _request_id: selectedReq.id });
+      setSelectedReq((prev: any) => prev ? { ...prev, pgdm_certificate_downloaded_at: prev.pgdm_certificate_downloaded_at || new Date().toISOString() } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Download failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPgdmCertificateSaving(false);
+    }
+  };
+
+  const handleNotifyPgdmReady = async () => {
+    if (!selectedReq) return;
+    setPgdmCertificateSaving(true);
+    try {
+      const { error } = await supabase.rpc("notify_pgdm_diploma_ready_for_collection" as any, {
+        _request_id: selectedReq.id,
+      });
+      if (error) throw error;
+      toast({ title: "Student notified", description: "WhatsApp collection message has been queued." });
+      setSelectedReq(null);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to notify student",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPgdmCertificateSaving(false);
+    }
+  };
+
+  // Reopen a submitted/approved certificate for correction. Regenerating a new
+  // PDF must go back through approval, so this clears the approval + submission
+  // stamps and returns the certificate to an editable draft.
+  const handleRegeneratePgdmCertificate = async () => {
+    if (!selectedReq) return;
+    setPgdmCertificateSaving(true);
+    try {
+      const cleared = {
+        pgdm_certificate_status: "draft",
+        pgdm_certificate_submitted_by: null,
+        pgdm_certificate_submitted_at: null,
+        pgdm_certificate_approved_by: null,
+        pgdm_certificate_approved_at: null,
+        pgdm_certificate_approval_notes: null,
+        pgdm_certificate_downloaded_at: null,
+      };
+      const { error } = await supabase
+        .from("alumni_verification_requests" as any)
+        .update(cleared)
+        .eq("id", selectedReq.id);
+      if (error) throw error;
+      toast({ title: "Certificate reopened", description: "Edit the details, then Generate & Submit for approval again." });
+      setSelectedReq((prev: any) => prev ? { ...prev, ...cleared } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to reopen certificate",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPgdmCertificateSaving(false);
+    }
   };
 
   // Pagination
@@ -412,8 +896,8 @@ registrar@nimt.ac.in`,
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Alumni Verification</h1>
-          <p className="text-sm text-muted-foreground mt-1">Review and manage verification requests</p>
+          <h1 className="text-2xl font-bold text-foreground">Student Services</h1>
+          <p className="text-sm text-muted-foreground mt-1">Review, assign, and manage service requests</p>
         </div>
         <div className="flex items-center gap-3">
           {paidPending > 0 && (
@@ -438,6 +922,101 @@ registrar@nimt.ac.in`,
           </button>
         ))}
       </div>
+
+      {canManageStudentServices && (
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Handler Allocation</h2>
+                <p className="text-xs text-muted-foreground">Assign Student Services requests by service, course, and batch. WhatsApp uses Official Allotted No.</p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowRuleForm(v => !v)}>
+                <UserCheck className="h-4 w-4" /> {showRuleForm ? "Hide" : "Add Rule"}
+              </Button>
+            </div>
+
+            {showRuleForm && (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 rounded-xl border border-border bg-muted/20 p-3">
+                <div>
+                  <label className="text-xs font-medium mb-1 block">Service</label>
+                  <select value={ruleDraft.service_type} onChange={e => setRuleDraft(p => ({ ...p, service_type: e.target.value }))} className={inputCls}>
+                    {Object.entries(SERVICE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block">Course</label>
+                  <select value={ruleDraft.course_id} onChange={e => {
+                    const selected = courses.find((c: any) => c.id === e.target.value);
+                    setRuleDraft(p => ({ ...p, course_id: e.target.value, course_text: selected?.name || "" }));
+                  }} className={inputCls}>
+                    <option value="">Global / text fallback</option>
+                    {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block">Course Text</label>
+                  <input value={ruleDraft.course_text} onChange={e => setRuleDraft(p => ({ ...p, course_text: e.target.value, course_id: "" }))} placeholder="Legacy course name" className={inputCls} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block">Batch Year</label>
+                  <input type="number" value={ruleDraft.batch_year} onChange={e => setRuleDraft(p => ({ ...p, batch_year: e.target.value }))} placeholder="Optional" className={inputCls} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block">Handler</label>
+                  <select value={ruleDraft.handler_user_id} onChange={e => setRuleDraft(p => ({ ...p, handler_user_id: e.target.value }))} className={inputCls}>
+                    <option value="">Select</option>
+                    {handlers.map((h: any) => (
+                      <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-5 flex justify-end">
+                  <Button size="sm" onClick={handleCreateRule} disabled={ruleSaving} className="gap-1.5">
+                    {ruleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    Save Rule
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="py-2 text-left font-semibold">Service</th>
+                    <th className="py-2 text-left font-semibold">Course</th>
+                    <th className="py-2 text-left font-semibold">Batch</th>
+                    <th className="py-2 text-left font-semibold">Handler</th>
+                    <th className="py-2 text-left font-semibold">Official No</th>
+                    <th className="py-2 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {handlerRules.length === 0 ? (
+                    <tr><td colSpan={6} className="py-3 text-muted-foreground">No handler rules yet. Paid requests without a rule will notify admins as unassigned.</td></tr>
+                  ) : handlerRules.map((rule: any) => {
+                    const handler = handlerByUserId.get(rule.handler_user_id) || {};
+                    const c = rule.course_id ? courseById.get(rule.course_id) : null;
+                    return (
+                      <tr key={rule.id} className="border-b border-border/40">
+                        <td className="py-2">{SERVICE_LABELS[rule.service_type] || rule.service_type}</td>
+                        <td className="py-2">{c?.name || rule.course_text || "Global"}</td>
+                        <td className="py-2">{rule.batch_year || "Any"}</td>
+                        <td className="py-2">{handler.display_name || rule.handler_user_id}</td>
+                        <td className="py-2">{handler.work_number || <span className="text-amber-600">Missing</span>}</td>
+                        <td className="py-2 text-right">
+                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => handleDeactivateRule(rule.id)}>Remove</Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Table */}
       <Card className="border-border/60 shadow-none overflow-hidden">
@@ -470,9 +1049,10 @@ registrar@nimt.ac.in`,
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Request #</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Course</th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
+	                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni</th>
+	                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Course</th>
+	                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Handler</th>
+	                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Result</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Due / Completed</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">TAT</th>
@@ -495,7 +1075,17 @@ registrar@nimt.ac.in`,
                           <div className="font-medium text-foreground">{req.alumni_name}</div>
                           <div className="text-[10px] text-muted-foreground">{req.employer_name !== "Self" ? req.employer_name : ""}</div>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{req.course} ({req.year_of_passing})</td>
+	                        <td className="px-4 py-3 text-muted-foreground">{req.course} ({req.year_of_passing})</td>
+	                        <td className="px-4 py-3 text-xs">
+	                          {req.assigned_handler_user_id ? (
+	                            <div>
+	                              <div className="font-medium text-foreground">{req.assigned_handler_name || "Assigned"}</div>
+	                              <div className="text-[10px] text-muted-foreground">{req.assigned_handler_official_phone || "Official no missing"}</div>
+	                            </div>
+	                          ) : (
+	                            <span className="text-amber-600 font-medium">Unassigned</span>
+	                          )}
+	                        </td>
                         <td className="px-3 py-3 text-center">
                           <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</Badge>
                         </td>
@@ -558,7 +1148,7 @@ registrar@nimt.ac.in`,
 
       {/* Detail + Review Dialog */}
       <Dialog open={!!selectedReq} onOpenChange={(o) => { if (!o) setSelectedReq(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
@@ -638,6 +1228,151 @@ registrar@nimt.ac.in`,
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
               </div>
 
+              {/* Handler assignment */}
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Student Services Handler</p>
+                {selectedReq.assigned_handler_user_id ? (
+                  <div className="text-sm space-y-1">
+                    <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{selectedReq.assigned_handler_name || "Assigned handler"}</span></p>
+                    <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{selectedReq.assigned_handler_email || "—"}</span></p>
+                    <p><span className="text-muted-foreground">Official Allotted No:</span> <span className="font-medium">{selectedReq.assigned_handler_official_phone || "—"}</span></p>
+                    <p className="text-[10px] text-muted-foreground">Assignment: {selectedReq.assignment_status || "assigned"}{selectedReq.assigned_at ? ` · ${new Date(selectedReq.assigned_at).toLocaleString("en-IN")}` : ""}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-amber-600 font-medium">No handler assigned yet.</p>
+                )}
+                {canManageStudentServices && ["paid", "under_review"].includes(selectedReq.status) && (
+                  <div className="flex gap-2 pt-2">
+                    <select
+                      value={selectedReq.assigned_handler_user_id || ""}
+                      onChange={e => handleAssignRequest(e.target.value)}
+                      disabled={assigningHandler}
+                      className={inputCls}
+                    >
+                      <option value="">Assign handler...</option>
+                      {handlers.map((h: any) => (
+                        <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                      ))}
+                    </select>
+                    {assigningHandler && <Loader2 className="h-4 w-4 animate-spin mt-3 text-muted-foreground" />}
+                  </div>
+                )}
+              </div>
+
+              {canWorkOnPgdmCertificate(selectedReq) && (
+                <div className="rounded-xl border border-border p-3 space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase">PGDM Certificate</p>
+                      <p className="text-xs text-muted-foreground">
+                        Status: <span className="font-semibold text-foreground">{(selectedReq.pgdm_certificate_status || "not_started").replace(/_/g, " ")}</span>
+                        {selectedReq.pgdm_certificate_submitted_at ? ` · Submitted ${new Date(selectedReq.pgdm_certificate_submitted_at).toLocaleString("en-IN")}` : ""}
+                      </p>
+                    </div>
+                    {selectedReq.pgdm_certificate_approved_at && (
+                      <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">
+                        Approved {new Date(selectedReq.pgdm_certificate_approved_at).toLocaleDateString("en-IN")}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="md:col-span-2">
+                          <label className="text-xs font-medium text-foreground mb-1 block">Candidate Name *</label>
+                          <input
+                            value={pgdmCertificateDetails.studentName}
+                            onChange={e => updatePgdmDetail("studentName", e.target.value)}
+                            disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">Completed Year *</label><input value={pgdmCertificateDetails.completedYear} onChange={e => updatePgdmDetail("completedYear", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">File No *</label><input value={pgdmCertificateDetails.fileNo} onChange={e => updatePgdmDetail("fileNo", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} placeholder="Res/PGDM/2005/Vol.9" /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">Enrollment No *</label><input value={pgdmCertificateDetails.enrollmentNo} onChange={e => updatePgdmDetail("enrollmentNo", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">CGPA *</label><input value={pgdmCertificateDetails.cgpa} onChange={e => updatePgdmDetail("cgpa", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">Equivalent Percentage *</label><input value={pgdmCertificateDetails.equivalentPercentage} onChange={e => updatePgdmDetail("equivalentPercentage", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">Issue Day *</label><input value={pgdmCertificateDetails.issueDay} onChange={e => updatePgdmDetail("issueDay", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} placeholder="30th" /></div>
+                        <div><label className="text-xs font-medium text-foreground mb-1 block">Issue Month & Year *</label><input value={pgdmCertificateDetails.issueMonthYear} onChange={e => updatePgdmDetail("issueMonthYear", e.target.value)} disabled={["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)} className={inputCls} placeholder="November 2005" /></div>
+                      </div>
+
+                      {selectedReq.pgdm_certificate_approval_notes && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                          Approval notes: {selectedReq.pgdm_certificate_approval_notes}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        {!["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
+                          <Button onClick={handleSubmitPgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
+                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            Generate &amp; Submit for Approval
+                          </Button>
+                        )}
+                        {isSuperAdmin && selectedReq.pgdm_certificate_status === "pending_approval" && (
+                          <Button onClick={handleApprovePgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                            Approve Certificate
+                          </Button>
+                        )}
+                        {["approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
+                          <Button variant="outline" onClick={handleDownloadPgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
+                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            Download for Print
+                          </Button>
+                        )}
+                        {["approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && selectedReq.pgdm_certificate_downloaded_at && (
+                          <Button onClick={handleNotifyPgdmReady} disabled={pgdmCertificateSaving || selectedReq.pgdm_certificate_status === "ready_notified"} className="gap-2">
+                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                            {selectedReq.pgdm_certificate_status === "ready_notified" ? "Student Notified" : "Notify Student to Collect Diploma"}
+                          </Button>
+                        )}
+                        {["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
+                          <Button variant="outline" onClick={handleRegeneratePgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
+                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                            Regenerate
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="relative mx-auto overflow-hidden rounded border border-border bg-muted shadow-sm" style={{ aspectRatio: "1324 / 1872", maxWidth: 340 }}>
+                        <img src={PGDM_CERTIFICATE_TEMPLATE_URL} alt="PGDM certificate preview" className="absolute inset-0 h-full w-full object-cover" />
+                        <svg viewBox="0 0 1324 1872" className="absolute inset-0 h-full w-full" aria-hidden="true">
+                          <text
+                            x="792"
+                            y="632"
+                            textAnchor="middle"
+                            dominantBaseline="alphabetic"
+                            fontFamily={PGDM_CERTIFICATE_NAME_FONT_FAMILY}
+                            fontSize={pgdmCertificateDetails.studentName.length > 24 ? 58 : 68}
+                            fontStyle="italic"
+                            fontWeight="400"
+                            fill="#222"
+                          >
+                            {pgdmCertificateDetails.studentName || "Candidate Name"}
+                          </text>
+                          <g fill="#333" fontFamily="Georgia, 'Times New Roman', serif" fontStyle="italic" fontSize="24" fontWeight="700" letterSpacing="1">
+                            <text x="930" y="1122">{pgdmCertificateDetails.completedYear}</text>
+                            <text x="760" y="1154">{pgdmCertificateDetails.fileNo}</text>
+                            <text x="785" y="1192">{pgdmCertificateDetails.enrollmentNo}</text>
+                            <text x="987" y="1192">{pgdmCertificateDetails.cgpa}</text>
+                            <text x="930" y="1225">{pgdmCertificateDetails.equivalentPercentage}</text>
+                            <text x="700" y="1301">{pgdmCertificateDetails.issueDay}</text>
+                            <text x="855" y="1301">{pgdmCertificateDetails.issueMonthYear}</text>
+                          </g>
+                        </svg>
+                      </div>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Preview only. Download is available after superadmin approval.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Employee review status */}
               {selectedReq.employee_reviewed_at && (
                 <div className="rounded-xl border border-success/20 bg-success/5 dark:bg-success/90/20 p-3 space-y-1">
@@ -716,67 +1451,136 @@ registrar@nimt.ac.in`,
                 </div>
               )}
 
-              {/* Review Section — Employee (if not yet reviewed) */}
-              {["paid"].includes(selectedReq.status) && !isSuperAdmin && (
+              {/* Review Section — Employee (if not yet reviewed).
+                  Hidden for PGDM diploma requests: those follow the dedicated
+                  certificate flow above, not the generic issuance review. */}
+              {["paid"].includes(selectedReq.status) && !isSuperAdmin && !canWorkOnPgdmCertificate(selectedReq) && (
                 <div className="space-y-3 pt-2 border-t border-border">
-                  <p className="text-xs font-semibold text-foreground">Submit Review</p>
-                  <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
-                    <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
-                      <option value="">Select result</option>
-                      <option value="recommended_approve">Recommend Approval</option>
-                      <option value="recommended_reject">Recommend Rejection</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document *</label>
-                    <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
-                      <Upload className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload verification evidence"}</span>
-                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
-                    </label>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Review Notes</label>
-                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
-                  </div>
-                  <Button className="w-full gap-2" onClick={handleEmployeeReview} disabled={saving}>
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    Submit Review for Approval
-                  </Button>
+                  {isIssuanceRequest(selectedReq) ? (
+                    <>
+                      <p className="text-xs font-semibold text-foreground">Verify Details</p>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Decision *</label>
+                        <select value={issuanceDecision} onChange={e => setIssuanceDecision(e.target.value)} className={inputCls}>
+                          {ISSUANCE_DECISION_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.value === "verified" ? `${option.label} ${issuanceDocumentName(selectedReq)}` : option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document</label>
+                        <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
+                          <Upload className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload optional supporting evidence"}</span>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
+                        </label>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Internal Note</label>
+                        <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Add internal record note..." className={inputCls + " resize-none"} />
+                      </div>
+                      <Button className="w-full gap-2" onClick={handleDetailsVerifiedForGeneration} disabled={saving}>
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        {issuanceActionLabel(selectedReq)}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs font-semibold text-foreground">Submit Review</p>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
+                        <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
+                          <option value="">Select result</option>
+                          <option value="recommended_approve">Recommend Approval</option>
+                          <option value="recommended_reject">Recommend Rejection</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document *</label>
+                        <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
+                          <Upload className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload verification evidence"}</span>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
+                        </label>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-foreground mb-1 block">Review Notes</label>
+                        <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
+                      </div>
+                      <Button className="w-full gap-2" onClick={handleEmployeeReview} disabled={saving}>
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        Submit Review for Approval
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
 
-              {/* Super Admin Approval (after employee review, or direct for super admin) */}
-              {isSuperAdmin && ["paid", "under_review"].includes(selectedReq.status) && (
+              {/* Super Admin Approval (after employee review, or direct for super admin).
+                  Hidden for PGDM diploma requests — the certificate panel above owns
+                  their generate → approve → print lifecycle. */}
+              {isSuperAdmin && ["paid", "under_review"].includes(selectedReq.status) && !canWorkOnPgdmCertificate(selectedReq) && (
                 <div className="space-y-3 pt-2 border-t border-border">
                   <p className="text-xs font-semibold text-foreground">
-                    {selectedReq.employee_reviewed_at ? "Super Admin Approval" : "Direct Review & Approve"}
+                    {isIssuanceRequest(selectedReq)
+                      ? "Verify Details"
+                      : selectedReq.employee_reviewed_at ? "Super Admin Approval" : "Direct Review & Approve"}
                   </p>
-                  <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
-                    <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
-                      <option value="">Select result</option>
-                      {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
+                  {isIssuanceRequest(selectedReq) ? (
+                    <div>
+                      <label className="text-xs font-medium text-foreground mb-1 block">Decision *</label>
+                      <select value={issuanceDecision} onChange={e => setIssuanceDecision(e.target.value)} className={inputCls}>
+                        {ISSUANCE_DECISION_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.value === "verified" ? `${option.label} ${issuanceDocumentName(selectedReq)}` : option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
+                      <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
+                        <option value="">Select result</option>
+                        {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  )}
                   {!selectedReq.employee_review_doc_url && (
                     <div>
-                      <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document *</label>
+                      <label className="text-xs font-medium text-foreground mb-1 block">
+                        Supporting Document{isIssuanceRequest(selectedReq) ? "" : " *"}
+                      </label>
                       <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
                         <Upload className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload verification evidence"}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {reviewDocFile ? reviewDocFile.name : isIssuanceRequest(selectedReq) ? "Upload optional supporting evidence" : "Upload verification evidence"}
+                        </span>
                         <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
                       </label>
                     </div>
                   )}
                   <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Approval Notes *</label>
-                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Add review notes..." className={inputCls + " resize-none"} />
+                    <label className="text-xs font-medium text-foreground mb-1 block">
+                      {isIssuanceRequest(selectedReq) ? "Internal Note" : "Approval Notes *"}
+                    </label>
+                    <textarea
+                      value={reviewNotes}
+                      onChange={e => setReviewNotes(e.target.value)}
+                      rows={2}
+                      placeholder={isIssuanceRequest(selectedReq) ? "Add internal record note..." : "Add review notes..."}
+                      className={inputCls + " resize-none"}
+                    />
                   </div>
-                  <Button className="w-full gap-2 bg-primary hover:bg-primary/90" onClick={() => handlePrepareResult(verificationResult === "confirmed")} disabled={saving}>
+                  <Button
+                    className="w-full gap-2 bg-primary hover:bg-primary/90"
+                    onClick={isIssuanceRequest(selectedReq) ? handleDetailsVerifiedForGeneration : () => handlePrepareResult(verificationResult === "confirmed")}
+                    disabled={saving}
+                  >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    Preview & Send Result Email
+                    {isIssuanceRequest(selectedReq) ? issuanceActionLabel(selectedReq) : "Preview & Send Result Email"}
                   </Button>
                 </div>
               )}
@@ -843,15 +1647,25 @@ registrar@nimt.ac.in`,
             <div>
               <label className="text-xs font-medium mb-1 block">Request Type</label>
               <select value={manualData.request_type} onChange={e => setManualData(p => ({ ...p, request_type: e.target.value }))} className={inputCls}>
-                <option value="verification">Alumni Verification</option>
+                <option value="verification">Student Verification</option>
                 <option value="marksheet">Marksheet Request</option>
                 <option value="diploma">Diploma Request</option>
                 <option value="transcript">Transcript Request</option>
               </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="text-xs font-medium mb-1 block">Alumni Name *</label><input value={manualData.alumni_name} onChange={e => setManualData(p => ({ ...p, alumni_name: e.target.value }))} className={inputCls} /></div>
-              <div><label className="text-xs font-medium mb-1 block">Course *</label><input value={manualData.course} onChange={e => setManualData(p => ({ ...p, course: e.target.value }))} className={inputCls} /></div>
+              <div><label className="text-xs font-medium mb-1 block">Student / Alumni Name *</label><input value={manualData.alumni_name} onChange={e => setManualData(p => ({ ...p, alumni_name: e.target.value }))} className={inputCls} /></div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">Course *</label>
+                <select value={manualData.course_id || manualData.course} onChange={e => {
+                  const selected = courses.find((c: any) => c.id === e.target.value);
+                  setManualData(p => ({ ...p, course_id: selected?.id || "", course: selected?.name || e.target.value }));
+                }} className={inputCls}>
+                  <option value="">Select course</option>
+                  {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
+                  <option value="Other">Other</option>
+                </select>
+              </div>
               <div><label className="text-xs font-medium mb-1 block">Year *</label><input type="number" value={manualData.year_of_passing} onChange={e => setManualData(p => ({ ...p, year_of_passing: e.target.value }))} className={inputCls} /></div>
               <div><label className="text-xs font-medium mb-1 block">Enrollment No</label><input value={manualData.enrollment_no} onChange={e => setManualData(p => ({ ...p, enrollment_no: e.target.value }))} className={inputCls} /></div>
             </div>

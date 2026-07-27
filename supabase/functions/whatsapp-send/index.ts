@@ -259,6 +259,12 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // Sent to the editor when their video is sent back for correction — carries
   // the reviewer's correction notes so they know what to fix before resubmit.
   video_correction_editor: { name: "video_correction_editor", params: ["editor_name", "video_title", "correction_notes"] },
+
+  // PGDM diploma certificate workflow (see pgdm-certificate-notify). Param
+  // order must match the notify function's sendTemplate() calls exactly.
+  pgdm_certificate_submitted_admin: { name: "pgdm_certificate_submitted_admin", params: ["name", "request_number", "alumni_name", "handler_name", "review_link"] },
+  pgdm_certificate_approved_handler: { name: "pgdm_certificate_approved_handler", params: ["handler_name", "request_number", "alumni_name", "download_link"] },
+  pgdm_diploma_ready_student: { name: "pgdm_diploma_ready_student", params: ["alumni_name", "request_number", "handler_name", "handler_phone"] },
 };
 
 function templateBodyFromComponents(components: unknown): string | null {

@@ -128,6 +128,76 @@ const TEMPLATES: Record<string, any> = {
       },
     ],
   },
+
+  // PGDM diploma certificate workflow — internal staff + candidate notices.
+  // Param order MUST match supabase/functions/pgdm-certificate-notify.
+  pgdm_certificate_submitted_admin: {
+    name: "pgdm_certificate_submitted_admin",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, a PGDM diploma certificate for request {{2}} ({{3}}) has been submitted by {{4}} and is awaiting your approval. " +
+          "Review and approve it here: {{5}}\n\nNIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Umesh",
+            "ADR-00030",
+            "Akash Singh",
+            "Priya Sharma",
+            "https://uni.nimt.ac.in/alumni-verifications?request=abc123",
+          ]],
+        },
+      },
+    ],
+  },
+
+  pgdm_certificate_approved_handler: {
+    name: "pgdm_certificate_approved_handler",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, the PGDM diploma certificate for request {{2}} ({{3}}) has been approved. " +
+          "Download and print it here: {{4}}\n\nNIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Priya Sharma",
+            "ADR-00030",
+            "Akash Singh",
+            "https://uni.nimt.ac.in/alumni-verifications?request=abc123",
+          ]],
+        },
+      },
+    ],
+  },
+
+  pgdm_diploma_ready_student: {
+    name: "pgdm_diploma_ready_student",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Dear {{1}}, your Post Graduate Diploma in Management (PGDM) for request {{2}} is ready for collection at " +
+          "NIMT Educational Institutions. Please carry a valid photo ID. For assistance, contact {{3}} at {{4}}.\n\n" +
+          "Warm regards, NIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Akash Singh",
+            "ADR-00030",
+            "Student Services Team",
+            "+91-7428477664",
+          ]],
+        },
+      },
+    ],
+  },
 };
 
 Deno.serve(async (req) => {
