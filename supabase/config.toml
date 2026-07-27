@@ -190,6 +190,10 @@ verify_jwt = false
 [functions.daily-lead-summary-email]
 verify_jwt = false
 
+# Called by pg_cron at 12:01 AM IST.
+[functions.daily-fee-collection-report]
+verify_jwt = false
+
 # Called both by signed-in users (from /my-docs) and by whatsapp-webhook
 # with the service-role key. The gateway can't validate the new opaque
 # sb_secret service-role tokens, so let the function handle auth itself.
