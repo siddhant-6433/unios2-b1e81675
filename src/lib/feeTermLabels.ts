@@ -38,6 +38,7 @@ export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata) => {
   }
 
   const normalized = String(term || "").trim().toLowerCase();
+  if (normalized === "security_deposit") return "Security Deposit (Refundable)";
   const periodLabel = meta?.period_label;
 
   for (const { regex, label } of TERM_PATTERNS) {
