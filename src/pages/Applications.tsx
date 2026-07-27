@@ -369,6 +369,8 @@ export default function Applications() {
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
+  // offline cash recording is cashier (accountant) + super_admin (matches OfflinePaymentDialog gate)
+  const canRecordOffline = ["super_admin", "accountant"].includes(role || "");
   const canManageApplicationLists = role === "super_admin" || role === "admission_head";
   const canViewCourseBreakup = canManageApplicationLists;
   const canExportApplications = isSuperAdmin || role === "principal";
@@ -2241,7 +2243,7 @@ export default function Applications() {
                                 <p><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] border-0 ml-1 ${PAYMENT_BADGE[app.payment_status || "pending"]}`}>{app.payment_status || "pending"}</Badge></p>
                                 {app.fee_amount && <p><span className="text-muted-foreground">Amount:</span> <span className="font-medium">₹{app.fee_amount.toLocaleString("en-IN")}</span></p>}
                                 {app.payment_ref && <p><span className="text-muted-foreground">Ref:</span> <span className="font-mono text-[10px]">{app.payment_ref}</span></p>}
-                                {isSuperAdmin && app.payment_status !== "paid" && app.lead_id && (
+                                {canRecordOffline && app.payment_status !== "paid" && app.lead_id && (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -2251,7 +2253,7 @@ export default function Applications() {
                                     <CreditCard className="h-3 w-3 mr-1" />Mark Offline Payment
                                   </Button>
                                 )}
-                                {isSuperAdmin && app.lead_id && (
+                                {canRecordOffline && app.lead_id && (
                                   <Button
                                     size="sm"
                                     variant="outline"
