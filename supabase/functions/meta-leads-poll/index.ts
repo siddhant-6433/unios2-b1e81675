@@ -108,6 +108,27 @@ async function fetchLeadsSince(formId: string, sinceUnix: number, token: string,
   return leads;
 }
 
+// Return the subset of leadgen_ids that are ALREADY in the leads table, so the
+// caller can skip them before spending a (rate-limited) lead-ingest invocation.
+// Cheap PostgREST read against the service role; chunked to keep URLs short.
+async function getExistingLeadgenIds(
+  ids: string[], supabaseUrl: string, serviceKey: string,
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const url = `${supabaseUrl}/rest/v1/leads` +
+      `?select=meta_leadgen_id&meta_leadgen_id=in.(${chunk.map(encodeURIComponent).join(",")})`;
+    const res = await fetch(url, {
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+    });
+    if (!res.ok) continue; // best-effort: on failure, fall through and let ingest dedup
+    const rows: any[] = await res.json().catch(() => []);
+    for (const r of rows) if (r?.meta_leadgen_id) existing.add(String(r.meta_leadgen_id));
+  }
+  return existing;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 
@@ -139,6 +160,14 @@ Deno.serve(async (req) => {
   } else if (Number.isFinite(lookbackSecondsParam) && lookbackSecondsParam > 0) {
     lookbackSeconds = Math.floor(lookbackSecondsParam);
   }
+
+  // Per-lead throttle before each lead-ingest call. Default 250ms is fine for the
+  // 5-min cron's tiny window; bump via ?throttle_ms=2000 for large backfills to
+  // stay under Supabase's function-to-function rate cap. Clamped to [100, 10000].
+  const throttleMsParam = Number(url.searchParams.get("throttle_ms") || "");
+  const throttleMs = Number.isFinite(throttleMsParam) && throttleMsParam > 0
+    ? Math.min(10000, Math.max(100, Math.floor(throttleMsParam)))
+    : 250;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -208,10 +237,22 @@ Deno.serve(async (req) => {
       stats.leads_found += leads.length;
       console.log(`[meta-leads-poll] form "${form.name}" (${form.id}): ${leads.length} leads to process`);
 
+      // Skip leads already ingested BEFORE the rate-limited lead-ingest call, so
+      // re-runs spend their function-to-function budget only on missing leads
+      // (and the 5-min cron stops burning invocations on its overlap window).
+      const already = await getExistingLeadgenIds(
+        leads.map((l) => String(l.id)), supabaseUrl, serviceKey,
+      );
+
       for (const lead of leads) {
+        if (already.has(String(lead.id))) {
+          pageStat.duplicates++;
+          stats.duplicates++;
+          continue;
+        }
         // Throttle to stay under Supabase's function-to-function rate cap
-        // (observed ~30 sub-calls before a 50s cooldown). 250ms = 4/sec.
-        await new Promise((r) => setTimeout(r, 250));
+        // (observed ~30 sub-calls before a 50s cooldown). Tunable via ?throttle_ms.
+        await new Promise((r) => setTimeout(r, throttleMs));
         const payload = {
           field_data:      lead.field_data     || [],
           leadgen_id:      lead.id,
