@@ -105,7 +105,7 @@ type AcademicFormData = Record<string, AcademicEntry | AcademicEntry[] | Entranc
 
 /** Generate year options descending from maxYear (or current year) down to max(dobYear, minYear) */
 function getYearOptions(dobYear?: number, maxYear?: number, minYear?: number): number[] {
-  const dobFloor = Math.max(1926, dobYear || 1926);
+  const dobFloor = Math.max(1960, dobYear || 1960);
   const start = minYear !== undefined ? Math.max(dobFloor, minYear) : dobFloor;
   const end = maxYear !== undefined ? maxYear : new Date().getFullYear();
   const years: number[] = [];
