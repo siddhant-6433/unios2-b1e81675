@@ -179,7 +179,7 @@ async function provisionStudent(
   // 3. Fetch fee_structure_items with fee_codes
   const { data: items } = await db
     .from("fee_structure_items")
-    .select("id, fee_code_id, term, amount, due_day, fee_codes:fee_code_id(code, name, category)")
+    .select("id, fee_code_id, term, amount, due_day, due_month, due_year_offset, due_date, fee_codes:fee_code_id(code, name, category)")
     .eq("fee_structure_id", feeStructure.id);
 
   if (!items || items.length === 0) throw new Error("Fee structure has no items");
@@ -252,11 +252,31 @@ async function provisionStudent(
   // 7. Build ledger rows
   const rows = filtered.map((item: any) => {
     const term = item.term;
-    let dueDate = feeStructure.version === "stetho_batch"
-      ? stethoSemesterDueDate(term, academicYear, Number(item.due_day || 10))
-      : quarterDueDate(term, academicYear);
+    const dueDay = Math.min(Math.max(Number(item.due_day || 10), 1), 28);
+    let dueDate: string | null = null;
 
-    // For non-quarter terms (registration, admission), due immediately
+    // 0. Absolute per-head due date (precise dd-mm-yyyy) wins — late fines run on this.
+    if (item.due_date) {
+      dueDate = String(item.due_date).slice(0, 10);
+    }
+    // 1. Explicit per-head config (course-wise due date): month + year offset.
+    if (!dueDate && item.due_month) {
+      const y = academicYear + Number(item.due_year_offset || 0);
+      dueDate = `${y}-${String(item.due_month).padStart(2, "0")}-${String(dueDay).padStart(2, "0")}`;
+    }
+    // 2. Stetho semester / quarter maps.
+    if (!dueDate) {
+      dueDate = feeStructure.version === "stetho_batch"
+        ? stethoSemesterDueDate(term, academicYear, dueDay)
+        : quarterDueDate(term, academicYear);
+    }
+    // 3. year_N stagger (year_1 = admission year, year_2 = +1yr…) — matches the SQL path
+    //    so multi-year heads never collide on one date.
+    if (!dueDate) {
+      const ym = term.match(/^year_([1-9])$/);
+      if (ym) dueDate = `${academicYear + (Number(ym[1]) - 1)}-04-${String(dueDay).padStart(2, "0")}`;
+    }
+    // 4. Fallback: due at session start.
     if (!dueDate) {
       dueDate = `${academicYear}-04-01`;
     }

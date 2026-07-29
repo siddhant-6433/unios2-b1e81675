@@ -73,6 +73,29 @@ jobs:
             echo "No migration files changed; skipping live Supabase dry-run for this PR."
           fi
 
+      # Cross-PR collision guard. The Supabase CLI (and the health script's
+      # within-tree uniqueness check) only see one branch at a time, so two
+      # PRs that each hand-write the same day's "YYYYMMDD120000" timestamp
+      # both pass in isolation and only collide AFTER both merge to main —
+      # which is precisely the failure that stranded ~15 migrations. Here we
+      # fail the PR if a migration file it ADDS reuses a timestamp that
+      # already exists on origin/main. Fix: `npm run db:migration:new -- <name>`
+      # stamps a real UTC-second timestamp that cannot collide.
+      - name: Reject migration timestamp reused from main
+        if: steps.migration_changes.outputs.changed == 'true'
+        run: |
+          git fetch --no-tags origin main
+          git ls-tree -r --name-only origin/main -- supabase/migrations \
+            | grep -oE '[0-9]{14}' | sort -u > /tmp/main_versions.txt
+          git diff --name-only --diff-filter=A "origin/main...HEAD" -- supabase/migrations \
+            | grep -oE '[0-9]{14}' | sort -u > /tmp/added_versions.txt
+          collisions=$(comm -12 /tmp/added_versions.txt /tmp/main_versions.txt)
+          if [ -n "$collisions" ]; then
+            echo "::error title=Migration timestamp collides with main::This PR adds migration file(s) whose 14-digit timestamp already exists on main: $(echo $collisions). Rename to a unique timestamp — run 'npm run db:migration:new -- <name>' which stamps a collision-proof UTC-second timestamp."
+            exit 1
+          fi
+          echo "No migration timestamp collisions with main."
+
       - name: Check secrets
         if: steps.migration_changes.outputs.changed == 'true'
         run: |
@@ -88,7 +111,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         if: steps.migration_changes.outputs.changed == 'true'
         with:
-          version: latest
+          version: 2.109.1  # pinned: "latest" hit a GitHub rate-limit and silently skipped a deploy (2026-07-27)
 
       - name: Validate migration push
         if: steps.migration_changes.outputs.changed == 'true'
@@ -162,7 +185,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         if: steps.migration_changes.outputs.changed == 'true'
         with:
-          version: latest
+          version: 2.109.1  # pinned: "latest" hit a GitHub rate-limit and silently skipped a deploy (2026-07-27)
 
       - name: Apply pending migrations
         if: steps.migration_changes.outputs.changed == 'true'

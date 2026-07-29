@@ -8,10 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
-  Receipt, FileText, RefreshCw,
+  Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
+import { ApplyCreditDialog } from "./ApplyCreditDialog";
+import { TransferFeeDialog } from "./TransferFeeDialog";
+import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
@@ -33,7 +36,7 @@ const PAYMENT_TYPE_LABEL: Record<string, string> = {
 };
 
 export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
-  const { role, session } = useAuth();
+  const { role, session, hasPermission } = useAuth();
   const { toast } = useToast();
   const [fees, setFees] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -42,12 +45,17 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
+  const [applyCreditOpen, setApplyCreditOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
+  const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
+  const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   const isStethoBatch = student?.fee_structure_version === "stetho_batch";
@@ -57,8 +65,14 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchFees();
       fetchPayments();
       fetchConsultantFlag();
+      fetchCredit();
     }
   }, [student?.id, student?.lead_id]);
+
+  const fetchCredit = async () => {
+    const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
+    if (data) setCredit(data);
+  };
 
   // Cashier note: is this candidate's fee consultant-managed (structure hidden
   // from the student login)? Staff-readable via v_student_fee_visibility.
@@ -240,6 +254,21 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             Migrate to Stetho Batch
           </Button>
         )}
+        {isFinanceRole && Number(credit?.general_credit || 0) > 0 && (
+          <Button size="sm" variant="outline" onClick={() => setApplyCreditOpen(true)} className="gap-1.5">
+            <Wallet className="h-3.5 w-3.5" /> Apply Credit
+          </Button>
+        )}
+        {canReallocate && fees.length > 0 && (
+          <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)} className="gap-1.5">
+            <ArrowLeftRight className="h-3.5 w-3.5" /> Transfer
+          </Button>
+        )}
+        {isFinanceRole && (
+          <Button size="sm" variant="outline" onClick={() => setAuditOpen(true)} className="gap-1.5">
+            <History className="h-3.5 w-3.5" /> Reallocation History
+          </Button>
+        )}
       </div>
 
       {/* Summary cards */}
@@ -248,7 +277,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         <SummaryCard label="Paid" value={totalPaid} color="bg-success/10 text-success" />
         <SummaryCard label="Concession" value={totalConcession} color="bg-pastel-purple text-foreground/70" />
         <SummaryCard label="Balance" value={totalBalance} color={totalBalance > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"} />
+        <SummaryCard label="Credit (unallocated)" value={Number(credit?.general_credit || 0)} color="bg-pastel-mint text-foreground/70" />
       </div>
+      {Number(credit?.application_fee_paid || 0) > 0 && (
+        <p className="text-[11px] text-muted-foreground -mt-2">
+          Application fee paid: ₹{Number(credit?.application_fee_paid || 0).toLocaleString("en-IN")}
+        </p>
+      )}
 
       {/* Fee table */}
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
@@ -439,6 +474,29 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         defaultAmount={totalBalance > 0 ? Math.round(totalBalance) : null}
         defaultPurpose="fee_due"
         onCreated={() => { fetchPayments(); onRefresh?.(); }}
+      />
+
+      <ApplyCreditDialog
+        open={applyCreditOpen}
+        onOpenChange={setApplyCreditOpen}
+        studentId={student.id}
+        fees={fees}
+        availableCredit={Number(credit?.general_credit || 0)}
+        onSuccess={() => { fetchFees(); fetchCredit(); onRefresh?.(); }}
+      />
+
+      <TransferFeeDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        studentId={student.id}
+        fees={fees}
+        onSuccess={() => { fetchFees(); fetchCredit(); onRefresh?.(); }}
+      />
+
+      <FeeLedgerAuditDialog
+        open={auditOpen}
+        onOpenChange={setAuditOpen}
+        studentId={student.id}
       />
     </div>
   );

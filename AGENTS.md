@@ -40,3 +40,18 @@ Key routing rules:
 - Review what gstack has learned → invoke /learn
 - Tune question sensitivity → invoke /plan-tune
 - Code quality dashboard → invoke /health
+
+## Database migrations — NEVER hand-name the timestamp
+
+Create every migration with the helper, which stamps the real UTC clock:
+
+```
+npm run db:migration:new -- <name>
+```
+
+Do NOT write `supabase/migrations/<timestamp>_*.sql` directly with an invented
+timestamp (e.g. `YYYYMMDD120000`, round-hour "noon" stamps). Those are
+deterministic, so parallel Conductor worktrees collide on the same timestamp
+and strand the whole `db push` pipeline. A pre-commit hook
+(`.githooks/pre-commit`) rewrites any hand-stamped new migration to the actual
+commit time as a backstop, but generate it correctly in the first place.

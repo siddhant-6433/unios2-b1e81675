@@ -539,10 +539,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     return totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, feeMetadata) }));
   }, [rawFeeItems, hasSchoolOptions, schoolSelection, feeMetadata]);
 
-  // Term keys present (drives the Add-Waiver year picker). Exclude the synthetic
-  // security-deposit line — it isn't a real fee-structure term and can't be waived.
+  // Term keys present (drives the Add-Waiver year picker). Includes the synthetic
+  // security-deposit line so the refundable boarding deposit can be waived too;
+  // waivers keyed on 'security_deposit' render on the deposit line and are netted
+  // by the offer's net_fee. The fee engine excludes the deposit from the 25% base,
+  // so a deposit waiver does not change the AN threshold.
   const availableTerms = useMemo(() => {
-    const terms = yearTotals.map(s => s.term).filter(t => t !== SECURITY_DEPOSIT_TERM);
+    const terms = yearTotals.map(s => s.term);
     return terms.length ? terms : ["year_1"];
   }, [yearTotals]);
 
@@ -664,11 +667,25 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     firstYearFee - preWaiverTotalForTerm(firstOfferTerm) - importedProposalWaiverTotalForTerm(firstOfferTerm),
   );
 
-  // Token fee defaults to 25% of net Year-1. Admissions can lower it while
-  // issuing the offer, but never below the course-specific seat-block floor.
+  // School structures bill by admission + quarters, so the seat-booking token
+  // defaults to the first real payment: Admission + Q1 + Security deposit
+  // (boarders only), net of any waivers staged on those lines. Non-school
+  // (year_N) offers keep the 25%-of-net-Year-1 default. Either way the applicant
+  // can lower it while issuing, down to a ₹5,000 floor (schools) or the
+  // course-specific seat-block floor.
+  const netForTerm = (term: string): number => {
+    const gross = yearTotals.find((y) => y.term === term)?.total || 0;
+    return Math.max(0, gross - preWaiverTotalForTerm(term) - importedProposalWaiverTotalForTerm(term));
+  };
+  const usesSchoolTerms = yearTotals.some((y) => y.term === "q1");
+  const schoolTokenBase = usesSchoolTerms
+    ? netForTerm("admission") + netForTerm("q1") + netForTerm(SECURITY_DEPOSIT_TERM)
+    : 0;
   const policyTokenRequiredAmount = Number(feePolicy?.token_required_amount || 0);
-  const tokenFloor = policyTokenRequiredAmount || 5000;
-  const tokenDefault = policyTokenRequiredAmount > 0
+  const tokenFloor = usesSchoolTerms ? 5000 : (policyTokenRequiredAmount || 5000);
+  const tokenDefault = usesSchoolTerms
+    ? Math.max(schoolTokenBase, tokenFloor)
+    : policyTokenRequiredAmount > 0
     ? policyTokenRequiredAmount
     : netFirstYearFee > 0
     ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
@@ -679,10 +696,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   // old value is meaningless. The user can re-click Edit to customise after.
   useEffect(() => {
     if (!showForm) return;
-    if (netFirstYearFee <= 0) return;
+    if (tokenDefault <= 0) return;
     setTokenFeeEdited(false);
     setForm(p => ({ ...p, token_fee_amount: String(tokenDefault) }));
-  }, [showForm, netFirstYearFee, tokenDefault]);
+  }, [showForm, tokenDefault]);
 
   useEffect(() => {
     if (!selectedFeeProposalId) {
@@ -1759,13 +1776,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                     placeholder={tokenDefault > 0 ? String(tokenDefault) : "—"}
                   />
                   <p className="mt-1 text-[10px] text-muted-foreground/70 leading-relaxed">
-                    {netFirstYearFee > 0 ? (
+                    {tokenDefault > 0 ? (
                       tokenFeeEdited ? (
                         <>
-                          Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span>. This is the amount the applicant must pay before downloading the education loan letter.
-                          {firstYearFee !== netFirstYearFee && (
-                            <> Gross {firstTermLabel} is ₹{firstYearFee.toLocaleString("en-IN")}; {firstTermLabel} waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
-                          )}
+                          Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span>. This is the amount the applicant must pay to book the seat before the acceptance deadline.
+                        </>
+                      ) : usesSchoolTerms ? (
+                        <>
+                          Default = Admission + Q1{netForTerm(SECURITY_DEPOSIT_TERM) > 0 ? " + Security deposit" : ""} = ₹{schoolTokenBase.toLocaleString("en-IN")}. Click Edit to override (min ₹{tokenFloor.toLocaleString("en-IN")}).
                         </>
                       ) : (
                         <>

@@ -56,6 +56,8 @@ const MODULE_LABELS: Record<string, string> = {
   ib_exhibition: "IB Exhibition", ib_projects: "IB Projects", ib_idu: "IB IDU",
   campuses_courses: "Campuses", documents: "Documents", alumni_verification: "Alumni Verification",
   user_management: "User Mgmt", permissions: "Permissions", library: "Library",
+  fee_ledger: "Fee Ledger",
+  fee_structure: "Fee Structure",
 };
 
 export function PermissionMatrixPanel() {
