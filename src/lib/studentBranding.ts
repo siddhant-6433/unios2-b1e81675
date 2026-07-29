@@ -3,6 +3,8 @@ import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 export interface StudentBrand {
+  /** Stable school key — drives ID-card theming (colour ramp / logo variant). */
+  key: "nimt" | "beacon" | "mirai";
   name: string;
   logo: string;
   logoAlt: string;
@@ -17,21 +19,24 @@ export interface StudentBrandInput {
 }
 
 export const NIMT_EDU_BRAND: StudentBrand = {
+  key: "nimt",
   name: "NIMT Educational Institutions",
   logo: nimtEduInstLogo,
   logoAlt: "NIMT Educational Institutions",
 };
 
 export const NIMT_BEACON_BRAND: StudentBrand = {
+  key: "beacon",
   name: "NIMT Beacon School",
   logo: nimtBeaconLogo,
   logoAlt: "NIMT Beacon School",
 };
 
 export const MIRAI_BRAND: StudentBrand = {
-  name: "Mirai School",
+  key: "mirai",
+  name: "Mirai Experiential School",
   logo: miraiLogoGreen,
-  logoAlt: "Mirai School",
+  logoAlt: "Mirai Experiential School",
 };
 
 export function brandForStudentOwner(input: StudentBrandInput): StudentBrand {

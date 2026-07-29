@@ -21,7 +21,8 @@ import { SelectField } from "@/components/ui/state-fields";
 import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
 import { whiteBgCutout } from "@/lib/whiteBgCutout";
 import { QRCodeSVG } from "qrcode.react";
-import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
+import { brandForStudentOwner, MIRAI_BRAND, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
+import miraiLogoRed from "@/assets/mirai-logo-red.svg";
 import { PhotoDayAssigneesPanel } from "@/components/admin/PhotoDayAssigneesPanel";
 
 type CardMode = "students" | "employees";
@@ -62,6 +63,8 @@ interface CardThemeColors {
   ramp: [string, string, string, string, string];
   accent: string;
   category: string;
+  /** Effective brand (logo + name) for this theme — Mirai swaps its logo variant to match the colour. */
+  brand: StudentBrand;
 }
 
 // Round-3 "beacon colour-shade waves": five tints of the brand hue per student type
@@ -69,29 +72,48 @@ interface CardThemeColors {
 const RAMP_BLUE: CardThemeColors["ramp"] = ["#E3EAFF", "#B3C6FF", "#7B9BFF", "#3D6FFF", "#0041F5"];
 const RAMP_GREEN: CardThemeColors["ramp"] = ["#DBF6E9", "#B2ECD0", "#73DCA9", "#38CD85", "#00BF63"];
 const RAMP_ORANGE: CardThemeColors["ramp"] = ["#FFECE0", "#FFD6BC", "#FFB384", "#FF9350", "#FF751F"];
+// Mirai brand tones: sage green #77966D (boarders) / brick red #AA4A44 (day schools).
+const RAMP_MIRAI_GREEN: CardThemeColors["ramp"] = ["#EEF2EC", "#D3DECD", "#AEC0A5", "#93AA88", "#77966D"];
+const RAMP_MIRAI_RED: CardThemeColors["ramp"] = ["#F6E9E8", "#E9C9C6", "#D59A95", "#BF6B65", "#AA4A44"];
+
+/** Category label from student_type (shared across all schools). */
+function typeCategory(t: StudentType): string {
+  return t === "boarder" ? "Boarding" : t === "day_boarder" ? "Day Boarding" : t === "day_scholar" ? "Day Scholar" : "";
+}
 
 function cardTheme(person: CardPerson): CardThemeColors {
-  switch (person.studentType) {
-    case "boarder":
-      return { ramp: RAMP_GREEN, accent: RAMP_GREEN[4], category: "Boarding" };
-    case "day_boarder":
-      return { ramp: RAMP_ORANGE, accent: RAMP_ORANGE[4], category: "Day Boarding" };
-    case "day_scholar":
-      return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category: "Day Scholar" };
+  const category = typeCategory(person.studentType);
+  switch (person.brand.key) {
+    case "mirai": {
+      // Mirai: green for boarders, red for day scholars/day boarders — logo variant matches.
+      const green = person.studentType === "boarder";
+      const ramp = green ? RAMP_MIRAI_GREEN : RAMP_MIRAI_RED;
+      return { ramp, accent: ramp[4], category, brand: { ...MIRAI_BRAND, logo: green ? MIRAI_BRAND.logo : miraiLogoRed } };
+    }
+    case "nimt":
+      // NIMT Educational Institutions: always blue, regardless of student type.
+      return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category, brand: person.brand };
+    case "beacon":
     default:
-      return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category: "" };
+      // Beacon: blue day scholar, orange day boarder, green boarder.
+      switch (person.studentType) {
+        case "boarder":
+          return { ramp: RAMP_GREEN, accent: RAMP_GREEN[4], category, brand: person.brand };
+        case "day_boarder":
+          return { ramp: RAMP_ORANGE, accent: RAMP_ORANGE[4], category, brand: person.brand };
+        default:
+          return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category, brand: person.brand };
+      }
   }
 }
 
 /**
- * The Round-3 Beacon design is scoped to NIMT Beacon School batches, which run at the
- * Avantika II and Arthala campuses only. Everyone else (other campuses, employees) gets
- * the plain generic card.
+ * The Round-3 "signal wave" design now covers every school student (Beacon, NIMT
+ * Educational Institutions, Mirai) — the colour ramp + logo come from cardTheme(). Employees
+ * still get the plain generic card.
  */
-function isBeaconStudent(person: CardPerson): boolean {
-  if (person.type !== "students") return false;
-  const c = person.campus.toLowerCase();
-  return c.includes("avantika ii") || c.includes("arthala");
+function useWaveCard(person: CardPerson): boolean {
+  return person.type === "students";
 }
 
 /** Academic session (Apr–Mar) label + validity, e.g. "2026 – 27" / "MAR 2027". */
@@ -99,6 +121,16 @@ function sessionInfo(): { label: string; validTill: string } {
   const d = new Date();
   const start = d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
   return { label: `${start} – ${String(start + 1).slice(2)}`, validTill: `MAR ${start + 1}` };
+}
+
+/** Batch label ("2026-28" / "2026-2028" / "2026 – 28") → end year 2028, or null. */
+export function batchEndYear(batch: string): number | null {
+  const nums = batch.match(/\d{2,4}/g);
+  if (!nums || nums.length < 2) return null;
+  let end = nums[nums.length - 1];
+  if (end.length === 2) end = nums[0].slice(0, 2) + end; // "28" → "2028" using the start century
+  const year = parseInt(end, 10);
+  return Number.isFinite(year) ? year : null;
 }
 
 /** dob (ISO date) → "dd MMM yyyy"; guards null / invalid → "-". */
@@ -401,9 +433,9 @@ const IdCardCenter = () => {
 
   async function printCards(rows: CardPerson[]) {
     if (rows.length === 0) return;
-    // Beacon fronts show the student cut out over the wave rings — build transparent
-    // cutouts (from the pure-white studio bg) for any selected Beacon student first.
-    const pending = rows.filter((row) => isBeaconStudent(row) && row.photoUrl && !cutouts[row.id]);
+    // Wave fronts show the student cut out over the signal-wave rings — build transparent
+    // cutouts (from the pure-white studio bg) for any selected school student first.
+    const pending = rows.filter((row) => useWaveCard(row) && row.photoUrl && !cutouts[row.id]);
     if (pending.length) {
       setPreparing(true);
       const done = await Promise.all(
@@ -624,7 +656,7 @@ const IdCardCenter = () => {
         <div className="id-card-sheet">
           {selectedRows.map((row) => (
             <div key={row.id} className="id-card-pair space-y-3">
-              {isBeaconStudent(row) ? (
+              {useWaveCard(row) ? (
                 <>
                   <div className="dc-scale"><IdCardFront person={row} cutoutUrl={cutouts[row.id]} /></div>
                   <div className="dc-scale"><IdCardBack person={row} /></div>
@@ -688,13 +720,23 @@ function StudentQr({ value, color, brand }: { value: string; color: string; bran
 }
 
 function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: string }) {
-  const { ramp, accent, category } = cardTheme(person);
+  const { ramp, accent, category, brand } = cardTheme(person);
   const { validTill } = sessionInfo();
   const subline =
     person.type === "students"
       ? `${person.group} · ADM. NO. ${person.primaryNo}`.toUpperCase()
       : `${person.subtitle} · EMP. NO. ${person.primaryNo}`.toUpperCase();
-  const badge = (category || (person.type === "students" ? "Student" : "Staff")).toUpperCase();
+  // NIMT Educational Institutions shows the course batch (e.g. "BATCH 2026-28") in place of the
+  // day-scholar/boarding category, and validity runs to June of the batch's end year.
+  const isNimt = person.brand.key === "nimt";
+  const hasBatch = person.extraValue && person.extraValue !== "-";
+  const badge = (
+    isNimt
+      ? hasBatch ? `Batch ${person.extraValue}` : "Student"
+      : category || (person.type === "students" ? "Student" : "Staff")
+  ).toUpperCase();
+  const endYear = isNimt && hasBatch ? batchEndYear(person.extraValue) : null;
+  const validLabel = endYear ? `JUNE ${endYear}` : validTill;
   // Concentric "signal wave" rings behind the photo (light → dark, innermost is accent).
   const rings: { d: number; b: number; w: number; c: string }[] = [
     { d: 392, b: -186, w: 20, c: ramp[0] },
@@ -711,7 +753,7 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
       </div>
       {/* wordmark logo */}
       <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 0" }}>
-        <img src={person.brand.logo} alt={person.brand.logoAlt} decoding="async" style={{ width: 234, height: 138, objectFit: "contain", display: "block" }} />
+        <img src={brand.logo} alt={brand.logoAlt} decoding="async" style={{ width: 234, height: 138, objectFit: "contain", display: "block" }} />
       </div>
       {/* photo + radiating rings */}
       <div style={{ position: "relative", height: 296, display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
@@ -746,7 +788,7 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
                 level="H"
                 fgColor="#111111"
                 bgColor="#FFFFFF"
-                imageSettings={{ src: person.brand.logo, height: 18, width: 18, excavate: true }}
+                imageSettings={{ src: brand.logo, height: 18, width: 18, excavate: true }}
               />
             </div>
             <span style={{ fontSize: 7, letterSpacing: ".18em", color: "#98A2B3", fontWeight: 700, fontFamily: "'Archivo',sans-serif" }}>SCAN</span>
@@ -760,15 +802,20 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
       {/* footer band */}
       <div style={{ background: accent, padding: "15px 30px", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "'Archivo',sans-serif" }}>
         <span style={{ color: "#fff", fontSize: 12.5, fontWeight: 800, letterSpacing: ".14em" }}>{badge}</span>
-        <span style={{ color: "rgba(255,255,255,.85)", fontSize: 12.5, fontWeight: 600, letterSpacing: ".08em" }}>VALID TILL {validTill}</span>
+        <span style={{ color: "rgba(255,255,255,.85)", fontSize: 12.5, fontWeight: 600, letterSpacing: ".08em" }}>VALID TILL {validLabel}</span>
       </div>
     </div>
   );
 }
 
 function IdCardBack({ person }: { person: CardPerson }) {
-  const { ramp, accent } = cardTheme(person);
+  const { ramp, accent, brand } = cardTheme(person);
   const { label: session } = sessionInfo();
+  // NIMT cards carry the course batch instead of the academic session.
+  const sessionLabel =
+    person.brand.key === "nimt" && person.extraValue && person.extraValue !== "-"
+      ? `Batch ${person.extraValue}`
+      : `Session ${session}`;
   const cells: { label: string; value: string; wide?: boolean }[] =
     person.type === "students"
       ? [
@@ -794,8 +841,8 @@ function IdCardBack({ person }: { person: CardPerson }) {
         <div style={{ position: "absolute", right: -70, top: -70, width: 190, height: 190, borderRadius: "50%", border: "16px solid rgba(255,255,255,.16)" }} />
         <div style={{ position: "absolute", right: -46, top: -46, width: 126, height: 126, borderRadius: "50%", border: "14px solid rgba(255,255,255,.26)" }} />
         <img
-          src={person.brand.logo}
-          alt={person.brand.logoAlt}
+          src={brand.logo}
+          alt={brand.logoAlt}
           decoding="async"
           // reverse logo: knock the wordmark out to solid white so it reads on any band colour
           style={{ position: "absolute", right: 18, top: 14, width: 62, height: 62, objectFit: "contain", filter: "brightness(0) invert(1)" }}
@@ -803,7 +850,7 @@ function IdCardBack({ person }: { person: CardPerson }) {
         <div style={{ position: "relative", color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: ".2em" }}>
           {person.type === "students" ? "STUDENT IDENTITY CARD" : "EMPLOYEE IDENTITY CARD"}
         </div>
-        <div style={{ position: "relative", color: "rgba(255,255,255,.7)", fontSize: 12, fontWeight: 600 }}>Session {session}</div>
+        <div style={{ position: "relative", color: "rgba(255,255,255,.7)", fontSize: 12, fontWeight: 600 }}>{sessionLabel}</div>
       </div>
       {/* gradient bar (dark → light) */}
       <div style={{ display: "flex", height: 8 }}>
@@ -820,9 +867,9 @@ function IdCardBack({ person }: { person: CardPerson }) {
       </div>
       {/* QR (also on the front name band) + return notice */}
       <div style={{ padding: "0 30px 26px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <StudentQr value={person.primaryNo} color={accent} brand={person.brand} />
+        <StudentQr value={person.primaryNo} color={accent} brand={brand} />
         <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "#667085" }}>
-          If found, please return this card to {person.brand.name}. This card remains the property of the institution.
+          If found, please return this card to {brand.name}. This card remains the property of the institution.
         </div>
       </div>
     </div>
