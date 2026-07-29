@@ -46,7 +46,7 @@ describe("CAHET registration fallback", () => {
     expect(adminApplicationView).toContain("cahetRegistrationFromApplication(appRow, appRow.lead_id)");
     expect(adminApplicationView).toContain("cahetRow || applicationCahet");
     expect(offerLetterFunction).toContain("cahetRegistrationFromApplication(applicationRow)");
-    expect(offerLetterFunction).toContain("cahetRegistrationRow || cahetRegistrationFromApplication");
+    expect(offerLetterFunction).toContain("cahetRegistrationRow || (cahetExamRow?.registration_no ? cahetExamRow : null) || cahetRegistrationFromApplication");
     expect(offerLetterDialog).toContain("cahetRegistrationFromApplication(appRow as ApplicationCahetSource | null, leadId)");
   });
 

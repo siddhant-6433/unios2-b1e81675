@@ -11,15 +11,18 @@ export interface CahetRegistrationDetails {
 type CahetRegistrationRow = Omit<CahetRegistrationDetails, "document_signed_url">;
 
 interface SupabaseCahetClient {
-  from(table: "cahet_registrations"): {
+  from(table: string): {
     select(columns: string): {
-      eq(column: "lead_id", value: string): {
-        maybeSingle(): Promise<{ data: CahetRegistrationRow | null }>;
+      eq(column: string, value: string): {
+        eq(column: string, value: string): {
+          maybeSingle(): Promise<{ data: Record<string, unknown> | null }>;
+        };
+        maybeSingle(): Promise<{ data: Record<string, unknown> | null }>;
       };
     };
   };
   storage: {
-    from(bucket: "cahet-registrations"): {
+    from(bucket: string): {
       createSignedUrl(path: string, expiresIn: number): Promise<{ data: { signedUrl?: string } | null }>;
     };
   };
@@ -70,24 +73,58 @@ export async function fetchCahetRegistration(
   leadId: string | null | undefined,
 ): Promise<CahetRegistrationDetails | null> {
   if (!leadId) return null;
+
+  // Try the legacy cahet_registrations table first.
   const { data } = await supabase
     .from("cahet_registrations")
     .select("id, lead_id, registration_no, document_url, notes, registered_at")
     .eq("lead_id", leadId)
     .maybeSingle();
 
-  if (!data) return null;
+  if (data) {
+    let documentSignedUrl: string | null = null;
+    if (data.document_url) {
+      const { data: signed } = await supabase.storage
+        .from("cahet-registrations")
+        .createSignedUrl(String(data.document_url), 60 * 60);
+      documentSignedUrl = signed?.signedUrl || null;
+    }
+    return {
+      id: String(data.id),
+      lead_id: String(data.lead_id),
+      registration_no: String(data.registration_no),
+      document_url: (data.document_url as string) || null,
+      notes: (data.notes as string) || null,
+      registered_at: (data.registered_at as string) || null,
+      document_signed_url: documentSignedUrl,
+    };
+  }
+
+  // Fall back to the generalized exam_registrations table.
+  const { data: examRow } = await supabase
+    .from("exam_registrations")
+    .select("id, lead_id, registration_no, document_url, notes, registered_at")
+    .eq("lead_id", leadId)
+    .eq("exam_code", "cahet")
+    .maybeSingle();
+
+  if (!examRow || !examRow.registration_no) return null;
 
   let documentSignedUrl: string | null = null;
-  if (data.document_url) {
+  if (examRow.document_url) {
     const { data: signed } = await supabase.storage
-      .from("cahet-registrations")
-      .createSignedUrl(data.document_url, 60 * 60);
+      .from("exam-registrations")
+      .createSignedUrl(String(examRow.document_url), 60 * 60);
     documentSignedUrl = signed?.signedUrl || null;
   }
 
   return {
-    ...(data as CahetRegistrationDetails),
+    id: String(examRow.id),
+    lead_id: String(examRow.lead_id),
+    registration_no: String(examRow.registration_no),
+    document_url: (examRow.document_url as string) || null,
+    notes: (examRow.notes as string) || null,
+    registered_at: (examRow.registered_at as string) || null,
     document_signed_url: documentSignedUrl,
   };
 }
