@@ -99,6 +99,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
   const [internalRefresh, setInternalRefresh] = useState(0);
   const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
   const [auditPayment, setAuditPayment] = useState<LeadPayment | null>(null);
+  const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
   const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
@@ -179,6 +180,17 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
       } else {
         setPreview([]);
       }
+
+      // Credit balance is informational here — it accrues pre-admission and
+      // carries forward once a real student ledger exists.
+      const creditTargetId = sid || lid;
+      if (creditTargetId) {
+        const { data: cred } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: creditTargetId });
+        if (alive) setCredit(cred || null);
+      } else {
+        setCredit(null);
+      }
+
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
@@ -277,6 +289,20 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
           <Stat label="Concession" value={fmt(totals.ledgerConcession)} tone="amber" />
           <Stat label="Paid" value={fmt(totals.ledgerPaid)} tone="emerald" />
           <Stat label="Outstanding" value={fmt(totals.ledgerBalance)} tone={totals.ledgerBalance > 0 ? "red" : "emerald"} />
+        </div>
+      )}
+
+      {/* Credit balance — informational, read-only pre-admission (or post-
+          admission before a Transfer/Apply UI is warranted here). */}
+      {credit && Number(credit.general_credit || 0) > 0 && (
+        <div className="rounded-xl border border-border bg-card px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          <span className="text-muted-foreground">Credit (unallocated):</span>
+          <span className="font-semibold text-foreground">{fmt(credit.general_credit)}</span>
+          {Number(credit.application_fee_paid || 0) > 0 && (
+            <span className="text-muted-foreground">
+              Application fee paid: <span className="font-medium text-foreground">{fmt(credit.application_fee_paid)}</span>
+            </span>
+          )}
         </div>
       )}
 

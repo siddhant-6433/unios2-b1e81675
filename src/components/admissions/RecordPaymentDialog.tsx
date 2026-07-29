@@ -51,6 +51,27 @@ export function RecordPaymentDialog({
   const [notes, setNotes] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Optional "apply to head" — only offered once a student ledger exists for
+  // this lead (pre-admission leads have no fee_ledger rows to apply to).
+  const [studentId, setStudentId] = useState<string | null>(null);
+  const [headOptions, setHeadOptions] = useState<{ id: string; label: string }[]>([]);
+  const [applyToHead, setApplyToHead] = useState<string>(""); // "" = credit (unallocated)
+
+  useEffect(() => {
+    if (!open || !leadId) return;
+    (async () => {
+      const { data: student } = await supabase.from("students").select("id").eq("lead_id", leadId).maybeSingle();
+      if (!student?.id) { setStudentId(null); setHeadOptions([]); return; }
+      setStudentId(student.id);
+      const { data: heads } = await supabase
+        .from("fee_ledger")
+        .select("id, term, fee_codes:fee_code_id(code)")
+        .eq("student_id", student.id)
+        .order("due_date");
+      setHeadOptions((heads || []).map((h: any) => ({ id: h.id, label: `${h.fee_codes?.code || "Fee"} — ${h.term}` })));
+    })();
+  }, [open, leadId]);
   const [feeStatus, setFeeStatus] = useState<{
     first_year_fee: number;
     token_required: number;
@@ -106,6 +127,7 @@ export function RecordPaymentDialog({
       setReceiptNo("");
       setNotes("");
       setScreenshot(null);
+      setApplyToHead("");
     }
   }, [open, defaultType]);
 
@@ -192,6 +214,20 @@ export function RecordPaymentDialog({
     // Stage advancement is handled by the lead_payments AFTER trigger
     // (handle_lead_payment_change). It checks the PAN / AN thresholds and
     // auto-issues numbers. We don't flip stage from here anymore.
+
+    if (applyToHead && studentId) {
+      const headLabel = headOptions.find(h => h.id === applyToHead)?.label || applyToHead;
+      const { error: applyErr } = await (supabase.rpc as any)("apply_student_credit", {
+        _id: studentId,
+        _fee_ledger_id: applyToHead,
+        _amount: parseFloat(amount),
+        _reason: `Offline payment applied to ${headLabel}`,
+        _source_payment_id: inserted?.id || null,
+      });
+      if (applyErr) {
+        toast({ title: "Payment recorded, but could not apply to head", description: applyErr.message, variant: "destructive" });
+      }
+    }
 
     toast({ title: "Payment recorded", description: `₹${parseFloat(amount).toLocaleString("en-IN")} ${PAYMENT_TYPES.find((t) => t.value === type)?.label} recorded.` });
     setSaving(false);
@@ -334,6 +370,19 @@ export function RecordPaymentDialog({
               </label>
             )}
           </div>
+
+          {studentId && headOptions.length > 0 && (
+            <SelectField
+              value={applyToHead}
+              onValueChange={setApplyToHead}
+              options={[
+                { value: "", label: "Credit (unallocated)" },
+                ...headOptions.map(h => ({ value: h.id, label: h.label })),
+              ]}
+              label="Apply to"
+              allowEmpty={false}
+            />
+          )}
 
           <TextAreaField
             value={notes}

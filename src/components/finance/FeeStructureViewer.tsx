@@ -1,10 +1,14 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ChevronDown, ChevronUp, Building2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, ChevronDown, ChevronUp, Building2, Plus, Pencil, Trash2, Power } from "lucide-react";
 import { ScholarshipPanel } from "./ScholarshipPanel";
 import { formatFeeTerm } from "@/lib/schoolFeeProposal";
+import { FeeStructureEditDialog, EditableFeeItem } from "./FeeStructureEditDialog";
 
 const categoryBadge: Record<string, string> = {
   tuition: "bg-pastel-blue", lab: "bg-pastel-purple", enrollment: "bg-pastel-green",
@@ -13,13 +17,28 @@ const categoryBadge: Record<string, string> = {
 };
 
 interface FeeItem {
+  id: string;
+  fee_code_id: string;
   code: string;
   name: string;
   category: string;
   term: string;
   amount: number;
   due_day: number;
+  due_month: number | null;
+  due_year_offset: number;
+  due_date: string | null;
 }
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** Prefer exact due_date ("10 Apr 2026"); else month/offset ("Apr yr+1"); else empty */
+const dueHint = (i: FeeItem) => {
+  if (i.due_date) {
+    const [y, m, d] = i.due_date.slice(0, 10).split("-");
+    return `${Number(d)} ${MONTH_ABBR[Number(m) - 1]} ${y}`;
+  }
+  return i.due_month == null ? "" : `${MONTH_ABBR[i.due_month - 1]}${i.due_year_offset > 0 ? ` yr+${i.due_year_offset}` : ""}`;
+};
 
 interface FeeStructure {
   id: string;
@@ -58,6 +77,9 @@ type StudentTypeFilter = "day_scholar" | "day_boarder" | "boarder";
 const isSchoolCourse = (code: string) => /^(BSAV|BSA|MIR)-/.test(code);
 
 export function FeeStructureViewer({ courseId, compact = false, showFilter = false, newAdmissionOnly = false }: Props) {
+  const { role, hasPermission } = useAuth();
+  const { toast } = useToast();
+  const canManage = role === "super_admin" || hasPermission("fee_structure:manage");
   const [structures, setStructures] = useState<FeeStructure[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCourse, setFilterCourse] = useState(courseId || "all");
@@ -65,76 +87,139 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
   const [studentType, setStudentType] = useState<StudentTypeFilter>("day_scholar");
   const [transportZone, setTransportZone] = useState<"none" | "zone_1" | "zone_2" | "zone_3">("none");
   const [boardingType, setBoardingType] = useState<"none" | "non_ac" | "ac_central" | "ac_individual">("none");
+  const [feeCodes, setFeeCodes] = useState<{ id: string; code: string; name: string; category: string }[]>([]);
+  const [editDialog, setEditDialog] = useState<{ feeStructureId: string; item: EditableFeeItem | null } | null>(null);
+
+  const fetchStructures = async () => {
+    let query = supabase
+      .from("fee_structures")
+      .select(`
+        id, version, is_active, course_id, metadata,
+        courses:course_id(id, name, code, webflow_slug,
+          departments!inner(name,
+            institutions!inner(name, campus_id,
+              campuses!inner(name)
+            )
+          )
+        ),
+        admission_sessions:session_id(name),
+        fee_structure_items(*, fee_codes:fee_code_id(code, name, category))
+      `)
+      .order("created_at", { ascending: false });
+
+    if (!canManage) {
+      query = query.eq("is_active", true);
+    }
+
+    if (courseId && !showFilter) {
+      query = query.eq("course_id", courseId);
+    }
+
+    const { data } = await query;
+
+    if (data) {
+      const mapped: FeeStructure[] = (data as any[])
+        .filter(fs => {
+          // Filter out existing_parent versions for new admission context
+          if (newAdmissionOnly && fs.version?.toLowerCase().includes("existing_parent")) return false;
+          return true;
+        })
+        .map(fs => {
+          const course = fs.courses as any;
+          const dept = course?.departments;
+          const inst = dept?.institutions;
+          const campus = inst?.campuses;
+
+          const items: FeeItem[] = (fs.fee_structure_items || []).map((i: any) => ({
+            id: i.id,
+            fee_code_id: i.fee_code_id,
+            code: i.fee_codes?.code || "—",
+            name: i.fee_codes?.name || "—",
+            category: i.fee_codes?.category || "other",
+            term: i.term,
+            amount: Number(i.amount),
+            due_day: i.due_day,
+            due_month: i.due_month ?? null,
+            due_year_offset: i.due_year_offset ?? 0,
+            due_date: i.due_date ?? null,
+          }));
+
+          return {
+            id: fs.id,
+            version: fs.version,
+            is_active: fs.is_active,
+            course_id: fs.course_id,
+            course_name: course?.name || "—",
+            course_code: course?.code || "",
+            course_slug: course?.webflow_slug || null,
+            campus_name: campus?.name || "—",
+            institution_name: inst?.name || "—",
+            session_name: (fs.admission_sessions as any)?.name || "—",
+            metadata: fs.metadata,
+            items,
+            total: items.reduce((s, i) => s + i.amount, 0),
+          };
+        });
+
+      setStructures(mapped);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
+    fetchStructures();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, showFilter, newAdmissionOnly, canManage]);
+
+  useEffect(() => {
+    if (!canManage) return;
     (async () => {
-      let query = supabase
-        .from("fee_structures")
-        .select(`
-          id, version, is_active, course_id, metadata,
-          courses:course_id(id, name, code, webflow_slug,
-            departments!inner(name,
-              institutions!inner(name, campus_id,
-                campuses!inner(name)
-              )
-            )
-          ),
-          admission_sessions:session_id(name),
-          fee_structure_items(*, fee_codes:fee_code_id(code, name, category))
-        `)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-
-      if (courseId && !showFilter) {
-        query = query.eq("course_id", courseId);
-      }
-
-      const { data } = await query;
-
-      if (data) {
-        const mapped: FeeStructure[] = (data as any[])
-          .filter(fs => {
-            // Filter out existing_parent versions for new admission context
-            if (newAdmissionOnly && fs.version?.toLowerCase().includes("existing_parent")) return false;
-            return true;
-          })
-          .map(fs => {
-            const course = fs.courses as any;
-            const dept = course?.departments;
-            const inst = dept?.institutions;
-            const campus = inst?.campuses;
-
-            const items: FeeItem[] = (fs.fee_structure_items || []).map((i: any) => ({
-              code: i.fee_codes?.code || "—",
-              name: i.fee_codes?.name || "—",
-              category: i.fee_codes?.category || "other",
-              term: i.term,
-              amount: Number(i.amount),
-              due_day: i.due_day,
-            }));
-
-            return {
-              id: fs.id,
-              version: fs.version,
-              is_active: fs.is_active,
-              course_id: fs.course_id,
-              course_name: course?.name || "—",
-              course_code: course?.code || "",
-              course_slug: course?.webflow_slug || null,
-              campus_name: campus?.name || "—",
-              institution_name: inst?.name || "—",
-              session_name: (fs.admission_sessions as any)?.name || "—",
-              metadata: fs.metadata,
-              items,
-              total: items.reduce((s, i) => s + i.amount, 0),
-            };
-          });
-
-        setStructures(mapped);
-      }
-      setLoading(false);
+      const { data } = await supabase.from("fee_codes").select("id, code, name, category").order("name");
+      if (data) setFeeCodes(data as any[]);
     })();
-  }, [courseId, showFilter, newAdmissionOnly]);
+  }, [canManage]);
+
+  const handleDeleteItem = async (itemId: string) => {
+    if (!window.confirm("Delete this fee item? This cannot be undone.")) return;
+    const { error } = await supabase.rpc("delete_fee_structure_item", { _item_id: itemId });
+    if (error) {
+      toast({ title: "Could not delete fee item", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Fee item deleted" });
+    fetchStructures();
+  };
+
+  const handleInlineDueDate = async (fs: FeeStructure, item: FeeItem, newValue: string) => {
+    if ((item.due_date ? item.due_date.slice(0, 10) : "") === newValue) return;
+    const { error } = await supabase.rpc("upsert_fee_structure_item", {
+      _fee_structure_id: fs.id,
+      _fee_code_id: item.fee_code_id,
+      _term: item.term,
+      _amount: item.amount,
+      _due_day: item.due_day ?? 10,
+      _item_id: item.id,
+      _due_month: item.due_month ?? null,
+      _due_year_offset: item.due_year_offset ?? 0,
+      _due_date: newValue || null,
+    });
+    if (error) {
+      toast({ title: "Could not update due date", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Due date updated" });
+    fetchStructures();
+  };
+
+  const handleToggleActive = async (fs: FeeStructure) => {
+    const { error } = await supabase.rpc("set_fee_structure_active", { _id: fs.id, _active: !fs.is_active });
+    if (error) {
+      toast({ title: "Could not update fee structure", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: fs.is_active ? "Fee structure deactivated" : "Fee structure activated" });
+    fetchStructures();
+  };
 
   // Auto-expand single result
   useEffect(() => {
@@ -526,6 +611,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     {fs.campus_name} · {fs.institution_name}
                   </span>
                   <Badge variant="outline" className="text-[8px] px-1 py-0">{versionLabel(fs.version)}</Badge>
+                  {!fs.is_active && <Badge variant="destructive" className="text-[8px] px-1 py-0">Inactive</Badge>}
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -543,6 +629,18 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
               </div>
             </button>
+
+            {/* Manage bar (super_admin / accountant only) */}
+            {canManage && (
+              <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-border/40 bg-muted/10">
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => handleToggleActive(fs)}>
+                  <Power className="h-3 w-3" /> {fs.is_active ? "Deactivate" : "Activate"}
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => setEditDialog({ feeStructureId: fs.id, item: null })}>
+                  <Plus className="h-3 w-3" /> Add fee item
+                </Button>
+              </div>
+            )}
 
             {/* Expanded */}
             {isExpanded && (() => {
@@ -563,7 +661,37 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                   <tr key={i} className="border-b border-border/40 last:border-0">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{formatFeeTerm(item.term)}</td>
+                    <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                      {canManage ? (
+                        <input
+                          type="date"
+                          value={item.due_date ? item.due_date.slice(0, 10) : ""}
+                          onChange={e => handleInlineDueDate(fs, item, e.target.value)}
+                          className="rounded border border-input bg-background px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring/30"
+                        />
+                      ) : (
+                        dueHint(item) || "—"
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
+                    {canManage && (
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setEditDialog({ feeStructureId: fs.id, item: { id: item.id, fee_code_id: item.fee_code_id, term: item.term, amount: item.amount, due_day: item.due_day, due_month: item.due_month, due_year_offset: item.due_year_offset, due_date: item.due_date } })}
+                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          title="Edit"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item.id)}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ));
 
@@ -580,7 +708,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                         <tr className="bg-muted/30">
                           <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
                           <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                          <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Due Date</th>
                           <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                          {canManage && <th className="px-3 py-1.5"></th>}
                         </tr>
                       </thead>
                       <tbody>{renderItemRows(items)}</tbody>
@@ -658,7 +788,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                                   <thead><tr className="bg-muted/30">
                                     <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
                                     <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Due Date</th>
                                     <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                                    {canManage && <th className="px-3 py-1.5"></th>}
                                   </tr></thead>
                                   <tbody>{renderItemRows(selectedItems)}</tbody>
                                 </table>
@@ -682,7 +814,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                         <thead><tr className="bg-muted/50">
                           <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Fee</th>
                           <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Term</th>
+                          <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Due Date</th>
                           <th className="px-3 py-2 text-right font-semibold text-muted-foreground uppercase">Amount</th>
+                          {canManage && <th className="px-3 py-2"></th>}
                         </tr></thead>
                         <tbody>{renderItemRows(sections.other)}</tbody>
                       </table>
@@ -746,7 +880,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                               <thead><tr className="bg-muted/30">
                                 <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
                                 <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Due Date</th>
                                 <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                                {canManage && <th className="px-3 py-1.5"></th>}
                               </tr></thead>
                               <tbody>{renderItemRows(selectedZoneItems)}</tbody>
                             </table>
@@ -765,6 +901,17 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
           </div>
         );
       })}
+
+      {canManage && editDialog && (
+        <FeeStructureEditDialog
+          open={!!editDialog}
+          onOpenChange={(open) => { if (!open) setEditDialog(null); }}
+          feeStructureId={editDialog.feeStructureId}
+          feeCodes={feeCodes}
+          item={editDialog.item}
+          onSaved={fetchStructures}
+        />
+      )}
     </div>
   );
 }
