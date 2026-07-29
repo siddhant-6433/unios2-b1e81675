@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Force real UTC timestamps onto newly-added Supabase migrations.
+# Auto-installed via package.json "prepare" (git config core.hooksPath .githooks).
+set -e
+node scripts/stamp-staged-migrations.mjs
