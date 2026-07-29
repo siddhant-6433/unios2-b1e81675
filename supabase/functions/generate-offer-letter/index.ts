@@ -1210,7 +1210,15 @@ Deno.serve(async (req) => {
       .select("registration_no, document_url, notes, registered_at")
       .eq("lead_id", offer.lead_id)
       .maybeSingle();
-    const cahetRegistration = cahetRegistrationRow || cahetRegistrationFromApplication(applicationRow);
+    const { data: cahetExamRow } = !cahetRegistrationRow
+      ? await admin
+          .from("exam_registrations")
+          .select("registration_no, document_url, notes, registered_at")
+          .eq("lead_id", offer.lead_id)
+          .eq("exam_code", "cahet")
+          .maybeSingle()
+      : { data: null };
+    const cahetRegistration = cahetRegistrationRow || (cahetExamRow?.registration_no ? cahetExamRow : null) || cahetRegistrationFromApplication(applicationRow);
     if (isBptOrBmritCourseName(course?.name) && !cahetRegistration) {
       return new Response(JSON.stringify({
         error: "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.",
@@ -1225,7 +1233,15 @@ Deno.serve(async (req) => {
       .select("registration_no, document_url, notes, registered_at")
       .eq("lead_id", offer.lead_id)
       .maybeSingle();
-    const updeledRegistration = updeledRegistrationRow || updeledRegistrationFromApplication(applicationRow);
+    const { data: updeledExamRow } = !updeledRegistrationRow
+      ? await admin
+          .from("exam_registrations")
+          .select("registration_no, document_url, notes, registered_at")
+          .eq("lead_id", offer.lead_id)
+          .eq("exam_code", "updeled")
+          .maybeSingle()
+      : { data: null };
+    const updeledRegistration = updeledRegistrationRow || (updeledExamRow?.registration_no ? updeledExamRow : null) || updeledRegistrationFromApplication(applicationRow);
     if (isDeledCourseName(course?.name) && !updeledRegistration) {
       return new Response(JSON.stringify({
         error: "UPDELED registration details are required before issuing an offer letter for D.El.Ed.",

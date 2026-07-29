@@ -11,15 +11,18 @@ export interface UpdeledRegistrationDetails {
 type UpdeledRegistrationRow = Omit<UpdeledRegistrationDetails, "document_signed_url">;
 
 export interface SupabaseUpdeledClient {
-  from(table: "updeled_registrations"): {
+  from(table: string): {
     select(columns: string): {
-      eq(column: "lead_id", value: string): {
-        maybeSingle(): Promise<{ data: UpdeledRegistrationRow | null }>;
+      eq(column: string, value: string): {
+        eq(column: string, value: string): {
+          maybeSingle(): Promise<{ data: Record<string, unknown> | null }>;
+        };
+        maybeSingle(): Promise<{ data: Record<string, unknown> | null }>;
       };
     };
   };
   storage: {
-    from(bucket: "updeled-registrations"): {
+    from(bucket: string): {
       createSignedUrl(path: string, expiresIn: number): Promise<{ data: { signedUrl?: string } | null }>;
     };
   };
@@ -75,24 +78,58 @@ export async function fetchUpdeledRegistration(
   leadId: string | null | undefined,
 ): Promise<UpdeledRegistrationDetails | null> {
   if (!leadId) return null;
+
+  // Try the legacy updeled_registrations table first.
   const { data } = await supabase
     .from("updeled_registrations")
     .select("id, lead_id, registration_no, document_url, notes, registered_at")
     .eq("lead_id", leadId)
     .maybeSingle();
 
-  if (!data) return null;
+  if (data) {
+    let documentSignedUrl: string | null = null;
+    if (data.document_url) {
+      const { data: signed } = await supabase.storage
+        .from("updeled-registrations")
+        .createSignedUrl(String(data.document_url), 60 * 60);
+      documentSignedUrl = signed?.signedUrl || null;
+    }
+    return {
+      id: String(data.id),
+      lead_id: String(data.lead_id),
+      registration_no: String(data.registration_no),
+      document_url: (data.document_url as string) || null,
+      notes: (data.notes as string) || null,
+      registered_at: (data.registered_at as string) || null,
+      document_signed_url: documentSignedUrl,
+    };
+  }
+
+  // Fall back to the generalized exam_registrations table.
+  const { data: examRow } = await supabase
+    .from("exam_registrations")
+    .select("id, lead_id, registration_no, document_url, notes, registered_at")
+    .eq("lead_id", leadId)
+    .eq("exam_code", "updeled")
+    .maybeSingle();
+
+  if (!examRow || !examRow.registration_no) return null;
 
   let documentSignedUrl: string | null = null;
-  if (data.document_url) {
+  if (examRow.document_url) {
     const { data: signed } = await supabase.storage
-      .from("updeled-registrations")
-      .createSignedUrl(data.document_url, 60 * 60);
+      .from("exam-registrations")
+      .createSignedUrl(String(examRow.document_url), 60 * 60);
     documentSignedUrl = signed?.signedUrl || null;
   }
 
   return {
-    ...(data as UpdeledRegistrationDetails),
+    id: String(examRow.id),
+    lead_id: String(examRow.lead_id),
+    registration_no: String(examRow.registration_no),
+    document_url: (examRow.document_url as string) || null,
+    notes: (examRow.notes as string) || null,
+    registered_at: (examRow.registered_at as string) || null,
     document_signed_url: documentSignedUrl,
   };
 }
