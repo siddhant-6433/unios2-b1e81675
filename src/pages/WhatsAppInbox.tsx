@@ -2551,13 +2551,17 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const totalUnrepliedConvs = modeFiltered.filter(c => c.unread_count > 0).length;
 
   const leadConvs = modeFiltered.filter(c => c.lead_id && !isOtherCategory(c));
-  const leadUnreplied = leadConvs.filter(c => c.unread_count > 0).length;
   const staffConvs2 = [...modeFiltered.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...syntheticStaffConvs];
-  const staffUnreplied = staffConvs2.filter(c => c.unread_count > 0).length;
   const jobConvs = modeFiltered.filter(c => c.lead_person_role === "job_applicant");
-  const jobUnreplied = jobConvs.filter(c => c.unread_count > 0).length;
   const otherConvs = modeFiltered.filter(c => c.lead_person_role === "vendor" || c.lead_person_role === "other");
-  const otherUnreplied = otherConvs.filter(c => c.unread_count > 0).length;
+  // Per-tab unreplied indicator counts distinct unread MESSAGES (sum of unread_count),
+  // matching the sidebar/header "N unreplied" badge (action_badge_counts.wa_unread,
+  // which counts unreplied inbound messages). Counting conversations instead made
+  // the inbox read 23 while every other surface read 34.
+  const leadUnreadMsgs = leadConvs.reduce((s, c) => s + c.unread_count, 0);
+  const staffUnreadMsgs = staffConvs2.reduce((s, c) => s + c.unread_count, 0);
+  const jobUnreadMsgs = jobConvs.reduce((s, c) => s + c.unread_count, 0);
+  const otherUnreadMsgs = otherConvs.reduce((s, c) => s + c.unread_count, 0);
   const opsFilters = [
     { key: "all" as const, label: "All ops", count: modeFiltered.length },
     { key: "reply_window" as const, label: "Reply now", count: modeFiltered.filter(isReplyWindowConversation).length },
@@ -2711,11 +2715,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             {/* Filter pills */}
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
-                { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnrepliedConvs, color: "bg-primary/10 text-primary border-primary/30" },
-                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-info/5 text-info-foreground border-info/20" },
-                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
-                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-primary/5 text-primary border-primary/20" },
-                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-warning/5 text-warning-foreground border-warning/20" },
+                { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnreadMsgs, color: "bg-primary/10 text-primary border-primary/30" },
+                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreadMsgs, color: "bg-info/5 text-info-foreground border-info/20" },
+                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreadMsgs, color: "bg-warning/5 text-warning-foreground border-warning/20" },
               ]).map((t) => (
                 <button
                   key={t.key}

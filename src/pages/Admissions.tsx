@@ -1434,8 +1434,20 @@ const Admissions = () => {
       // Union of two sources: lead_followups view + AI-call records needing
       // human follow-up. Deduped via Set so a lead in both sources only
       // surfaces once in the filtered table.
+      // Scope the overdue_followups fetch to this counsellor. The view is huge
+      // globally (every counsellor's pending followups) and .limit(500) takes the
+      // 500 oldest across ALL counsellors — so a counsellor's own leads get
+      // crowded out and the drill-down under-counts (e.g. card 344 → table 9).
+      // Scoping by counsellor_id keeps the fetch to their own set (well under 500).
+      // ponytail: ai_call_records has no counsellor column/FK to scope client-side;
+      // it's small globally (<500) so it isn't truncated, and the list query's own
+      // counsellor scope filters it. Revisit with a scoped RPC if it grows past 500.
+      let overdueFollowupQuery = (supabase.from("overdue_followups" as any) as any).select("lead_id");
+      if (role === "counsellor" && profile?.id) {
+        overdueFollowupQuery = overdueFollowupQuery.eq("counsellor_id", profile.id);
+      }
       const [{ data: fu }, { data: aiFu }] = await Promise.all([
-        (supabase.from("overdue_followups" as any) as any).select("lead_id").limit(500),
+        overdueFollowupQuery.limit(500),
         (supabase.from("ai_call_records" as any) as any)
           .select("lead_id").eq("needs_followup", true).is("followup_done_at", null).limit(500),
       ]);
@@ -2119,7 +2131,13 @@ const Admissions = () => {
         <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-sm">
           <Filter className="h-3.5 w-3.5 text-primary" />
           <span className="font-medium text-foreground">
-            Showing {actionLeadIds.size} lead{actionLeadIds.size !== 1 ? "s" : ""} from <span className="text-primary">{actionBucketLabel}</span>
+            {/* Show the real (scope-filtered) result count, not the pre-scope
+                candidate set size. actionLeadIds is a global union of
+                overdue_followups ∪ ai_call_records (each RLS-unscoped, e.g.
+                ai_call_records SELECT policy = `true`), so for a counsellor its
+                .size counts every counsellor's leads while the table only
+                renders this counsellor's — the "103 vs 9" contradiction. */}
+            Showing {filteredCount} lead{filteredCount !== 1 ? "s" : ""} from <span className="text-primary">{actionBucketLabel}</span>
           </span>
           <button
             onClick={() => { setActionLeadIds(null); setActionBucketLabel(""); }}
