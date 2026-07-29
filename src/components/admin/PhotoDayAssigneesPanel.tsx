@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, Loader2, Search, ShieldAlert } from "lucide-react";
+import { Camera, ChevronDown, ChevronRight, Loader2, Search, ShieldAlert } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +27,7 @@ export function PhotoDayAssigneesPanel() {
   const [rows, setRows] = useState<StaffRow[]>([]);
   const [search, setSearch] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   const checkAccess = useCallback(async () => {
     if (!user?.id) {
@@ -72,8 +73,8 @@ export function PhotoDayAssigneesPanel() {
   }, [checkAccess]);
 
   useEffect(() => {
-    if (allowed) loadStaff();
-  }, [allowed, loadStaff]);
+    if (allowed && open && rows.length === 0) loadStaff();
+  }, [allowed, open, rows.length, loadStaff]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -125,25 +126,40 @@ export function PhotoDayAssigneesPanel() {
   return (
     <div className="print:hidden rounded-xl border border-border bg-card p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Camera className="h-4 w-4 text-primary" />
-            Photo Day assignees
-          </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Grant capture access to any staff member on your campus. They use the mobile app class-by-class.
-          </p>
-        </div>
         <button
           type="button"
-          onClick={loadStaff}
-          disabled={loading}
-          className="rounded-lg border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-start gap-2 text-left"
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {open ? (
+            <ChevronDown className="mt-0.5 h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="mt-0.5 h-4 w-4 text-muted-foreground" />
+          )}
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Camera className="h-4 w-4 text-primary" />
+              Photo Day assignees
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Grant capture access to any staff member on your campus. They use the mobile app class-by-class.
+            </p>
+          </div>
         </button>
+        {open && (
+          <button
+            type="button"
+            onClick={loadStaff}
+            disabled={loading}
+            className="rounded-lg border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        )}
       </div>
 
+      {open && (
+      <>
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -195,6 +211,8 @@ export function PhotoDayAssigneesPanel() {
             </div>
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

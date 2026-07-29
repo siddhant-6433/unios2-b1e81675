@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
@@ -6,6 +6,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import {
   CreditCard,
   Download,
+  FileSpreadsheet,
   Loader2,
   Printer,
   Search,
@@ -18,11 +19,17 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/state-fields";
 import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
+import { whiteBgCutout } from "@/lib/whiteBgCutout";
+import { QRCodeSVG } from "qrcode.react";
+import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { PhotoDayAssigneesPanel } from "@/components/admin/PhotoDayAssigneesPanel";
 
 type CardMode = "students" | "employees";
 
 type PhotoFilter = "all" | "missing" | "has" | "ai_pending";
+
+/** Card theme = student_type (drives full-card colour). "employee" always renders NIMT Blue. */
+type StudentType = "day_scholar" | "day_boarder" | "boarder" | "employee";
 
 interface CardPerson {
   id: string;
@@ -40,6 +47,66 @@ interface CardPerson {
   photoProcessedUrl: string | null;
   extraLabel: string;
   extraValue: string;
+  // School ID-card fields (students only; empty for employees)
+  fatherName: string;
+  fatherPhone: string;
+  motherName: string;
+  motherPhone: string;
+  dob: string;
+  studentType: StudentType;
+  brand: StudentBrand;
+}
+
+interface CardThemeColors {
+  /** 5-tint "signal wave" ramp, light → dark. Last entry is the accent/band colour. */
+  ramp: [string, string, string, string, string];
+  accent: string;
+  category: string;
+}
+
+// Round-3 "beacon colour-shade waves": five tints of the brand hue per student type
+// (light → accent). Green/orange accents are the school-specified #00bf63 / #ff751f.
+const RAMP_BLUE: CardThemeColors["ramp"] = ["#E3EAFF", "#B3C6FF", "#7B9BFF", "#3D6FFF", "#0041F5"];
+const RAMP_GREEN: CardThemeColors["ramp"] = ["#DBF6E9", "#B2ECD0", "#73DCA9", "#38CD85", "#00BF63"];
+const RAMP_ORANGE: CardThemeColors["ramp"] = ["#FFECE0", "#FFD6BC", "#FFB384", "#FF9350", "#FF751F"];
+
+function cardTheme(person: CardPerson): CardThemeColors {
+  switch (person.studentType) {
+    case "boarder":
+      return { ramp: RAMP_GREEN, accent: RAMP_GREEN[4], category: "Boarding" };
+    case "day_boarder":
+      return { ramp: RAMP_ORANGE, accent: RAMP_ORANGE[4], category: "Day Boarding" };
+    case "day_scholar":
+      return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category: "Day Scholar" };
+    default:
+      return { ramp: RAMP_BLUE, accent: RAMP_BLUE[4], category: "" };
+  }
+}
+
+/**
+ * The Round-3 Beacon design is scoped to NIMT Beacon School batches, which run at the
+ * Avantika II and Arthala campuses only. Everyone else (other campuses, employees) gets
+ * the plain generic card.
+ */
+function isBeaconStudent(person: CardPerson): boolean {
+  if (person.type !== "students") return false;
+  const c = person.campus.toLowerCase();
+  return c.includes("avantika ii") || c.includes("arthala");
+}
+
+/** Academic session (Apr–Mar) label + validity, e.g. "2026 – 27" / "MAR 2027". */
+function sessionInfo(): { label: string; validTill: string } {
+  const d = new Date();
+  const start = d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+  return { label: `${start} – ${String(start + 1).slice(2)}`, validTill: `MAR ${start + 1}` };
+}
+
+/** dob (ISO date) → "dd MMM yyyy"; guards null / invalid → "-". */
+function formatDob(dob: string): string {
+  if (!dob) return "-";
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 const CENTER_ROLES = new Set(["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"]);
@@ -56,6 +123,30 @@ function initials(name: string): string {
 
 function displayNo(admissionNo: string | null, preAdmissionNo: string | null): string {
   return admissionNo || preAdmissionNo || "-";
+}
+
+function photoStatus(row: CardPerson): string {
+  if (!row.photoUrl) return "Missing photo";
+  const aiPending =
+    !!row.photoOriginalUrl && !row.photoProcessedUrl && row.photoUrl === row.photoOriginalUrl;
+  return aiPending ? "AI pending" : "Has photo";
+}
+
+/** Download the given rows as a CSV (opens in Excel). Filename reflects the active photo filter. */
+function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
+  const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
+  const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [
+    headers.map(esc).join(","),
+    ...rows.map((r) => [r.name, r.primaryNo, r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
+  ];
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `id-card-${mode}-${filterLabel}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 /** Tiny list avatar: lazy-load a storage thumb; fall back to initials on error. */
@@ -96,6 +187,9 @@ const IdCardCenter = () => {
   const [groupFilter, setGroupFilter] = useState("all");
   const [photoFilter, setPhotoFilter] = useState<PhotoFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Transparent-background cutouts (Beacon front), keyed by student id. Generated on print.
+  const [cutouts, setCutouts] = useState<Record<string, string>>({});
+  const [preparing, setPreparing] = useState(false);
 
   const hasHrAccess = can("hr", "view");
   const canOpenCenter = role === "super_admin" || (role ? CENTER_ROLES.has(role) : false) || hasHrAccess;
@@ -164,7 +258,7 @@ const IdCardCenter = () => {
   async function fetchStudents() {
     let query = supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, photo_url, photo_original_url, photo_processed_url, blood_group, joining_class, section, campus_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_name, father_phone, mother_name, mother_phone, dob, student_type, photo_url, photo_original_url, photo_processed_url, blood_group, joining_class, section, campus_id, courses:course_id(name), batches:batch_id(name), campuses:campus_id(name)")
       .in("status", ["active", "pre_admitted"])
       .order("name", { ascending: true })
       .limit(1000);
@@ -183,6 +277,15 @@ const IdCardCenter = () => {
       const batch = relationName(student.batches);
       const grade = course !== "-" ? course : student.joining_class || "Student";
       const section = student.section && student.section !== grade ? ` / ${student.section}` : "";
+      const campusName = relationName(student.campuses);
+      // Legacy/imported rows use "hostel"; newer forms write "boarder"/"day_boarder". Normalise.
+      const rawType = String(student.student_type || "").toLowerCase().trim();
+      const studentType: StudentType =
+        rawType === "boarder" || rawType === "hostel"
+          ? "boarder"
+          : rawType === "day_boarder"
+            ? "day_boarder"
+            : "day_scholar";
       return {
         id: student.id,
         type: "students",
@@ -190,7 +293,7 @@ const IdCardCenter = () => {
         primaryNo: displayNo(student.admission_no, student.pre_admission_no),
         subtitle: `${grade}${section}`,
         group: grade,
-        campus: relationName(student.campuses),
+        campus: campusName,
         phone: student.phone || student.father_phone || "-",
         email: "-",
         bloodGroup: student.blood_group || "-",
@@ -199,7 +302,14 @@ const IdCardCenter = () => {
         photoProcessedUrl: student.photo_processed_url || null,
         extraLabel: "Batch",
         extraValue: batch,
-      };
+        fatherName: student.father_name || "-",
+        fatherPhone: student.father_phone || "-",
+        motherName: student.mother_name || "-",
+        motherPhone: student.mother_phone || "-",
+        dob: student.dob || "",
+        studentType,
+        brand: brandForStudentOwner({ campusName, courseName: course !== "-" ? course : null }),
+      } satisfies CardPerson;
     }));
   }
 
@@ -253,6 +363,13 @@ const IdCardCenter = () => {
         photoProcessedUrl: null,
         extraLabel: "Department",
         extraValue: profile.department || "-",
+        fatherName: "-",
+        fatherPhone: "-",
+        motherName: "-",
+        motherPhone: "-",
+        dob: "",
+        studentType: "employee",
+        brand: NIMT_EDU_BRAND,
       } satisfies CardPerson;
     }));
   }
@@ -282,9 +399,29 @@ const IdCardCenter = () => {
     setSelectedIds(new Set());
   }
 
-  function printCards(rows: CardPerson[]) {
+  async function printCards(rows: CardPerson[]) {
     if (rows.length === 0) return;
-    window.setTimeout(() => window.print(), 50);
+    // Beacon fronts show the student cut out over the wave rings — build transparent
+    // cutouts (from the pure-white studio bg) for any selected Beacon student first.
+    const pending = rows.filter((row) => isBeaconStudent(row) && row.photoUrl && !cutouts[row.id]);
+    if (pending.length) {
+      setPreparing(true);
+      const done = await Promise.all(
+        pending.map(async (row) => {
+          try {
+            return [row.id, await whiteBgCutout(row.photoUrl as string)] as const;
+          } catch (err) {
+            console.warn("[IdCardCenter] cutout failed for", row.name, err);
+            return null;
+          }
+        }),
+      );
+      setCutouts((prev) => ({ ...prev, ...Object.fromEntries(done.filter(Boolean) as [string, string][]) }));
+      setPreparing(false);
+      // let React paint the cutouts into the hidden print DOM before opening the dialog
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    window.setTimeout(() => window.print(), 60);
   }
 
   if (!canOpenCenter) {
@@ -302,32 +439,59 @@ const IdCardCenter = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap');
+        /* Round-3 card is authored at 400x634px; on screen shown natural, in print scaled to CR80 portrait. */
+        .dc-scale { width: 400px; height: 634px; }
+        .dc-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         @media print {
           body * { visibility: hidden !important; }
           #id-card-print, #id-card-print * { visibility: visible !important; }
-          #id-card-print { position: absolute; inset: 0; padding: 12mm; background: white; }
-          .id-card-sheet { display: grid !important; grid-template-columns: repeat(2, 86mm); gap: 8mm; align-items: start; }
+          #id-card-print { position: absolute; inset: 0; padding: 8mm; background: white; }
+          .id-card-sheet { display: grid !important; grid-template-columns: repeat(3, 54mm); gap: 6mm; align-items: start; }
           .id-card-pair { break-inside: avoid; page-break-inside: avoid; }
-          .print-card { width: 86mm !important; height: 54mm !important; box-shadow: none !important; border: 1px solid #d1d5db !important; }
+          .dc-scale { width: 54mm !important; height: 85.6mm !important; overflow: hidden; }
+          .dc-scale > .dc-card { transform: scale(0.5102); transform-origin: top left; box-shadow: none !important; }
+          .dc-card, .dc-card * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
       `}</style>
 
       <div className="print:hidden flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">ID Card Center</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            ID Card Center
+            {!loading && (
+              <span className="ml-3 text-base font-semibold text-muted-foreground">
+                {filteredRows.length} {mode === "students" ? "students" : "employees"}
+                {photoFilter !== "all" && (
+                  <span className="ml-1 text-primary">
+                    ({photoFilter === "missing" ? "missing photo" : photoFilter === "has" ? "has photo" : "AI pending"})
+                  </span>
+                )}
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Generate individual or bulk ID cards for students and eligible employees.
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => exportCsv(filteredRows, mode, photoFilter)}
+            disabled={filteredRows.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Export CSV
+          </Button>
           <Button variant="outline" className="gap-2" onClick={selectVisible} disabled={filteredRows.length === 0}>
             <UserCheck className="h-4 w-4" /> Select Visible
           </Button>
           <Button variant="outline" onClick={clearSelection} disabled={selectedIds.size === 0}>
             Clear
           </Button>
-          <Button className="gap-2" onClick={() => printCards(selectedRows)} disabled={selectedRows.length === 0}>
-            <Printer className="h-4 w-4" /> Print / Save PDF
+          <Button className="gap-2" onClick={() => printCards(selectedRows)} disabled={selectedRows.length === 0 || preparing}>
+            {preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            {preparing ? "Preparing photos…" : "Print / Save PDF"}
           </Button>
         </div>
       </div>
@@ -460,8 +624,17 @@ const IdCardCenter = () => {
         <div className="id-card-sheet">
           {selectedRows.map((row) => (
             <div key={row.id} className="id-card-pair space-y-3">
-              <IdCardFront person={row} />
-              <IdCardBack person={row} />
+              {isBeaconStudent(row) ? (
+                <>
+                  <div className="dc-scale"><IdCardFront person={row} cutoutUrl={cutouts[row.id]} /></div>
+                  <div className="dc-scale"><IdCardBack person={row} /></div>
+                </>
+              ) : (
+                <>
+                  <div className="dc-scale"><GenericFront person={row} /></div>
+                  <div className="dc-scale"><GenericBack person={row} /></div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -470,66 +643,272 @@ const IdCardCenter = () => {
   );
 };
 
-function IdCardFront({ person }: { person: CardPerson }) {
+// ── Round-3 "beacon colour-shade waves" card faces (authored at 400×634px) ──
+
+const DC_CARD: CSSProperties = {
+  width: 400,
+  height: 634,
+  background: "#fff",
+  borderRadius: 22,
+  overflow: "hidden",
+  position: "relative",
+  display: "flex",
+  flexDirection: "column",
+  boxShadow: "0 18px 44px rgba(0,65,245,.16)",
+  fontFamily: "'Poppins','Archivo',Helvetica,Arial,sans-serif",
+};
+
+/**
+ * Branded QR encoding the admission/employee number — the same key the app already uses
+ * for student lookup (library issue, etc.). Standard QR so any scanner reads it; the brand
+ * colour + centre logo make it distinctive. Level H tolerates the logo occlusion.
+ */
+function StudentQr({ value, color, brand }: { value: string; color: string; brand: StudentBrand }) {
+  if (!value || value === "-") return null;
   return (
-    <div className="print-card overflow-hidden rounded-xl border border-border bg-white shadow-sm">
-      <div className="h-[42%] bg-primary px-4 py-3 text-white">
-        <div className="text-[11px] font-semibold uppercase tracking-wide opacity-90">NIMT Educational Institutions</div>
-        <div className="mt-1 text-[9px] opacity-80">{person.type === "students" ? "Student Identity Card" : "Employee Identity Card"}</div>
+    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div style={{ background: "#fff", padding: 6, borderRadius: 10, border: "1px solid #EEF2F8", lineHeight: 0 }}>
+        <QRCodeSVG
+          value={value}
+          size={110}
+          level="H"
+          // Near-black modules: a coloured QR + centre logo drops below the scan margin (verified).
+          fgColor="#111111"
+          bgColor="#FFFFFF"
+          imageSettings={{ src: brand.logo, height: 26, width: 26, excavate: true }}
+        />
       </div>
-      <div className="-mt-9 flex flex-col items-center px-4 pb-3 text-center">
-        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-muted text-lg font-bold text-primary shadow-sm">
-          {person.photoUrl ? (
-            <img
-              src={idCardPhotoUrl(person.photoUrl) || person.photoUrl}
-              alt=""
-              width={80}
-              height={80}
-              // Print needs the image present — don't lazy-load selected card faces.
-              decoding="async"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            initials(person.name)
-          )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 10.5, letterSpacing: ".14em", color, fontWeight: 700 }}>SCAN TO IDENTIFY</span>
+        <span style={{ fontSize: 17, fontWeight: 700, color: "#1A1A1A", letterSpacing: ".06em" }}>{value}</span>
+        <span style={{ fontSize: 10, color: "#98A2B3", lineHeight: 1.4 }}>Library · Attendance · Transport</span>
+      </div>
+    </div>
+  );
+}
+
+function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: string }) {
+  const { ramp, accent, category } = cardTheme(person);
+  const { validTill } = sessionInfo();
+  const subline =
+    person.type === "students"
+      ? `${person.group} · ADM. NO. ${person.primaryNo}`.toUpperCase()
+      : `${person.subtitle} · EMP. NO. ${person.primaryNo}`.toUpperCase();
+  const badge = (category || (person.type === "students" ? "Student" : "Staff")).toUpperCase();
+  // Concentric "signal wave" rings behind the photo (light → dark, innermost is accent).
+  const rings: { d: number; b: number; w: number; c: string }[] = [
+    { d: 392, b: -186, w: 20, c: ramp[0] },
+    { d: 320, b: -150, w: 18, c: ramp[1] },
+    { d: 252, b: -116, w: 16, c: ramp[2] },
+    { d: 190, b: -84, w: 14, c: ramp[3] },
+    { d: 136, b: -56, w: 12, c: ramp[4] },
+  ];
+  return (
+    <div className="dc-card" style={DC_CARD}>
+      {/* lanyard slot */}
+      <div style={{ height: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+        <div style={{ width: 62, height: 9, borderRadius: 5, background: "#E3E7F0" }} />
+      </div>
+      {/* wordmark logo */}
+      <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 0" }}>
+        <img src={person.brand.logo} alt={person.brand.logoAlt} decoding="async" style={{ width: 234, height: 138, objectFit: "contain", display: "block" }} />
+      </div>
+      {/* photo + radiating rings */}
+      <div style={{ position: "relative", height: 296, display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
+        {rings.map((r, i) => (
+          <div key={i} style={{ position: "absolute", bottom: r.b, width: r.d, height: r.d, borderRadius: "50%", border: `${r.w}px solid ${r.c}` }} />
+        ))}
+        {cutoutUrl ? (
+          // Transparent cutout: student stands in front of the waves, no box.
+          <img src={cutoutUrl} alt="" decoding="async" style={{ position: "relative", zIndex: 1, width: 252, height: 288, objectFit: "contain", objectPosition: "center bottom" }} />
+        ) : person.photoUrl ? (
+          <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <img src={idCardPhotoUrl(person.photoUrl) || person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          </div>
+        ) : (
+          <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center", color: accent, fontSize: 56, fontWeight: 700 }}>
+            {initials(person.name)}
+          </div>
+        )}
+      </div>
+      {/* name band — name/subline on the left, scannable QR on the right */}
+      <div style={{ position: "relative", zIndex: 1, background: "#fff", padding: "14px 26px 10px", display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ color: "#1A1A1A", fontSize: 26, fontWeight: 700, lineHeight: 1.05, letterSpacing: "-.01em" }}>{person.name}</div>
+          <div style={{ color: accent, fontSize: 11.5, fontWeight: 600, letterSpacing: ".12em", fontFamily: "'Archivo',sans-serif" }}>{subline}</div>
         </div>
-        <div className="mt-2 text-[15px] font-bold leading-tight text-foreground">{person.name}</div>
-        <div className="text-[11px] font-medium text-muted-foreground">{person.subtitle}</div>
-        <div className="mt-2 grid w-full grid-cols-2 gap-x-3 gap-y-1 text-left text-[9px]">
-          <Info label={person.type === "students" ? "Admission No." : "Employee No."} value={person.primaryNo} />
-          <Info label={person.extraLabel} value={person.extraValue} />
-          <Info label="Phone" value={person.phone} />
-          <Info label="Blood Group" value={person.bloodGroup} />
-        </div>
+        {person.primaryNo && person.primaryNo !== "-" && (
+          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <div style={{ lineHeight: 0 }}>
+              <QRCodeSVG
+                value={person.primaryNo}
+                size={80}
+                level="H"
+                fgColor="#111111"
+                bgColor="#FFFFFF"
+                imageSettings={{ src: person.brand.logo, height: 18, width: 18, excavate: true }}
+              />
+            </div>
+            <span style={{ fontSize: 7, letterSpacing: ".18em", color: "#98A2B3", fontWeight: 700, fontFamily: "'Archivo',sans-serif" }}>SCAN</span>
+          </div>
+        )}
+      </div>
+      {/* 5-tint gradient bar */}
+      <div style={{ marginTop: "auto", display: "flex", height: 12 }}>
+        {ramp.map((c, i) => <div key={i} style={{ flex: 1, background: c }} />)}
+      </div>
+      {/* footer band */}
+      <div style={{ background: accent, padding: "15px 30px", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "'Archivo',sans-serif" }}>
+        <span style={{ color: "#fff", fontSize: 12.5, fontWeight: 800, letterSpacing: ".14em" }}>{badge}</span>
+        <span style={{ color: "rgba(255,255,255,.85)", fontSize: 12.5, fontWeight: 600, letterSpacing: ".08em" }}>VALID TILL {validTill}</span>
       </div>
     </div>
   );
 }
 
 function IdCardBack({ person }: { person: CardPerson }) {
+  const { ramp, accent } = cardTheme(person);
+  const { label: session } = sessionInfo();
+  const cells: { label: string; value: string; wide?: boolean }[] =
+    person.type === "students"
+      ? [
+          { label: "Date of Birth", value: formatDob(person.dob) },
+          { label: "Blood Group", value: person.bloodGroup },
+          { label: "Father's Name", value: person.fatherName },
+          { label: "Mobile", value: person.fatherPhone },
+          { label: "Mother's Name", value: person.motherName },
+          { label: "Mobile", value: person.motherPhone },
+          { label: "Campus", value: person.campus, wide: true },
+        ]
+      : [
+          { label: "Employee No.", value: person.primaryNo },
+          { label: "Department", value: person.extraValue },
+          { label: "Email", value: person.email, wide: true },
+          { label: "Contact", value: person.phone },
+          { label: "Campus", value: person.campus, wide: true },
+        ];
   return (
-    <div className="print-card rounded-xl border border-border bg-white p-4 shadow-sm">
-      <div className="text-[12px] font-bold text-primary">UniOS ID Verification</div>
-      <div className="mt-3 space-y-2 text-[10px]">
-        <Info label="Name" value={person.name} />
-        <Info label="Campus" value={person.campus} />
-        <Info label="Email" value={person.email} />
-        <Info label={person.type === "students" ? "Guardian / Emergency" : "Contact"} value={person.phone} />
+    <div className="dc-card" style={{ ...DC_CARD, fontFamily: "'Archivo',Helvetica,Arial,sans-serif" }}>
+      {/* header band with concentric ring flourish + reverse (white knockout) logo */}
+      <div style={{ position: "relative", background: accent, padding: "26px 30px 22px", display: "flex", flexDirection: "column", gap: 3, overflow: "hidden" }}>
+        <div style={{ position: "absolute", right: -70, top: -70, width: 190, height: 190, borderRadius: "50%", border: "16px solid rgba(255,255,255,.16)" }} />
+        <div style={{ position: "absolute", right: -46, top: -46, width: 126, height: 126, borderRadius: "50%", border: "14px solid rgba(255,255,255,.26)" }} />
+        <img
+          src={person.brand.logo}
+          alt={person.brand.logoAlt}
+          decoding="async"
+          // reverse logo: knock the wordmark out to solid white so it reads on any band colour
+          style={{ position: "absolute", right: 18, top: 14, width: 62, height: 62, objectFit: "contain", filter: "brightness(0) invert(1)" }}
+        />
+        <div style={{ position: "relative", color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: ".2em" }}>
+          {person.type === "students" ? "STUDENT IDENTITY CARD" : "EMPLOYEE IDENTITY CARD"}
+        </div>
+        <div style={{ position: "relative", color: "rgba(255,255,255,.7)", fontSize: 12, fontWeight: 600 }}>Session {session}</div>
       </div>
-      <div className="mt-4 rounded-lg bg-muted p-3 text-center text-[9px] leading-relaxed text-muted-foreground">
-        If found, please return this card to NIMT Educational Institutions.
-        This card remains property of the institution.
+      {/* gradient bar (dark → light) */}
+      <div style={{ display: "flex", height: 8 }}>
+        {[...ramp].reverse().map((c, i) => <div key={i} style={{ flex: 1, background: c }} />)}
       </div>
-      <div className="mt-4 h-8 rounded bg-foreground" />
+      {/* info grid */}
+      <div style={{ flex: 1, alignContent: "space-evenly", padding: "20px 30px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        {cells.map((cell, i) => (
+          <div key={i} style={{ gridColumn: cell.wide ? "1 / -1" : undefined, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: ".14em", color: "#98A2B3", fontWeight: 700 }}>{cell.label.toUpperCase()}</span>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "#1A1A1A", lineHeight: 1.35 }}>{cell.value || "—"}</span>
+          </div>
+        ))}
+      </div>
+      {/* QR (also on the front name band) + return notice */}
+      <div style={{ padding: "0 30px 26px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <StudentQr value={person.primaryNo} color={accent} brand={person.brand} />
+        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "#667085" }}>
+          If found, please return this card to {person.brand.name}. This card remains the property of the institution.
+        </div>
+      </div>
     </div>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+// ── Generic card (non-Beacon campuses + employees): plain neutral navy, no wave motif ──
+
+const GENERIC_NAVY = "#0B2A5B";
+
+function GenericFront({ person }: { person: CardPerson }) {
   return (
-    <div>
-      <div className="text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="truncate text-[10px] font-semibold text-foreground">{value || "-"}</div>
+    <div className="dc-card" style={{ ...DC_CARD, boxShadow: "0 18px 44px rgba(11,42,91,.16)" }}>
+      <div style={{ background: GENERIC_NAVY, padding: "22px 28px", display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 5, flex: "0 0 auto" }}>
+          <img src={person.brand.logo} alt={person.brand.logoAlt} decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        </div>
+        <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, lineHeight: 1.15 }}>{person.brand.name}</div>
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "18px 28px", textAlign: "center" }}>
+        <div style={{ width: 214, height: 248, borderRadius: 16, overflow: "hidden", border: `4px solid ${GENERIC_NAVY}`, background: "#EEF2F8", display: "flex", alignItems: "center", justifyContent: "center", color: GENERIC_NAVY, fontSize: 56, fontWeight: 700 }}>
+          {person.photoUrl ? (
+            <img src={idCardPhotoUrl(person.photoUrl) || person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            initials(person.name)
+          )}
+        </div>
+        <div style={{ marginTop: 20, color: "#1A1A1A", fontSize: 27, fontWeight: 700, lineHeight: 1.05 }}>{person.name}</div>
+        <div style={{ marginTop: 6, color: GENERIC_NAVY, fontSize: 12.5, fontWeight: 600, letterSpacing: ".14em", fontFamily: "'Archivo',sans-serif" }}>
+          {(person.type === "students" ? person.group : person.subtitle).toUpperCase()}
+        </div>
+      </div>
+      <div style={{ background: GENERIC_NAVY, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "'Archivo',sans-serif", color: "#fff" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: ".12em" }}>
+          {person.type === "students" ? "STUDENT" : "EMPLOYEE"}
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 600, letterSpacing: ".06em", color: "rgba(255,255,255,.85)" }}>
+          {person.type === "students" ? "Adm." : "Emp."} {person.primaryNo}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function GenericBack({ person }: { person: CardPerson }) {
+  const { label: session } = sessionInfo();
+  const cells: { label: string; value: string; wide?: boolean }[] =
+    person.type === "students"
+      ? [
+          { label: "Date of Birth", value: formatDob(person.dob) },
+          { label: "Blood Group", value: person.bloodGroup },
+          { label: "Father's Name", value: person.fatherName },
+          { label: "Mobile", value: person.fatherPhone },
+          { label: "Mother's Name", value: person.motherName },
+          { label: "Mobile", value: person.motherPhone },
+          { label: "Campus", value: person.campus, wide: true },
+        ]
+      : [
+          { label: "Employee No.", value: person.primaryNo },
+          { label: "Department", value: person.extraValue },
+          { label: "Email", value: person.email, wide: true },
+          { label: "Contact", value: person.phone },
+          { label: "Campus", value: person.campus, wide: true },
+        ];
+  return (
+    <div className="dc-card" style={{ ...DC_CARD, boxShadow: "0 18px 44px rgba(11,42,91,.16)", fontFamily: "'Archivo',Helvetica,Arial,sans-serif" }}>
+      <div style={{ background: GENERIC_NAVY, padding: "24px 28px", display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={{ color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: ".2em" }}>
+          {person.type === "students" ? "STUDENT IDENTITY CARD" : "EMPLOYEE IDENTITY CARD"}
+        </div>
+        <div style={{ color: "rgba(255,255,255,.7)", fontSize: 12, fontWeight: 600 }}>Session {session}</div>
+      </div>
+      <div style={{ flex: 1, alignContent: "space-evenly", padding: "20px 28px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        {cells.map((cell, i) => (
+          <div key={i} style={{ gridColumn: cell.wide ? "1 / -1" : undefined, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: ".14em", color: "#98A2B3", fontWeight: 700 }}>{cell.label.toUpperCase()}</span>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "#1A1A1A", lineHeight: 1.35 }}>{cell.value || "—"}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: "0 28px 26px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <StudentQr value={person.primaryNo} color={GENERIC_NAVY} brand={person.brand} />
+        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "#667085" }}>
+          If found, please return this card to {person.brand.name}. This card remains the property of the institution.
+        </div>
+      </div>
     </div>
   );
 }
