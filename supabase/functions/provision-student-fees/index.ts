@@ -328,7 +328,11 @@ async function provisionStudent(
       }
 
       for (const [term, totalWaiver] of waiverByTerm) {
-        const matching = rows.filter((r: any) => r.term === term && r.total_amount > 0);
+        let matching = rows.filter((r: any) => r.term === term && r.total_amount > 0);
+        // ponytail: alias for known term mismatches between offer waivers and fee structures
+        if (matching.length === 0 && term === "security_deposit") {
+          matching = rows.filter((r: any) => /^NB-SEC$/i.test(r.fee_code_code || "") && r.total_amount > 0);
+        }
         if (matching.length === 0) {
           console.warn(`[provision-student-fees] Waiver for term '${term}' (₹${totalWaiver}) has no matching ledger rows for student ${studentId}; skipping.`);
           continue;
@@ -456,6 +460,16 @@ async function provisionStudent(
     insertErr = res.error;
   }
   if (insertErr) throw new Error(`Insert failed: ${insertErr.message}`);
+
+  // Canonical reconciliation: the SQL function sync_fee_ledger_concessions is
+  // the single source of truth for how approved offer waivers (and manual
+  // concessions) map onto the ledger. The inline waiver pass above set an
+  // initial concession so token-credit could compute a post-waiver net; this
+  // call then re-derives the exact concessions from the approved waivers so
+  // provisioning and later waiver edits (via the offer_waivers trigger) always
+  // agree — no need to re-provision to pick up a waiver.
+  const { error: syncErr } = await db.rpc("sync_fee_ledger_concessions", { p_student_id: studentId });
+  if (syncErr) console.warn(`[provision-student-fees] concession sync failed for ${studentId}: ${syncErr.message}`);
 
   return newRows.length;
 }
