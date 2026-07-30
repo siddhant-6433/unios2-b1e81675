@@ -8,6 +8,8 @@ export interface StudentBrand {
   name: string;
   logo: string;
   logoAlt: string;
+  /** Logo aspect ratio (width / height) — keeps the QR-centre logo from stretching. Default 1. */
+  logoAspect?: number;
 }
 
 export interface StudentBrandInput {
@@ -23,6 +25,7 @@ export const NIMT_EDU_BRAND: StudentBrand = {
   name: "NIMT Educational Institutions",
   logo: nimtEduInstLogo,
   logoAlt: "NIMT Educational Institutions",
+  logoAspect: 1296 / 650, // wide wordmark (viewBox 1296×650)
 };
 
 export const NIMT_BEACON_BRAND: StudentBrand = {
