@@ -1,5 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -90,7 +90,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       .from("fee_ledger")
       .select("*, fee_codes:fee_code_id(code, name, category)")
       .eq("student_id", student.id)
-      .order("due_date");
+      .order("due_date").order("term");
     if (data) setFees(data);
     setLoading(false);
   };
@@ -185,6 +185,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const totalPaid = fees.reduce((s, f) => s + Number(f.paid_amount || 0), 0);
   const totalConcession = fees.reduce((s, f) => s + Number(f.concession || 0), 0);
   const totalBalance = fees.reduce((s, f) => s + Number(f.balance || 0), 0);
+
+  // Group consecutive rows by term (fees are due_date-ordered, so same-term
+  // rows are already adjacent) — lets tuition + boarding for a quarter read
+  // together under one header instead of as a flat list.
+  const feeGroups = useMemo(() => {
+    const groups: { term: string; rows: any[] }[] = [];
+    for (const f of fees) {
+      const last = groups[groups.length - 1];
+      if (last && last.term === f.term) last.rows.push(f);
+      else groups.push({ term: f.term, rows: [f] });
+    }
+    return groups;
+  }, [fees]);
 
   if (loading) {
     return <PageLoader />;
@@ -291,7 +304,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           <thead>
             <tr className="border-b border-border text-left">
               <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
-              <th className="px-4 py-3 font-medium text-muted-foreground">Term</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
@@ -304,49 +316,64 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           <tbody>
             {fees.length === 0 ? (
               <tr>
-                <td colSpan={isFinanceRole ? 9 : 8} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={isFinanceRole ? 8 : 7} className="px-4 py-8 text-center text-muted-foreground">
                   No fee records found. {canProvision && "Click 'Auto-Assign Fees' to provision."}
                 </td>
               </tr>
-            ) : fees.map((f: any) => (
-              <tr key={f.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                <td className="px-4 py-3">
-                  <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
-                  <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}</td>
-                <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-right text-muted-foreground">
-                  {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}
-                </td>
-                <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>
-                    {f.status === "paid" && <Check className="h-3 w-3" />}
-                    {f.status === "due" && <Clock className="h-3 w-3" />}
-                    {f.status === "overdue" && <AlertTriangle className="h-3 w-3" />}
-                    {f.status}
-                  </span>
-                </td>
-                {isFinanceRole && (
-                  <td className="px-4 py-3">
-                    {Number(f.paid_amount) === 0 && (
-                      <button
-                        onClick={() => handleRemoveUnpaid(f.id)}
-                        className="text-muted-foreground hover:text-destructive transition-colors"
-                        title="Remove unpaid item"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+            ) : feeGroups.map((g) => {
+              const gTotal = g.rows.reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+              const gConcession = g.rows.reduce((s: number, r: any) => s + Number(r.concession || 0), 0);
+              return (
+              <Fragment key={g.term}>
+                <tr className="bg-muted/40 border-b border-border">
+                  <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
+                    {defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
                   </td>
-                )}
-              </tr>
-            ))}
+                  <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
+                  <td colSpan={isFinanceRole ? 5 : 4} />
+                </tr>
+                {g.rows.map((f: any) => (
+                  <tr key={f.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 pl-6">
+                      <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
+                      <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
+                    <td className="px-4 py-3 text-right text-muted-foreground">
+                      {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>
+                        {f.status === "paid" && <Check className="h-3 w-3" />}
+                        {f.status === "due" && <Clock className="h-3 w-3" />}
+                        {f.status === "overdue" && <AlertTriangle className="h-3 w-3" />}
+                        {f.status}
+                      </span>
+                    </td>
+                    {isFinanceRole && (
+                      <td className="px-4 py-3">
+                        {Number(f.paid_amount) === 0 && (
+                          <button
+                            onClick={() => handleRemoveUnpaid(f.id)}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                            title="Remove unpaid item"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -149,7 +149,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
       if (sid) {
         queries.push(supabase.from("fee_ledger")
           .select("id, fee_code_id, term, total_amount, concession, paid_amount, balance, due_date, status, fee_codes:fee_code_id(name, code)")
-          .eq("student_id", sid).order("term").order("due_date"));
+          .eq("student_id", sid).order("due_date").order("term"));
       }
       const results = await Promise.all(queries);
       const lpRes = lid ? results[0] : { data: [] };
@@ -510,8 +510,22 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
         );
       })()}
 
-      {/* Ledger (flat, term shown per-row) */}
-      {ledger.length > 0 && (
+      {/* Ledger grouped by term */}
+      {ledger.length > 0 && (() => {
+        const TERM_LABELS: Record<string, string> = {
+          admission: "Admission", registration: "Registration",
+          q1: "Quarter 1 (Apr–Jun)", q2: "Quarter 2 (Jul–Sep)",
+          q3: "Quarter 3 (Oct–Dec)", q4: "Quarter 4 (Jan–Mar)",
+          year_1: "Year 1", year_2: "Year 2", year_3: "Year 3",
+          year_4: "Year 4", year_5: "Year 5",
+        };
+        const groups: { term: string; rows: LedgerRow[] }[] = [];
+        for (const r of ledger) {
+          const last = groups[groups.length - 1];
+          if (last && last.term === r.term) last.rows.push(r);
+          else groups.push({ term: r.term, rows: [r] });
+        }
+        return (
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
             <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
@@ -522,7 +536,6 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
               <thead>
                 <tr className="bg-muted/20 text-muted-foreground">
                   <th className="text-center px-3 py-2 font-medium">Fee</th>
-                  <th className="text-center px-3 py-2 font-medium">Term</th>
                   <th className="text-center px-3 py-2 font-medium">Total</th>
                   <th className="text-center px-3 py-2 font-medium">Concession</th>
                   <th className="text-center px-3 py-2 font-medium">Credits / Receipts</th>
@@ -532,87 +545,108 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
                 </tr>
               </thead>
               <tbody>
-                {ledger.map(r => {
-                  const isOpen = expandedRow === r.id;
-                  const rowLinks = links.filter(l => l.fee_ledger_id === r.id);
-                  const firstLink = rowLinks[0];
-                  const firstPayment = firstLink ? payments.find(x => x.id === firstLink.lead_payment_id) : null;
+                {groups.map(g => {
+                  const gTotal = g.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+                  const gConcession = g.rows.reduce((s, r) => s + Number(r.concession || 0), 0);
+                  const gBalance = g.rows.reduce((s, r) => s + Number(r.balance || 0), 0);
                   return (
-                    <Fragment key={r.id}>
-                      <tr
-                        onClick={() => rowLinks.length ? setExpandedRow(isOpen ? null : r.id) : null}
-                        className={`border-t border-border ${rowLinks.length ? "cursor-pointer hover:bg-muted/20" : ""}`}
-                      >
-                        <td className="px-3 py-2 text-center text-foreground">
-                          <span className="inline-flex items-center gap-1 justify-center">
-                            {rowLinks.length > 0 && (isOpen ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                            <span>{r.fee_codes?.name || r.fee_code_id.slice(0, 8)}</span>
-                            <span className="font-mono text-[10px] text-muted-foreground/70">{r.fee_codes?.code || ""}</span>
-                          </span>
+                    <Fragment key={g.term}>
+                      <tr className="bg-muted/40 border-t border-border">
+                        <td className="px-3 py-1.5 text-foreground font-semibold text-[11px]" colSpan={2}>
+                          {TERM_LABELS[g.term] || g.term.replace(/_/g, " ")}
                         </td>
-                        <td className="px-3 py-2 text-center text-muted-foreground capitalize">{r.term.replace(/_/g, " ")}</td>
-                        <td className="px-3 py-2 text-center text-foreground tabular-nums">{fmt(r.total_amount)}</td>
-                        <td className="px-3 py-2 text-center text-warning-foreground tabular-nums">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
-                        <td className="px-3 py-2 text-center">
-                          {r.paid_amount > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
-                              <span className="text-success font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
-                              {firstPayment && (
-                                <>
-                                  <span className="text-muted-foreground/60">·</span>
-                                  <span className="font-mono text-[10px] text-foreground">{firstPayment.receipt_no || "—"}</span>
-                                  {firstPayment.receipt_url && (
-                                    <a
-                                      href={firstPayment.receipt_url}
-                                      target="_blank"
-                                      rel="noopener"
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="text-success hover:underline text-[11px] font-medium"
-                                    >
-                                      PDF
-                                    </a>
-                                  )}
-                                  {rowLinks.length > 1 && (
-                                    <span className="text-[10px] text-muted-foreground">+{rowLinks.length - 1}</span>
-                                  )}
-                                </>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground/50">—</span>
-                          )}
+                        <td className="px-3 py-1.5 text-center text-[10px] text-muted-foreground tabular-nums">
+                          {gConcession > 0 ? fmt(gConcession) : ""}
                         </td>
-                        <td className="px-3 py-2 text-center tabular-nums">
-                          <span className={r.balance > 0 ? "text-destructive font-semibold" : "text-success font-semibold"}>{fmt(r.balance)}</span>
+                        <td />
+                        <td className="px-3 py-1.5 text-center text-[10px] tabular-nums font-semibold text-muted-foreground">
+                          {fmt(gTotal - gConcession)}
                         </td>
-                        <td className="px-3 py-2 text-center text-muted-foreground whitespace-nowrap">{fmtDate(r.due_date)}</td>
-                        <td className="px-3 py-2 text-center">
-                          <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            r.status === "paid" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
-                            : r.status === "overdue" ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
-                            : "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
-                          }`}>{r.status}</span>
-                        </td>
+                        <td colSpan={2} />
                       </tr>
-                      {isOpen && rowLinks.length > 0 && (
-                        <tr className="bg-muted/10 border-t border-border">
-                          <td colSpan={8} className="px-3 py-2 space-y-1">
-                            {rowLinks.map(l => {
-                              const p = payments.find(x => x.id === l.lead_payment_id);
-                              return (
-                                <div key={l.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                  <FileImage className="h-3 w-3" />
-                                  <span>Receipt <span className="font-mono text-foreground">{p?.receipt_no || "—"}</span></span>
-                                  <span>· {fmt(l.amount)} paid{l.concession_amount > 0 ? ` + ${fmt(l.concession_amount)} concession` : ""}</span>
-                                  <span>· {fmtDate(l.applied_at)}</span>
-                                  {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-success hover:underline font-medium">PDF</a>}
-                                  {l.notes && <span className="italic">· {l.notes}</span>}
-                                </div>
-                              );
-                            })}
-                          </td>
-                        </tr>
-                      )}
+                      {g.rows.map(r => {
+                        const isOpen = expandedRow === r.id;
+                        const rowLinks = links.filter(l => l.fee_ledger_id === r.id);
+                        const firstLink = rowLinks[0];
+                        const firstPayment = firstLink ? payments.find(x => x.id === firstLink.lead_payment_id) : null;
+                        return (
+                          <Fragment key={r.id}>
+                            <tr
+                              onClick={() => rowLinks.length ? setExpandedRow(isOpen ? null : r.id) : null}
+                              className={`border-t border-border/50 ${rowLinks.length ? "cursor-pointer hover:bg-muted/20" : ""}`}
+                            >
+                              <td className="px-3 py-2 text-center text-foreground">
+                                <span className="inline-flex items-center gap-1 justify-center">
+                                  {rowLinks.length > 0 && (isOpen ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                                  <span>{r.fee_codes?.name || r.fee_code_id.slice(0, 8)}</span>
+                                  <span className="font-mono text-[10px] text-muted-foreground/70">{r.fee_codes?.code || ""}</span>
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center text-foreground tabular-nums">{fmt(r.total_amount)}</td>
+                              <td className="px-3 py-2 text-center text-warning-foreground tabular-nums">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
+                              <td className="px-3 py-2 text-center">
+                                {r.paid_amount > 0 ? (
+                                  <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                                    <span className="text-success font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
+                                    {firstPayment && (
+                                      <>
+                                        <span className="text-muted-foreground/60">·</span>
+                                        <span className="font-mono text-[10px] text-foreground">{firstPayment.receipt_no || "—"}</span>
+                                        {firstPayment.receipt_url && (
+                                          <a
+                                            href={firstPayment.receipt_url}
+                                            target="_blank"
+                                            rel="noopener"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="text-success hover:underline text-[11px] font-medium"
+                                          >
+                                            PDF
+                                          </a>
+                                        )}
+                                        {rowLinks.length > 1 && (
+                                          <span className="text-[10px] text-muted-foreground">+{rowLinks.length - 1}</span>
+                                        )}
+                                      </>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground/50">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-center tabular-nums">
+                                <span className={r.balance > 0 ? "text-destructive font-semibold" : "text-success font-semibold"}>{fmt(r.balance)}</span>
+                              </td>
+                              <td className="px-3 py-2 text-center text-muted-foreground whitespace-nowrap">{fmtDate(r.due_date)}</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                  r.status === "paid" ? "bg-success/10 text-success dark:bg-success/80/30 dark:text-success"
+                                  : r.status === "overdue" ? "bg-destructive/10 text-destructive dark:bg-destructive/80/30 dark:text-destructive/80"
+                                  : "bg-warning/10 text-warning-foreground dark:bg-warning/80/30 dark:text-warning"
+                                }`}>{r.status}</span>
+                              </td>
+                            </tr>
+                            {isOpen && rowLinks.length > 0 && (
+                              <tr className="bg-muted/10 border-t border-border">
+                                <td colSpan={7} className="px-3 py-2 space-y-1">
+                                  {rowLinks.map(l => {
+                                    const p = payments.find(x => x.id === l.lead_payment_id);
+                                    return (
+                                      <div key={l.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                        <FileImage className="h-3 w-3" />
+                                        <span>Receipt <span className="font-mono text-foreground">{p?.receipt_no || "—"}</span></span>
+                                        <span>· {fmt(l.amount)} paid{l.concession_amount > 0 ? ` + ${fmt(l.concession_amount)} concession` : ""}</span>
+                                        <span>· {fmtDate(l.applied_at)}</span>
+                                        {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-success hover:underline font-medium">PDF</a>}
+                                        {l.notes && <span className="italic">· {l.notes}</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                     </Fragment>
                   );
                 })}
@@ -620,7 +654,8 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
             </table>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {isSuperAdmin && (
         <>
