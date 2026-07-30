@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2,
   CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
-  Globe, MousePointer, Flame, CheckCircle,
+  Globe, MousePointer, Flame, CheckCircle, UserPlus, Users,
 } from "lucide-react";
 import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
@@ -233,6 +233,32 @@ const ACTIVITY_CONFIG: Record<string, {
     bg: "bg-slate-500 text-white",
     getTitle: () => "Info Updated",
   },
+  assignment: {
+    icon: <UserPlus className="h-3.5 w-3.5" />,
+    bg: "bg-indigo-500 text-white",
+    getTitle: (a) => {
+      const d = (a.description || "").toLowerCase();
+      if (d.includes("unassigned") || d.includes("returned to bucket")) return "Lead unassigned";
+      if (d.includes("reassigned") || d.includes(" from ")) return "Lead reassigned";
+      if (d.includes("picked from") || d.includes("self-picked")) return "Lead picked from bucket";
+      if (d.includes("auto-assigned") || d.includes("ai priority") || d.includes("round-robin")) {
+        return "Lead auto-assigned";
+      }
+      return "Lead assigned";
+    },
+    getSub: (a) => a.description || null,
+  },
+  system: {
+    icon: <Users className="h-3.5 w-3.5" />,
+    bg: "bg-slate-600 text-white",
+    getTitle: (a) => {
+      const d = (a.description || "").toLowerCase();
+      if (d.includes("auto-assigned") || d.includes("assigned")) return "Assignment (system)";
+      if (d.includes("returned to bucket") || d.includes("reclaimed")) return "Returned to bucket";
+      return "System";
+    },
+    getSub: (a) => a.description || null,
+  },
   // Engagement events
   page_view: {
     icon: <Globe className="h-3.5 w-3.5" />,
@@ -382,7 +408,12 @@ function TimelineList({ activities, leadId, leadPhone }: { activities: any[]; le
           const config = ACTIVITY_CONFIG[a.type] || DEFAULT_CONFIG;
           const title = config.getTitle(a);
           const subtitle = config.getSub?.(a) ?? (a.type === "stage_change" ? a.description?.replace(/^Stage changed from /i, "") : null);
-          const showBody = a.description && a.type !== "stage_change" && a.type !== "lead_created";
+          // assignment/system put the full sentence in the subtitle already
+          const showBody = a.description
+            && a.type !== "stage_change"
+            && a.type !== "lead_created"
+            && a.type !== "assignment"
+            && a.type !== "system";
 
           // Find recording for this AI call activity
           let recordingUrl: string | null = null;
