@@ -514,6 +514,18 @@ Deno.serve(async (req) => {
         surl: selfUrl, furl: selfUrl,
       });
 
+      // Persist the txnid on the pending row so reconcile-lead-payments can
+      // look this transaction up later. Without it a payment that never
+      // produced a surl POST (UPI app → user closes the tab) is unfindable.
+      // settleLeadPaymentRow overwrites it with the real easepayid on settle.
+      const { error: txnPersistErr } = await admin
+        .from("lead_payments")
+        .update({ transaction_ref: txnid })
+        .eq("id", lp.id);
+      if (txnPersistErr) {
+        console.warn("[easebuzz] persist lead txnid failed:", txnPersistErr.message);
+      }
+
       const res = await fetch(`${baseUrl}/payment/initiateLink`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1075,6 +1087,116 @@ Deno.serve(async (req) => {
           // Full attempts kept for deep debugging if needed
           attempts,
           skipped: skipped.slice(0, 10),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Reconcile pending LEAD payments (cron) ─────────────────────
+    // The surl return POST is the only settlement path for lead payments and
+    // it never fires when the candidate pays inside a UPI app and closes the
+    // browser tab. The S2S webhook is the other fallback, but it depends on
+    // dashboard config we don't control from code. This polls EaseBuzz for
+    // every pending lead_payments row that has an LP… txnid and settles the
+    // ones EaseBuzz reports as genuinely successful.
+    if (action === "reconcile-lead-payments") {
+      // Cron-only: this settles money, so require the service role key.
+      if ((req.headers.get("Authorization") || "") !== `Bearer ${serviceKey}`) {
+        return new Response(
+          JSON.stringify({ error: "Forbidden" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const lookbackDays = Math.min(Math.max(Number(body.lookback_days ?? 7), 1), 90);
+      const since = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+
+      const { data: pending, error: pendErr } = await admin
+        .from("lead_payments")
+        .select("id, amount, transaction_ref, lead_id, type, created_at")
+        .eq("gateway", "easebuzz")
+        .eq("status", "pending")
+        .like("transaction_ref", "LP%")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (pendErr) {
+        console.error("[easebuzz] reconcile-lead-payments query error:", pendErr.message);
+        return new Response(
+          JSON.stringify({ error: pendErr.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const settledRows: any[] = [];
+      const skipped: any[] = [];
+
+      for (const row of pending || []) {
+        const txnid = String(row.transaction_ref);
+
+        // Single-txn retrieve hash: SHA512(key|txnid|salt)
+        const hash = await sha512(`${merchantKey}|${txnid}|${merchantSalt}`);
+        let txn: any = null;
+        try {
+          const ebRes = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ key: merchantKey, txnid, hash }).toString(),
+          });
+          const parsed = JSON.parse(await ebRes.text());
+          if (parsed?.status === 1) {
+            txn = Array.isArray(parsed.data) ? parsed.data[0] : parsed.data;
+          }
+        } catch (e) {
+          skipped.push({ id: row.id, txnid, reason: "eb_fetch_error", detail: String(e) });
+          continue;
+        }
+
+        const ebStatus = String(txn?.status || "not_found").toLowerCase();
+        if (ebStatus !== "success") {
+          skipped.push({ id: row.id, txnid, reason: `eb_status_${ebStatus}` });
+          continue;
+        }
+
+        // Never settle for an amount that doesn't match what we asked for.
+        const got = easebuzzAmount(txn);
+        const expected = Number(row.amount || 0);
+        if (expected > 0 && Math.abs(expected - got) > 0.01) {
+          skipped.push({ id: row.id, txnid, reason: "amount_mismatch", expected, got });
+          continue;
+        }
+
+        const easepayid = String(txn.easepayid || txn.mihpayid || txnid).trim();
+        const settled = await settleLeadPaymentRow(admin, row.id, easepayid, {
+          gateway: "easebuzz",
+          source: "reconcile",
+          notify: true,
+          supabaseUrl,
+          serviceKey,
+        });
+        if (!settled.ok) {
+          skipped.push({ id: row.id, txnid, reason: "settle_failed", detail: settled.message });
+          continue;
+        }
+        if (settled.already) {
+          skipped.push({ id: row.id, txnid, reason: "already_settled" });
+          continue;
+        }
+        settledRows.push({ id: row.id, lead_id: row.lead_id, txnid, easepayid, amount: got });
+      }
+
+      console.log(`[easebuzz] reconcile-lead-payments: scanned=${pending?.length ?? 0} settled=${settledRows.length} skipped=${skipped.length}`);
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          lookback_days: lookbackDays,
+          scanned: pending?.length ?? 0,
+          settled: settledRows,
+          skipped_count: skipped.length,
+          skipped: skipped.slice(0, 30),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
