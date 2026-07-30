@@ -42,6 +42,33 @@ export function opaqueBounds(data: Uint8ClampedArray, w: number, h: number, alph
   return maxX < 0 ? null : { minX, minY, maxX, maxY };
 }
 
+/**
+ * Subject bounding box that ignores sparse noise: a row/column counts toward the box
+ * only if it holds a meaningful number of opaque pixels. Stray specks (JPEG artefacts,
+ * a leftover grey pixel below the shoulder) no longer inflate the box and leave the
+ * subject floating in transparent padding. Falls back to `opaqueBounds` if nothing clears
+ * the threshold. `minFrac` is the fraction of the perpendicular dimension a line must cover.
+ */
+export function subjectBounds(data: Uint8ClampedArray, w: number, h: number, minFrac = 0.03): Bounds | null {
+  const rowCount = new Int32Array(h);
+  const colCount = new Int32Array(w);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 16) {
+        rowCount[y]++;
+        colCount[x]++;
+      }
+    }
+  }
+  const rowMin = Math.max(3, Math.round(w * minFrac));
+  const colMin = Math.max(3, Math.round(h * minFrac));
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) if (rowCount[y] >= rowMin) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  for (let x = 0; x < w; x++) if (colCount[x] >= colMin) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+  if (maxX < 0 || maxY < 0) return opaqueBounds(data, w, h);
+  return { minX, minY, maxX, maxY };
+}
+
 /** Fraction of the subject's height added as transparent headroom above the head. */
 const HEADROOM = 0.14;
 
@@ -113,7 +140,7 @@ function reframeWithHeadroom(
   w: number,
   h: number,
 ): HTMLCanvasElement {
-  const b = opaqueBounds(data, w, h);
+  const b = subjectBounds(data, w, h);
   if (!b) return src; // fully transparent — leave as-is
 
   const sw = b.maxX - b.minX + 1;
