@@ -330,7 +330,7 @@ const Admissions = () => {
   const [exporting, setExporting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
-  const canExportLeads = isSuperAdmin || role === "principal";
+  const canExportLeads = isSuperAdmin || role === "admission_head" || role === "principal";
   const { myDefaults } = useTatDefaults();
   const canTransfer = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "campus_admin" || role === "principal";
