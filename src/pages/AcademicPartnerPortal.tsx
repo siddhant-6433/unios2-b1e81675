@@ -35,8 +35,11 @@ import {
   GraduationCap,
   IndianRupee,
   Loader2,
+  LogIn,
   MoreHorizontal,
   PhoneCall,
+  PhoneOff,
+  Receipt,
   Link as LinkIcon,
   Plus,
   FileText,
@@ -502,6 +505,11 @@ export default function AcademicPartnerPortal() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [savingAgentPhone, setSavingAgentPhone] = useState(false);
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
+  // The cloud call currently in progress. Kept until the counsellor drops it so
+  // the top-of-page call bar can offer an "End Call" that hangs up both Plivo legs.
+  const [activeCall, setActiveCall] = useState<{ leadId: string; name: string; callId: string } | null>(null);
+  const [endingCall, setEndingCall] = useState(false);
+  const [receiptsModalLead, setReceiptsModalLead] = useState<Lead | null>(null);
   const [payLinkLead, setPayLinkLead] = useState<{ id: string; name: string } | null>(null);
   const [loginLinkLead, setLoginLinkLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
   const [agentPhone, setAgentPhone] = useState("");
@@ -1119,7 +1127,7 @@ export default function AcademicPartnerPortal() {
       const { data, error } = await supabase.functions.invoke("manual-call", {
         body: { lead_id: lead.id },
       });
-      if (error || data?.error) {
+      if (error || data?.error || !data?.call_id) {
         toast({
           title: "Call failed",
           description: data?.error || error?.message || "Unable to start cloud call.",
@@ -1127,6 +1135,7 @@ export default function AcademicPartnerPortal() {
         });
         return;
       }
+      setActiveCall({ leadId: lead.id, name: lead.name, callId: data.call_id });
       toast({
         title: "Calling you",
         description: data?.message || `Pick up your phone to connect to ${lead.name}.`,
@@ -1135,6 +1144,28 @@ export default function AcademicPartnerPortal() {
       toast({ title: "Call failed", description: errorMessage(error) || "Unable to start cloud call.", variant: "destructive" });
     } finally {
       setCallingLeadId(null);
+    }
+  };
+
+  // Drop the in-progress cloud call. hangup_only tears down both Plivo legs
+  // (hanging up the counsellor A-leg drops the bridged student B-leg too).
+  const endActiveCall = async () => {
+    if (!activeCall || endingCall) return;
+    setEndingCall(true);
+    try {
+      const { error } = await supabase.functions.invoke("manual-call-cancel", {
+        body: { call_id: activeCall.callId, caller_user_id: user?.id, hangup_only: true },
+      });
+      if (error) {
+        toast({ title: "Couldn't end call", description: error.message || "Try again.", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Call ended", description: `Disconnected from ${activeCall.name}.` });
+      setActiveCall(null);
+    } catch (error: unknown) {
+      toast({ title: "Couldn't end call", description: errorMessage(error) || "Try again.", variant: "destructive" });
+    } finally {
+      setEndingCall(false);
     }
   };
 
@@ -1371,6 +1402,19 @@ export default function AcademicPartnerPortal() {
         ))}
       </div>
 
+      {activeCall && (
+        <div className="sticky top-2 z-30 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 shadow-sm">
+          <div className="flex items-center gap-2 text-sm text-emerald-900">
+            <PhoneCall className="h-4 w-4 animate-pulse text-emerald-600" />
+            <span>In call with <span className="font-semibold">{activeCall.name}</span> — pick up your phone to connect.</span>
+          </div>
+          <Button size="sm" variant="destructive" className="gap-2" onClick={endActiveCall} disabled={endingCall}>
+            {endingCall ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneOff className="h-3.5 w-3.5" />}
+            End Call
+          </Button>
+        </div>
+      )}
+
       <Tabs
         value={activeTab}
         onValueChange={(value) => setSearchParams(value === "leads" ? {} : { tab: value })}
@@ -1417,13 +1461,17 @@ export default function AcademicPartnerPortal() {
                         label={lead.application_id ? "Continue Application" : "Complete Application"}
                         directOpen
                       />
-                      <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
+                      <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
                         {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
                         Call
                       </Button>
                       <Button size="sm" variant="outline" className="gap-2" onClick={() => setPayLinkLead({ id: lead.id, name: lead.name })}>
                         <LinkIcon className="h-3.5 w-3.5" />
                         Payment Link
+                      </Button>
+                      <Button size="sm" variant="outline" className="gap-2" disabled={!lead.phone} onClick={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}>
+                        <LogIn className="h-3.5 w-3.5" />
+                        Login Link
                       </Button>
                       </div>
                     </td>
@@ -1475,12 +1523,12 @@ export default function AcademicPartnerPortal() {
                             leadName={lead.name}
                             leadPhone={lead.phone}
                             mode="academic_partner_on_behalf"
-                            label={completed ? "Open Application" : lead.application_id ? "Continue Application" : "Complete Application"}
+                            label="Continue Application"
                             directOpen
                           />
                         )}
                         {isPartnerAttributed && (
-                          <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
+                          <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
                             {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
                             Call
                           </Button>
@@ -1503,38 +1551,54 @@ export default function AcademicPartnerPortal() {
                             <DropdownMenuItem onSelect={() => setDetailsLead(lead)}>
                               <FileText className="h-3.5 w-3.5" /> View details
                             </DropdownMenuItem>
-                            {completed && lead.application_form_pdf_url && (
-                              <DropdownMenuItem asChild>
-                                <a href={lead.application_form_pdf_url} target="_blank" rel="noreferrer">
-                                  <FileText className="h-3.5 w-3.5" /> View/Download PDF
-                                </a>
-                              </DropdownMenuItem>
-                            )}
-                            {isPartnerAttributed && (
+                            {isPartnerAttributed && completed && (
                               <>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  disabled={!lead.phone}
-                                  onSelect={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}
-                                >
-                                  <LinkIcon className="h-3.5 w-3.5" /> Send login link to candidate
-                                </DropdownMenuItem>
-                                {completed && (
-                                  <ApplyMagicLinkButton
-                                    leadId={lead.id}
-                                    leadName={lead.name}
-                                    leadPhone={lead.phone}
-                                    mode="academic_partner_on_behalf"
-                                    label="Start New Application"
-                                    startNew
-                                    directOpen
-                                    asMenuItem
-                                  />
-                                )}
+                                <ApplyMagicLinkButton
+                                  leadId={lead.id}
+                                  leadName={lead.name}
+                                  leadPhone={lead.phone}
+                                  mode="academic_partner_on_behalf"
+                                  label="Start New Application"
+                                  startNew
+                                  directOpen
+                                  asMenuItem
+                                />
                               </>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                      </div>
+                      {/* Small links — receipts (app fee / token / etc.) and the
+                          submitted application PDF, visible even before the
+                          candidate becomes a student. */}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setReceiptsModalLead(lead)}
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                        >
+                          <Receipt className="h-3 w-3" /> Receipts
+                        </button>
+                        {lead.application_form_pdf_url && (
+                          <a
+                            href={lead.application_form_pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <FileText className="h-3 w-3" /> Application PDF
+                          </a>
+                        )}
+                        {isPartnerAttributed && lead.phone && (
+                          <button
+                            type="button"
+                            onClick={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <LogIn className="h-3 w-3" /> Send login link
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -1991,6 +2055,53 @@ export default function AcademicPartnerPortal() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipts modal for an application row — surfaces application-fee / token
+          and any other confirmed fee receipts, working even before the candidate
+          becomes a student (receiptsByLead is keyed on the lead, not student). */}
+      <Dialog open={!!receiptsModalLead} onOpenChange={(o) => { if (!o) setReceiptsModalLead(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Fee Receipts{receiptsModalLead ? ` — ${receiptsModalLead.name}` : ""}</DialogTitle>
+            <DialogDescription>Application fee, token / admission fee and other confirmed payments.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-muted">
+                <tr className="border-b">
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Receipt No.</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Type</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Date</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Mode</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Amount</th>
+                  <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Receipt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(receiptsModalLead ? (receiptsByLead.get(receiptsModalLead.id) ?? []) : []).map((r) => (
+                  <tr key={r.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-mono text-xs">{r.receipt_no || "—"}</td>
+                    <td className="px-4 py-3 capitalize">{(r.type || "").replace(/_/g, " ") || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{(r.payment_date || r.created_at) ? new Date(r.payment_date || r.created_at).toLocaleDateString("en-IN") : "-"}</td>
+                    <td className="px-4 py-3 text-xs capitalize">{(r.payment_mode || "").replace(/_/g, " ") || "—"}</td>
+                    <td className="px-4 py-3 text-right font-medium">{fmt(r.amount)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {r.receipt_url ? (
+                        <a href={r.receipt_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                          <FileText className="h-3.5 w-3.5" /> View
+                        </a>
+                      ) : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                  </tr>
+                ))}
+                {receiptsModalLead && (receiptsByLead.get(receiptsModalLead.id) ?? []).length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee receipts recorded yet</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </DialogContent>
       </Dialog>
