@@ -11,7 +11,7 @@ import {
   generatePgdmCertificatePdf,
   normalizePgdmCertificateDetails,
   PGDM_CERTIFICATE_NAME_FONT_FAMILY,
-  PGDM_CERTIFICATE_TEMPLATE_URL,
+  pgdmCertificateTemplateForCampus,
   pgdmCertificateFileName,
   type PgdmCertificateDetails,
 } from "@/lib/pgdmCertificate";
@@ -74,6 +74,7 @@ export default function AlumniVerifications() {
   const [reviewDocFile, setReviewDocFile] = useState<File | null>(null);
   const [pgdmCertificateDetails, setPgdmCertificateDetails] = useState<PgdmCertificateDetails>(emptyPgdmCertificateDetails());
   const [pgdmCertificateSaving, setPgdmCertificateSaving] = useState(false);
+  const [pgdmAudit, setPgdmAudit] = useState<any[]>([]);
 
   // Manual entry dialog
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -169,6 +170,15 @@ export default function AlumniVerifications() {
   const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
   const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
 
+  const fetchPgdmAudit = async (requestId: string) => {
+    const { data } = await supabase
+      .from("pgdm_certificate_audit" as any)
+      .select("*")
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: false });
+    setPgdmAudit((data || []) as any[]);
+  };
+
   const openDetail = (req: any) => {
     setSelectedReq(req);
     setReviewNotes(req.employee_review_notes || req.review_notes || "");
@@ -181,6 +191,8 @@ export default function AlumniVerifications() {
     setNewStatus(req.status);
     setReviewDocFile(null);
     setPgdmCertificateDetails(hydratePgdmDetails(req));
+    setPgdmAudit([]);
+    if (isPgdmDiplomaRequest(req)) fetchPgdmAudit(req.id);
   };
 
   const handleEmployeeReview = async () => {
@@ -717,7 +729,7 @@ registrar@nimt.ac.in`,
   };
 
   const uploadPgdmCertificatePdf = async (req: any, details: PgdmCertificateDetails) => {
-    const pdfBlob = await generatePgdmCertificatePdf(details);
+    const pdfBlob = await generatePgdmCertificatePdf(details, req?.campus);
     const path = `${req.id}/pgdm-certificate.pdf`;
     const { error } = await supabase.storage
       .from("alumni-verification-docs")
@@ -749,6 +761,7 @@ registrar@nimt.ac.in`,
         status: prev.status === "paid" ? "under_review" : prev.status,
       } : prev);
       fetchRequests();
+      fetchPgdmAudit(selectedReq.id);
     } catch (error) {
       toast({
         title: "Failed to submit certificate",
@@ -778,6 +791,7 @@ registrar@nimt.ac.in`,
         pgdm_certificate_approval_notes: reviewNotes || null,
       } : prev);
       fetchRequests();
+      fetchPgdmAudit(selectedReq.id);
     } catch (error) {
       toast({
         title: "Approval failed",
@@ -800,7 +814,7 @@ registrar@nimt.ac.in`,
       if (selectedReq.pgdm_certificate_pdf_path) {
         await getDocUrl(selectedReq.pgdm_certificate_pdf_path);
       } else {
-        const pdfBlob = await generatePgdmCertificatePdf(pgdmCertificateDetails);
+        const pdfBlob = await generatePgdmCertificatePdf(pgdmCertificateDetails, selectedReq.campus);
         const url = URL.createObjectURL(pdfBlob);
         const link = document.createElement("a");
         link.href = url;
@@ -811,6 +825,7 @@ registrar@nimt.ac.in`,
       await supabase.rpc("mark_pgdm_certificate_downloaded" as any, { _request_id: selectedReq.id });
       setSelectedReq((prev: any) => prev ? { ...prev, pgdm_certificate_downloaded_at: prev.pgdm_certificate_downloaded_at || new Date().toISOString() } : prev);
       fetchRequests();
+      fetchPgdmAudit(selectedReq.id);
     } catch (error) {
       toast({
         title: "Download failed",
@@ -849,8 +864,19 @@ registrar@nimt.ac.in`,
   // stamps and returns the certificate to an editable draft.
   const handleRegeneratePgdmCertificate = async () => {
     if (!selectedReq) return;
+    // Regenerate reverts a submitted/approved certificate to draft and pulls it
+    // out of the approval queue — a submitted cert was lost this way before, so
+    // confirm the intent explicitly.
+    if (["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status)) {
+      const label = selectedReq.pgdm_certificate_status === "pending_approval" ? "pending approval" : selectedReq.pgdm_certificate_status;
+      if (!window.confirm(`This certificate is ${label.replace(/_/g, " ")}. Reopening returns it to draft and removes it from the approval queue until you submit again. Continue?`)) return;
+    }
     setPgdmCertificateSaving(true);
     try {
+      const { error } = await supabase.rpc("regenerate_pgdm_certificate" as any, {
+        _request_id: selectedReq.id,
+      });
+      if (error) throw error;
       const cleared = {
         pgdm_certificate_status: "draft",
         pgdm_certificate_submitted_by: null,
@@ -860,14 +886,10 @@ registrar@nimt.ac.in`,
         pgdm_certificate_approval_notes: null,
         pgdm_certificate_downloaded_at: null,
       };
-      const { error } = await supabase
-        .from("alumni_verification_requests" as any)
-        .update(cleared)
-        .eq("id", selectedReq.id);
-      if (error) throw error;
       toast({ title: "Certificate reopened", description: "Edit the details, then Generate & Submit for approval again." });
       setSelectedReq((prev: any) => prev ? { ...prev, ...cleared } : prev);
       fetchRequests();
+      if (selectedReq) fetchPgdmAudit(selectedReq.id);
     } catch (error) {
       toast({
         title: "Failed to reopen certificate",
@@ -1339,7 +1361,7 @@ registrar@nimt.ac.in`,
 
                     <div>
                       <div className="relative mx-auto overflow-hidden rounded border border-border bg-muted shadow-sm" style={{ aspectRatio: "1324 / 1872", maxWidth: 340 }}>
-                        <img src={PGDM_CERTIFICATE_TEMPLATE_URL} alt="PGDM certificate preview" className="absolute inset-0 h-full w-full object-cover" />
+                        <img src={pgdmCertificateTemplateForCampus(selectedReq.campus)} alt="PGDM certificate preview" className="absolute inset-0 h-full w-full object-cover" />
                         <svg viewBox="0 0 1324 1872" className="absolute inset-0 h-full w-full" aria-hidden="true">
                           <text
                             x="792"
@@ -1370,6 +1392,29 @@ registrar@nimt.ac.in`,
                       </p>
                     </div>
                   </div>
+
+                  {pgdmAudit.length > 0 && (
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1.5 mb-2">
+                        <Clock className="h-3 w-3" /> Certificate Audit Trail
+                      </p>
+                      <ul className="space-y-1.5">
+                        {pgdmAudit.map((a: any) => (
+                          <li key={a.id} className="flex items-start justify-between gap-3 text-xs">
+                            <span className="text-foreground">
+                              <span className="font-semibold capitalize">{String(a.action).replace(/_/g, " ")}</span>
+                              {" by "}
+                              <span className="font-medium">{a.actor_name || "Unknown"}</span>
+                              {a.details?.notes ? <span className="text-muted-foreground"> — {a.details.notes}</span> : null}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                              {new Date(a.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
