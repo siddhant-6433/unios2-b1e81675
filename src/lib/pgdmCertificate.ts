@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import templateUrl from "@/assets/pgdm/pgdm-certificate-template.png";
+import greaterNoidaTemplateUrl from "@/assets/pgdm/pgdm-certificate-greater-noida-template.png";
 
 export type PgdmCertificateDetails = {
   studentName: string;
@@ -13,7 +14,16 @@ export type PgdmCertificateDetails = {
 };
 
 export const PGDM_CERTIFICATE_TEMPLATE_URL = templateUrl;
+export const PGDM_CERTIFICATE_GREATER_NOIDA_TEMPLATE_URL = greaterNoidaTemplateUrl;
 export const PGDM_CERTIFICATE_NAME_FONT_FAMILY = '"La Luxes Script", "Times New Roman", Georgia, serif';
+
+// Greater Noida-campus PGDM diplomas carry a different masthead + seal ("NIMT
+// GREATER NOIDA", Knowledge Park address) but the same fill-in body layout, so
+// the text coordinates below are shared. Ghaziabad campuses use the default.
+export const pgdmCertificateTemplateForCampus = (campus?: string | null): string => {
+  const normalized = (campus || "").toLowerCase().replace(/[^a-z]/g, "");
+  return normalized.includes("greaternoida") ? greaterNoidaTemplateUrl : templateUrl;
+};
 
 export const emptyPgdmCertificateDetails = (): PgdmCertificateDetails => ({
   studentName: "",
@@ -73,12 +83,15 @@ const drawText = (
   doc.text(text, x, baselineY, { align, baseline: "alphabetic" });
 };
 
-export async function generatePgdmCertificatePdf(details: PgdmCertificateDetails): Promise<Blob> {
+export async function generatePgdmCertificatePdf(
+  details: PgdmCertificateDetails,
+  campus?: string | null,
+): Promise<Blob> {
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  const templateDataUrl = await assetToDataUrl(templateUrl);
+  const templateDataUrl = await assetToDataUrl(pgdmCertificateTemplateForCampus(campus));
 
   doc.addImage(templateDataUrl, "PNG", 0, 0, pageWidth, pageHeight, undefined, "FAST");
   doc.setTextColor("#333333");

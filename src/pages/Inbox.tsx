@@ -25,7 +25,18 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "abvmu_deposits" | "offer_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+
+interface CertificateApprovalItem {
+  id: string;
+  request_number: string;
+  alumni_name: string;
+  campus: string | null;
+  course: string | null;
+  submitted_by_name: string | null;
+  submitted_at: string | null;
+  pdf_path: string | null;
+}
 
 interface AbvmuDepositItem {
   id: string;
@@ -137,7 +148,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | AbvmuDepositItem | OfferApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -190,6 +201,7 @@ export default function Inbox() {
     offer_waivers: 0,
     abvmu_deposits: 0,
     offer_approvals: 0,
+    certificate_approvals: 0,
     contact_changes: 0,
     applications: 0,
     followups: 0,
@@ -232,6 +244,14 @@ export default function Inbox() {
       count: counts.offer_approvals,
       roles: APPROVER_ROLES,
       color: "text-info-foreground",
+    },
+    {
+      id: "certificate_approvals",
+      label: "Certificate Approvals",
+      icon: FileText,
+      count: counts.certificate_approvals,
+      roles: ["super_admin"],
+      color: "text-emerald-600",
     },
     {
       id: "contact_changes",
@@ -377,6 +397,14 @@ export default function Inbox() {
             .select("id")
             .neq("status", "resolved")
         : Promise.resolve({ count: 0 }),
+
+      // PGDM certificate approvals — super_admin only
+      isSuperAdmin
+        ? supabase
+            .from("alumni_verification_requests" as any)
+            .select("id")
+            .eq("pgdm_certificate_status", "pending_approval")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -395,6 +423,7 @@ export default function Inbox() {
       whatsapp: get(6),
       video_approvals: get(7),
       voice_messages: get(8),
+      certificate_approvals: get(9),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -588,6 +617,34 @@ export default function Inbox() {
             requested_by_name: null,
             application_id: null,
           } as OfferApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "certificate_approvals") {
+        const { data, error } = await supabase
+          .from("alumni_verification_requests" as any)
+          .select("id, request_number, alumni_name, campus, course, pgdm_certificate_submitted_by, pgdm_certificate_submitted_at, pgdm_certificate_pdf_path")
+          .eq("pgdm_certificate_status", "pending_approval")
+          .order("pgdm_certificate_submitted_at", { ascending: true });
+        if (error) throw error;
+        const rows = (data || []) as any[];
+        const submitterIds = [...new Set(rows.map(r => r.pgdm_certificate_submitted_by).filter(Boolean))];
+        const nameById: Record<string, string> = {};
+        if (submitterIds.length) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("user_id, display_name, email")
+            .in("user_id", submitterIds);
+          for (const p of (profs || []) as any[]) nameById[p.user_id] = p.display_name || p.email || "";
+        }
+        const nextItems = rows.map((r: any) => ({
+            id: r.id,
+            request_number: r.request_number,
+            alumni_name: r.alumni_name,
+            campus: r.campus,
+            course: r.course,
+            submitted_by_name: nameById[r.pgdm_certificate_submitted_by] || null,
+            submitted_at: r.pgdm_certificate_submitted_at,
+            pdf_path: r.pgdm_certificate_pdf_path,
+          } as CertificateApprovalItem));
         commitItems(cat, nextItems);
       } else if (cat === "contact_changes") {
         const { data, error } = await supabase
@@ -836,6 +893,34 @@ export default function Inbox() {
     }
   };
 
+  const approveCertificate = async (cert: CertificateApprovalItem) => {
+    if (!isSuperAdmin) return;
+    const notes = window.prompt("Approval notes (optional):") ?? undefined;
+    setProcessing(cert.id);
+    try {
+      const { error } = await (supabase as any).rpc("approve_pgdm_certificate", {
+        _request_id: cert.id,
+        _approval_notes: notes || null,
+      });
+      if (error) throw error;
+      toast({ title: "Certificate approved", description: "The assigned handler has been notified to download and print." });
+      setSelectedItem(null);
+      loadItems("certificate_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Approval failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const openCertificatePdf = async (path: string | null) => {
+    if (!path) { toast({ title: "No certificate PDF found", variant: "destructive" }); return; }
+    const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 60 * 30);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+    else toast({ title: "Could not open certificate", variant: "destructive" });
+  };
+
   const decideContactChange = async (request: ContactChangeItem, decision: "approved" | "rejected") => {
     if (!isSuperAdmin && !isPrincipal) return;
     let notes: string | undefined;
@@ -1015,6 +1100,24 @@ export default function Inbox() {
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "certificate_approvals") {
+      const c = item as CertificateApprovalItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.alumni_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{c.request_number} · {c.campus || c.course || "PGDM"}</p>
+            </div>
+            <span className="text-[10px] text-emerald-600 font-medium shrink-0">Approve</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {c.submitted_by_name ? `by ${c.submitted_by_name} · ` : ""}{fmtTime(c.submitted_at)}
+          </p>
         </button>
       );
     }
@@ -1330,6 +1433,55 @@ export default function Inbox() {
               </Button>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (selected === "certificate_approvals") {
+      const c = selectedItem as CertificateApprovalItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.alumni_name}</h3>
+            <p className="text-sm text-muted-foreground">{c.request_number} · PGDM Diploma Certificate</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Campus" value={c.campus || "—"} />
+            <Row label="Course" value={c.course || "—"} />
+            <Row label="Submitted By" value={c.submitted_by_name || "—"} highlight />
+            <Row label="Submitted On" value={fmtDate(c.submitted_at)} />
+          </div>
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full"
+            onClick={() => openCertificatePdf(c.pdf_path)}
+          >
+            <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Review certificate PDF
+          </Button>
+
+          <Button
+            size="sm"
+            className="w-full bg-success/90 hover:bg-success text-white"
+            disabled={!isSuperAdmin || processing === c.id}
+            onClick={() => approveCertificate(c)}
+          >
+            {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve Certificate</>}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => navigate("/alumni-verifications")}
+          >
+            <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Open in Student Services
+          </Button>
+          <p className="text-[10px] text-muted-foreground text-center">
+            To correct details, open in Student Services and use Regenerate.
+          </p>
         </div>
       );
     }

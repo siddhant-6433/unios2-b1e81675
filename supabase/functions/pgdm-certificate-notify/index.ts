@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
     const adminUserIds = (admins || []).map((admin: any) => admin.user_id).filter(Boolean);
     const [{ data: employees }, { data: profiles }] = await Promise.all([
       adminUserIds.length
-        ? db.from("employee_profiles").select("user_id, display_name, work_number").in("user_id", adminUserIds)
+        ? db.from("employee_profiles").select("user_id, display_name, work_number, mobile_number").in("user_id", adminUserIds)
         : Promise.resolve({ data: [] as any[] }),
       adminUserIds.length
         ? db.from("profiles").select("user_id, display_name, email").in("user_id", adminUserIds)
@@ -132,7 +132,10 @@ Deno.serve(async (req) => {
     for (const admin of admins || []) {
       const employee = employeeByUser.get((admin as any).user_id) || {};
       const profile = profileByUser.get((admin as any).user_id) || {};
-      await sendTemplate("pgdm_certificate_submitted_admin", employee?.work_number, [
+      // Super admins rarely have an official work_number on their employee
+      // profile; fall back to their personal mobile so the approval alert
+      // still reaches them (no number on record → no send, logged as skipped).
+      await sendTemplate("pgdm_certificate_submitted_admin", employee?.work_number || employee?.mobile_number, [
         employee?.display_name || profile?.display_name || "Superadmin",
         requestRow.request_number,
         requestRow.alumni_name,
