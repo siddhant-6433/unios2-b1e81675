@@ -163,7 +163,8 @@ const TEMPLATES: Record<string, any> = {
         type: "BODY",
         text:
           "Hi {{1}}, the PGDM diploma certificate for request {{2}} ({{3}}) has been approved. " +
-          "Download and print it here: {{4}}\n\nNIMT Educational Institutions",
+          "Please download and print it here: {{4}}, then notify the candidate to collect it.\n\n" +
+          "NIMT Educational Institutions",
         example: {
           body_text: [[
             "Priya Sharma",
@@ -264,6 +265,35 @@ Deno.serve(async (req) => {
     if (!tmpl) {
       return new Response(JSON.stringify({ error: `Unknown template "${name}". Known: ${Object.keys(TEMPLATES).join(", ")}` }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Edit mode: POST { name, edit: true } re-submits new components for an
+    // already-created template (edits go back to Meta review). Look up the
+    // template id from the WABA list, then POST to that id.
+    if (reqBody.edit) {
+      const listRes = await fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=200`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const listBody = await listRes.json();
+      const existing = (listBody?.data || []).find(
+        (t: any) => t.name === tmpl.name && t.language === tmpl.language,
+      );
+      if (!existing) {
+        return new Response(JSON.stringify({ error: `Template "${tmpl.name}" not found to edit — create it first.` }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const editRes = await fetch(`https://graph.facebook.com/v21.0/${existing.id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ category: tmpl.category, components: tmpl.components }),
+      });
+      const editBody = await editRes.json();
+      return new Response(JSON.stringify({ ok: editRes.ok, status: editRes.status, edited: tmpl.name, id: existing.id, body: editBody }), {
+        status: editRes.ok ? 200 : 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
