@@ -30,6 +30,33 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
 };
 
+// For PGDM diploma requests the base `status` stays "under_review" through the
+// whole certificate lifecycle, so a request awaiting approval, being printed,
+// or already collected all looked identical ("Under Review"). Overlay the
+// certificate stage onto the displayed status + tab so the stage is visible.
+// `key` is the tab bucket it counts under; `label`/`color` drive the badge.
+const isPgdmDiplomaReq = (req: any) => {
+  const courseText = `${req?.course || ""} ${req?.course_code || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return req?.request_type === "diploma" && (
+    courseText.includes("pgdm") || courseText.includes("postgraduatediplomainmanagement")
+  );
+};
+
+const CERT_STAGE_CONFIG: Record<string, { key: string; label: string; color: string }> = {
+  pending_approval: { key: "under_review", label: "Pending Approval", color: "bg-warning/10 text-warning-foreground" },
+  approved: { key: "under_review", label: "Approved · Printing", color: "bg-info/10 text-info-foreground" },
+  ready_notified: { key: "verified", label: "Ready · Candidate Notified", color: "bg-success/10 text-success" },
+};
+
+const statusMetaFor = (req: any): { key: string; label: string; color: string } => {
+  if (isPgdmDiplomaReq(req)) {
+    const stage = CERT_STAGE_CONFIG[req?.pgdm_certificate_status];
+    if (stage) return stage;
+  }
+  const c = STATUS_CONFIG[req?.status] || STATUS_CONFIG.pending_payment;
+  return { key: req?.status || "pending_payment", label: c.label, color: c.color };
+};
+
 const RESULT_LABELS: Record<string, { label: string; color: string }> = {
   confirmed: { label: "Confirmed", color: "bg-success/10 text-success" },
   discrepancy_marks: { label: "Discrepancy", color: "bg-warning/10 text-warning-foreground" },
@@ -181,8 +208,8 @@ export default function AlumniVerifications() {
 
   useEffect(() => { fetchRequests(); fetchRoutingData(); }, []);
 
-  const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
-  const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
+  const filtered = statusFilter === "all" ? requests : requests.filter(r => statusMetaFor(r).key === statusFilter);
+  const paidPending = requests.filter(r => ["paid", "under_review"].includes(statusMetaFor(r).key)).length;
 
   const fetchPgdmAudit = async (requestId: string) => {
     const { data } = await supabase
@@ -982,7 +1009,7 @@ registrar@nimt.ac.in`,
       {/* Status filter */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit overflow-x-auto">
         {[{ key: "all", label: `All (${requests.length})` }, ...Object.entries(STATUS_CONFIG).map(([k, v]) => ({
-          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => r.status === k).length})`,
+          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => statusMetaFor(r).key === k).length})`,
         }))].map(t => (
           <button key={t.key} onClick={() => setStatusFilter(t.key)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -1129,7 +1156,7 @@ registrar@nimt.ac.in`,
                 </thead>
                 <tbody>
                   {paginatedRequests.map((req: any) => {
-                    const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending_payment;
+                    const cfg = statusMetaFor(req);
                     const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
                     const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
                     return (
