@@ -16,7 +16,7 @@ type DocLite = { id: string; document_type: string; title: string; file_name: st
 
 type LeadRow = { id: string; name: string; phone: string | null; stage: string; admission_no: string | null; pre_admission_no: string | null; created_at: string; courses: { name: string } | null; consultant_commission_type: string | null; consultant_commission_value: number | null };
 type ApplicationRow = { id: string; application_id: string | null; status: string | null; lead_id: string; full_name: string | null; submitted_at: string | null };
-type PayoutRow = { payout_id: string; candidate_name: string; admission_no: string | null; course_name: string | null; payout_amount: number; fee_paid_pct: number; status: string };
+type PayoutRow = { payout_id: string; candidate_name: string; admission_no: string | null; course_name: string | null; student_fee_paid: number; payout_amount: number; fee_paid_pct: number; status: string };
 type SearchLead = { id: string; name: string; phone: string | null; stage: string; admission_no: string | null; pre_admission_no: string | null; consultant_id: string | null };
 
 const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -86,7 +86,7 @@ export function ConsultantDetailDialog({
     }
 
     const { data: payoutRows } = await (supabase.from("consultant_payout_sheet" as any) as any)
-      .select("payout_id, candidate_name, admission_no, course_name, payout_amount, fee_paid_pct, status")
+      .select("payout_id, candidate_name, admission_no, course_name, student_fee_paid, payout_amount, fee_paid_pct, status")
       .eq("consultant_id", cId).order("created_at", { ascending: false });
     setPayouts((payoutRows || []) as PayoutRow[]);
     setLoading(false);
@@ -359,8 +359,8 @@ export function ConsultantDetailDialog({
                 </div>
                 <SimpleTable
                   empty="No payouts. Payouts appear once a linked lead pays fees."
-                  head={["Candidate", "Admission No.", "Course", "Fee Paid", "Amount", "Status"]}
-                  rows={payouts.map(p => [p.candidate_name, p.admission_no || "—", p.course_name || "—", `${Number(p.fee_paid_pct)}%`, inr(Number(p.payout_amount)), p.status])}
+                  head={["Candidate", "Admission No.", "Course", "Fee Paid", "Payout", "Status"]}
+                  rows={payouts.map(p => [p.candidate_name, p.admission_no || "—", p.course_name || "—", `${inr(Number(p.student_fee_paid))} (${Number(p.fee_paid_pct)}%)`, inr(Number(p.payout_amount)), p.status])}
                 />
               </>
             )}
