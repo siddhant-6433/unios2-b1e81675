@@ -10,11 +10,14 @@ import { SelectField } from "@/components/ui/state-fields";
 import {
   Plus, Search, Loader2, Users, Phone, Mail,
   IndianRupee, MapPin, ChevronRight,
-  FileText, RotateCcw, CheckCircle2
+  FileText, RotateCcw, CheckCircle2, GitMerge
 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { CourseCommissions } from "@/components/consultant/CourseCommissions";
 import { CommissionApprovalPanel } from "@/components/consultant/CommissionApprovalPanel";
+import { ConsultantPerformanceTab } from "@/components/consultant/ConsultantPerformanceTab";
+import { ConsultantPayoutsTab } from "@/components/consultant/ConsultantPayoutsTab";
+import { ConsultantDetailDialog } from "@/components/consultant/ConsultantDetailDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 
@@ -29,6 +32,7 @@ interface Consultant {
   company_name: string | null; company_address: string | null; pan_number: string | null; gst_number: string | null; tan_number: string | null;
   authorised_signatory_name: string | null; authorised_signatory_contact: string | null; authorised_signatory_email: string | null;
   onboarding_status: string; onboarding_step: number;
+  bank_account_name: string | null; bank_account_number: string | null; bank_ifsc: string | null; bank_name: string | null; bank_upi: string | null;
 }
 
 type ConsultantDocument = {
@@ -101,6 +105,11 @@ type ConsultantSavePayload = {
   notes: string | null;
   user_id: string | null;
   payout_model: string;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  bank_ifsc: string | null;
+  bank_name: string | null;
+  bank_upi: string | null;
 };
 
 type FeeCollectionRemittance = {
@@ -174,6 +183,12 @@ const onboardingFormFromConsultant = (consultant: Consultant | null): Onboarding
   authorised_signatory_email: consultant?.authorised_signatory_email || consultant?.email || "",
 });
 const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "document";
+// Match phones ignoring +, spaces and a leading country code so "+91 98717..."
+// and "098717..." collapse to the same key. Last 10 digits = the Indian number.
+const phoneKey = (phone: string | null | undefined) => {
+  const digits = (phone || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+};
 const normalizeStatus = (status: string | null | undefined): OnboardingStatus => {
   if (status === "in_progress" || status === "skipped" || status === "completed") return status;
   return "not_started";
@@ -201,7 +216,7 @@ const Consultants = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
-  const [tab, setTab] = useState<"list" | "requests" | "association_requests">("list");
+  const [tab, setTab] = useState<"list" | "performance" | "payouts" | "requests" | "association_requests">("list");
   const canSeeRequests = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -215,11 +230,18 @@ const Consultants = () => {
     name: "", organization: "", phone: "", email: "", city: "",
     stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "",
     payout_model: "commission_pct_first_year",
+    bank_account_name: "", bank_account_number: "", bank_ifsc: "", bank_name: "", bank_upi: "",
   });
   const [feeRemittances, setFeeRemittances] = useState<FeeCollectionRemittance[]>([]);
   const [remittanceForm, setRemittanceForm] = useState({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
   const [remittanceSaving, setRemittanceSaving] = useState(false);
   const [consultantUsers, setConsultantUsers] = useState<{ user_id: string; display_name: string | null; email: string | null }[]>([]);
+  const [mergeGroup, setMergeGroup] = useState<Consultant[] | null>(null);
+  const [mergeKeepId, setMergeKeepId] = useState<string>("");
+  const [merging, setMerging] = useState(false);
+  const [detailConsultant, setDetailConsultant] = useState<Consultant | null>(null);
+  const isSuperAdmin = role === "super_admin";
+  const canLinkLeads = role === "super_admin" || role === "principal";
   const canAccessConsultantOnboarding =
     role === "super_admin"
     || ((role === "principal" || role === "counsellor") && hasPermission("consultants:view"));
@@ -258,6 +280,17 @@ const Consultants = () => {
     return matchSearch && matchStage;
   });
 
+  // Phone keys that occur on more than one consultant → flag those cards as dups.
+  const dupPhoneKeys = new Set(
+    Object.entries(
+      consultants.reduce((acc, c) => {
+        const k = phoneKey(c.phone);
+        if (k.length >= 10) acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+    ).filter(([, n]) => n > 1).map(([k]) => k),
+  );
+
   const documentsByConsultant = consultantDocuments.reduce((map, document) => {
     map.set(document.consultant_id, [...(map.get(document.consultant_id) || []), document]);
     return map;
@@ -265,6 +298,15 @@ const Consultants = () => {
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Name is required", variant: "destructive" }); return; }
+    // Block duplicate mobile numbers — root cause of the same consultant appearing twice.
+    const key = phoneKey(form.phone);
+    if (key.length >= 10) {
+      const clash = consultants.find(c => c.id !== editingId && phoneKey(c.phone) === key);
+      if (clash) {
+        toast({ title: "Duplicate mobile number", description: `A consultant "${clash.name}" already uses this number. Edit that record instead of creating a new one.`, variant: "destructive" });
+        return;
+      }
+    }
     setSaving(true);
     const payload: ConsultantSavePayload = {
       name: form.name.trim(),
@@ -278,6 +320,11 @@ const Consultants = () => {
       notes: form.notes.trim() || null,
       user_id: form.user_id || null,
       payout_model: form.payout_model,
+      bank_account_name: form.bank_account_name.trim() || null,
+      bank_account_number: form.bank_account_number.trim() || null,
+      bank_ifsc: form.bank_ifsc.trim().toUpperCase() || null,
+      bank_name: form.bank_name.trim() || null,
+      bank_upi: form.bank_upi.trim() || null,
     };
 
     const { error } = editingId
@@ -291,7 +338,7 @@ const Consultants = () => {
 
   const resetForm = () => {
     setShowForm(false); setEditingId(null);
-    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "", payout_model: "commission_pct_first_year" });
+    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "", payout_model: "commission_pct_first_year", bank_account_name: "", bank_account_number: "", bank_ifsc: "", bank_name: "", bank_upi: "" });
     setFeeRemittances([]);
     setRemittanceForm({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
   };
@@ -302,11 +349,43 @@ const Consultants = () => {
       city: c.city || "", stage: c.stage, commission_type: c.commission_type || "percentage",
       commission_value: String(c.commission_value || 0), notes: c.notes || "", user_id: c.user_id || "",
       payout_model: c.payout_model || "commission_pct_first_year",
+      bank_account_name: c.bank_account_name || "", bank_account_number: c.bank_account_number || "",
+      bank_ifsc: c.bank_ifsc || "", bank_name: c.bank_name || "", bank_upi: c.bank_upi || "",
     });
     setEditingId(c.id);
     setShowForm(true);
     fetchConsultantUsers();
     if ((c.payout_model || "commission_pct_first_year") === "fee_collection") fetchFeeRemittances(c.id);
+  };
+
+  const openMerge = (c: Consultant) => {
+    const key = phoneKey(c.phone);
+    const group = consultants.filter(x => phoneKey(x.phone) === key);
+    if (group.length < 2) return;
+    setMergeGroup(group);
+    // Default keeper: prefer a portal-linked record, else the most complete.
+    const linked = group.find(x => x.user_id);
+    setMergeKeepId((linked || group[0]).id);
+  };
+
+  const doMerge = async () => {
+    if (!mergeGroup || !mergeKeepId) return;
+    const losers = mergeGroup.filter(c => c.id !== mergeKeepId);
+    if (losers.length === 0) return;
+    setMerging(true);
+    for (const loser of losers) {
+      const { error } = await (supabase.rpc as any)("merge_consultants", { _keep_id: mergeKeepId, _remove_id: loser.id });
+      if (error) {
+        toast({ title: "Merge failed", description: error.message, variant: "destructive" });
+        setMerging(false);
+        return;
+      }
+    }
+    toast({ title: `Merged ${losers.length} duplicate${losers.length > 1 ? "s" : ""}` });
+    setMergeGroup(null);
+    setMergeKeepId("");
+    setMerging(false);
+    fetchConsultants();
   };
 
   const fetchFeeRemittances = async (consultantId: string) => {
@@ -491,6 +570,22 @@ const Consultants = () => {
             Consultants
           </button>
           <button
+            onClick={() => setTab("performance")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
+              tab === "performance" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Performance
+          </button>
+          <button
+            onClick={() => setTab("payouts")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
+              tab === "payouts" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Payouts
+          </button>
+          <button
             onClick={() => setTab("requests")}
             className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
               tab === "requests" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
@@ -509,7 +604,11 @@ const Consultants = () => {
         </div>
       )}
 
-      {tab === "requests" ? (
+      {tab === "performance" ? (
+        <ConsultantPerformanceTab />
+      ) : tab === "payouts" ? (
+        <ConsultantPayoutsTab />
+      ) : tab === "requests" ? (
         <CommissionApprovalPanel />
       ) : tab === "association_requests" ? (
         <LeadAssociationRequestsPanel requesterType="consultant" />
@@ -554,7 +653,7 @@ const Consultants = () => {
         {filtered.map(c => {
           const docs = documentsByConsultant.get(c.id) || [];
           return (
-          <Card key={c.id} className="border-border/60 shadow-none hover:shadow-sm transition-shadow cursor-pointer group" onClick={() => editConsultant(c)}>
+          <Card key={c.id} className="border-border/60 shadow-none hover:shadow-sm transition-shadow cursor-pointer group" onClick={() => setDetailConsultant(c)}>
             <CardContent className="p-5">
               <div className="flex items-start justify-between">
                 <div>
@@ -562,6 +661,17 @@ const Consultants = () => {
                   {c.organization && <p className="text-xs text-primary font-medium mt-0.5">{c.organization}</p>}
                 </div>
                 <div className="flex items-center gap-1">
+                  {dupPhoneKeys.has(phoneKey(c.phone)) && (
+                    <>
+                      <Badge className="text-[9px] border-0 bg-warning/15 text-warning">Duplicate #</Badge>
+                      {isSuperAdmin && (
+                        <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-[10px]"
+                          onClick={(e) => { e.stopPropagation(); openMerge(c); }}>
+                          <GitMerge className="h-3 w-3" />Merge
+                        </Button>
+                      )}
+                    </>
+                  )}
                   {c.user_id && <Badge className="text-[9px] border-0 bg-success/10 text-success dark:bg-success/80/30 dark:text-success">Linked</Badge>}
                   <Badge className={`text-[10px] border-0 ${stageColors[c.stage] || "bg-muted"}`}>{stageLabels[c.stage] || c.stage}</Badge>
                 </div>
@@ -708,6 +818,34 @@ const Consultants = () => {
                   ? "Commission — fixed amount: college pays a fixed rupee amount per admission, released proportionally as the student pays their first-year fee."
                   : "Commission — % of first-year fee: college pays the consultant a percentage of the student's first-year fee, released proportionally as the student pays. (Percentage comes from the commission rate below / per-course rates.)"}
               </p>
+            </div>
+            <div className="border-t border-border pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-semibold uppercase text-muted-foreground">Bank / Payout Account</label>
+                <span className="text-[10px] text-muted-foreground">Used on the accountant payout sheet</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Account Holder Name</label>
+                  <input value={form.bank_account_name} onChange={e => setForm(p => ({ ...p, bank_account_name: e.target.value }))} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Account Number</label>
+                  <input value={form.bank_account_number} onChange={e => setForm(p => ({ ...p, bank_account_number: e.target.value }))} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">IFSC</label>
+                  <input value={form.bank_ifsc} onChange={e => setForm(p => ({ ...p, bank_ifsc: e.target.value.toUpperCase() }))} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Bank Name</label>
+                  <input value={form.bank_name} onChange={e => setForm(p => ({ ...p, bank_name: e.target.value }))} className={inputCls} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">UPI ID (optional)</label>
+                  <input value={form.bank_upi} onChange={e => setForm(p => ({ ...p, bank_upi: e.target.value }))} className={inputCls} />
+                </div>
+              </div>
             </div>
             {editingId && (
               <div className="border-t border-border pt-4">
@@ -942,6 +1080,57 @@ const Consultants = () => {
                   </Button>
                 )}
               </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConsultantDetailDialog
+        consultant={detailConsultant}
+        documents={detailConsultant ? (documentsByConsultant.get(detailConsultant.id) || []) : []}
+        canLink={canLinkLeads}
+        onEdit={() => { const c = detailConsultant; setDetailConsultant(null); if (c) editConsultant(c); }}
+        onChanged={fetchConsultants}
+        onClose={() => setDetailConsultant(null)}
+      />
+
+      <Dialog open={!!mergeGroup} onOpenChange={(o) => { if (!o && !merging) { setMergeGroup(null); setMergeKeepId(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Merge duplicate consultants</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-1">
+            <p className="text-xs text-muted-foreground">
+              Pick the record to <span className="font-medium text-foreground">keep</span>. All leads, payouts, commissions,
+              documents and remittances from the others are re-pointed to it, missing details are filled in from the
+              duplicates, then the duplicates are deleted. This cannot be undone.
+            </p>
+            <div className="space-y-2">
+              {(mergeGroup || []).map((c) => (
+                <label key={c.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${mergeKeepId === c.id ? "border-primary bg-primary/5" : "border-border/60 hover:bg-muted/30"}`}>
+                  <input type="radio" name="merge-keep" checked={mergeKeepId === c.id} onChange={() => setMergeKeepId(c.id)} className="mt-1" />
+                  <div className="min-w-0 flex-1 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">{c.name}</span>
+                      {c.user_id && <Badge className="text-[9px] border-0 bg-success/10 text-success">Linked</Badge>}
+                      {mergeKeepId === c.id && <Badge className="text-[9px] border-0 bg-primary/10 text-primary">Keep</Badge>}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
+                      {c.organization && <span>{c.organization}</span>}
+                      {c.email && <span>{c.email}</span>}
+                      {c.bank_account_number && <span>Bank on file</span>}
+                      <span>Added {new Date(c.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => { setMergeGroup(null); setMergeKeepId(""); }} disabled={merging}>Cancel</Button>
+              <Button onClick={doMerge} disabled={merging || !mergeKeepId} className="gap-1.5">
+                {merging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
+                Merge {(mergeGroup || []).length - 1} into selected
+              </Button>
             </div>
           </div>
         </DialogContent>
