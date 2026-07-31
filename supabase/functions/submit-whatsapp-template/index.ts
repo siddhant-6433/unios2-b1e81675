@@ -198,6 +198,33 @@ const TEMPLATES: Record<string, any> = {
       },
     ],
   },
+
+  // Student Services TAT allocation — sent to the assigned handler's official
+  // number (see student-services-notify). Param order MUST match that function.
+  student_services_tat: {
+    name: "student_services_tat",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, a Student Services request has been assigned to you.\n\n" +
+          "Request: {{2}}\nService: {{3}}\nStudent: {{4}}\nCourse / Batch: {{5}}\nDue by: {{6}}\n\n" +
+          "Please action it before the due date.\n\nNIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Priya Sharma",
+            "ADR-00030",
+            "Degree/Diploma Request",
+            "Akash Singh",
+            "PGDM (2011)",
+            "05/08/2026",
+          ]],
+        },
+      },
+    ],
+  },
 };
 
 Deno.serve(async (req) => {

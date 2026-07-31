@@ -265,6 +265,11 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   pgdm_certificate_submitted_admin: { name: "pgdm_certificate_submitted_admin", params: ["name", "request_number", "alumni_name", "handler_name", "review_link"] },
   pgdm_certificate_approved_handler: { name: "pgdm_certificate_approved_handler", params: ["handler_name", "request_number", "alumni_name", "download_link"] },
   pgdm_diploma_ready_student: { name: "pgdm_diploma_ready_student", params: ["alumni_name", "request_number", "handler_name", "handler_phone"] },
+
+  // Student Services TAT — sent to the assigned handler's official number when a
+  // request is allocated (see student-services-notify). Param order must match
+  // that function's sendTemplate() call exactly.
+  student_services_tat: { name: "student_services_tat", params: ["handler_name", "request_number", "service_name", "student_name", "course_batch", "due_date"] },
 };
 
 function templateBodyFromComponents(components: unknown): string | null {
@@ -754,6 +759,7 @@ Deno.serve(async (req) => {
       video_submitted_admin: "New video submitted for approval on the NIMT Video Portal.\n\nEditor: {{1}}\nTitle: {{2}}\nBrand: {{3}}\n\nPlease review it in the Video Approvals queue.",
       video_approved_editor: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
       video_correction_editor: "Hi {{1}}, your video \"{{2}}\" needs a correction before it can be approved on the NIMT Video Portal.\n\nWhat to fix: {{3}}\n\nOpen your portal to see any screenshots, make the changes, and resubmit.",
+      student_services_tat: "Hi {{1}}, a Student Services request has been assigned to you.\n\nRequest: {{2}}\nService: {{3}}\nStudent: {{4}}\nCourse / Batch: {{5}}\nDue by: {{6}}\n\nPlease action it before the due date. Open the admin panel to proceed.",
     };
 
     let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()
