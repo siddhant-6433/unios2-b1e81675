@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { CourseCommissions } from "@/components/consultant/CourseCommissions";
+import { LeadCommissions } from "@/components/consultant/LeadCommissions";
 import { CommissionApprovalPanel } from "@/components/consultant/CommissionApprovalPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
@@ -712,6 +713,11 @@ const Consultants = () => {
             {editingId && (
               <div className="border-t border-border pt-4">
                 <CourseCommissions consultantId={editingId} />
+              </div>
+            )}
+            {editingId && (
+              <div className="border-t border-border pt-4">
+                <LeadCommissions consultantId={editingId} />
               </div>
             )}
             {editingId && form.payout_model === "fee_collection" && (
