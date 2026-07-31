@@ -86,6 +86,7 @@ export default function AlumniVerifications() {
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
 
   // Email preview dialog
   const [showEmailPreview, setShowEmailPreview] = useState(false);
@@ -141,27 +142,40 @@ export default function AlumniVerifications() {
   };
 
   const fetchRoutingData = async () => {
-    const [coursesRes, directoryRes, employeeRes, rulesRes] = await Promise.all([
+    const [coursesRes, handlersRes, rulesRes] = await Promise.all([
       supabase.from("courses").select("id, name, code").eq("is_active", true).order("name"),
-      supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
-      supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number, employment_status"),
+      // Dedicated handler list gated on alumni_verification:manage (not
+      // user_management:view) so Student Services managers who aren't super
+      // admins still see names in the "Assign handler" dropdown.
+      supabase.rpc("student_service_assignable_handlers" as any),
       supabase.from("student_service_handler_rules" as any).select("*").eq("is_active", true).order("updated_at", { ascending: false }),
     ]);
     setCourses((coursesRes.data || []) as any[]);
-    const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
-    const staff = ((directoryRes.data || []) as any[])
-      .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
-      .map((u: any) => {
-        const emp = employeeByUser.get(u.user_id) || {};
-        return {
-          ...u,
-          display_name: emp.display_name || u.display_name || u.email || u.user_id,
-          work_email: emp.work_email || u.email || "",
-          work_number: emp.work_number || "",
-          personal_mobile: emp.mobile_number || u.phone || "",
-        };
-      });
-    setHandlers(staff);
+
+    if (handlersRes.error && isMissingRpcError(handlersRes.error)) {
+      // Fallback (RPC not deployed yet): the admin directory, which only returns
+      // rows for super_admin / user_management:view callers.
+      const [directoryRes, employeeRes] = await Promise.all([
+        supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
+        supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number"),
+      ]);
+      const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
+      const staff = ((directoryRes.data || []) as any[])
+        .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
+        .map((u: any) => {
+          const emp = employeeByUser.get(u.user_id) || {};
+          return {
+            ...u,
+            display_name: emp.display_name || u.display_name || u.email || u.user_id,
+            work_email: emp.work_email || u.email || "",
+            work_number: emp.work_number || "",
+            personal_mobile: emp.mobile_number || u.phone || "",
+          };
+        });
+      setHandlers(staff);
+    } else {
+      setHandlers((handlersRes.data || []) as any[]);
+    }
     setHandlerRules((rulesRes.data || []) as any[]);
   };
 
@@ -723,6 +737,38 @@ registrar@nimt.ac.in`,
     fetchRequests();
   };
 
+  const handleMarkOfflinePaid = async () => {
+    if (!selectedReq || selectedReq.status !== "pending_payment") return;
+    if (!canManageStudentServices) return;
+    const method = window.prompt(
+      "Payment mode (e.g. Cash, UPI, Bank Transfer, Easebuzz-reconciled):",
+      "offline",
+    );
+    if (method === null) return;
+    const reference = window.prompt("Reference / receipt no (optional):", "") || null;
+    setMarkingPaid(true);
+    try {
+      const { error } = await supabase.rpc("mark_alumni_request_paid_offline" as any, {
+        _request_id: selectedReq.id,
+        _method: method || "offline",
+        _reference: reference,
+      });
+      if (error) throw error;
+      toast({ title: "Payment recorded", description: "Request moved to Pending Review." });
+      const patch = { status: "paid", paid_at: new Date().toISOString(), payment_method: method || "offline", payment_ref: reference };
+      setSelectedReq((prev: any) => prev ? { ...prev, ...patch } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to record payment",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setMarkingPaid(false);
+    }
+  };
+
   const getDocUrl = async (path: string) => {
     const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
@@ -1248,6 +1294,17 @@ registrar@nimt.ac.in`,
                   {selectedReq.paid_at ? <Badge className="bg-success/10 text-success border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
                 </div>
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
+                {canManageStudentServices && selectedReq.status === "pending_payment" && (
+                  <div className="pt-1">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleMarkOfflinePaid} disabled={markingPaid}>
+                      {markingPaid ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                      Mark Offline Payment
+                    </Button>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Use for cash/UPI/bank payments or to reconcile an online payment that didn't confirm.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Handler assignment */}
