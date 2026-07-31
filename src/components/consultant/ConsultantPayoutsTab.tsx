@@ -17,6 +17,7 @@ type PayoutRow = {
   candidate_name: string;
   admission_no: string | null;
   course_name: string | null;
+  student_fee_paid: number;
   payout_amount: number;
   fee_paid_pct: number;
   status: string;
@@ -66,7 +67,7 @@ export const ConsultantPayoutsTab = () => {
           <td>${esc(r.candidate_name)}</td>
           <td>${esc(r.admission_no)}</td>
           <td>${esc(r.course_name)}</td>
-          <td class="num">${Number(r.fee_paid_pct)}%</td>
+          <td class="num">${inr(Number(r.student_fee_paid))} (${Number(r.fee_paid_pct)}%)</td>
           <td class="num">${inr(Number(r.payout_amount))}</td>
         </tr>`).join("");
       return `
@@ -164,7 +165,7 @@ export const ConsultantPayoutsTab = () => {
                         <td className="py-1.5 pr-3 text-foreground">{r.candidate_name}</td>
                         <td className="py-1.5 pr-3 text-muted-foreground">{r.admission_no || "—"}</td>
                         <td className="py-1.5 pr-3 text-muted-foreground">{r.course_name || "—"}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{Number(r.fee_paid_pct)}%</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{inr(Number(r.student_fee_paid))} <span className="text-muted-foreground">({Number(r.fee_paid_pct)}%)</span></td>
                         <td className="py-1.5 text-right tabular-nums font-medium">{inr(Number(r.payout_amount))}</td>
                       </tr>
                     ))}
