@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
+import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,6 +135,9 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       });
   }, [isCreditNote, consultantId]);
 
+  // Day-closer / 9AM–6PM cash window gate (super_admin is always exempt server-side).
+  const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode);
+
   // Owner decision: offline cash recording is cashier (accountant) + super_admin
   // only — no counsellors, no campus admins, no consultants.
   const allowedRole = ["super_admin", "accountant"].includes(role || "");
@@ -230,6 +234,10 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       return;
     }
     if (isCreditNote) { await submitCreditNote(amt); return; }
+    if (cashBlocked) {
+      toast({ title: "Cash receipt not allowed", description: cashReason || undefined, variant: "destructive" });
+      return;
+    }
     if (mode === "cheque" && !txnRef.trim()) {
       toast({ title: "Cheque / DD number is required", variant: "destructive" });
       return;
@@ -363,6 +371,12 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
             label="Payment Mode"
             allowEmpty={false}
           />
+
+          {cashBlocked && (
+            <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+              {cashReason}
+            </p>
+          )}
 
           {/* Consultant credit note (super_admin, non-cash offset) */}
           {isCreditNote && (
@@ -523,7 +537,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button onClick={handleSubmit} disabled={submitting || cashBlocked}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {submitting ? "Recording…" : "Mark as Paid"}
           </Button>
