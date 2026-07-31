@@ -194,6 +194,12 @@ verify_jwt = false
 [functions.daily-fee-collection-report]
 verify_jwt = false
 
+# Invoked by signed-in accountants/super_admins on Day Closer (and directly with
+# the service-role key for tests). Opaque service-role tokens can't be validated
+# at the gateway, so the function does its own role check.
+[functions.day-closer-report]
+verify_jwt = false
+
 # Called both by signed-in users (from /my-docs) and by whatsapp-webhook
 # with the service-role key. The gateway can't validate the new opaque
 # sb_secret service-role tokens, so let the function handle auth itself.

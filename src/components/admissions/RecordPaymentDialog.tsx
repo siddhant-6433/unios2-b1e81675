@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { IndianRupee, Loader2, Upload, FileImage, X } from "lucide-react";
+import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
 
 const PAYMENT_TYPES = [
   { value: "application_fee", label: "Application Fee" },
@@ -51,6 +52,9 @@ export function RecordPaymentDialog({
   const [notes, setNotes] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Day-closer / 9AM–6PM cash window gate (super_admin exempt server-side).
+  const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode);
 
   // Optional "apply to head" — only offered once a student ledger exists for
   // this lead (pre-admission leads have no fee_ledger rows to apply to).
@@ -133,6 +137,10 @@ export function RecordPaymentDialog({
 
   const handleSave = async () => {
     if (!amount || parseFloat(amount) <= 0) return;
+    if (cashBlocked) {
+      toast({ title: "Cash receipt not allowed", description: cashReason || undefined, variant: "destructive" });
+      return;
+    }
     if (isTokenInstalmentBelowMin) {
       toast({
         title: `Minimum ₹${minInstalment.toLocaleString("en-IN")} per token instalment`,
@@ -327,6 +335,11 @@ export function RecordPaymentDialog({
                 </button>
               ))}
             </div>
+            {cashBlocked && (
+              <p className="mt-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+                {cashReason}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -399,7 +412,7 @@ export function RecordPaymentDialog({
             onClick={handleSave}
             disabled={
               !amount || parseFloat(amount) <= 0 || saving ||
-              isTokenInstalmentBelowMin ||
+              isTokenInstalmentBelowMin || cashBlocked ||
               (requireScreenshot && (!screenshot || !transactionRef.trim()))
             }
             className="gap-2"

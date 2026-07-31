@@ -6,7 +6,7 @@ import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
   ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe, HandCoins, Tag, TimerOff, ScrollText,
+  Globe, HandCoins, Tag, TimerOff, ScrollText, Lock,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -19,8 +19,10 @@ import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
+import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -60,8 +62,11 @@ const Finance = () => {
   const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
+  const { role } = useAuth();
   const canCreateFinance = can("finance", "create");
   const canEditFinance = can("finance", "edit");
+  const canCloseDay = role === "super_admin" || role === "accountant";
+  const [dayCloserOpen, setDayCloserOpen] = useState(false);
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
@@ -139,6 +144,7 @@ const Finance = () => {
   return (
     <>
     <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
+    {canCloseDay && <DayCloserDialog open={dayCloserOpen} onOpenChange={setDayCloserOpen} onClosed={fetchAll} />}
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
@@ -147,6 +153,11 @@ const Finance = () => {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
+          {canCloseDay && (
+            <Button variant="outline" className="gap-2" onClick={() => setDayCloserOpen(true)}>
+              <Lock className="h-4 w-4" /> Close Day
+            </Button>
+          )}
           {canCreateFinance && <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>}
         </div>
       </div>
