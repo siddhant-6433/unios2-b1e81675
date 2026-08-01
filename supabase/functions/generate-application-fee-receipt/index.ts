@@ -238,10 +238,19 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     logoH = fallbackSize;
   }
 
-  const titleW = bold.widthOfTextAtSize(opts.receiptTitle, 13);
-  page.drawText(opts.receiptTitle, {
-    x: width - margin - titleW, y: y - 14, size: 13, font: bold, color: brand,
+  const titleWords = opts.receiptTitle.split(/\s+/);
+  const titleLine1 = titleWords.slice(0, -1).join(" ") || titleWords[0];
+  const titleLine2 = titleWords.length > 1 ? titleWords[titleWords.length - 1] : null;
+  const t1W = bold.widthOfTextAtSize(titleLine1, 13);
+  page.drawText(titleLine1, {
+    x: width - margin - t1W, y: y - 6, size: 13, font: bold, color: brand,
   });
+  if (titleLine2) {
+    const t2W = bold.widthOfTextAtSize(titleLine2, 13);
+    page.drawText(titleLine2, {
+      x: width - margin - t2W, y: y - 22, size: 13, font: bold, color: brand,
+    });
+  }
   const rcptText = `Receipt No: ${opts.receiptNo}`;
   const rcptW = font.widthOfTextAtSize(rcptText, 10);
   page.drawText(rcptText, {
@@ -335,7 +344,7 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
       x: margin, y: contactY, size: 9, font, color: muted,
     });
   }
-  const siteText = opts.branding.website || "unios.nimt.ac.in";
+  const siteText = opts.branding.website || "uni.nimt.ac.in";
   const siteW = bold.widthOfTextAtSize(siteText, 9);
   page.drawText(siteText, { x: width - margin - siteW, y, size: 9, font: bold, color: brand });
 
