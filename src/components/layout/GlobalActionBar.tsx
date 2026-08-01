@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
@@ -52,7 +53,7 @@ export function GlobalActionBar() {
           ? counsellorFilter
           : (isCounsellor ? profileId : null);
 
-        const { data, error } = await (supabase as any).rpc("action_badge_counts", {
+        const { data, error } = await fetchActionBadgeCounts({
           p_scope_counsellor_id: effectiveProfileId,
           p_include_unassigned: !isCounsellor && counsellorFilter === "all",
         });

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { CheckCheck, Loader2, X } from "lucide-react";
@@ -81,10 +82,10 @@ export function WhatsAppPanel() {
       setUnrepliedCount(0);
       return;
     }
-    const { data, error } = await supabase.rpc("action_badge_counts" as never, {
+    const { data, error } = await fetchActionBadgeCounts({
       p_scope_counsellor_id: isCounsellor ? profile?.id : null,
       p_include_unassigned: true,
-    } as never);
+    });
     if (error) {
       console.error("[WhatsAppPanel] unread count fetch failed:", error);
       return;

@@ -490,11 +490,16 @@ Deno.serve(async (req) => {
                   "in-progress": "in_progress", answered: "in_progress",
                   failed: "failed", cancel: "no_answer",
                 };
-                await db.from("ai_call_records").update({
-                  status: statusMap[plivoStatus] || plivoStatus,
+                // Only write a mapped, constraint-valid status. Raw Plivo strings
+                // (e.g. "ringing", "early media") fail ai_call_records_status_check
+                // (23514) and strand the row at "initiated" forever.
+                const mapped = statusMap[plivoStatus];
+                const patch: Record<string, unknown> = {
                   duration_seconds: parseInt(statusData.bill_duration || statusData.duration || "0"),
                   completed_at: new Date().toISOString(),
-                }).eq("id", call.id);
+                };
+                if (mapped) patch.status = mapped;
+                await db.from("ai_call_records").update(patch).eq("id", call.id);
                 console.log(`Updated call ${call.id} status from initiated → ${plivoStatus}`);
               }
             }

@@ -23,6 +23,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { canSeePolicyItem, isAcademicPartnerPortalRole, type AccessState } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -239,7 +240,7 @@ export function AppSidebar() {
     if (isAcademicPartnerPortalRole(role)) return;
     if (role === "counsellor" && !profile?.id) return;
 
-    const { data, error } = await (supabase as any).rpc("action_badge_counts", {
+    const { data, error } = await fetchActionBadgeCounts({
       p_scope_counsellor_id: role === "counsellor" ? profile?.id : null,
       p_include_unassigned: true,
     });
