@@ -130,6 +130,25 @@ function fitText(text: string, font: any, size: number, maxWidth: number): strin
   return `${out}...`;
 }
 
+function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 6): string[] {
+  if (!text) return [""];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const trial = line ? line + " " + word : word;
+    if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
+      line = trial;
+    } else {
+      if (line) lines.push(line);
+      line = word;
+      if (lines.length >= maxLines) break;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
 interface Branding {
   slug?: string | null;
   name: string;
@@ -240,7 +259,12 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   const cardPad = 14;
   const rowGap = 16;
-  const cardH = 22 + opts.rows.length * rowGap + cardPad;
+  const valueX = margin + cardPad + 130;
+  const valueMaxW = width - margin - cardPad - valueX;
+  // Pre-wrap each value so long values stay inside the card instead of running off-page.
+  const wrappedRows = opts.rows.map(([k, v]) => [k, wrapText(v || "—", bold, 10, valueMaxW)] as [string, string[]]);
+  const totalLines = wrappedRows.reduce((n, [, lines]) => n + lines.length, 0);
+  const cardH = 22 + totalLines * rowGap + cardPad;
   page.drawRectangle({
     x: margin, y: y - cardH, width: width - margin * 2, height: cardH,
     color: cardBg, borderColor: border, borderWidth: 0.5,
@@ -249,10 +273,12 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     x: margin + cardPad, y: y - 14, size: 9, font: bold, color: muted,
   });
   let ry = y - 30;
-  for (const [k, v] of opts.rows) {
-    page.drawText(k, { x: margin + cardPad,        y: ry, size: 10, font, color: subtle });
-    page.drawText(v || "—", { x: margin + cardPad + 130, y: ry, size: 10, font: bold, color: text });
-    ry -= rowGap;
+  for (const [k, lines] of wrappedRows) {
+    page.drawText(k, { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
+    for (const line of lines) {
+      page.drawText(line, { x: valueX, y: ry, size: 10, font: bold, color: text });
+      ry -= rowGap;
+    }
   }
   y -= cardH + 14;
 
