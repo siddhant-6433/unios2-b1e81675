@@ -71,6 +71,17 @@ interface WaiverItem {
   year_amount: number | null;
 }
 
+interface WaiverGroup {
+  id: string; // lead_id::offer_letter_id — synthetic key for list identity
+  lead_id: string;
+  lead_name: string;
+  course_name: string | null;
+  offer_letter_id: string;
+  waivers: WaiverItem[];
+  total_waiver: number;
+  created_at: string;
+}
+
 interface OfferApprovalItem {
   id: string;
   lead_id: string;
@@ -440,10 +451,12 @@ export default function Inbox() {
 
   // ── Item loading ──────────────────────────────────────────────────────────
 
-  const loadItems = useCallback(async (cat: CategoryId) => {
+  const loadItems = useCallback(async (cat: CategoryId, keepSelection?: boolean) => {
     setLoading(true);
-    setSelectedItem(null);
-    setItems([]); // clear stale items immediately so renderMiddleItem never sees mismatched data
+    if (!keepSelection) {
+      setSelectedItem(null);
+      setItems([]);
+    }
 
     try {
       if (cat === "abvmu_deposits") {
@@ -564,7 +577,7 @@ export default function Inbox() {
           }
         }
 
-        const nextItems = waiverRows.map((w: any) => {
+        const flatWaivers = waiverRows.map((w: any) => {
             const offer = offersById.get(w.offer_letter_id);
             const lead = offer?.lead_id ? leadsById.get(offer.lead_id) : null;
             const course = offer?.course_id ? coursesById.get(offer.course_id) : null;
@@ -593,7 +606,33 @@ export default function Inbox() {
               year_amount: yearAmount,
             } as WaiverItem;
           });
-        commitItems(cat, nextItems);
+
+        // Group by lead+offer so one row = one student
+        const groupMap = new Map<string, WaiverGroup>();
+        for (const w of flatWaivers) {
+          const key = `${w.lead_id}::${w.offer_letter_id}`;
+          let g = groupMap.get(key);
+          if (!g) {
+            g = {
+              id: key,
+              lead_id: w.lead_id,
+              lead_name: w.lead_name,
+              course_name: w.course_name,
+              offer_letter_id: w.offer_letter_id,
+              waivers: [],
+              total_waiver: 0,
+              created_at: w.created_at,
+            };
+            groupMap.set(key, g);
+          }
+          g.waivers.push(w);
+          g.total_waiver += w.amount;
+          if (w.created_at > g.created_at) g.created_at = w.created_at;
+        }
+        const nextItems = Array.from(groupMap.values());
+        // Store flat count for badge (total pending waivers, not groups)
+        setCounts((prev) => prev[cat] === flatWaivers.length ? prev : { ...prev, [cat]: flatWaivers.length });
+        setItems(nextItems);
       } else if (cat === "offer_approvals") {
         // offer_letters has course_id → courses FK; join directly
         const { data, error } = await supabase
@@ -822,11 +861,43 @@ export default function Inbox() {
       });
       if (error || data?.error) throw new Error(error?.message || data?.error);
       toast({ title: decision === "approved" ? "Waiver approved" : "Waiver rejected" });
+      // Optimistically update the group in-place so the user stays on the same card.
+      // If only one waiver was left, clear selection (group gone). Otherwise remove
+      // the decided waiver from the group and update totals.
+      setSelectedItem((prev) => {
+        if (!prev || !("waivers" in prev)) return null;
+        const g = prev as WaiverGroup;
+        const remaining = g.waivers.filter(w => w.id !== waiver.id);
+        if (remaining.length === 0) return null;
+        return { ...g, waivers: remaining, total_waiver: remaining.reduce((s, w) => s + w.amount, 0) };
+      });
+      loadItems("offer_waivers", true);
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const decideAllWaivers = async (group: WaiverGroup) => {
+    if (!isSuperAdmin) return;
+    setProcessing(group.id);
+    try {
+      for (const w of group.waivers) {
+        const { data, error } = await supabase.functions.invoke("decide-offer-waiver", {
+          body: { waiver_id: w.id, decision: "approved" },
+        });
+        if (error || data?.error) throw new Error(error?.message || data?.error);
+      }
+      toast({ title: `All ${group.waivers.length} waivers approved` });
       setSelectedItem(null);
       loadItems("offer_waivers");
       fetchCounts();
     } catch (e: any) {
-      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+      toast({ title: "Batch approve failed", description: e.message, variant: "destructive" });
+      loadItems("offer_waivers");
+      fetchCounts();
     } finally {
       setProcessing(null);
     }
@@ -1068,21 +1139,26 @@ export default function Inbox() {
     }
 
     if (selected === "offer_waivers") {
-      const w = item as WaiverItem;
+      const g = item as WaiverGroup;
       return (
-        <button key={w.id} className={baseClass} onClick={() => setSelectedItem(w)}>
+        <button key={g.id} className={baseClass} onClick={() => setSelectedItem(g)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{w.lead_name}</p>
-              <p className="text-xs text-muted-foreground truncate">{w.course_name || "—"}</p>
+              <p className="text-sm font-medium text-foreground truncate">{g.lead_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{g.course_name || "—"}</p>
             </div>
-            <span className="text-sm font-semibold text-warning-foreground shrink-0">{fmtINR(w.amount)}</span>
+            <span className="text-sm font-semibold text-warning-foreground shrink-0">{fmtINR(g.total_waiver)}</span>
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <Badge className="bg-muted text-muted-foreground border-0 text-[10px] capitalize">
-              {w.term_label}
+            <Badge className="bg-muted text-muted-foreground border-0 text-[10px]">
+              {g.waivers.length} waiver{g.waivers.length > 1 ? "s" : ""}
             </Badge>
-            <span className="text-[10px] text-muted-foreground/60">{fmtTime(w.created_at)}</span>
+            {g.waivers.map(w => (
+              <Badge key={w.id} className="bg-muted text-muted-foreground border-0 text-[10px] capitalize">
+                {w.term_label}
+              </Badge>
+            ))}
+            <span className="text-[10px] text-muted-foreground/60">{fmtTime(g.created_at)}</span>
           </div>
         </button>
       );
@@ -1313,65 +1389,92 @@ export default function Inbox() {
     }
 
     if (selected === "offer_waivers") {
-      const w = selectedItem as WaiverItem;
-      const applicableAfterWaiver = w.year_amount != null
-        ? Math.max(0, w.year_amount - w.amount)
-        : null;
+      const g = selectedItem as WaiverGroup;
       return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{w.lead_name}</h3>
-            {w.course_name && <p className="text-sm text-muted-foreground">{w.course_name}</p>}
+        <div className="p-5 space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">{g.lead_name}</h3>
+              {g.course_name && <p className="text-sm text-muted-foreground">{g.course_name}</p>}
+            </div>
+            <span className="text-sm font-semibold text-warning-foreground shrink-0">
+              Total: {fmtINR(g.total_waiver)}
+            </span>
           </div>
 
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Particular" value={w.term_label} />
-            <Row label="Amount" value={fmtINR(w.year_amount)} />
-            <Row label="Waiver Requested" value={fmtINR(w.amount)} highlight />
-            <Row label="Applicable Amount After Waiver" value={fmtINR(applicableAfterWaiver)} />
-            <Row label="Reason" value={w.reason || "—"} />
-            <Row label="Requested By" value={
-              w.requested_by_name
-                ? `${w.requested_by_name}${w.requested_by_role ? ` (${w.requested_by_role.replace("_", " ")})` : ""}`
-                : "—"
-            } />
-            <Row label="Requested On" value={fmtDate(w.created_at)} />
+          <div className="space-y-2">
+            {g.waivers.map(w => {
+              const afterWaiver = w.year_amount != null ? Math.max(0, w.year_amount - w.amount) : null;
+              return (
+                <div key={w.id} className="rounded-lg border border-border bg-card p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{w.term_label}</span>
+                      <span className="text-sm text-warning-foreground font-medium">−{fmtINR(w.amount)}</span>
+                    </div>
+                    {isSuperAdmin && (
+                      <div className="flex gap-1">
+                        <button
+                          disabled={processing === w.id}
+                          onClick={() => decideWaiver(w, "approved")}
+                          className="rounded bg-success hover:bg-success/90 text-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                        >
+                          {processing === w.id ? "…" : "Approve"}
+                        </button>
+                        <button
+                          disabled={processing === w.id}
+                          onClick={() => decideWaiver(w, "rejected")}
+                          className="rounded border border-destructive/30 text-destructive hover:bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-0.5">
+                    {w.year_amount != null && (
+                      <div>Gross: {fmtINR(w.year_amount)} → After waiver: {fmtINR(afterWaiver)}</div>
+                    )}
+                    {w.reason && <div>Reason: {w.reason}</div>}
+                    {w.requested_by_name && (
+                      <div>
+                        By {w.requested_by_name}
+                        {w.requested_by_role ? ` (${w.requested_by_role.replace("_", " ")})` : ""}
+                        {" · "}{fmtDate(w.created_at)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-2">
+          {isSuperAdmin && g.waivers.length > 1 && (
             <Button
               size="sm"
-              className="flex-1 bg-success/90 hover:bg-success text-white"
-              disabled={!isSuperAdmin || processing === w.id}
-              onClick={() => decideWaiver(w, "approved")}
+              className="w-full bg-success/90 hover:bg-success text-white"
+              disabled={processing != null}
+              onClick={() => decideAllWaivers(g)}
             >
-              {processing === w.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+              {processing != null ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
               ) : (
-                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+                <CheckCheck className="h-4 w-4 mr-1.5" />
               )}
+              Approve All ({g.waivers.length})
             </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="flex-1"
-              disabled={!isSuperAdmin || processing === w.id}
-              onClick={() => decideWaiver(w, "rejected")}
-            >
-              <XCircle className="h-4 w-4 mr-1.5" />Reject
-            </Button>
-          </div>
+          )}
 
           {!isSuperAdmin && (
             <p className="text-xs text-muted-foreground text-center">Only super admins can approve waivers.</p>
           )}
 
-          {w.lead_id && (
+          {g.lead_id && (
             <Button
               variant="outline"
               size="sm"
               className="w-full"
-              onClick={() => navigate(`/admissions/${w.lead_id}`)}
+              onClick={() => navigate(`/admissions/${g.lead_id}`)}
             >
               <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
               View Lead Profile
