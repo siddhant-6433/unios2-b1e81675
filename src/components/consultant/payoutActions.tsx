@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, Building2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 // Shared row shape from the consultant_payout_sheet view (select "*").
 export type PayoutSheetRow = {
@@ -28,6 +29,10 @@ export type PayoutSheetRow = {
   payment_date: string | null;
   payment_proof_path: string | null;
   paid_at: string | null;
+  zoho_bill_id?: string | null;
+  zoho_bill_number?: string | null;
+  zoho_synced_at?: string | null;
+  zoho_sync_error?: string | null;
 };
 
 export const CAN_MANAGE_PAYOUT_ROLES = ["super_admin", "campus_admin", "admission_head"];
@@ -36,8 +41,8 @@ export const modeLabel: Record<string, string> = { bank_transfer: "Bank Transfer
 export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "proof";
 
-// ---- Per-payout PDF slip (true download) ------------------------------------
-export function downloadPayoutSlip(r: PayoutSheetRow) {
+// ---- Per-payout PDF slip ----------------------------------------------------
+function buildSlipDoc(r: PayoutSheetRow): jsPDF {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const M = 48;
   let y = 56;
@@ -76,8 +81,17 @@ export function downloadPayoutSlip(r: PayoutSheetRow) {
   doc.text("Approved by: __________________", 320, y);
   doc.setFontSize(7.5); doc.setTextColor(150);
   doc.text(`Generated ${new Date().toLocaleString("en-IN")}`, M, 800);
+  return doc;
+}
 
-  doc.save(`payout-slip-${safeFileName(r.candidate_name)}-${safeFileName(r.consultant_name)}.pdf`);
+export function downloadPayoutSlip(r: PayoutSheetRow) {
+  buildSlipDoc(r).save(`payout-slip-${safeFileName(r.candidate_name)}-${safeFileName(r.consultant_name)}.pdf`);
+}
+
+// Base64 of the slip PDF (for attaching to a Zoho bill).
+function payoutSlipBase64(r: PayoutSheetRow): string {
+  const uri = buildSlipDoc(r).output("datauristring");
+  return uri.slice(uri.indexOf(",") + 1);
 }
 
 // ---- Mark-paid dialog -------------------------------------------------------
@@ -104,8 +118,13 @@ export function MarkPaidDialog({ payout, onClose, onDone }: { payout: PayoutShee
       _payout_id: payout.payout_id, _payment_mode: mode, _payment_reference: reference.trim() || null,
       _payment_date: date || null, _proof_path: proofPath, _note: note.trim() || null,
     });
+    if (error) { setSaving(false); toast({ title: "Couldn't mark paid", description: error.message, variant: "destructive" }); return; }
+    // If this payout is already a Zoho bill, also record the payment in Zoho (best-effort).
+    if (payout.zoho_bill_id) {
+      const { error: zErr } = await supabase.functions.invoke("zoho-books-sync", { body: { payout_id: payout.payout_id, action: "record_payment" } });
+      if (zErr) toast({ title: "Marked paid, but Zoho sync failed", description: "Record the payment in Zoho manually.", variant: "destructive" });
+    }
     setSaving(false);
-    if (error) { toast({ title: "Couldn't mark paid", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Payout marked paid" });
     onDone();
   };
@@ -153,5 +172,36 @@ export function MarkPaidDialog({ payout, onClose, onDone }: { payout: PayoutShee
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---- Send-to-Zoho button (creates the Zoho vendor + bill, attaches the slip) --
+export function ZohoSyncButton({ row, onDone }: { row: PayoutSheetRow; onDone: () => void }) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const send = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke("zoho-books-sync", {
+      body: { payout_id: row.payout_id, action: "create_bill", pdf_base64: payoutSlipBase64(row) },
+    });
+    setBusy(false);
+    const errMsg = error?.message || (data as { error?: string } | null)?.error;
+    if (errMsg) { toast({ title: "Zoho sync failed", description: errMsg, variant: "destructive" }); return; }
+    toast({ title: "Sent to Zoho Books" });
+    onDone();
+  };
+
+  if (row.zoho_bill_id) {
+    return (
+      <Badge className="border-0 bg-primary/10 text-primary text-[10px] gap-1" title={row.zoho_synced_at ? `Synced ${new Date(row.zoho_synced_at).toLocaleString("en-IN")}` : ""}>
+        <Building2 className="h-3 w-3" />Zoho {row.zoho_bill_number || "✓"}
+      </Badge>
+    );
+  }
+  return (
+    <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px]" disabled={busy} onClick={send} title={row.zoho_sync_error || "Create a bill in Zoho Books"}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Building2 className="h-3.5 w-3.5" />}Send to Zoho
+    </Button>
   );
 }

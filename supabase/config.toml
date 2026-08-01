@@ -216,3 +216,6 @@ verify_jwt = false
 
 [functions.pay-link]
 verify_jwt = false
+
+[functions.zoho-books-webhook]
+verify_jwt = false
