@@ -145,6 +145,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         sessionStorage.removeItem(IMPERSONATION_KEY);
       }
 
+      // No role yet? An admitted candidate's auth user is often not linked to
+      // their student record (AN issuance only mints a claim token). Auto-claim
+      // it by their verified phone/email so post-login routing defaults to the
+      // student dashboard. Safe: only links an unclaimed, single-match admitted
+      // student and never converts a user who already has a role.
+      if (!roleRes.data) {
+        try {
+          const { data: claim } = await supabase.rpc("claim_admitted_student_self" as any);
+          if ((claim as any)?.linked) setRole("student" as AppRole);
+        } catch { /* non-critical */ }
+      }
+
       // Fetch permissions — non-critical, errors are safe to ignore
       supabase.rpc("get_user_permissions", { _user_id: userId })
         .then((res) => {
