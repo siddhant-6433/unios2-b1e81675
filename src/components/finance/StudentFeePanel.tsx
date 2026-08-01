@@ -10,6 +10,7 @@ import {
   Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
   Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History,
 } from "lucide-react";
+import { AddFeeHeadDialog } from "./AddFeeHeadDialog";
 import { ConcessionDialog } from "./ConcessionDialog";
 import { AddCustomFeeDialog } from "./AddCustomFeeDialog";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
@@ -50,6 +51,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [addFeeHeadOpen, setAddFeeHeadOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
@@ -59,6 +61,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
+  const canManageFeeStructure = role === "super_admin" || hasPermission("fee_structure:manage");
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   const isStethoBatch = student?.fee_structure_version === "stetho_batch";
@@ -273,6 +276,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {canProvision && (
           <Button size="sm" variant="outline" onClick={() => setAddFeeOpen(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Fee
+          </Button>
+        )}
+        {canManageFeeStructure && student?.id && (
+          <Button size="sm" variant="outline" onClick={() => setAddFeeHeadOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Add Fee Head
           </Button>
         )}
         {canRequestConcession && fees.length > 0 && (
@@ -513,6 +521,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </>
         );
       })()}
+
+      <AddFeeHeadDialog
+        open={addFeeHeadOpen}
+        onOpenChange={setAddFeeHeadOpen}
+        studentId={student.id}
+        onSuccess={() => { fetchFees(); onRefresh?.(); }}
+      />
 
       <ConcessionDialog
         open={concessionOpen}

@@ -8,7 +8,7 @@ import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
-  AlertCircle, CheckCircle, Clock, CreditCard,
+  AlertCircle, CheckCircle, Clock, CreditCard, FileText,
 } from "lucide-react";
 
 const tabs = [
@@ -315,13 +315,22 @@ export default function StudentPortal() {
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-bold shrink-0">
             {student.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold text-gray-900 truncate">{student.name}</h2>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-0.5">
               {student.course_name && <span>{student.course_name}</span>}
               <span className="font-mono">{student.admission_no}</span>
             </div>
           </div>
+          {!claimToken && (
+            <button
+              onClick={() => navigate("/my-applications")}
+              className="flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
+              title="Open your application dashboard"
+            >
+              <FileText className="h-4 w-4" /> Application
+            </button>
+          )}
         </div>
       </div>
 

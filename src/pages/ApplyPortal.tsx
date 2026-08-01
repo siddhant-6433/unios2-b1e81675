@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
@@ -1132,6 +1133,18 @@ function ApplicationDashboardView({
   onBehalfContext: OnBehalfContext | null;
 }) {
   const portal = usePortal();
+  const { role } = useAuth();
+
+  // Default landing for an admitted, linked candidate is the student dashboard.
+  // AuthContext auto-links their student record (role → 'student'); once that
+  // resolves, send them to /student instead of the application dashboard.
+  // Skip for partner on-behalf sessions and magic-link visits.
+  useEffect(() => {
+    if (role !== "student" || onBehalfContext) return;
+    if (new URLSearchParams(window.location.search).has("token")) return;
+    window.location.assign("/student");
+  }, [role, onBehalfContext]);
+
   // Which app's fee-receipt dialog is open. Builds the same modern receipt
   // the student gets via email — single canonical format.
   const [receiptApp, setReceiptApp] = useState<any | null>(null);
@@ -1308,7 +1321,7 @@ function ApplicationDashboardView({
             subtitle      = <span className="font-mono font-semibold">Admission No: {an}</span>;
             subtitleColor = "text-white/70";
             cta = (
-              <a href="https://uni.nimt.ac.in" target="_blank" rel="noopener"
+              <a href="/student"
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 <GraduationCap className="h-4 w-4" /> Go to Student Dashboard →
               </a>
@@ -1433,9 +1446,7 @@ function ApplicationDashboardView({
                     <span className="text-xs font-bold text-white tracking-wide">Admitted · {admNo}</span>
                   </div>
                   <a
-                    href="https://uni.nimt.ac.in"
-                    target="_blank"
-                    rel="noopener"
+                    href="/student"
                     className="text-[11px] font-bold text-white/90 hover:text-white underline underline-offset-2"
                   >
                     Student Portal →
