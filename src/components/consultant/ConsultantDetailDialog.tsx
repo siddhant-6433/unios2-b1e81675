@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X } from "lucide-react";
+import { Loader2, Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw } from "lucide-react";
+import { PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, modeLabel, CAN_MANAGE_PAYOUT_ROLES } from "@/components/consultant/payoutActions";
 
 type ConsultantLite = {
   id: string; name: string; organization: string | null; phone: string | null;
@@ -16,7 +18,7 @@ type DocLite = { id: string; document_type: string; title: string; file_name: st
 
 type LeadRow = { id: string; name: string; phone: string | null; stage: string; admission_no: string | null; pre_admission_no: string | null; created_at: string; courses: { name: string } | null; consultant_commission_type: string | null; consultant_commission_value: number | null };
 type ApplicationRow = { id: string; application_id: string | null; status: string | null; lead_id: string; full_name: string | null; submitted_at: string | null };
-type PayoutRow = { payout_id: string; candidate_name: string; admission_no: string | null; course_name: string | null; student_fee_paid: number; payout_amount: number; fee_paid_pct: number; status: string };
+type PayoutRow = PayoutSheetRow;
 type SearchLead = { id: string; name: string; phone: string | null; stage: string; admission_no: string | null; pre_admission_no: string | null; consultant_id: string | null };
 
 const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -36,6 +38,10 @@ export function ConsultantDetailDialog({
   onClose: () => void;
 }) {
   const { toast } = useToast();
+  const { role } = useAuth();
+  const canManagePayout = CAN_MANAGE_PAYOUT_ROLES.includes(role || "");
+  const [markPaid, setMarkPaid] = useState<PayoutRow | null>(null);
+  const [payoutBusyId, setPayoutBusyId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<LeadRow[]>([]);
@@ -86,7 +92,7 @@ export function ConsultantDetailDialog({
     }
 
     const { data: payoutRows } = await (supabase.from("consultant_payout_sheet" as any) as any)
-      .select("payout_id, candidate_name, admission_no, course_name, student_fee_paid, payout_amount, fee_paid_pct, status")
+      .select("*")
       .eq("consultant_id", cId).order("created_at", { ascending: false });
     setPayouts((payoutRows || []) as PayoutRow[]);
     setLoading(false);
@@ -146,6 +152,15 @@ export function ConsultantDetailDialog({
     setEditCommId(null);
     load();
     onChanged();
+  };
+
+  const unmarkPayout = async (p: PayoutRow) => {
+    setPayoutBusyId(p.payout_id);
+    const { error } = await (supabase.rpc as any)("unmark_consultant_payout_paid", { _payout_id: p.payout_id });
+    setPayoutBusyId(null);
+    if (error) { toast({ title: "Couldn't revert", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Reverted to pending" });
+    load();
   };
 
   if (!consultant) return null;
@@ -357,11 +372,63 @@ export function ConsultantDetailDialog({
                   <span className="flex items-center gap-1"><IndianRupee className="h-3 w-3" />Total {inr(payoutTotal)}</span>
                   <span>Pending {inr(payablePending)}</span>
                 </div>
-                <SimpleTable
-                  empty="No payouts. Payouts appear once a linked lead pays fees."
-                  head={["Candidate", "Admission No.", "Course", "Fee Paid", "Payout", "Status"]}
-                  rows={payouts.map(p => [p.candidate_name, p.admission_no || "—", p.course_name || "—", `${inr(Number(p.student_fee_paid))} (${Number(p.fee_paid_pct)}%)`, inr(Number(p.payout_amount)), p.status])}
-                />
+                {payouts.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No payouts. Payouts appear once a linked lead pays fees.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border/40 text-left text-muted-foreground">
+                          <th className="py-2 pr-3 font-medium">Candidate</th>
+                          <th className="py-2 pr-3 font-medium">Admission No.</th>
+                          <th className="py-2 pr-3 font-medium text-right">Fee Paid</th>
+                          <th className="py-2 pr-3 font-medium text-right">Payout</th>
+                          <th className="py-2 pr-3 font-medium">Status</th>
+                          <th className="py-2 font-medium text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payouts.map(p => (
+                          <tr key={p.payout_id} className="border-b border-border/20 last:border-0 align-top">
+                            <td className="py-2 pr-3 font-medium text-foreground">{p.candidate_name}<div className="text-[10px] text-muted-foreground">{p.course_name || ""}</div></td>
+                            <td className="py-2 pr-3 text-muted-foreground">{p.admission_no || "—"}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">{inr(Number(p.student_fee_paid))} <span className="text-muted-foreground">({Number(p.fee_paid_pct)}%)</span></td>
+                            <td className="py-2 pr-3 text-right tabular-nums font-medium">{inr(Number(p.payout_amount))}</td>
+                            <td className="py-2 pr-3">
+                              {p.status === "paid" ? (
+                                <div>
+                                  <Badge className="border-0 bg-success/15 text-success text-[10px]">Paid</Badge>
+                                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {p.payment_date || (p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-IN") : "")}
+                                    {p.payment_mode ? ` · ${modeLabel[p.payment_mode] || p.payment_mode}` : ""}
+                                    {p.payment_reference ? ` · ${p.payment_reference}` : ""}
+                                  </div>
+                                </div>
+                              ) : (
+                                <Badge className="border-0 bg-warning/15 text-warning text-[10px]">{p.status}</Badge>
+                              )}
+                            </td>
+                            <td className="py-2 text-right whitespace-nowrap">
+                              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px]" onClick={() => downloadPayoutSlip(p)}>
+                                <Download className="h-3.5 w-3.5" />Slip
+                              </Button>
+                              {canManagePayout && p.status !== "paid" && (
+                                <Button size="sm" className="h-7 gap-1 px-2 text-[10px]" onClick={() => setMarkPaid(p)}>
+                                  <CheckCircle2 className="h-3.5 w-3.5" />Mark paid
+                                </Button>
+                              )}
+                              {canManagePayout && p.status === "paid" && (
+                                <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px] text-muted-foreground" disabled={payoutBusyId === p.payout_id} onClick={() => unmarkPayout(p)}>
+                                  {payoutBusyId === p.payout_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Revert
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
 
@@ -411,6 +478,7 @@ export function ConsultantDetailDialog({
           </div>
         )}
       </DialogContent>
+      {markPaid && <MarkPaidDialog payout={markPaid} onClose={() => setMarkPaid(null)} onDone={() => { setMarkPaid(null); load(); }} />}
     </Dialog>
   );
 }
