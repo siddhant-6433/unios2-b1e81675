@@ -230,7 +230,9 @@ export function decideApplicantAccess(state: AccessState): AccessDecision {
   if (!state.isAuthenticated) {
     return { allowed: false, reason: "unauthenticated", redirectTo: "/login" };
   }
-  if (state.role !== null) {
+  // Applicants (role === null) live here; admitted students (role === "student")
+  // may also open their application dashboard from the student portal.
+  if (state.role !== null && state.role !== "student") {
     return { allowed: false, reason: "wrong_role", redirectTo: "/" };
   }
   return { allowed: true };
