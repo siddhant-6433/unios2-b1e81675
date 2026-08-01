@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School, PauseCircle, PlayCircle, MessageSquare } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -27,6 +27,7 @@ import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { ExternalOwnerDialog } from "@/components/admissions/ExternalOwnerDialog";
+import { HoldApplicationDialog, type HoldApplicationTarget } from "@/components/admissions/HoldApplicationDialog";
 import { determineProgramCategory } from "@/components/apply/types";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -192,6 +193,7 @@ export default function AdminApplicationView() {
     role === "admission_head" || role === "campus_admin";
   const canEditProgram = canManageOffer;
   const isSuperAdmin = role === "super_admin";
+  const isCounsellor = role === "counsellor";
   const canAssignExternalOwner =
     isSuperAdmin
     || role === "principal"
@@ -239,6 +241,10 @@ export default function AdminApplicationView() {
   const [offlinePaymentOpen, setOfflinePaymentOpen] = useState(false);
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [showExternalOwner, setShowExternalOwner] = useState(false);
+  const [holdTarget, setHoldTarget] = useState<HoldApplicationTarget | null>(null);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -259,6 +265,7 @@ export default function AdminApplicationView() {
       ]);
       if (appErr) throw appErr;
       setApp(appRow);
+      if (appRow?.id) loadComments(appRow.id);
       const activeDocs = activeDocsByLogicalKey((((fnRes?.data as any)?.docs || []) as PreviewDoc[]));
       const activeDocPaths = new Set(activeDocs.map(d => d.path).filter(Boolean));
       setDocs(activeDocs);
@@ -407,6 +414,32 @@ export default function AdminApplicationView() {
   };
 
   useEffect(() => { refresh(); }, [applicationId]);
+
+  const loadComments = async (appId: string) => {
+    const { data } = await supabase
+      .from("application_comments" as any)
+      .select("*")
+      .eq("application_id", appId)
+      .order("created_at", { ascending: false });
+    setComments((data as any[]) || []);
+  };
+
+  const addComment = async () => {
+    if (!newComment.trim() || !app?.id) return;
+    setSavingComment(true);
+    const { error } = await supabase.rpc("add_application_comment" as any, {
+      _application_id: app.id,
+      _body: newComment.trim(),
+      _kind: "comment",
+    });
+    if (error) {
+      toast({ title: "Couldn't add comment", description: error.message, variant: "destructive" });
+    } else {
+      setNewComment("");
+      await loadComments(app.id);
+    }
+    setSavingComment(false);
+  };
 
   const insertApplicationAudit = async (
     section: string,
@@ -723,6 +756,22 @@ export default function AdminApplicationView() {
 
   const currentCourseName = currentCourseOption?.name || lead?.course?.name || primarySelection?.course_name || "No program selected";
   const currentCampusName = currentCourseOption?.campus_name || primarySelection?.campus_name || "";
+
+  const buildHoldTarget = (): HoldApplicationTarget | null => {
+    if (!app) return null;
+    return {
+      id: app.id,
+      application_id: app.application_id,
+      lead_id: lead?.id || app.lead_id || null,
+      full_name: app.full_name,
+      phone: lead?.phone || app.phone,
+      course_name: currentCourseName,
+      exam_code: null, // ponytail: skip exam derivation; hold dialog falls back to generic WA copy
+      on_hold: app.status === "on_hold",
+      hold_reason: app.hold_reason,
+      show_counselling_preset: !["token_paid", "pre_admitted", "admitted"].includes(app.status),
+    };
+  };
   const sortedCourseOptions = useMemo(() => (
     [...courseOptions].sort((a, b) => {
       const campusCmp = a.campus_name.localeCompare(b.campus_name);
@@ -1054,6 +1103,29 @@ export default function AdminApplicationView() {
               Create Linked Lead
             </Button>
           )}
+          {!isCounsellor && (
+            app.status === "on_hold" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-success border-success/30 hover:bg-success/5"
+                onClick={() => setHoldTarget(buildHoldTarget())}
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                Release hold
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-warning-foreground border-warning/40 hover:bg-warning/5"
+                onClick={() => setHoldTarget(buildHoldTarget())}
+              >
+                <PauseCircle className="h-3.5 w-3.5" />
+                Hold
+              </Button>
+            )
+          )}
           {role === "super_admin" && (
             <Button
               variant="outline"
@@ -1364,6 +1436,54 @@ export default function AdminApplicationView() {
         </div>
       )}
 
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">Comments</h2>
+          {comments.length > 0 && <span className="text-xs text-muted-foreground">({comments.length})</span>}
+        </div>
+        <div className="space-y-2">
+          <Textarea
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder="Add a comment on this application…"
+            rows={2}
+            className="text-sm"
+          />
+          <div className="flex justify-end">
+            <Button size="sm" onClick={addComment} disabled={!newComment.trim() || savingComment}>
+              {savingComment ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+              Add comment
+            </Button>
+          </div>
+        </div>
+        {comments.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No comments yet.</p>
+        ) : (
+          <div className="space-y-2 pt-1">
+            {comments.map((c) => (
+              <div key={c.id} className="rounded-lg border border-border bg-muted/20 p-2.5 text-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {c.kind === "hold" && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 text-warning-foreground px-2 py-0.5 text-[10px] font-medium">
+                      <PauseCircle className="h-3 w-3" />On hold
+                    </span>
+                  )}
+                  {c.kind === "release" && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2 py-0.5 text-[10px] font-medium">
+                      <PlayCircle className="h-3 w-3" />Hold released
+                    </span>
+                  )}
+                  <span className="text-xs font-medium text-foreground">{c.author_name || "Staff"}</span>
+                  <span className="text-[11px] text-muted-foreground">{new Date(c.created_at).toLocaleString("en-IN")}</span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-foreground">{c.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {canUploadDocuments && (
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -1563,6 +1683,13 @@ export default function AdminApplicationView() {
           onSuccess={refresh}
         />
       )}
+
+      {/* Put on hold / release — shared with the applications list page */}
+      <HoldApplicationDialog
+        target={holdTarget}
+        onClose={() => setHoldTarget(null)}
+        onSaved={() => { setHoldTarget(null); refresh(); }}
+      />
     </div>
   );
 }

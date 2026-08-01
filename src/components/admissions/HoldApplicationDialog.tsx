@@ -80,6 +80,13 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
       return;
     }
 
+    // Log to the application's comment thread (best-effort — never fail the hold on this).
+    await supabase.rpc("add_application_comment" as any, {
+      _application_id: target.id,
+      _body: reason.trim() || "Put on hold",
+      _kind: "hold",
+    });
+
     if (notify && target.phone) {
       try {
         const { error: waErr } = await supabase.functions.invoke("whatsapp-send", {
@@ -121,6 +128,11 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
       setSaving(false);
       return;
     }
+    await supabase.rpc("add_application_comment" as any, {
+      _application_id: target.id,
+      _body: "Hold released",
+      _kind: "release",
+    });
     toast({ title: "Hold released", description: `${target.application_id} is back in the active flow.` });
     setSaving(false);
     onSaved();
