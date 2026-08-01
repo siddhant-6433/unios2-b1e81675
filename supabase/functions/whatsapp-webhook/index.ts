@@ -269,7 +269,8 @@ Deno.serve(async (req) => {
         for (const msg of messages) {
           const phone = msg.from; // sender's phone number
           const waMessageId = msg.id;
-          const msgType = msg.type || "text";
+          const KNOWN_MSG_TYPES = new Set(["text", "image", "document", "audio", "video", "template", "interactive"]);
+          const msgType = KNOWN_MSG_TYPES.has(msg.type) ? msg.type : "text";
           // Interactive button replies (e.g. our Good/Bad feedback buttons)
           // carry their payload in msg.interactive.button_reply. Surface the
           // chosen title in `content` so the inbox shows "Good" / "Bad"

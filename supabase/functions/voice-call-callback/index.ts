@@ -487,6 +487,7 @@ Deno.serve(async (req) => {
               if (plivoStatus && plivoStatus !== "initiated" && plivoStatus !== "ringing") {
                 const statusMap: Record<string, string> = {
                   completed: "completed", busy: "busy", "no-answer": "no_answer",
+                  "in-progress": "in_progress", answered: "in_progress",
                   failed: "failed", cancel: "no_answer",
                 };
                 await db.from("ai_call_records").update({
