@@ -532,6 +532,7 @@ export async function settlePaymentLink(
     note?: string | null;
     lead_id?: string | null;
     student_id?: string | null;
+    allocations?: Array<{ fee_code_id: string; amount: number; label?: string }> | null;
   },
   paymentRef: string,
   gateway: GatewayName,
@@ -571,6 +572,10 @@ export async function settlePaymentLink(
   }
 
   const paidAmount = Number(link.amount);
+  // When the link carries a per-head breakup, record it on the payment and let
+  // provision_student_fees (fired by the lead_payments confirm trigger) map each
+  // allocation to the matching fee_ledger heads — instead of the oldest-due sweep.
+  const hasAllocations = Array.isArray(link.allocations) && link.allocations.length > 0;
 
   const notifyPaymentReceived = (leadId: string, leadPaymentId: string) => {
     fetch(`${supabaseUrl}/functions/v1/notify-event`, {
@@ -629,7 +634,10 @@ export async function settlePaymentLink(
         gateway,
         transaction_ref: payId,
         status: "confirmed",
-        applied_to_ledger: true,
+        // With a breakup, leave unapplied so the provision trigger routes it to
+        // the chosen heads; otherwise apply oldest-due below as before.
+        applied_to_ledger: hasAllocations ? false : true,
+        allocations: hasAllocations ? link.allocations : null,
         notes: link.note || "Fee payment via payment link",
       })
       .select("id")
@@ -642,6 +650,11 @@ export async function settlePaymentLink(
     }
     if (lp?.id) {
       await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      if (hasAllocations) {
+        // Breakup routing is handled by provision_student_fees (confirm trigger).
+        notifyPaymentReceived(leadId, lp.id);
+        return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+      }
       // Apply amount to oldest due ledger rows (same as pay-link).
       const { data: rows } = await admin
         .from("fee_ledger")
@@ -691,6 +704,9 @@ export async function settlePaymentLink(
         gateway,
         transaction_ref: payId,
         status: "confirmed",
+        // Pre-admission (no student yet): breakup is held and mapped by
+        // provision_student_fees once the student ledger is provisioned.
+        allocations: hasAllocations ? link.allocations : null,
         notes: link.note || "Custom payment via payment link",
       })
       .select("id")

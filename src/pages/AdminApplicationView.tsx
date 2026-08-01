@@ -13,6 +13,7 @@ import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLife
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
+import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -236,6 +237,7 @@ export default function AdminApplicationView() {
   const [savingProgram, setSavingProgram] = useState(false);
   const [leadPayments, setLeadPayments] = useState<LeadPaymentRow[]>([]);
   const [offlinePaymentOpen, setOfflinePaymentOpen] = useState(false);
+  const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [showExternalOwner, setShowExternalOwner] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
@@ -1029,6 +1031,17 @@ export default function AdminApplicationView() {
               leadPhone={lead?.phone || app.phone}
             />
           )}
+          {(lead?.id || app.lead_id) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setSendLinkOpen(true)}
+            >
+              <IndianRupee className="h-3.5 w-3.5" />
+              Send Payment Link
+            </Button>
+          )}
           {!lead?.id && (
             <Button
               variant="outline"
@@ -1520,6 +1533,16 @@ export default function AdminApplicationView() {
           leadId={lead.id}
           applicationId={app.application_id}
           onRecorded={refresh}
+        />
+      )}
+
+      {/* Send a payment link (optionally with a per-head breakup) to the candidate */}
+      {(lead?.id || app.lead_id) && (
+        <SendPaymentLinkDialog
+          open={sendLinkOpen}
+          onOpenChange={setSendLinkOpen}
+          leadId={lead?.id || app.lead_id}
+          onCreated={refresh}
         />
       )}
 

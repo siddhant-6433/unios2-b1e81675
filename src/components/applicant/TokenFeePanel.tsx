@@ -180,6 +180,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [leadEmail, setLeadEmail] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
+  // Post-admission course-balance summary (from get_applicant_fee_due). Drives
+  // the "Pay remaining course fee" action once a ledger exists.
+  const [feeDue, setFeeDue] = useState<{ student_id: string | null; due_total: number; heads: { code: string; term: string; balance: number }[] } | null>(null);
   const [yearFees, setYearFees] = useState<Record<string, number>>({});
   const [offerWaivers, setOfferWaivers] = useState<{ term: string; amount: number }[]>([]);
   const [payments, setPayments] = useState<{
@@ -373,13 +376,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
     // Fetch per-term waivers and payment history in parallel.
     const offerId = (offerRes.data as any[])?.[0]?.id;
-    const [waiverRes, payRes, abvmuRes] = await Promise.all([
+    const [waiverRes, payRes, abvmuRes, feeDueRes] = await Promise.all([
       offerId ? (supabase as any).rpc("get_applicant_offer_waivers", { _offer_id: offerId }) : Promise.resolve({ data: [] }),
       (supabase as any).rpc("get_applicant_payments", { _lead_id: resolvedLeadId }),
       (supabase as any).rpc("get_abvmu_deposit_claims", { _lead_id: resolvedLeadId }),
+      (supabase as any).rpc("get_applicant_fee_due", { _lead_id: resolvedLeadId }),
     ]);
     setOfferWaivers((waiverRes.data || []).map((w: any) => ({ term: w.term, amount: Number(w.amount) })));
     setPayments(payRes.data || []);
+    if (feeDueRes.data) {
+      const fd = feeDueRes.data as any;
+      setFeeDue({ student_id: fd.student_id || null, due_total: Number(fd.due_total || 0), heads: fd.heads || [] });
+    }
     setAbvmuClaims((abvmuRes.data || []).map((c: any) => ({
       id: c.id,
       amount: Number(c.amount),
@@ -572,6 +580,87 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         // Popup blocked (common on Edge with strict tracking prevention) — same-tab redirect
         window.location.assign(data.pay_url);
       }
+    } catch (e: any) {
+      try { payWin?.close(); } catch { /* ignore */ }
+      setError(e?.message || "Failed to start payment");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  // Post-admission: pay the remaining course balance from the fee ledger. Amount
+  // is server-authoritative (the edge fn recomputes from the ledger), so we only
+  // pass the student and scope. Mirrors the /pay portal's initiate-fee-payment.
+  const payRemainingCourseFee = async () => {
+    if (!feeDue?.student_id || feeDue.due_total <= 0) return;
+    if (!paymentPhone) {
+      setError("Phone number missing on your profile — re-login with WhatsApp OTP so payment can be started.");
+      return;
+    }
+    const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
+
+    if (gateway === "razorpay") {
+      setPaying(true);
+      setError(null);
+      try {
+        await openRazorpayCheckout({
+          amountPaise: Math.round(feeDue.due_total * 100),
+          receipt: buildRazorpayReceipt("student", feeDue.student_id),
+          context: "student_fee",
+          description: "Course Fee",
+          studentId: feeDue.student_id,
+          paymentScope: "due",
+          customerName: applicantName,
+          customerEmail: paymentEmail || undefined,
+          customerPhone: paymentPhone,
+          productInfo: "Course Fee",
+        });
+        await load();
+        onPayment?.();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Payment was cancelled.");
+      } finally {
+        setPaying(false);
+      }
+      return;
+    }
+
+    let payWin: Window | null = null;
+    try { payWin = window.open("about:blank", "_blank"); } catch { payWin = null; }
+
+    setPaying(true);
+    setError(null);
+    try {
+      const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
+      const txnid = `FEE${feeDue.student_id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
+      const { data, error: invErr } = await supabase.functions.invoke(functionName, {
+        body: {
+          action: "initiate-fee-payment",
+          student_id: feeDue.student_id,
+          txnid,
+          amount: feeDue.due_total,
+          payment_scope: "due",
+          fee_ids: [],
+          productinfo: "Course Fee",
+          firstname: applicantName.split(" ")[0] || applicantName,
+          email: paymentEmail || undefined,
+          phone: paymentPhone,
+        },
+      });
+      if (invErr) {
+        let detail = invErr.message;
+        try {
+          const ctx = (invErr as any).context;
+          const body = ctx?.json ? await ctx.json() : (ctx?.text ? await ctx.text() : null);
+          if (body?.error) detail = body.error;
+          else if (typeof body === "string" && body) detail = body;
+        } catch (_) {}
+        throw new Error(detail);
+      }
+      if (data?.error) throw new Error(data.error);
+      if (!data?.pay_url) throw new Error("No payment URL returned");
+      if (payWin && !payWin.closed) payWin.location.href = data.pay_url;
+      else window.location.assign(data.pay_url);
     } catch (e: any) {
       try { payWin?.close(); } catch { /* ignore */ }
       setError(e?.message || "Failed to start payment");
@@ -1363,6 +1452,29 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           ? `Deadline passed — contact admissions immediately`
                           : semDaysLeft === 0 ? "Due today!"
                           : `Due by ${fmtDate(semesterFeeDeadline)} · ${semDaysLeft} day${semDaysLeft !== 1 ? "s" : ""} left`}
+                      </div>
+                    )}
+                    {/* Post-admission: pay the remaining course balance from the ledger. */}
+                    {isAdmitted && feeDue && feeDue.due_total > 0 && (
+                      <div className="mt-3">
+                        <button
+                          onClick={payRemainingCourseFee}
+                          disabled={paying}
+                          className="inline-flex items-center gap-2 rounded-xl bg-info px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-info/90 disabled:opacity-60 transition-colors"
+                        >
+                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />}
+                          Pay remaining course fee (₹{feeDue.due_total.toLocaleString("en-IN")})
+                        </button>
+                        {feeDue.heads.length > 0 && (
+                          <div className="mt-2 space-y-0.5">
+                            {feeDue.heads.map((h, i) => (
+                              <div key={i} className="flex justify-between text-[11px] text-gray-500">
+                                <span>{h.code} · {defaultFeeTermLabel(h.term)}</span>
+                                <span>₹{Number(h.balance).toLocaleString("en-IN")}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

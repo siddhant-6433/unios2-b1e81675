@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
+import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
 import { Loader2, LinkIcon, Copy, Check } from "lucide-react";
 
 type Purpose = "pre_admission_token" | "fee_due" | "custom";
@@ -48,6 +49,7 @@ export function SendPaymentLinkDialog({
   const { toast } = useToast();
   const [purpose, setPurpose] = useState<Purpose>(defaultPurpose || (studentId ? "fee_due" : "pre_admission_token"));
   const [amount, setAmount] = useState<string>(defaultAmount ? String(defaultAmount) : "");
+  const [allocations, setAllocations] = useState<FeeAllocation[]>([]);
   const [note, setNote] = useState<string>("");
   const [expiryDays, setExpiryDays] = useState<string>("7");
   const [channel, setChannel] = useState<string>("whatsapp");
@@ -55,9 +57,13 @@ export function SendPaymentLinkDialog({
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const usingBreakup = allocations.length > 0;
+  const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+
   const reset = () => {
     setPurpose(defaultPurpose || (studentId ? "fee_due" : "pre_admission_token"));
     setAmount(defaultAmount ? String(defaultAmount) : "");
+    setAllocations([]);
     setNote("");
     setExpiryDays("7");
     setChannel("whatsapp");
@@ -66,9 +72,14 @@ export function SendPaymentLinkDialog({
   };
 
   const handleSubmit = async () => {
-    const amt = parseFloat(amount);
+    // With a breakup, the total IS the amount; otherwise use the entered amount.
+    const amt = usingBreakup ? breakupTotal : parseFloat(amount);
     if (!amt || amt <= 0) {
       toast({ title: "Enter a valid amount", variant: "destructive" });
+      return;
+    }
+    if (usingBreakup && allocations.some((a) => !a.fee_code_id || a.amount <= 0)) {
+      toast({ title: "Complete the breakup", description: "Every head needs a fee head and a positive amount.", variant: "destructive" });
       return;
     }
     setSubmitting(true);
@@ -78,6 +89,7 @@ export function SendPaymentLinkDialog({
         lead_id: leadId || undefined,
         student_id: studentId || undefined,
         amount: amt,
+        allocations: usingBreakup ? allocations : undefined,
         note: note.trim() || undefined,
         expires_days: parseInt(expiryDays, 10) || 7,
         send_channel: channel,
@@ -157,12 +169,23 @@ export function SendPaymentLinkDialog({
             <FieldShell label="Amount (₹)">
               <Input
                 type="number" min="1" step="1" inputMode="numeric"
-                value={amount}
+                value={usingBreakup ? String(breakupTotal) : amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
+                disabled={usingBreakup}
                 autoFocus
               />
+              {usingBreakup && (
+                <p className="mt-1 text-[10px] text-muted-foreground">Total is set by the breakup below.</p>
+              )}
             </FieldShell>
+            <FeeHeadAllocationField
+              open={open}
+              studentId={studentId}
+              leadId={leadId}
+              value={allocations}
+              onChange={setAllocations}
+            />
             <FieldShell label="Link valid for (days)">
               <Input
                 type="number" min="1" max="90" step="1"
