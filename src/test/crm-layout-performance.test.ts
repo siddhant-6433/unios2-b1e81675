@@ -7,6 +7,7 @@ const appLayout = readFileSync("src/components/layout/AppLayout.tsx", "utf8");
 const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "utf8");
 const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTime.tsx", "utf8");
 const useTatDefaults = readFileSync("src/hooks/useTatDefaults.ts", "utf8");
+const actionBadgeCountsHelper = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
 const migration = readFileSync("supabase/migrations/20260618150000_crm_layout_perf_indexes.sql", "utf8");
 const actionBadgeCounts = readFileSync("supabase/migrations/20260618183000_action_badge_counts.sql", "utf8");
 const fastActionBadgeCounts = readFileSync("supabase/migrations/20260625130000_fast_action_badge_counts.sql", "utf8");
@@ -24,8 +25,11 @@ describe("CRM layout performance guardrails", () => {
   });
 
   it("uses one invoker payload for repeated layout counts so RLS still gates scoped counts", () => {
-    expect(globalActionBar).toContain('rpc("action_badge_counts"');
-    expect(appSidebar).toContain('rpc("action_badge_counts"');
+    // Banners route through the shared dedup helper, which is the sole caller
+    // of the RPC (collapses concurrent bursts to avoid statement timeouts).
+    expect(globalActionBar).toContain("fetchActionBadgeCounts(");
+    expect(appSidebar).toContain("fetchActionBadgeCounts(");
+    expect(actionBadgeCountsHelper).toContain('rpc("action_badge_counts"');
     expect(appLayout).toContain("deferredShellReady");
     expect(actionBadgeCounts).toMatch(/\bSECURITY\s+INVOKER\b/i);
     expect(actionBadgeCounts).toContain("public.get_user_role(auth.uid())");
@@ -35,7 +39,7 @@ describe("CRM layout performance guardrails", () => {
   });
 
   it("keeps mounted WhatsApp and TAT banners off heavyweight REST view/count paths", () => {
-    expect(whatsAppPanel).toContain('rpc("action_badge_counts"');
+    expect(whatsAppPanel).toContain("fetchActionBadgeCounts(");
     expect(useTatDefaults).toContain('rpc("my_tat_defaults"');
     expect(myTatDefaults).toMatch(/\bSECURITY\s+INVOKER\b/i);
     expect(myTatDefaults).toContain("public.get_user_role(auth.uid())");
