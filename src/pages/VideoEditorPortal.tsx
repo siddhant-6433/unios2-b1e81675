@@ -236,7 +236,16 @@ export default function VideoEditorPortal() {
       videoId = (inserted as any)?.id || "";
     }
     if (error) {
-      toast({ title: "Submission failed", description: error.message, variant: "destructive" });
+      // 23505 = the global normalized-drive_url unique index: this video link was
+      // already submitted (by anyone, in any status — pending, approved, published).
+      const isDup = (error as any).code === "23505";
+      toast({
+        title: isDup ? "Duplicate video" : "Submission failed",
+        description: isDup
+          ? "This video link has already been submitted for approval or approved. Each video can only be submitted once."
+          : error.message,
+        variant: "destructive",
+      });
       setSubmitting(false); return;
     }
     // Notify super admins on WhatsApp that a video is awaiting approval.
@@ -275,7 +284,21 @@ export default function VideoEditorPortal() {
     };
     const { error } = await supabase.from("videos" as any).update(payload).eq("id", selected.id);
     if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+      // 23505 = a global normalized social-URL unique index: this Instagram/
+      // LinkedIn/YouTube post is already attached to another video (any editor,
+      // any status). The error message carries the offending index name.
+      const isDup = (error as any).code === "23505";
+      const msg = String((error as any).message || "");
+      const platform = msg.includes("instagram") ? "Instagram"
+        : msg.includes("linkedin") ? "LinkedIn"
+        : msg.includes("youtube") ? "YouTube" : "social media";
+      toast({
+        title: isDup ? "Duplicate social link" : "Save failed",
+        description: isDup
+          ? `This ${platform} URL is already attached to another video. Each post can only back one video.`
+          : error.message,
+        variant: "destructive",
+      });
       setSavingSocial(false); return;
     }
     toast({ title: "Social links saved" });
