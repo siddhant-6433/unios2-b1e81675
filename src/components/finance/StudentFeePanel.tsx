@@ -11,6 +11,7 @@ import {
   Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
+import { AddCustomFeeDialog } from "./AddCustomFeeDialog";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
@@ -44,6 +45,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
+  const [addFeeOpen, setAddFeeOpen] = useState(false);
+  const [pendingWaivers, setPendingWaivers] = useState<Record<string, number>>({});
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -66,8 +69,24 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchPayments();
       fetchConsultantFlag();
       fetchCredit();
+      fetchPendingWaivers();
     }
   }, [student?.id, student?.lead_id]);
+
+  // Per-head waiver/concession requests still awaiting approval, so the ledger
+  // can badge a head as "waiver pending". Sum pending flat value per fee row.
+  const fetchPendingWaivers = async () => {
+    const { data } = await supabase
+      .from("concessions")
+      .select("fee_ledger_id, value, status")
+      .eq("student_id", student.id)
+      .in("status", ["pending_principal", "pending_super_admin"]);
+    const map: Record<string, number> = {};
+    for (const c of data || []) {
+      if (c.fee_ledger_id) map[c.fee_ledger_id] = (map[c.fee_ledger_id] || 0) + Number(c.value || 0);
+    }
+    setPendingWaivers(map);
+  };
 
   const fetchCredit = async () => {
     const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
@@ -251,9 +270,14 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             )}
           </>
         )}
+        {canProvision && (
+          <Button size="sm" variant="outline" onClick={() => setAddFeeOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Add Fee
+          </Button>
+        )}
         {canRequestConcession && fees.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
-            <HandCoins className="h-3.5 w-3.5" /> Request Concession
+            <HandCoins className="h-3.5 w-3.5" /> Request Waiver / Concession
           </Button>
         )}
         {isFinanceRole && student?.id && (
@@ -342,6 +366,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">
                       {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}
+                      {pendingWaivers[f.id] > 0 && (
+                        <span className="block text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
+                          +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
@@ -490,6 +519,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         onOpenChange={setConcessionOpen}
         studentId={student.id}
         feeItems={fees}
+        onSuccess={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
+      />
+
+      <AddCustomFeeDialog
+        open={addFeeOpen}
+        onOpenChange={setAddFeeOpen}
+        student={student}
         onSuccess={() => { fetchFees(); onRefresh?.(); }}
       />
 

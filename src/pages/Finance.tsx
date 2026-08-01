@@ -6,7 +6,7 @@ import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
   ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe, HandCoins, Tag, TimerOff, ScrollText, Lock,
+  Globe, HandCoins, Tag, TimerOff, ScrollText, Lock, Users,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -20,6 +20,7 @@ import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprov
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
 import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
+import { BulkCustomFeeDialog } from "@/components/finance/BulkCustomFeeDialog";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -52,7 +53,8 @@ const gatewayLabel = (gateway?: string | null) =>
   gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports" | "audit">("ledger");
+  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "bulk-fees" | "reports" | "audit">("ledger");
+  const [bulkFeeOpen, setBulkFeeOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -135,9 +137,11 @@ const Finance = () => {
     { id: "concessions" as const,          label: "Concessions",         icon: HandCoins,  badge: 0 },
     { id: "waivers" as const,              label: "Offer Waivers",       icon: Tag,        badge: pendingWaiverCount },
     { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
+    { id: "bulk-fees" as const,            label: "Bulk Fees",           icon: Users,      badge: 0 },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
     { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
-  ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
+  ].filter((t) => (t.id !== "bulk-fees" || role === "super_admin"))
+   .filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
 
   if (loading) return <PageLoader />;
 
@@ -347,6 +351,26 @@ const Finance = () => {
       {tab === "reports" && <FinanceOverview />}
 
       {tab === "audit" && <PaymentAuditLog />}
+
+      {tab === "bulk-fees" && role === "super_admin" && (
+        <div className="rounded-xl bg-card card-shadow p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-muted-foreground" />
+            <h3 className="text-sm font-semibold text-foreground">Bulk custom fees</h3>
+          </div>
+          <p className="text-sm text-muted-foreground max-w-2xl">
+            Add a custom fee head (meal, transport, ad-hoc charge) to many students at once — filter by
+            course, batch or session, or hand-pick individuals. Set the frequency, due dates and an optional
+            late fine, then post it as a one-off charge or attach it to the course + session structure so
+            future admissions inherit it.
+          </p>
+          <Button onClick={() => setBulkFeeOpen(true)} className="gap-1.5">
+            <Plus className="h-4 w-4" /> Add fee to students
+          </Button>
+        </div>
+      )}
+
+      <BulkCustomFeeDialog open={bulkFeeOpen} onOpenChange={setBulkFeeOpen} onSuccess={fetchAll} />
     </div>
     </>
   );
