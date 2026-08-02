@@ -1,16 +1,15 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import {
-  Search, Filter, IndianRupee, Download, Plus, CreditCard,
+  Search, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
-  ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe, HandCoins, Tag, TimerOff, ScrollText, Lock,
+  Receipt, HandCoins, Settings2, Lock,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
-import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
@@ -20,7 +19,11 @@ import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprov
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
 import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
+import FeeCollections from "./FeeCollections";
+import { CashierConsole } from "@/components/finance/CashierConsole";
+import { CustomFeeHeadsPanel } from "@/components/finance/CustomFeeHeadsPanel";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { matchesCampus } from "@/lib/campusFilter";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -36,43 +39,59 @@ const categoryBadge: Record<string, string> = {
   token: "bg-primary/15 text-primary", hostel: "bg-pastel-mint text-foreground/70",
   transport: "bg-pastel-yellow text-foreground/70", other: "bg-muted text-foreground/70",
 };
-const modeBadge: Record<string, string> = {
-  online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
-  upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint", consultant_credit_note: "bg-pastel-orange",
-};
-const modeLabel = (m: string) => m === "consultant_credit_note" ? "Credit Note" : (m || "").replace(/_/g, " ");
-const gatewayLabels: Record<string, string> = {
-  easebuzz: "Easebuzz",
-  icici: "ICICI",
-  cashfree: "Cashfree",
-  offline: "Marked Offline",
-  manual: "Marked Offline",
-};
-const gatewayLabel = (gateway?: string | null) =>
-  gateway ? (gatewayLabels[gateway] || gateway) : "—";
+type TabId = "collect" | "ledger" | "receipts" | "approvals" | "setup" | "reports";
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports" | "audit">("ledger");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [structures, setStructures] = useState<any[]>([]);
+  const [summary, setSummary] = useState<Record<string, number> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
+  const [pendingConcessionCount, setPendingConcessionCount] = useState(0);
+  const [receiptsView, setReceiptsView] = useState<"receipts" | "online">("receipts");
+  const [setupView, setSetupView] = useState<"structures" | "late-fees" | "heads">("structures");
+  const [reportsView, setReportsView] = useState<"overview" | "audit">("overview");
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
   const canCreateFinance = can("finance", "create");
-  const canEditFinance = can("finance", "edit");
-  const canCloseDay = role === "super_admin" || role === "accountant";
+  const isSuperAdmin = role === "super_admin";
+  const canManageSetup = isSuperAdmin || hasPermission("fee_structure:manage");
+  const canCloseDay = isSuperAdmin || role === "accountant";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
+
+  const tabs = useMemo(() => {
+    const all: { id: TabId; label: string; icon: typeof FileText; badge: number; show: boolean }[] = [
+      { id: "collect",   label: "Collect",   icon: IndianRupee, badge: 0, show: true },
+      { id: "receipts",  label: "Receipts",  icon: CreditCard,  badge: 0, show: true },
+      { id: "ledger",    label: "Ledger",    icon: FileText,    badge: 0, show: true },
+      { id: "approvals", label: "Approvals", icon: HandCoins,   badge: pendingWaiverCount + pendingConcessionCount, show: true },
+      { id: "setup",     label: "Setup",     icon: Settings2,   badge: 0, show: canManageSetup },
+      { id: "reports",   label: "Reports",   icon: BarChart3,   badge: 0, show: true },
+    ];
+    return all.filter(t => t.show);
+  }, [pendingWaiverCount, pendingConcessionCount, canManageSetup]);
+
+  // The cashier lives in Collect; everyone else opens on Receipts.
+  const defaultTab: TabId = role === "accountant" ? "collect" : "receipts";
+  const urlTab = searchParams.get("tab") as TabId | null;
+  const tab: TabId = tabs.some(t => t.id === urlTab) ? (urlTab as TabId) : defaultTab;
+  const setTab = useCallback((next: TabId) => {
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev);
+      p.set("tab", next);
+      return p;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [ledgerRes, paymentsRes, structRes, waiverRes] = await Promise.all([
+    const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes, summaryRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       // v_all_payments unifies pre-admission lead_payments (token / application
       // fees confirmed before AN issuance) with post-admission payments. Without
@@ -84,6 +103,13 @@ const Finance = () => {
       supabase.from("v_all_payments" as any).select("*").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
       supabase.from("offer_waivers").select("id", { count: "planned", head: true }).eq("status", "pending"),
+      supabase.from("concessions").select("id", { count: "planned", head: true }).in("status", ["pending_principal", "pending_super_admin"]),
+      // Header totals come from the server. Summing the .limit(200) ledger slice
+      // below reported whatever the first 200 rows by due date happened to add
+      // up to, which is not "Total Due".
+      (supabase.rpc as any)("finance_summary", {
+        _campus_ids: selectedCampusId === "all" ? null : [selectedCampusId],
+      }),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
     if (paymentsRes.data) {
@@ -106,44 +132,55 @@ const Finance = () => {
     }
     if (structRes.data) setStructures(structRes.data);
     setPendingWaiverCount(waiverRes.count ?? 0);
+    setPendingConcessionCount(concessionRes.count ?? 0);
+    if (summaryRes?.data) setSummary(summaryRes.data as Record<string, number>);
     setLoading(false);
   };
 
   const filteredLedger = useMemo(() => ledger.filter((f: any) => {
-    if (selectedCampusId !== "all" && f.students?.campus_id !== selectedCampusId) return false;
+    if (!matchesCampus(f.students?.campus_id, selectedCampusId)) return false;
     const name = f.students?.name || "";
     const admNo = f.students?.admission_no || f.students?.pre_admission_no || "";
     return name.toLowerCase().includes(search.toLowerCase()) || admNo.toLowerCase().includes(search.toLowerCase());
   }), [ledger, search, selectedCampusId]);
 
-  const filteredPayments = useMemo(() =>
-    selectedCampusId === "all"
-      ? payments
-      : payments.filter((p: any) => p.students?.campus_id === selectedCampusId),
-  [payments, selectedCampusId]);
+  const filteredPayments = useMemo(
+    () => payments.filter((p: any) => matchesCampus(p.students?.campus_id, selectedCampusId)),
+    [payments, selectedCampusId],
+  );
 
-  const totalCollected = filteredLedger.reduce((s: number, f: any) => s + Number(f.paid_amount || 0), 0);
-  const totalDue = filteredLedger.reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
-  const totalOverdue = filteredLedger.filter((f: any) => f.status === "overdue").reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
-  const paidCount = filteredLedger.filter((f: any) => f.status === "paid").length;
+  const totalCollected = Number(summary?.collected ?? 0);
+  const totalDue = Number(summary?.due ?? 0);
+  const totalOverdue = Number(summary?.overdue ?? 0);
+  const paidCount = Number(summary?.paid_items ?? 0);
 
-  const tabs = [
-    { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText,   badge: 0 },
-    { id: "receipts" as const,             label: "Receipts",            icon: CreditCard, badge: 0 },
-    { id: "online-transactions" as const,  label: "Online",              icon: Globe,      badge: 0 },
-    { id: "structures" as const,           label: "Structures",          icon: Wallet,     badge: 0 },
-    { id: "concessions" as const,          label: "Concessions",         icon: HandCoins,  badge: 0 },
-    { id: "waivers" as const,              label: "Offer Waivers",       icon: Tag,        badge: pendingWaiverCount },
-    { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
-    { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
-    { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
-  ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
+  // CSV of whatever table is on screen — the old Export button did nothing.
+  const exportCsv = () => {
+    const rows: (string | number)[][] = tab === "ledger"
+      ? [["Student", "Admission No", "Fee Code", "Term", "Total", "Paid", "Balance", "Due Date", "Status"],
+         ...filteredLedger.map((f: any) => [
+           f.students?.name || "", f.students?.admission_no || f.students?.pre_admission_no || "",
+           f.fee_codes?.code || "", f.term, f.total_amount, f.paid_amount, f.balance ?? 0, f.due_date, f.status,
+         ])]
+      : [["Receipt No", "Student", "Admission No", "Amount", "Mode", "Gateway", "Ref", "Recorded By", "Date"],
+         ...filteredPayments.map((p: any) => [
+           p.receipt_no || "", p.students?.name || "", p.students?.admission_no || "",
+           p.amount, p.payment_mode || "", p.gateway || "", p.transaction_ref || "",
+           p.profiles?.display_name || "", p.paid_at,
+         ])];
+    const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `finance-${tab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   if (loading) return <PageLoader />;
 
   return (
     <>
-    <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
     {canCloseDay && <DayCloserDialog open={dayCloserOpen} onOpenChange={setDayCloserOpen} onClosed={fetchAll} />}
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -152,13 +189,21 @@ const Finance = () => {
           <p className="text-sm text-muted-foreground mt-1">Fee structures, ledger, payments & financial reports</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
+          {(tab === "ledger" || tab === "receipts") && (
+            <Button variant="outline" className="gap-2" onClick={exportCsv}>
+              <Download className="h-4 w-4" /> Export
+            </Button>
+          )}
           {canCloseDay && (
             <Button variant="outline" className="gap-2" onClick={() => setDayCloserOpen(true)}>
               <Lock className="h-4 w-4" /> Close Day
             </Button>
           )}
-          {canCreateFinance && <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>}
+          {canCreateFinance && (
+            <Button className="gap-2" onClick={() => setTab("collect")}>
+              <Plus className="h-4 w-4" /> Record Payment
+            </Button>
+          )}
         </div>
       </div>
 
@@ -167,15 +212,13 @@ const Finance = () => {
           { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
           { label: "Total Due", value: `₹${(totalDue / 100000).toFixed(1)}L`, sub: "Pending balance", icon: Clock, iconBg: "bg-pastel-yellow" },
           { label: "Overdue", value: `₹${(totalOverdue / 100000).toFixed(1)}L`, sub: "Action required", icon: AlertTriangle, iconBg: "bg-pastel-red" },
-          { label: "Receipts", value: String(filteredPayments.length), sub: "Transactions", icon: Receipt, iconBg: "bg-pastel-blue" },
+          { label: "Concession", value: `₹${(Number(summary?.concession ?? 0) / 100000).toFixed(1)}L`, sub: `${Number(summary?.total_items ?? 0)} fee items`, icon: Receipt, iconBg: "bg-pastel-blue" },
         ].map((stat) => (
           <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
             <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                  <stat.icon className="h-5 w-5 text-foreground/70" />
-                </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><ArrowUpRight className="h-4 w-4" /></Button>
+              {/* the drill-down chevron here never did anything — removed */}
+              <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
+                <stat.icon className="h-5 w-5 text-foreground/70" />
               </div>
               <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
               <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
@@ -198,6 +241,8 @@ const Finance = () => {
           </button>
         ))}
       </div>
+
+      {tab === "collect" && <CashierConsole />}
 
       {tab === "ledger" && (
         <>
@@ -260,96 +305,84 @@ const Finance = () => {
       )}
 
       {tab === "receipts" && (
-        <Card className="border-border/60 shadow-none overflow-hidden">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold">All Receipts</CardTitle>
-              <span className="text-xs text-muted-foreground">{filteredPayments.length} records</span>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt No</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Student</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gateway</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transaction Ref</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recorded By</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Download</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPayments.length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
-                ) : filteredPayments.map((p: any) => (
-                  <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">{p.students?.name || "—"}</div>
-                      <div className="text-xs text-muted-foreground font-mono">{p.students?.admission_no || "—"}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{p.fee_description || "—"}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{modeLabel(p.payment_mode)}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{p.profiles?.display_name || "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(p.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => setReceipt({
-                          type: "student_fee",
-                          receipt_no: p.receipt_no || undefined,
-                          student_name: p.students?.name || undefined,
-                          admission_no: p.students?.admission_no || undefined,
-                          payment_mode: p.payment_mode,
-                          fee_description: p.fee_description || undefined,
-                          recorded_by: p.profiles?.display_name || undefined,
-                          amount: Number(p.amount),
-                          payment_ref: p.transaction_ref,
-                          payment_gateway: p.gateway || null,
-                          payment_date: p.paid_at,
-                          receipt_url: p.receipt_url || null,
-                          payment_id: p.id || null,
-                        })}
-                        className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
-                      >
-                        <Receipt className="h-3.5 w-3.5" /> PDF
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        <SubTabs
+          value={receiptsView}
+          onChange={(v) => setReceiptsView(v as "receipts" | "online")}
+          options={[
+            { value: "receipts", label: "Receipts" },
+            { value: "online", label: "Online attempts" },
+          ]}
+        />
       )}
 
-      {tab === "online-transactions" && <TransactionHistoryPanel />}
+      {tab === "receipts" && receiptsView === "online" && <TransactionHistoryPanel />}
 
-      {tab === "structures" && (
-        <FeeStructureViewer showFilter />
+      {tab === "receipts" && receiptsView === "receipts" && <FeeCollections embedded />}
+
+      {tab === "approvals" && (
+        <div className="space-y-8">
+          <ConcessionApprovalPanel />
+          <OfferWaiverApprovalPanel />
+        </div>
       )}
 
-      {tab === "concessions" && <ConcessionApprovalPanel />}
+      {tab === "setup" && (
+        <>
+          <SubTabs
+            value={setupView}
+            onChange={(v) => setSetupView(v as "structures" | "late-fees" | "heads")}
+            options={[
+              { value: "structures", label: "Fee Structures" },
+              { value: "late-fees", label: "Late Fees" },
+              { value: "heads", label: "Custom Heads" },
+            ]}
+          />
+          {setupView === "structures" && <FeeStructureViewer showFilter />}
+          {setupView === "late-fees" && <LateFeeConfigPanel />}
+          {setupView === "heads" && <CustomFeeHeadsPanel />}
+        </>
+      )}
 
-      {tab === "waivers" && <OfferWaiverApprovalPanel />}
-
-      {tab === "late-fees" && <LateFeeConfigPanel />}
-
-      {tab === "reports" && <FinanceOverview />}
-
-      {tab === "audit" && <PaymentAuditLog />}
+      {tab === "reports" && (
+        <>
+          {isSuperAdmin && (
+            <SubTabs
+              value={reportsView}
+              onChange={(v) => setReportsView(v as "overview" | "audit")}
+              options={[
+                { value: "overview", label: "Overview" },
+                { value: "audit", label: "Audit Log" },
+              ]}
+            />
+          )}
+          {reportsView === "audit" && isSuperAdmin ? <PaymentAuditLog /> : <FinanceOverview />}
+        </>
+      )}
     </div>
     </>
   );
 };
+
+function SubTabs({ value, onChange, options }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-lg border border-input bg-card p-1 w-fit">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            value === o.value ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default Finance;

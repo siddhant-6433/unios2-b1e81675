@@ -59,7 +59,6 @@ const mainMenu: MenuItem[] = [
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, permission: "attendance:view" },
   { title: "Exams", url: "/exams", icon: BookOpen, permission: "exams:view" },
   { title: "Finance", url: "/finance", icon: IndianRupee, permission: "finance:view" },
-  { title: "Collections", url: "/collections", icon: Receipt, permission: "finance:view" },
   { title: "Credit Notes", url: "/consultant-credit-notes", icon: FileMinus2, roles: ["super_admin"] },
   { title: "Refer & Earn", url: "/referrals", icon: Gift, permission: "referrals:view" },
   { title: "Reports", url: "/reports", icon: BarChart3, permission: "reports:view" },
