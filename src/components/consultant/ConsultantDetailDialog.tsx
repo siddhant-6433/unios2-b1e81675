@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw } from "lucide-react";
-import { PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, modeLabel, CAN_MANAGE_PAYOUT_ROLES } from "@/components/consultant/payoutActions";
+import { PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, modeLabel, CAN_MANAGE_PAYOUT_ROLES, ZohoSyncButton } from "@/components/consultant/payoutActions";
 
 type ConsultantLite = {
   id: string; name: string; organization: string | null; phone: string | null;
@@ -412,6 +412,7 @@ export function ConsultantDetailDialog({
                               <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px]" onClick={() => downloadPayoutSlip(p)}>
                                 <Download className="h-3.5 w-3.5" />Slip
                               </Button>
+                              {canManagePayout && <ZohoSyncButton row={p} onDone={load} />}
                               {canManagePayout && p.status !== "paid" && (
                                 <Button size="sm" className="h-7 gap-1 px-2 text-[10px]" onClick={() => setMarkPaid(p)}>
                                   <CheckCircle2 className="h-3.5 w-3.5" />Mark paid
