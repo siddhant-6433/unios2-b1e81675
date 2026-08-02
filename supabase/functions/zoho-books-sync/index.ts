@@ -11,7 +11,7 @@
 // "approved expense -> Zoho bill -> paid" flow.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoAddVendorBankAccount, zohoResolveExpenseAccount, zohoVendorHasBank } from "../_shared/zoho.ts";
+import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoResolveExpenseAccount } from "../_shared/zoho.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,7 +62,6 @@ Deno.serve(async (req) => {
     const admissionNo = lead?.admission_no || lead?.pre_admission_no || "";
 
     const token = await zohoAccessToken();
-    let bankWarning: unknown = null; // surfaced in the response when the bank push fails
 
     // ---- Ensure vendor (+ bank details) -------------------------------------
     const ensureVendor = async (): Promise<string> => {
@@ -79,18 +78,10 @@ Deno.serve(async (req) => {
         if (!res.ok) throw new Error(`vendor create failed: ${JSON.stringify(res.data)}`);
         vendorId = res.data.contact.contact_id;
       }
-      // Push structured bank details if the vendor has none yet (best-effort,
-      // non-fatal). Connected-banking orgs may require the account number
-      // encrypted; if so this fails and the warning is surfaced so we can adapt.
-      if (consultant?.bank_account_number && !(await zohoVendorHasBank(token, vendorId!))) {
-        const bank = await zohoAddVendorBankAccount(token, vendorId!, {
-          bank_name: consultant.bank_name,
-          account_number: consultant.bank_account_number,
-          ifsc: consultant.bank_ifsc,
-          account_holder: consultant.bank_account_name || consultant.name,
-        });
-        if (!bank.ok) { bankWarning = bank.data; console.error("vendor bank add failed", bank.data); }
-      }
+      // NOTE: Zoho Books India exposes vendor connected-banking bank accounts only
+      // through the UI (Vendors > More > Add Bank Account, with IFSC validation) —
+      // there is no documented API. So bank details stay a one-time manual entry
+      // in Zoho per vendor; everything else here is automated.
       if (vendorId !== consultant?.zoho_vendor_id) {
         await admin.from("consultants").update({ zoho_vendor_id: vendorId }).eq("id", consultant!.id);
       }
@@ -142,10 +133,9 @@ Deno.serve(async (req) => {
           if (!att.ok) console.error("attachment failed", att.data);
         }
         await admin.from("consultant_payouts").update({
-          zoho_bill_id: billId, zoho_bill_number: billNumber, zoho_synced_at: new Date().toISOString(),
-          zoho_sync_error: bankWarning ? `bank: ${JSON.stringify(bankWarning)}`.slice(0, 800) : null,
+          zoho_bill_id: billId, zoho_bill_number: billNumber, zoho_synced_at: new Date().toISOString(), zoho_sync_error: null,
         }).eq("id", payoutId);
-        return json({ ok: true, zoho_bill_id: billId, zoho_bill_number: billNumber, bank_warning: bankWarning });
+        return json({ ok: true, zoho_bill_id: billId, zoho_bill_number: billNumber });
       } catch (e) {
         await admin.from("consultant_payouts").update({ zoho_sync_error: String(e).slice(0, 500) }).eq("id", payoutId);
         return json({ error: String(e) }, 502);
