@@ -90,7 +90,29 @@ interface CampaignQueueItem {
 type CounsellorOption = {
   id: string;
   name: string;
+  /** Null = has never placed a call. */
+  last_call_at?: string | null;
+  open_leads?: number;
+  /** Still-pending members across their other active call lists. */
+  pending_call_list?: number;
 };
+
+// login_disabled=false is a poor proxy for "active" — several counsellors
+// holding hundreds of leads have not dialled in weeks, and a test account is
+// selectable. Rather than guess who is on leave, show the evidence and let the
+// assigner decide.
+const daysSince = (iso: string | null | undefined) =>
+  iso == null ? null : Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
+const lastCallLabel = (iso: string | null | undefined) => {
+  const d = daysSince(iso);
+  if (d === null) return "never called";
+  if (d === 0) return "called today";
+  if (d === 1) return "called yesterday";
+  return `last called ${d}d ago`;
+};
+
+const DORMANT_DAYS = 14;
 
 type LeadListAssignmentReportRow = {
   assignment_id: string;
@@ -114,9 +136,11 @@ type LeadListAssignmentReportRow = {
 type CallListProgress = {
   list_id: string;
   total: number;
+  dialable: number;
   pending: number;
   worked: number;
   skipped: number;
+  not_dialable: number;
   last_call_at: string | null;
   dispositions: Record<string, number>;
   by_counsellor: {
@@ -823,22 +847,22 @@ export default function LeadLists() {
       return;
     }
 
-    const { data: roleRows } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "counsellor");
-    const userIds = [...new Set((roleRows || []).map((row: any) => row.user_id).filter(Boolean))];
-    if (userIds.length === 0) {
+    // One RPC instead of user_roles + profiles: it also carries the activity
+    // signals the assigner needs (last call, open leads, outstanding list work).
+    const { data, error } = await supabase.rpc("assignable_counsellors" as any);
+    if (error) {
+      toast({ title: "Could not load counsellors", description: error.message, variant: "destructive" });
       setCounsellors([]);
       return;
     }
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, display_name")
-      .in("user_id", userIds)
-      .eq("login_disabled", false);
-    setCounsellors(((profiles || []) as any[])
-      .map((item) => ({ id: item.id, name: item.display_name || "Unknown" }))
+    setCounsellors(((data || []) as any[])
+      .map((item) => ({
+        id: item.id,
+        name: item.name || "Unknown",
+        last_call_at: item.last_call_at ?? null,
+        open_leads: item.open_leads ?? 0,
+        pending_call_list: item.pending_call_list ?? 0,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name)));
   };
 
@@ -1946,6 +1970,8 @@ export default function LeadLists() {
               ) : (
                 counsellors.map((counsellor) => {
                   const checked = selectedCounsellorIds.includes(counsellor.id);
+                  const days = daysSince(counsellor.last_call_at);
+                  const dormant = days === null || days >= DORMANT_DAYS;
                   return (
                     <label key={counsellor.id} className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 hover:bg-muted/30">
                       <input
@@ -1955,6 +1981,15 @@ export default function LeadLists() {
                         className="h-4 w-4"
                       />
                       <span className="text-sm font-medium text-foreground">{counsellor.name}</span>
+                      <span className={`ml-auto flex items-center gap-2 text-[11px] ${dormant ? "text-destructive" : "text-muted-foreground"}`}>
+                        {dormant && <AlertTriangle className="h-3 w-3" />}
+                        {lastCallLabel(counsellor.last_call_at)}
+                        {!!counsellor.pending_call_list && (
+                          <Badge variant="outline" className="text-[10px] font-normal">
+                            {counsellor.pending_call_list} on other lists
+                          </Badge>
+                        )}
+                      </span>
                     </label>
                   );
                 })
@@ -1982,14 +2017,15 @@ export default function LeadLists() {
               <div className="flex items-center gap-3">
                 <div className="h-2 w-48 overflow-hidden rounded-full bg-muted">
                   <div className="h-full bg-primary transition-all"
-                    style={{ width: `${Math.round((reportProgress.worked / reportProgress.total) * 100)}%` }} />
+                    style={{ width: `${Math.round((reportProgress.worked / Math.max(reportProgress.dialable || reportProgress.total, 1)) * 100)}%` }} />
                 </div>
                 <span className="text-sm tabular-nums text-foreground">
-                  {reportProgress.worked}/{reportProgress.total} called
+                  {reportProgress.worked}/{reportProgress.dialable ?? reportProgress.total} called
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {reportProgress.pending} pending
                   {reportProgress.skipped > 0 && ` · ${reportProgress.skipped} skipped`}
+                  {reportProgress.not_dialable > 0 && ` · ${reportProgress.not_dialable} not dialable (no phone or closed)`}
                 </span>
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {reportProgress.last_call_at

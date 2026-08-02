@@ -22,9 +22,12 @@ export interface CallListOverviewRow {
   due_date: string | null;
   assigned_at: string;
   total: number;
+  /** total minus not_dialable — the honest denominator. */
+  dialable: number;
   pending: number;
   worked: number;
   skipped: number;
+  not_dialable: number;
   last_call_at: string | null;
   dispositions: Record<string, number>;
   by_counsellor: {
@@ -107,7 +110,8 @@ export function CallListProgressPanel() {
 
       <div className="divide-y divide-border">
         {lists.map((list) => {
-          const pct = list.total ? Math.round((list.worked / list.total) * 100) : 0;
+          const denom = list.dialable ?? list.total;
+          const pct = denom ? Math.round((list.worked / denom) * 100) : 0;
           const outcomes = Object.entries(list.dispositions).sort((a, b) => b[1] - a[1]);
           return (
             <div key={list.id} className="px-4 py-3 space-y-2">
@@ -135,9 +139,11 @@ export function CallListProgressPanel() {
                 <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
                   <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="text-xs tabular-nums text-foreground">{list.worked}/{list.total} called</span>
+                <span className="text-xs tabular-nums text-foreground">{list.worked}/{denom} called</span>
                 <span className="text-[11px] text-muted-foreground">
-                  {list.pending} pending{list.skipped > 0 && ` · ${list.skipped} skipped`}
+                  {list.pending} pending
+                  {list.skipped > 0 && ` · ${list.skipped} skipped`}
+                  {list.not_dialable > 0 && ` · ${list.not_dialable} not dialable`}
                 </span>
               </div>
 

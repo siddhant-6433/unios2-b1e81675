@@ -1991,7 +1991,7 @@ export default function CloudDialer() {
               <optgroup label="My Call Lists">
                 {myCallLists.map(l => (
                   <option key={l.id} value={`list:${l.id}`}>
-                    {l.name} ({l.worked}/{l.total}){l.due_date ? ` · due ${l.due_date}` : ""}
+                    {l.name} ({l.worked}/{l.dialable ?? l.total}){l.due_date ? ` · due ${l.due_date}` : ""}
                   </option>
                 ))}
               </optgroup>
@@ -2055,13 +2055,17 @@ export default function CloudDialer() {
       {activeListId && activeList && (
         <div className="flex items-center gap-3 px-6 py-2 border-b border-border bg-primary/5">
           <span className="text-xs font-semibold text-foreground">{activeList.name}</span>
+          {/* Denominator is dialable, not total: members with no phone or a
+              terminal stage never enter the queue, so counting them would make
+              the list impossible to finish. */}
           <div className="h-1.5 w-40 rounded-full bg-muted overflow-hidden">
             <div className="h-full bg-primary transition-all"
-              style={{ width: `${activeList.total ? Math.round((activeList.worked / activeList.total) * 100) : 0}%` }} />
+              style={{ width: `${activeList.dialable ? Math.round((activeList.worked / activeList.dialable) * 100) : 0}%` }} />
           </div>
           <span className="text-[11px] text-muted-foreground tabular-nums">
-            {activeList.worked}/{activeList.total} called · {activeList.pending} left
+            {activeList.worked}/{activeList.dialable ?? activeList.total} called · {activeList.pending} left
             {activeList.skipped > 0 && ` · ${activeList.skipped} skipped`}
+            {activeList.not_dialable > 0 && ` · ${activeList.not_dialable} not dialable`}
             {activeList.due_date && ` · due ${activeList.due_date}`}
           </span>
           {activeList.priority_note && (

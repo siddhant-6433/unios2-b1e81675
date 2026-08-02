@@ -37,6 +37,10 @@ const attributionReadersMigration = readFileSync(
   "supabase/migrations/20260802113544_call_list_own_assignee_readers.sql",
   "utf8",
 );
+const notDialableMigration = readFileSync(
+  "supabase/migrations/20260802115927_call_list_not_dialable_and_counsellor_activity.sql",
+  "utf8",
+);
 const dialer = readFileSync("src/pages/CloudDialer.tsx", "utf8");
 const progressPanel = readFileSync("src/components/dashboard/CallListProgressPanel.tsx", "utf8");
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
@@ -183,6 +187,36 @@ describe("assigned call lists", () => {
     // The AI-call branch stays: an AI call is never attributable to a counsellor,
     // and that column is a "latest contact" display, not a counted outcome.
     expect(attributionReadersMigration).toContain("FROM public.ai_call_logs acl");
+  });
+
+  it("keeps an assigned list completable", () => {
+    // The queue excludes no-phone / terminal-stage members, so counting them in
+    // the denominator made the list unfinishable. First real assignment showed
+    // "0/38 called · 38 left" over a queue of 25.
+    expect(notDialableMigration).toContain("CHECK (work_status IN ('pending', 'worked', 'skipped', 'not_dialable'))");
+    expect(notDialableMigration).toContain("CREATE OR REPLACE FUNCTION public.mark_call_list_undialable");
+    expect(notDialableMigration).toContain("PERFORM public.mark_call_list_undialable(_list_id);");
+    // The queue's exclusion rule and the not_dialable rule must stay identical,
+    // or members land in neither the queue nor the excluded count.
+    expect(notDialableMigration).toContain(
+      "(l.phone IS NULL\n            OR l.stage IN ('not_interested', 'dnc', 'rejected', 'ineligible', 'admitted', 'cold'))");
+    // Readers expose the honest denominator.
+    expect(notDialableMigration).toContain("'dialable'");
+    expect(notDialableMigration).toContain("'not_dialable'");
+    expect(dialer).toContain("activeList.dialable");
+    expect(progressPanel).toContain("list.dialable ?? list.total");
+  });
+
+  it("surfaces counsellor activity in the assign picker", () => {
+    // login_disabled=false is a poor proxy for active: several counsellors
+    // holding hundreds of leads had not dialled in 6+ weeks, and a test account
+    // was selectable. Show the evidence rather than guess who is on leave.
+    expect(notDialableMigration).toContain("CREATE OR REPLACE FUNCTION public.assignable_counsellors");
+    expect(notDialableMigration).toContain("AS last_call_at");
+    expect(notDialableMigration).toContain("AS pending_call_list");
+    expect(leadLists).toContain("assignable_counsellors");
+    expect(leadLists).toContain("DORMANT_DAYS");
+    expect(leadLists).toContain("lastCallLabel");
   });
 
   it("keeps the assignment RPC callable twice in one transaction", () => {

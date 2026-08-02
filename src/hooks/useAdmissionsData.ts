@@ -358,9 +358,13 @@ export interface MyCallList {
   priority_note: string | null;
   due_date: string | null;
   total: number;
+  /** total minus not_dialable — what the counsellor can actually work. */
+  dialable: number;
   pending: number;
   worked: number;
   skipped: number;
+  /** No phone or terminal stage at hand-off; never enters the queue. */
+  not_dialable: number;
   last_worked_at: string | null;
 }
 
