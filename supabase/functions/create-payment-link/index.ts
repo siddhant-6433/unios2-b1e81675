@@ -160,6 +160,13 @@ Deno.serve(async (req) => {
     const wantsEmail = sendChannel === "email" || sendChannel === "both";
     // gateway: 'razorpay' | 'easebuzz' | 'auto' (default)
     // auto = Razorpay hosted link if keys exist, else Easebuzz on /pay/<token>
+    //
+    // We still mint the hosted Razorpay Payment Link: it is what drives
+    // Razorpay's own SMS/email reminders and the payment-link webhook that
+    // settles the receipt. What changed is that its rzp.io short_url is no
+    // longer handed to anyone — every channel gets our branded /pay/<token>,
+    // and that page forwards to the hosted checkout when the payer clicks
+    // Pay. One artifact, one settlement path, our branding on the way in.
     const gatewayPref = String(parsed.gateway || "auto").toLowerCase();
 
     if (!["pre_admission_token", "fee_due", "custom"].includes(purpose)) {
@@ -272,7 +279,6 @@ Deno.serve(async (req) => {
     if (insErr || !linkRow) return json({ error: insErr?.message || "Failed to create link" }, 500);
 
     const ourUrl = `${publicBase.replace(/\/$/, "")}/pay/${linkRow.token}`;
-    let payUrl = ourUrl;
     let gateway: string | null = null;
     let gatewayLinkId: string | null = null;
     let shortUrl: string | null = null;
@@ -305,7 +311,6 @@ Deno.serve(async (req) => {
         gateway = "razorpay";
         gatewayLinkId = rp.id || null;
         shortUrl = rp.short_url || null;
-        payUrl = shortUrl || ourUrl;
       } else {
         console.error("[create-payment-link] razorpay link failed:", rp.error);
       }
@@ -327,19 +332,16 @@ Deno.serve(async (req) => {
         gateway = "easebuzz";
         gatewayLinkId = ec.id || merchantTxn;
         shortUrl = ec.short_url;
-        payUrl = shortUrl;
       } else {
-        // Fall back: UniOs /pay page will open Easebuzz checkout on Pay click
+        // UniOs /pay page opens the Easebuzz checkout on Pay click.
         console.warn("[create-payment-link] EasyCollect unavailable, using /pay page:", ec.error);
         gateway = "easebuzz";
-        payUrl = ourUrl;
       }
     }
 
     // Final fallback if nothing selected
     if (!gateway) {
       gateway = keyId && keySecret ? "razorpay" : "easebuzz";
-      payUrl = ourUrl;
     }
 
     await admin
@@ -386,17 +388,19 @@ Deno.serve(async (req) => {
             purpose_label: purpose === "pre_admission_token"
               ? "Token fee prior to admission (adjustable against admission fee)"
               : purpose === "fee_due" ? "Fee due" : "Payment",
-            pay_url: payUrl,
+            pay_url: ourUrl,
             note: note || "",
           },
         }),
       }).catch((e) => console.error("[create-payment-link] email failed:", e));
     }
 
+    // pay_url is always our branded page. short_url is the gateway's own
+    // hosted artifact, returned for reconcile/debugging only — never shared.
     return json({
       id: linkRow.id,
       token: linkRow.token,
-      pay_url: payUrl,
+      pay_url: ourUrl,
       short_url: shortUrl,
       gateway,
       amount,

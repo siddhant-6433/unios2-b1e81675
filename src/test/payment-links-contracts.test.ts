@@ -168,9 +168,15 @@ describe("PayLink public page", () => {
     expect(payLinkPage).toContain("This link is ${data.status}");
   });
 
-  it("redirects to the Razorpay hosted link when one exists", () => {
-    expect(payLinkPage).toContain('if (data.gateway === "razorpay" && data.short_url)');
-    expect(payLinkPage).toContain("window.location.href = data.short_url;");
+  // The page used to bounce straight to the gateway's hosted short_url on LOAD,
+  // so nobody — not even the WhatsApp recipients whose button pointed here —
+  // ever saw a UniOs-branded page. It now renders first and forwards only when
+  // the payer clicks Pay, so Razorpay's reminders and payment-link webhook
+  // still settle against the one hosted artifact.
+  it("renders the branded page first and forwards to the gateway only on Pay", () => {
+    expect(payLinkPage).not.toContain("if (data.short_url && (data.gateway ===");
+    expect(payLinkPage).toContain("const handlePay = () => {");
+    expect(payLinkPage).toMatch(/handlePay = \(\) => \{[\s\S]{0,600}?window\.location\.href = link\.short_url;/);
   });
 });
 
