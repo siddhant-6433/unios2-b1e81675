@@ -25,7 +25,25 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+
+// Manual fee concessions raised at the cashier desk. Approving one runs
+// sync_fee_ledger_concessions server-side, so an offer waiver already mapped
+// onto the same ledger row survives.
+interface FeeConcessionItem {
+  id: string;
+  student_id: string;
+  student_name: string;
+  admission_no: string | null;
+  fee_code: string | null;
+  term: string | null;
+  fee_total: number | null;
+  type: string;
+  value: number;
+  reason: string | null;
+  requested_by_name: string | null;
+  created_at: string | null;
+}
 
 interface CertificateApprovalItem {
   id: string;
@@ -159,7 +177,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -210,6 +228,7 @@ export default function Inbox() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
+    fee_concessions: 0,
     abvmu_deposits: 0,
     offer_approvals: 0,
     certificate_approvals: 0,
@@ -237,6 +256,14 @@ export default function Inbox() {
       label: "Offer Waivers",
       icon: Tag,
       count: counts.offer_waivers,
+      roles: ["super_admin"],
+      color: "text-warning-foreground",
+    },
+    {
+      id: "fee_concessions",
+      label: "Fee Concessions",
+      icon: Tag,
+      count: counts.fee_concessions,
       roles: ["super_admin"],
       color: "text-warning-foreground",
     },
@@ -416,6 +443,14 @@ export default function Inbox() {
             .select("id")
             .eq("pgdm_certificate_status", "pending_approval")
         : Promise.resolve({ count: 0 }),
+
+      // Manual fee concessions awaiting a super_admin decision
+      isSuperAdmin
+        ? supabase
+            .from("concessions")
+            .select("id")
+            .in("status", ["pending_principal", "pending_super_admin"])
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -435,6 +470,7 @@ export default function Inbox() {
       video_approvals: get(7),
       voice_messages: get(8),
       certificate_approvals: get(9),
+      fee_concessions: get(10),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -656,6 +692,33 @@ export default function Inbox() {
             requested_by_name: null,
             application_id: null,
           } as OfferApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "fee_concessions") {
+        const { data, error } = await supabase
+          .from("concessions")
+          .select(`
+            id, student_id, type, value, reason, created_at,
+            students:student_id(name, admission_no, pre_admission_no),
+            fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
+            requester:requested_by(display_name)
+          `)
+          .in("status", ["pending_principal", "pending_super_admin"])
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        const nextItems = ((data || []) as any[]).map((c: any) => ({
+            id: c.id,
+            student_id: c.student_id,
+            student_name: c.students?.name || "—",
+            admission_no: c.students?.admission_no || c.students?.pre_admission_no || null,
+            fee_code: c.fee_ledger?.fee_codes?.code || null,
+            term: c.fee_ledger?.term || null,
+            fee_total: c.fee_ledger?.total_amount ?? null,
+            type: c.type,
+            value: Number(c.value),
+            reason: c.reason,
+            requested_by_name: c.requester?.display_name || null,
+            created_at: c.created_at,
+          } as FeeConcessionItem));
         commitItems(cat, nextItems);
       } else if (cat === "certificate_approvals") {
         const { data, error } = await supabase
@@ -985,6 +1048,31 @@ export default function Inbox() {
     }
   };
 
+  const decideConcession = async (c: FeeConcessionItem, approve: boolean) => {
+    if (!isSuperAdmin) return;
+    let note: string | null = null;
+    if (!approve) {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      note = r || null;
+    }
+    setProcessing(c.id);
+    try {
+      const { error } = await (supabase as any).rpc("decide_fee_concession", {
+        _id: c.id, _approve: approve, _note: note,
+      });
+      if (error) throw error;
+      toast({ title: approve ? "Concession approved" : "Concession rejected" });
+      setSelectedItem(null);
+      loadItems("fee_concessions");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const openCertificatePdf = async (path: string | null) => {
     if (!path) { toast({ title: "No certificate PDF found", variant: "destructive" }); return; }
     const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 60 * 30);
@@ -1176,6 +1264,26 @@ export default function Inbox() {
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "fee_concessions") {
+      const c = item as FeeConcessionItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {c.fee_code || "Fee"} · {c.type === "flat" ? fmtINR(c.value) : `${c.value}%`}
+              </p>
+            </div>
+            <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {c.requested_by_name ? `by ${c.requested_by_name} · ` : ""}{fmtTime(c.created_at)}
+          </p>
         </button>
       );
     }
@@ -1536,6 +1644,60 @@ export default function Inbox() {
               </Button>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (selected === "fee_concessions") {
+      const c = selectedItem as FeeConcessionItem;
+      const effective = c.type === "flat"
+        ? c.value
+        : Math.round(((c.fee_total || 0) * c.value) / 100);
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.student_name}</h3>
+            {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Fee Head" value={`${c.fee_code || "—"}${c.term ? ` · ${c.term}` : ""}`} />
+            <Row label="Fee Amount" value={fmtINR(c.fee_total)} />
+            <Row label="Concession" value={c.type === "flat" ? fmtINR(c.value) : `${c.value}%`} />
+            <Row label="Reduces Balance By" value={fmtINR(effective)} highlight />
+            <Row label="Requested By" value={c.requested_by_name || "—"} />
+            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          </div>
+
+          {c.reason && (
+            <div className="rounded-xl border border-border bg-muted/30 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
+              <p className="mt-1 text-sm text-foreground">{c.reason}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === c.id}
+              onClick={() => decideConcession(c, true)}
+            >
+              {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === c.id}
+              onClick={() => decideConcession(c, false)}
+            >
+              Reject
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center">
+            Approving recomputes the ledger from every approved source, so offer waivers on the same row are preserved.
+          </p>
         </div>
       );
     }

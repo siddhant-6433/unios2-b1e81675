@@ -22,7 +22,7 @@ interface ItemConcession {
 }
 
 export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSuccess }: ConcessionDialogProps) {
-  const { role, user } = useAuth();
+  const { role } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [items, setItems] = useState<ItemConcession[]>([]);
@@ -60,51 +60,34 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
     }
 
     setSaving(true);
-    const status = isSuperAdmin ? "approved" : "pending_principal";
 
-    // Get profiles.id (FK target) from auth user.id
-    let profileId: string | null = null;
-    if (user?.id) {
-      const { data: p } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-      profileId = p?.id || null;
-    }
-
-    const rows = items.map(ic => ({
-      student_id: studentId,
-      fee_ledger_id: ic.feeId,
-      type: ic.type,
-      value: Number(ic.value),
-      reason: reason.trim(),
-      status,
-      requested_by: profileId,
-      ...(isSuperAdmin ? {
-        approved_by: profileId,
-        approved_by_principal: user?.id || null,
-        principal_decision_at: new Date().toISOString(),
-        approved_by_super_admin: user?.id || null,
-        super_admin_decision_at: new Date().toISOString(),
-      } : {}),
-    }));
-
-    const { error } = await supabase.from("concessions").insert(rows as any);
-
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-      setSaving(false);
-      return;
-    }
-
-    // If super admin, apply concession to fee_ledger immediately
-    if (isSuperAdmin) {
-      for (const ic of items) {
-        const feeItem = feeItems.find(f => f.id === ic.feeId);
-        if (!feeItem) continue;
-        const concessionAmount = computeAmount(ic);
-        // Only update concession — balance is auto-generated (total - concession - paid)
-        await supabase
-          .from("fee_ledger")
-          .update({ concession: concessionAmount } as any)
-          .eq("id", ic.feeId);
+    // Requests go through an RPC that never touches fee_ledger. A super admin's
+    // own request is immediately decided by the same RPC pair, so the ledger
+    // write is always the canonical sync_fee_ledger_concessions() — the old
+    // direct `fee_ledger.concession = amount` write ASSIGNED rather than summed
+    // and silently wiped offer-waiver concessions on the same row.
+    for (const ic of items) {
+      const { data: id, error } = await (supabase.rpc as any)("request_fee_concession", {
+        _student_id: studentId,
+        _fee_ledger_id: ic.feeId,
+        _type: ic.type,
+        _value: Number(ic.value),
+        _reason: reason.trim(),
+      });
+      if (error) {
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+      if (isSuperAdmin && id) {
+        const { error: decErr } = await (supabase.rpc as any)("decide_fee_concession", {
+          _id: id, _approve: true, _note: null,
+        });
+        if (decErr) {
+          toast({ title: "Requested, but could not auto-approve", description: decErr.message, variant: "destructive" });
+          setSaving(false);
+          return;
+        }
       }
     }
 
@@ -112,7 +95,7 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
       title: isSuperAdmin ? "Concession applied" : "Concession requested",
       description: isSuperAdmin
         ? `Applied to ${items.length} item(s)`
-        : `Sent for principal approval (${items.length} item(s))`,
+        : `Sent for super admin approval (${items.length} item(s))`,
     });
 
     setItems([]);
@@ -253,7 +236,8 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
               </div>
             ) : (
               <div className="p-2.5 rounded-xl bg-warning/5 text-warning-foreground text-xs font-medium">
-                This request will be sent to the principal for approval, then to the super admin.
+                This request goes to the super admin for approval. The fee ledger is not
+                changed until it is approved.
               </div>
             )
           )}

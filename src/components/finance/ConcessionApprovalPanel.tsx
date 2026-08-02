@@ -48,7 +48,8 @@ export function ConcessionApprovalPanel() {
     setProcessing(concession.id);
 
     if (isPrincipal && concession.status === "pending_principal") {
-      // Principal approves → move to pending_super_admin
+      // Legacy two-step chain: the principal still forwards older requests.
+      // New requests from the cashier desk go straight to pending_super_admin.
       const { error } = await supabase
         .from("concessions")
         .update({
@@ -64,78 +65,35 @@ export function ConcessionApprovalPanel() {
         toast({ title: "Forwarded to super admin" });
         fetchConcessions();
       }
-    } else if (isSuperAdmin && (concession.status === "pending_super_admin" || concession.status === "pending_principal")) {
-      // Super admin final approval → update fee_ledger concession
-      // Get profiles.id for approved_by FK
-      let profileId: string | null = null;
-      if (user?.id) {
-        const { data: p } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-        profileId = p?.id || null;
-      }
-      const { error } = await supabase
-        .from("concessions")
-        .update({
-          status: "approved",
-          approved_by: profileId,
-          approved_by_super_admin: user?.id,
-          super_admin_decision_at: new Date().toISOString(),
-          // If skipping principal level
-          ...(concession.status === "pending_principal" ? {
-            approved_by_principal: user?.id,
-            principal_decision_at: new Date().toISOString(),
-          } : {}),
-        } as any)
-        .eq("id", concession.id);
-
-      if (error) {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-      } else {
-        // Apply concession to fee_ledger
-        if (concession.fee_ledger_id) {
-          const feeItem = concession.fee_ledger;
-          const totalAmount = Number(feeItem?.total_amount || 0);
-          const concessionAmount = concession.type === "flat"
-            ? Number(concession.value)
-            : Math.round((totalAmount * Number(concession.value)) / 100);
-
-          // Fetch current fee ledger to get paid_amount
-          const { data: currentFee } = await supabase
-            .from("fee_ledger")
-            .select("paid_amount, total_amount")
-            .eq("id", concession.fee_ledger_id)
-            .single();
-
-          if (currentFee) {
-            // Only update concession — balance is auto-generated (total - concession - paid)
-            await supabase
-              .from("fee_ledger")
-              .update({ concession: concessionAmount } as any)
-              .eq("id", concession.fee_ledger_id);
-          }
-        }
-        toast({ title: "Concession approved and applied" });
-        fetchConcessions();
-      }
+      setProcessing(null);
+      return;
     }
 
+    // Super admin decides. decide_fee_concession stamps the decision and then
+    // runs sync_fee_ledger_concessions(), which recomputes the row's concession
+    // from every approved source. The old code assigned fee_ledger.concession
+    // directly, which wiped any offer-waiver concession on the same row.
+    const { error } = await (supabase.rpc as any)("decide_fee_concession", {
+      _id: concession.id, _approve: true, _note: null,
+    });
+    if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
+    else { toast({ title: "Concession approved and applied" }); fetchConcessions(); }
     setProcessing(null);
   };
 
   const handleReject = async (concessionId: string) => {
     setProcessing(concessionId);
-    const { error } = await supabase
-      .from("concessions")
-      .update({
-        status: "rejected",
-        ...(isPrincipal ? {
+    const note = window.prompt("Reason for rejecting this concession? (optional)") || null;
+
+    // decide_fee_concession is super_admin-only; a principal rejecting a legacy
+    // pending_principal request still writes the status directly.
+    const { error } = isSuperAdmin
+      ? await (supabase.rpc as any)("decide_fee_concession", { _id: concessionId, _approve: false, _note: note })
+      : await supabase.from("concessions").update({
+          status: "rejected",
           approved_by_principal: user?.id,
           principal_decision_at: new Date().toISOString(),
-        } : {
-          approved_by_super_admin: user?.id,
-          super_admin_decision_at: new Date().toISOString(),
-        }),
-      } as any)
-      .eq("id", concessionId);
+        } as any).eq("id", concessionId);
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
