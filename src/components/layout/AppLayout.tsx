@@ -179,7 +179,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {deferredShellReady && <CahetSprintTicker />}
             {deferredShellReady && <UpdeledSprintTicker />}
             {deferredShellReady && <ApplicantDeadlineTicker />}
-            {deferredShellReady && <GlobalActionBar />}
+            {/* Every number in this bar is now a clickable bucket chip inside the
+                Cloud Dialer, which is the counsellor's landing page. Keeping both
+                meant two places to decide what to work on next. */}
+            {deferredShellReady && role !== "counsellor" && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">
               <Suspense fallback={

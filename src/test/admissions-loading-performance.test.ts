@@ -28,7 +28,10 @@ describe("Admissions CRM loading performance guardrails", () => {
 
   it("keeps the counsellor pending-actions CTA inside the accessible admissions workflow", () => {
     expect(admissions).toContain("TAT Defaults Banner");
-    expect(admissions).toContain('onClick={() => setView("action_center")}');
+    // Counsellors no longer have the Action Center tab (the Cloud Dialer works the
+    // same seven buckets), so their CTA goes to the dialer; everyone else still
+    // gets the in-page Action Center. Either way it must not dead-end.
+    expect(admissions).toContain('role === "counsellor" ? navigate("/cloud-dialer") : setView("action_center")');
     expect(admissions).not.toContain('navigate("/counsellor-dashboard?tab=tat-defaults")');
   });
 

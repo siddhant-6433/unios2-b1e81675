@@ -208,7 +208,11 @@ export function AppSidebar() {
     permissions,
     isImpersonating,
   };
+  // Pages that are now buckets of the Cloud Dialer queue. Counsellors get one
+  // work surface; every other role keeps the standalone pages.
+  const DIALER_FOLDED_URLS = ["/fresh-leads", "/missed-calls"];
   const canSee = (item: MenuItem) => {
+    if (role === "counsellor" && DIALER_FOLDED_URLS.includes(item.url)) return false;
     return canSeePolicyItem(accessState, item);
   };
   const canViewSettings = canSeePolicyItem(accessState, {

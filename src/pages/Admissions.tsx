@@ -28,6 +28,9 @@ import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadSt
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
+  isEmptyFilterDefinition, toFilterDefinition, unsupportedDynamicFilters,
+} from "@/lib/dynamicListFilters";
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
@@ -322,6 +325,14 @@ const Admissions = () => {
   const [existingListId, setExistingListId] = useState("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
   const [savingList, setSavingList] = useState(false);
+  // Dynamic lists keep absorbing new matching leads. Only offered when every
+  // active filter is replayable in SQL — see src/lib/dynamicListFilters.ts.
+  const [makeDynamic, setMakeDynamic] = useState(false);
+  // Create-and-assign: hand the list straight to counsellors as a call queue.
+  const [assignAfterCreate, setAssignAfterCreate] = useState(false);
+  const [assignCounsellorIds, setAssignCounsellorIds] = useState<string[]>([]);
+  const [assignNote, setAssignNote] = useState("");
+  const [assignDueDate, setAssignDueDate] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [showDeleteRequest, setShowDeleteRequest] = useState(false);
   const [deleteReason, setDeleteReason] = useState<string>("duplicate");
@@ -335,6 +346,29 @@ const Admissions = () => {
   const canTransfer = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "campus_admin" || role === "principal";
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
+  // Mirrors assign_lead_list_round_robin's own permission check.
+  const canAssignLists = isSuperAdmin || isTeamLeader
+    || role === "admission_head" || role === "principal";
+
+  // A dynamic list is re-evaluated in SQL on a cron, so it can only carry
+  // filters that map to columns on leads. Activity filters (not-called, overdue
+  // follow-up, action bucket) resolve to id-Sets computed by other queries on
+  // this page and can't be re-derived later — the toggle is disabled and says so
+  // rather than silently dropping them.
+  const dynamicFilterState = {
+    stageFilter, sourceFilter, sourceFilterMode,
+    courseFilter: debouncedCourseFilter, courseFilterMode,
+    leadInstitutionType, tempFilter, selectedCampusId, fromDate, toDate,
+    applicationStageFilter, roleFilter, counsellorFilter, sharedWithNimtFilter,
+    search: debouncedSearch,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+    newLeadAssignmentFilter,
+  };
+  const dynamicBlockers = unsupportedDynamicFilters(dynamicFilterState as any);
+  const dynamicDefinition = toFilterDefinition(dynamicFilterState as any);
+  const canBeDynamic = listScope === "filtered"
+    && dynamicBlockers.length === 0
+    && !isEmptyFilterDefinition(dynamicDefinition);
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
@@ -1050,6 +1084,11 @@ const Admissions = () => {
           } : {},
           description: `Saved from Admissions — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} leads`,
           created_by: profile?.id || null,
+          // filters_snapshot above is audit-only; filter_definition is the
+          // canonical, replayable one the SQL resolver reads.
+          ...(makeDynamic && canBeDynamic
+            ? { list_type: "dynamic", filter_definition: dynamicDefinition }
+            : {}),
         })
         .select("id, name")
         .single();
@@ -1077,9 +1116,8 @@ const Admissions = () => {
       }
     }
 
-    setSavingList(false);
-
     if (memberErrors > 0) {
+      setSavingList(false);
       toast({
         title: "List partially updated",
         description: `"${listName}" was created, but some leads could not be added. Check console.`,
@@ -1088,15 +1126,47 @@ const Admissions = () => {
       return;
     }
 
-    toast({
-      title: listMode === "new" ? "List created" : "List updated",
-      description: `"${listName}" — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${leadIds.length === 1 ? "" : "s"} added.`,
-    });
+    // Hand it straight to counsellors as a dialable call list.
+    if (assignAfterCreate && assignCounsellorIds.length > 0 && listId) {
+      const { data: rows, error: assignErr } = await supabase.rpc("assign_lead_list_round_robin" as any, {
+        _list_id: listId,
+        _counsellor_ids: assignCounsellorIds,
+        _only_unassigned: false,
+        _priority_note: assignNote.trim() || null,
+        _due_date: assignDueDate || null,
+      });
+      setSavingList(false);
+      if (assignErr) {
+        toast({
+          title: "List created, assignment failed",
+          description: assignErr.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      const assigned = ((rows as any[]) || []).reduce((sum, r) => sum + Number(r.assigned_count || 0), 0);
+      toast({
+        title: "Call list assigned",
+        description: `"${listName}" — ${assigned} lead${assigned === 1 ? "" : "s"} across ${assignCounsellorIds.length} counsellor${assignCounsellorIds.length === 1 ? "" : "s"}. It's live in their Cloud Dialer.`,
+      });
+    } else {
+      setSavingList(false);
+      toast({
+        title: listMode === "new" ? "List created" : "List updated",
+        description: `"${listName}" — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${leadIds.length === 1 ? "" : "s"} added.`,
+      });
+    }
+
     setShowAddToList(false);
     setNewListName("");
     setExistingListId("");
     setListMode("new");
     setListScope("selected");
+    setMakeDynamic(false);
+    setAssignAfterCreate(false);
+    setAssignCounsellorIds([]);
+    setAssignNote("");
+    setAssignDueDate("");
     setSelectedIds(new Set());
   };
 
@@ -1722,12 +1792,8 @@ const Admissions = () => {
           <CounsellorOnboarding />
         </Suspense>
       )}
-      {/* Productivity nudge — auto-hides if they're already using the cloud dialer */}
-      {role === "counsellor" && (
-        <Suspense fallback={null}>
-          <CloudDialerNudge />
-        </Suspense>
-      )}
+      {/* The dialer-adoption nudge is retired: counsellors now land on
+          /cloud-dialer and it is their only work queue. */}
       <div className="rounded-2xl bg-gradient-to-r from-primary/5 via-card to-info/5 border border-border/40 px-6 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
@@ -2049,13 +2115,17 @@ const Admissions = () => {
       {/* Hot Leads now lives in a floating right-edge sidebar so it doesn't
           consume vertical space and surfaces a notification badge for new
           arrivals. The FAB is always on the right edge. */}
-      <Suspense fallback={null}>
-        <HotLeadsSidebar
-          profileId={profile?.id}
-          isSuperAdmin={isSuperAdmin}
-          isTeamLeader={isTeamLeader}
-        />
-      </Suspense>
+      {/* Counsellors get hot leads as the dialer's "Interested & Hot" bucket —
+          in the queue they're already working, not a second floating list. */}
+      {role !== "counsellor" && (
+        <Suspense fallback={null}>
+          <HotLeadsSidebar
+            profileId={profile?.id}
+            isSuperAdmin={isSuperAdmin}
+            isTeamLeader={isTeamLeader}
+          />
+        </Suspense>
+      )}
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
       {myDefaults && myDefaults.total_defaults > 0 && (
@@ -2079,9 +2149,9 @@ const Admissions = () => {
             size="sm"
             variant="outline"
             className="border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
-            onClick={() => setView("action_center")}
+            onClick={() => role === "counsellor" ? navigate("/cloud-dialer") : setView("action_center")}
           >
-            View Details
+            {role === "counsellor" ? "Work the queue" : "View Details"}
           </Button>
         </div>
       )}
@@ -2179,12 +2249,14 @@ const Admissions = () => {
           >
             Clear filter
           </button>
-          <button
-            onClick={() => { setActionLeadIds(null); setActionBucketLabel(""); setView("action_center"); }}
-            className="ml-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
-          >
-            Back to Action Center
-          </button>
+          {role !== "counsellor" && (
+            <button
+              onClick={() => { setActionLeadIds(null); setActionBucketLabel(""); setView("action_center"); }}
+              className="ml-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
+            >
+              Back to Action Center
+            </button>
+          )}
         </div>
       )}
 
@@ -2192,7 +2264,10 @@ const Admissions = () => {
 
       {/* View tabs — always visible */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
-        {((role === "counsellor" ? ["action_center", "pipeline", "list"] : ["action_center", "pipeline", "list", "seats", "payments"]) as const).map((v) => (
+        {/* Counsellors lose Action Center: it renders the same seven buckets the
+            Cloud Dialer (their landing page) already works through, so /admissions
+            is purely their searchable lead list. */}
+        {((role === "counsellor" ? ["pipeline", "list"] : ["action_center", "pipeline", "list", "seats", "payments"]) as const).map((v) => (
           <button key={v} onClick={() => setView(v)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             {v === "action_center" ? "Action Center" : v.charAt(0).toUpperCase() + v.slice(1)}
@@ -2948,16 +3023,113 @@ const Admissions = () => {
                 )}
               </div>
             )}
+
+            {/* Dynamic lists: only offered for a filtered scope, since a
+                hand-picked selection has no filter to replay. */}
+            {listMode === "new" && (
+              <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+                <label className={`flex items-center gap-2 text-sm font-medium ${canBeDynamic ? "cursor-pointer text-foreground" : "cursor-not-allowed text-muted-foreground"}`}>
+                  <input
+                    type="checkbox"
+                    checked={makeDynamic && canBeDynamic}
+                    disabled={!canBeDynamic}
+                    onChange={(e) => setMakeDynamic(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Keep this list up to date automatically
+                </label>
+                {canBeDynamic ? (
+                  <p className="text-xs text-muted-foreground">
+                    New leads matching these filters join the list every 15 minutes — and are
+                    auto-assigned to whoever the list is assigned to.
+                  </p>
+                ) : listScope !== "filtered" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Only available for “All filtered” — a hand-picked selection has no filter to re-run.
+                  </p>
+                ) : dynamicBlockers.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Not available with these filters: {dynamicBlockers.join(", ")}. They're computed
+                    per-session and can't be re-run later.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Set at least one filter (course, source, stage, campus…) first.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Filter → select → assign in one step. Without this, handing a
+                counsellor a priority list meant leaving the page, finding the
+                list under Marketing, and assigning it there. */}
+            {canAssignLists && (
+              <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={assignAfterCreate}
+                    onChange={(e) => setAssignAfterCreate(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Assign as a priority call list
+                </label>
+                {assignAfterCreate && (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Split round-robin across the selected counsellors. The list appears in their
+                      Cloud Dialer under <span className="font-medium text-foreground">My Call Lists</span>.
+                    </p>
+                    <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-card">
+                      {counsellorOptions.map((c) => (
+                        <label key={c.id} className="flex cursor-pointer items-center gap-2 border-b border-border/50 px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30">
+                          <input
+                            type="checkbox"
+                            checked={assignCounsellorIds.includes(c.id)}
+                            onChange={() => setAssignCounsellorIds((cur) =>
+                              cur.includes(c.id) ? cur.filter((x) => x !== c.id) : [...cur, c.id])}
+                            className="h-4 w-4"
+                          />
+                          {c.name}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <input
+                        type="text"
+                        value={assignNote}
+                        onChange={(e) => setAssignNote(e.target.value)}
+                        placeholder="Priority note (optional)"
+                        className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="date"
+                        value={assignDueDate}
+                        onChange={(e) => setAssignDueDate(e.target.value)}
+                        min={new Date().toISOString().slice(0, 10)}
+                        className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddToList(false)} disabled={savingList}>Cancel</Button>
             <Button
               onClick={handleAddSelectedToList}
-              disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
+              disabled={
+                savingList
+                || (listMode === "new" ? !newListName.trim() : !existingListId)
+                || (assignAfterCreate && assignCounsellorIds.length === 0)
+              }
               className="gap-2"
             >
               {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-              {listMode === "new" ? "Create List" : "Add to List"}
+              {assignAfterCreate
+                ? "Create & assign"
+                : listMode === "new" ? "Create List" : "Add to List"}
             </Button>
           </DialogFooter>
         </DialogContent>
