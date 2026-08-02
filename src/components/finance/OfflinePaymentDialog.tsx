@@ -59,21 +59,30 @@ const BANK_OPTIONS = [
   "IndusInd Bank", "IDFC First Bank", "Other",
 ];
 
+type ChargeHead = { id: string; fee_code_id: string; code: string; name: string; amount: number };
+
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   leadId: string;
   applicationId?: string | null;
   defaultType?: string;
+  /** Pre-fills the amount — the cashier desk passes the selected head's balance. */
+  defaultAmount?: number | null;
+  /** Pre-selects the fee_ledger row the money should land on. */
+  defaultApplyToHead?: string | null;
   onRecorded?: () => void;
 }
 
-export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId, defaultType, onRecorded }: Props) {
+export function OfflinePaymentDialog({
+  open, onOpenChange, leadId, applicationId, defaultType,
+  defaultAmount, defaultApplyToHead, onRecorded,
+}: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
 
   const [type,   setType]   = useState<string>(defaultType || "application_fee");
-  const [amount, setAmount] = useState<string>("");
+  const [amount, setAmount] = useState<string>(defaultAmount ? String(defaultAmount) : "");
   const initialDateTime = getCurrentIndiaDateTimeInput();
   const [date,   setDate]   = useState<string>(initialDateTime.date);
   const [time,   setTime]   = useState<string>(initialDateTime.time);
@@ -89,14 +98,28 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   // this lead (pre-admission leads have no fee_ledger rows to apply to).
   const [studentId, setStudentId] = useState<string | null>(null);
   const [headOptions, setHeadOptions] = useState<{ id: string; label: string }[]>([]);
-  const [applyToHead, setApplyToHead] = useState<string>(""); // "" = credit (unallocated)
+  const [applyToHead, setApplyToHead] = useState<string>(defaultApplyToHead || ""); // "" = credit (unallocated)
+
+  // Ad-hoc charge heads a super_admin has enabled for this person. Only offered
+  // pre-admission: an admitted student gets a real fee_ledger row via
+  // AddChargeDialog first, then the money is applied to it below.
+  const [chargeHeads, setChargeHeads] = useState<ChargeHead[]>([]);
+  const [chargeHeadId, setChargeHeadId] = useState<string>("");
+  const selectedChargeHead = chargeHeads.find(h => h.id === chargeHeadId) || null;
 
   useEffect(() => {
     if (!open || !leadId) return;
     (async () => {
       const { data: student } = await supabase.from("students").select("id").eq("lead_id", leadId).maybeSingle();
-      if (!student?.id) { setStudentId(null); setHeadOptions([]); return; }
+      if (!student?.id) {
+        setStudentId(null);
+        setHeadOptions([]);
+        const { data: charges } = await (supabase.rpc as any)("available_fee_charges", { _student_id: null, _lead_id: leadId });
+        setChargeHeads((charges || []) as ChargeHead[]);
+        return;
+      }
       setStudentId(student.id);
+      setChargeHeads([]);
       const { data: heads } = await supabase
         .from("fee_ledger")
         .select("id, term, fee_codes:fee_code_id(code)")
@@ -105,6 +128,13 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       setHeadOptions((heads || []).map((h: any) => ({ id: h.id, label: `${h.fee_codes?.code || "Fee"} — ${h.term}` })));
     })();
   }, [open, leadId]);
+
+  // Re-seed from props whenever the dialog is reopened for a different head.
+  useEffect(() => {
+    if (!open) return;
+    setApplyToHead(defaultApplyToHead || "");
+    if (defaultAmount) setAmount(String(defaultAmount));
+  }, [open, defaultApplyToHead, defaultAmount]);
 
   // Consultant credit-note (super_admin only) state.
   const isSuperAdmin = role === "super_admin";
@@ -151,7 +181,8 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   const reset = () => {
     const now = getCurrentIndiaDateTimeInput();
     setType(defaultType || "application_fee");
-    setAmount("");
+    setAmount(defaultAmount ? String(defaultAmount) : "");
+    setChargeHeadId("");
     setDate(now.date);
     setTime(now.time);
     setMode("cash");
@@ -163,7 +194,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
     setConsultantId("");
     setCreditNoteId("");
     setCreditNotes([]);
-    setApplyToHead("");
+    setApplyToHead(defaultApplyToHead || "");
   };
 
   // Money always lands as unallocated credit first; if a specific head was
@@ -290,6 +321,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       gateway:         "offline",
       notes:           notes || null,
       proof_url:       proofUrl,
+      fee_code_id:     selectedChargeHead?.fee_code_id || null,
       application_id:   type === "application_fee" ? applicationId || null : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
@@ -351,9 +383,30 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 autoFocus
+                readOnly={!!selectedChargeHead}
+                title={selectedChargeHead ? "Amount is fixed by the fee head" : undefined}
               />
             </FieldShell>
           </div>
+
+          {/* Ad-hoc charge heads (pre-admission only). The amount is fixed by
+              the super_admin who enabled the head — the cashier can't edit it. */}
+          {chargeHeads.length > 0 && (
+            <SelectField
+              value={chargeHeadId}
+              onValueChange={(v) => {
+                setChargeHeadId(v);
+                const head = chargeHeads.find(h => h.id === v);
+                if (head) { setAmount(String(head.amount)); setType("other"); }
+              }}
+              options={[
+                { value: "", label: "No specific head" },
+                ...chargeHeads.map(h => ({ value: h.id, label: `${h.name} — ₹${Number(h.amount).toLocaleString("en-IN")}` })),
+              ]}
+              label="Fee Head"
+              allowEmpty={false}
+            />
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <FieldShell label="Transaction Date">
