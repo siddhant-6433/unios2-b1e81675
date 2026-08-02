@@ -41,6 +41,15 @@ const notDialableMigration = readFileSync(
   "supabase/migrations/20260802115927_call_list_not_dialable_and_counsellor_activity.sql",
   "utf8",
 );
+const dynamicMigration = readFileSync(
+  "supabase/migrations/20260802131616_dynamic_lead_lists.sql",
+  "utf8",
+);
+const includeTerminalMigration = readFileSync(
+  "supabase/migrations/20260802131652_call_list_include_terminal.sql",
+  "utf8",
+);
+const dynamicFilters = readFileSync("src/lib/dynamicListFilters.ts", "utf8");
 const dialer = readFileSync("src/pages/CloudDialer.tsx", "utf8");
 const progressPanel = readFileSync("src/components/dashboard/CallListProgressPanel.tsx", "utf8");
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
@@ -217,6 +226,89 @@ describe("assigned call lists", () => {
     expect(leadLists).toContain("assignable_counsellors");
     expect(leadLists).toContain("DORMANT_DAYS");
     expect(leadLists).toContain("lastCallLabel");
+  });
+
+  it("keeps dynamic-list membership re-derivable", () => {
+    // filters_snapshot is audit metadata with five incompatible shapes and
+    // half its filters resolve to per-session id-Sets, so a dynamic list needs
+    // its own canonical, column-only vocabulary.
+    expect(dynamicMigration).toContain("filter_definition jsonb");
+    expect(dynamicMigration).toContain("CHECK (list_type IN ('static', 'dynamic'))");
+    // A dynamic list with no filter would silently match every lead.
+    expect(dynamicMigration).toContain("lead_lists_dynamic_needs_filter");
+    expect(dynamicMigration).toContain("CREATE OR REPLACE FUNCTION public.lead_matches_filter");
+    expect(dynamicMigration).toContain("CREATE OR REPLACE FUNCTION public.resolve_dynamic_list_members");
+    expect(dynamicMigration).toContain("cron.schedule(");
+    expect(dynamicMigration).toContain("refresh-dynamic-lead-lists");
+    // Never reuse filters_snapshot as the source of truth.
+    expect(dynamicMigration).not.toContain("filters_snapshot->>");
+  });
+
+  it("only drops dynamic members that were never called", () => {
+    // A worked/skipped member is call history; a filter change must not erase it.
+    expect(dynamicMigration).toContain("AND m.work_status = 'pending'");
+    expect(dynamicMigration).toContain("NOT public.lead_matches_filter(l, v_list.filter_definition)");
+    // New matches auto-assign to whoever already holds the list.
+    expect(dynamicMigration).toContain("v_owners[((c.rn - 1) % array_length(v_owners, 1)) + 1]");
+    // and only notify when something actually arrived.
+    expect(dynamicMigration).toContain("IF v_added > 0 AND v_owners IS NOT NULL THEN");
+  });
+
+  it("gates 'make dynamic' on filters that can actually be replayed", () => {
+    expect(dynamicFilters).toContain("export function unsupportedDynamicFilters");
+    expect(dynamicFilters).toContain("export function toFilterDefinition");
+    for (const blocked of ["actionLeadIds", "notCalledIds", "followupLeadIds", "applicationStageFilter"]) {
+      expect(dynamicFilters).toContain(blocked);
+    }
+    expect(admissions).toContain("unsupportedDynamicFilters");
+    expect(admissions).toContain("canBeDynamic");
+    // The dialog must say WHY, not silently drop the unsupported filters.
+    expect(admissions).toContain("dynamicBlockers.join(\", \")");
+  });
+
+  it("lets an assignment include cold / not-interested leads", () => {
+    expect(includeTerminalMigration).toContain("NOT ll.include_terminal");
+    // The queue has to read the same flag or members stay pending but never
+    // appear — the unfinishable-list bug again.
+    expect(includeTerminalMigration).toContain("cfg.include_terminal");
+    expect(includeTerminalMigration).toContain("CREATE OR REPLACE FUNCTION public.preview_call_list_assignment");
+    expect(leadLists).toContain("assignIncludeTerminal");
+    expect(leadLists).toContain("will be dialable");
+  });
+
+  it("names Cloud Dialer in the assignment notification and counts dialable", () => {
+    expect(includeTerminalMigration).toContain("Open Cloud Dialer to start");
+    expect(includeTerminalMigration).toContain("JOIN public.leads l ON l.id = a.lead_id");
+  });
+
+  it("reclaims the dialer's top chrome and frees the post-call actions", () => {
+    // The four stacked strips (missed banner, dial card, header, list banner)
+    // became one toolbar; the dial pad and incoming lookup share a popover.
+    expect(dialer).toContain("Single toolbar");
+    expect(dialer).toContain("dialPadOpen");
+    // Actions must not be gated on a disposition being chosen.
+    expect(dialer).toContain("Lead actions — available before, during and after a call");
+    // Pause is reachable whenever there is a queue, not only mid-session.
+    expect(dialer).toContain("const pauseDialer");
+    expect(dialer).toContain("onClick={pauseDialer} disabled={queue.length === 0}");
+    // History collapsed by default.
+    expect(dialer).toContain("Previous calls ({callHistory.length})");
+  });
+
+  it("shows the call-list dropdown to first-time users, once", () => {
+    expect(dialer).toContain("call-list-dropdown-seen-v1:");
+    expect(dialer).toContain("Your call lists live here");
+    // Only once they have a list, and not while already in one.
+    expect(dialer).toContain("myCallLists.length > 0 && !activeListId");
+    // Selected list gets a distinct treatment.
+    expect(dialer).toContain("border-primary bg-primary/10 ring-1 ring-primary/30");
+  });
+
+  it("distinguishes static and dynamic lists visually", () => {
+    expect(leadLists).toContain("Dynamic");
+    expect(leadLists).toContain("Static");
+    expect(leadLists).toContain("describeFilterDefinition");
+    expect(leadLists).toContain("resolve_dynamic_list_members");
   });
 
   it("keeps the assignment RPC callable twice in one transaction", () => {

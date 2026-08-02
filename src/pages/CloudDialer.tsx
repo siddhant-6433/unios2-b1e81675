@@ -12,8 +12,9 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
-  MessageCircle, ChevronRight, IndianRupee, Footprints,
+  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle,
@@ -315,6 +316,25 @@ export default function CloudDialer() {
   const [walkinSaving, setWalkinSaving] = useState(false);
   const { data: campuses = [] } = useCampuses();
 
+  // Toolbar: dial-pad + incoming lookup share one popover.
+  const [dialPadOpen, setDialPadOpen] = useState(false);
+
+  // First-run coach-mark on the queue selector. Call lists are new, and the
+  // dropdown gives a counsellor no reason to look at it. Per-user, versioned
+  // key, try/catch because storage can be blocked (same pattern as
+  // SchoolFeeProposalDialog). `showListCoachMark` is derived further down —
+  // it depends on myCallLists, which is defined after this block.
+  const listCoachMarkKey = `call-list-dropdown-seen-v1:${user?.id || "anonymous"}`;
+  const [listCoachMarkSeen, setListCoachMarkSeen] = useState(true);
+  useEffect(() => {
+    try { setListCoachMarkSeen(localStorage.getItem(listCoachMarkKey) === "1"); }
+    catch { setListCoachMarkSeen(true); }
+  }, [listCoachMarkKey]);
+  const dismissListCoachMark = useCallback(() => {
+    setListCoachMarkSeen(true);
+    try { localStorage.setItem(listCoachMarkKey, "1"); } catch { /* storage blocked */ }
+  }, [listCoachMarkKey]);
+
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const pauseTimerRef = useRef<number | null>(null);
@@ -356,6 +376,9 @@ export default function CloudDialer() {
   // counsellor; it shows up here and is worked start-to-finish.
   const { data: myCallLists = [], refetch: refetchCallLists } = useMyCallLists();
   const activeList = myCallLists.find(l => l.id === activeListId) ?? null;
+  // Only worth showing once they actually have a list to work, and not while
+  // they're already in one.
+  const showListCoachMark = !listCoachMarkSeen && myCallLists.length > 0 && !activeListId;
   const {
     data: campaignPayload,
     isLoading: campaignLoading,
@@ -1472,6 +1495,14 @@ export default function CloudDialer() {
     placeCall();
   };
 
+  // Pausing between calls also has to stop the auto-next countdown, or the queue
+  // advances while the counsellor is away.
+  const pauseDialer = () => {
+    autoNextTriggered.current = false;
+    setAutoNextTimer(0);
+    setPaused(true);
+  };
+
   const stopDialer = () => {
     setDialerActive(false);
     setPaused(false);
@@ -1879,204 +1910,225 @@ export default function CloudDialer() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col">
-      {/* Missed-call priority banner — sits above the dialer header */}
-      {missedCount > 0 && (
-        <button
-          onClick={() => navigate("/missed-calls")}
-          className="flex items-center gap-3 px-6 py-2 bg-warning/5 dark:bg-warning/90/20 border-b border-warning/20 hover:bg-warning/10/70 transition-colors text-left"
-        >
-          <PhoneMissed className="h-4 w-4 text-warning-foreground shrink-0 animate-pulse" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-warning-foreground dark:text-warning/30">
-              {missedCount} missed callback{missedCount === 1 ? "" : "s"} pending — call these first
-            </p>
-            <p className="text-[11px] text-warning-foreground dark:text-warning/40/80">
-              Inbound calls received outside business hours. The lead is waiting.
-            </p>
-          </div>
-          <ArrowRight className="h-4 w-4 text-warning-foreground shrink-0" />
-        </button>
-      )}
-
-      {/* Dial a number — type a phone, look up in leads, then pin+call.
-          For unknown numbers, a name input appears so we can create a stub
-          lead and dial it (so call_logs has a lead_id and the disposition
-          flow works end-to-end). 10-digit Indian mobile only; storage
-          format is +91XXXXXXXXXX. */}
-      <div className="px-6 pt-3 pb-3">
-        <div className="rounded-xl border border-border bg-card p-3 flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <PhoneCall className="h-3.5 w-3.5 text-cyan-600" /> Dial a number
-          </div>
-          <input
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={10}
-            value={dialPhone}
-            onChange={e => {
-              const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
-              setDialPhone(digits);
-              setDialLeadMatch(null);
-              setDialNoMatch(false);
-            }}
-            placeholder="9555192192"
-            disabled={dialerActive || dialPlacing}
-            className="flex-1 min-w-[180px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-mono disabled:opacity-50"
-            onKeyDown={e => { if (e.key === "Enter" && dialPhone.length === 10) dialLookup(); }}
-          />
-          {!dialLeadMatch && !dialNoMatch && (
-            <Button size="sm" variant="outline" onClick={dialLookup} disabled={dialPhone.length !== 10 || dialerActive || dialPlacing}>
-              Look up
-            </Button>
-          )}
-          {dialLeadMatch && (
-            <>
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/5 dark:bg-success/90/20 px-2 py-1 text-xs">
-                <CheckCircle className="h-3 w-3 text-success" />
-                <span className="font-medium text-success-foreground dark:text-success/40">{dialLeadMatch.name}</span>
-              </span>
-              {dialLeadMatch.isSelf === false && (
-                <span className="text-[10px] text-warning-foreground dark:text-warning">
-                  Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
-                </span>
-              )}
-              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
-                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
-                Call now
-              </Button>
-            </>
-          )}
-          {dialNoMatch && (
-            <>
-              <span className="text-[11px] text-warning-foreground dark:text-warning">No lead found — add new:</span>
-              <input
-                type="text"
-                value={dialNewName}
-                onChange={e => setDialNewName(e.target.value)}
-                placeholder="Lead name"
-                disabled={dialPlacing}
-                className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm disabled:opacity-50 w-44"
-              />
-              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing}>
-                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
-                Create & Call
-              </Button>
-              <Button size="sm" variant="ghost" className="text-xs" onClick={() => { setDialNoMatch(false); setDialPhone(""); setDialNewName(""); }}>
-                Cancel
-              </Button>
-            </>
-          )}
+      {/* ── Single toolbar ────────────────────────────────────────────────
+          Was four stacked strips (~224px) before any lead content: a missed-call
+          banner, a "Dial a number" card, this header, and the call-list progress
+          bar. All four collapse here; the dial pad and the incoming-call lookup
+          were the same idea (find a number and call it) so they share one
+          popover. */}
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-card">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 shrink-0">
+          <Phone className="h-3.5 w-3.5 text-cyan-700" />
         </div>
-      </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-100"><Phone className="h-4 w-4 text-cyan-700" /></div>
-          <div>
-            <h1 className="text-lg font-bold text-foreground">Cloud Dialer</h1>
-            <p className="text-[11px] text-muted-foreground">{queue.length} leads in queue</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Queue source */}
-          <select value={queueSource} onChange={e => { setQueueSource(e.target.value); setBucketFilter(null); }} disabled={dialerActive}
-            className="rounded-xl border border-input bg-background px-3 py-2 text-sm disabled:opacity-50">
-            <option value="smart">Smart Queue (Priority)</option>
-            <option value="followups">All Follow-ups</option>
-            <option value="fresh">Fresh Leads Only</option>
-            <option value="all">All Pipeline</option>
-            {myCallLists.length > 0 && (
-              <optgroup label="My Call Lists">
-                {myCallLists.map(l => (
-                  <option key={l.id} value={`list:${l.id}`}>
-                    {l.name} ({l.worked}/{l.dialable ?? l.total}){l.due_date ? ` · due ${l.due_date}` : ""}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-          {/* Live call timer in header */}
-          {(callState.status === "calling" || callState.status === "connected") && (
-            <Badge className={`text-xs font-mono tabular-nums border-0 ${
-              callState.status === "connected" ? "bg-success/10 text-success animate-pulse" : "bg-cyan-100 text-cyan-700"
+        {/* Queue selector — the primary control, so it leads and gets the
+            active-list treatment when a list is being worked. */}
+        <Popover open={showListCoachMark} onOpenChange={(o) => { if (!o) dismissListCoachMark(); }}>
+          <PopoverTrigger asChild>
+            <div className={`relative rounded-lg border transition-colors ${
+              activeListId ? "border-primary bg-primary/10 ring-1 ring-primary/30" : "border-input bg-background"
             }`}>
-              {callState.status === "connected" ? <Volume2 className="h-3 w-3 mr-1" /> : <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              {formatTime(callState.elapsed)}
-            </Badge>
-          )}
-          {/* Incoming call phone lookup */}
-          <div className="flex items-center gap-1 border border-input rounded-xl px-2 py-1 bg-background">
-            <PhoneIncoming className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <input type="text" value={lookupPhone} onChange={e => { setLookupPhone(e.target.value); setLookupNotFound(false); setLookupResult(null); }}
-              placeholder="Incoming call? Enter phone..."
-              onKeyDown={e => { if (e.key === "Enter") lookupByPhone(); }}
-              className="w-36 text-xs bg-transparent outline-none placeholder:text-muted-foreground/60" />
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={lookupByPhone} disabled={lookupLoading}>
-              {lookupLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Find"}
+              {activeListId && <ListChecks className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-primary" />}
+              <select
+                value={queueSource}
+                onChange={e => { setQueueSource(e.target.value); setBucketFilter(null); dismissListCoachMark(); }}
+                disabled={dialerActive}
+                className={`appearance-none bg-transparent py-1.5 pr-7 text-sm font-medium outline-none disabled:opacity-50 ${
+                  activeListId ? "pl-7 text-primary" : "pl-2.5"
+                }`}
+              >
+                <option value="smart">Smart Queue (Priority)</option>
+                <option value="followups">All Follow-ups</option>
+                <option value="fresh">Fresh Leads Only</option>
+                <option value="all">All Pipeline</option>
+                {myCallLists.length > 0 && (
+                  <optgroup label="My Call Lists">
+                    {myCallLists.map(l => (
+                      <option key={l.id} value={`list:${l.id}`}>
+                        {l.name} ({l.worked}/{l.dialable ?? l.total}){l.due_date ? ` · due ${l.due_date}` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            </div>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72">
+            <p className="text-sm font-semibold text-foreground">Your call lists live here</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              When someone assigns you a list to call, pick it from this dropdown under
+              <span className="font-medium text-foreground"> My Call Lists</span> and work it top to
+              bottom — no searching or filtering.
+            </p>
+            <Button size="sm" className="mt-3 h-7 w-full text-xs" onClick={dismissListCoachMark}>Got it</Button>
+          </PopoverContent>
+        </Popover>
+
+        {/* Active list progress, inline rather than its own strip. */}
+        {activeListId && activeList && (
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted shrink-0">
+              <div className="h-full bg-primary transition-all"
+                style={{ width: `${activeList.dialable ? Math.round((activeList.worked / activeList.dialable) * 100) : 0}%` }} />
+            </div>
+            <span className="text-[11px] tabular-nums text-muted-foreground whitespace-nowrap">
+              {activeList.worked}/{activeList.dialable ?? activeList.total}
+              {activeList.not_dialable > 0 && ` · ${activeList.not_dialable} n/d`}
+              {activeList.due_date && ` · due ${activeList.due_date}`}
+            </span>
+            {activeList.priority_note && (
+              <span className="truncate text-[11px] italic text-muted-foreground">“{activeList.priority_note}”</span>
+            )}
+            <Button size="sm" variant="ghost" className="h-6 shrink-0 px-1.5 text-[11px]"
+              onClick={() => { setQueueSource("smart"); setBucketFilter(null); }} disabled={dialerActive}>
+              Exit
             </Button>
           </div>
-          {lookupResult && (
-            <a href={`/admissions/${lookupResult.id}`} target="_blank" rel="noreferrer"
-              className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 dark:bg-success/90/20 px-3 py-1.5 text-xs">
-              <span className="font-semibold text-success">{lookupResult.name}</span>
-              <span className="text-muted-foreground">{lookupResult.course_name}</span>
-              <span className="text-primary hover:underline">Open →</span>
-            </a>
+        )}
+
+        <span className="text-[11px] text-muted-foreground whitespace-nowrap">{queue.length} in queue</span>
+
+        {/* Live call timer */}
+        {(callState.status === "calling" || callState.status === "connected") && (
+          <Badge className={`text-xs font-mono tabular-nums border-0 ${
+            callState.status === "connected" ? "bg-success/10 text-success animate-pulse" : "bg-cyan-100 text-cyan-700"
+          }`}>
+            {callState.status === "connected" ? <Volume2 className="h-3 w-3 mr-1" /> : <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+            {formatTime(callState.elapsed)}
+          </Badge>
+        )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Missed callbacks — was a full-width banner. */}
+          {missedCount > 0 && (
+            <button
+              onClick={() => navigate("/missed-calls")}
+              className="flex items-center gap-1 rounded-lg border border-warning/30 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning-foreground hover:bg-warning/20"
+              title="Inbound calls received outside business hours — call these first"
+            >
+              <PhoneMissed className="h-3 w-3 animate-pulse" />
+              {missedCount} missed
+            </button>
           )}
-          {lookupNotFound && <span className="text-[10px] text-destructive">No lead found</span>}
-          <Button variant="outline" size="sm" onClick={loadQueue} disabled={dialerActive}><Users className="h-3.5 w-3.5 mr-1.5" />Refresh</Button>
+
+          {/* Dial a number + incoming-call lookup, one popover. */}
+          <Popover open={dialPadOpen} onOpenChange={setDialPadOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 px-2" title="Dial a number / look up an incoming call">
+                <PhoneCall className="h-3.5 w-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-foreground">Dial a number</p>
+                <div className="flex gap-1.5">
+                  <input
+                    type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={10}
+                    value={dialPhone}
+                    onChange={e => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setDialPhone(digits); setDialLeadMatch(null); setDialNoMatch(false);
+                    }}
+                    placeholder="9555192192"
+                    disabled={dialerActive || dialPlacing}
+                    className="flex-1 rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-mono disabled:opacity-50"
+                    onKeyDown={e => { if (e.key === "Enter" && dialPhone.length === 10) dialLookup(); }}
+                  />
+                  {!dialLeadMatch && !dialNoMatch && (
+                    <Button size="sm" variant="outline" onClick={dialLookup} disabled={dialPhone.length !== 10 || dialerActive || dialPlacing}>
+                      Look up
+                    </Button>
+                  )}
+                </div>
+                {dialLeadMatch && (
+                  <div className="space-y-1.5">
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/5 px-2 py-1 text-xs">
+                      <CheckCircle className="h-3 w-3 text-success" />
+                      <span className="font-medium text-success-foreground">{dialLeadMatch.name}</span>
+                    </span>
+                    {dialLeadMatch.isSelf === false && (
+                      <p className="text-[10px] text-warning-foreground">
+                        Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
+                      </p>
+                    )}
+                    <Button size="sm" className="w-full bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
+                      {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                      Call now
+                    </Button>
+                  </div>
+                )}
+                {dialNoMatch && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] text-warning-foreground">No lead found — add new:</p>
+                    <input type="text" value={dialNewName} onChange={e => setDialNewName(e.target.value)}
+                      placeholder="Lead name" disabled={dialPlacing}
+                      className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm disabled:opacity-50" />
+                    <div className="flex gap-1.5">
+                      <Button size="sm" className="flex-1 bg-cyan-600 hover:bg-cyan-700" onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing}>
+                        {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                        Create & Call
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setDialNoMatch(false); setDialPhone(""); setDialNewName(""); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-border pt-3 space-y-1.5">
+                <p className="text-xs font-semibold text-foreground">Incoming call?</p>
+                <div className="flex gap-1.5">
+                  <input type="text" value={lookupPhone}
+                    onChange={e => { setLookupPhone(e.target.value); setLookupNotFound(false); setLookupResult(null); }}
+                    placeholder="Enter phone to identify"
+                    onKeyDown={e => { if (e.key === "Enter") lookupByPhone(); }}
+                    className="flex-1 rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs" />
+                  <Button size="sm" variant="outline" onClick={lookupByPhone} disabled={lookupLoading}>
+                    {lookupLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Find"}
+                  </Button>
+                </div>
+                {lookupResult && (
+                  <a href={`/admissions/${lookupResult.id}`} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-2 py-1.5 text-xs">
+                    <span className="font-semibold text-success">{lookupResult.name}</span>
+                    <span className="text-muted-foreground">{lookupResult.course_name}</span>
+                    <span className="ml-auto text-primary hover:underline">Open →</span>
+                  </a>
+                )}
+                {lookupNotFound && <span className="text-[10px] text-destructive">No lead found</span>}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Button variant="outline" size="sm" className="h-7 px-2" onClick={loadQueue} disabled={dialerActive} title="Refresh queue">
+            <Users className="h-3.5 w-3.5" />
+          </Button>
+
+          {/* Pause is reachable whenever there's a queue, not only mid-session:
+              a counsellor stepping away between calls needs it too. */}
+          {paused ? (
+            <Button size="sm" className="h-7 bg-success hover:bg-success/90 text-xs" onClick={() => setPaused(false)}>
+              <Play className="h-3.5 w-3.5 mr-1" />Resume{pauseTime > 0 && ` (${formatTime(pauseTime)})`}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={pauseDialer} disabled={queue.length === 0}>
+              <Pause className="h-3.5 w-3.5 mr-1" />Pause
+            </Button>
+          )}
 
           {dialerActive ? (
-            <>
-              {paused ? (
-                <Button size="sm" onClick={() => setPaused(false)} className="bg-success hover:bg-success/90">
-                  <Play className="h-3.5 w-3.5 mr-1.5" />Resume {pauseTime > 0 && `(${formatTime(pauseTime)})`}
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => setPaused(true)}>
-                  <Pause className="h-3.5 w-3.5 mr-1.5" />Pause
-                </Button>
-              )}
-              <Button size="sm" variant="destructive" onClick={stopDialer}>
-                <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Stop
-              </Button>
-            </>
+            <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={stopDialer}>
+              <PhoneOff className="h-3.5 w-3.5 mr-1" />Stop
+            </Button>
           ) : (
-            <Button size="sm" onClick={startDialer} disabled={queue.length === 0} className="bg-cyan-600 hover:bg-cyan-700">
-              <Phone className="h-3.5 w-3.5 mr-1.5" />Start Dialer
+            <Button size="sm" className="h-7 bg-cyan-600 hover:bg-cyan-700 text-xs" onClick={startDialer} disabled={queue.length === 0}>
+              <Phone className="h-3.5 w-3.5 mr-1" />Start Dialer
             </Button>
           )}
         </div>
       </div>
-
-      {/* Assigned call list progress — the counsellor's brief from the assigner */}
-      {activeListId && activeList && (
-        <div className="flex items-center gap-3 px-6 py-2 border-b border-border bg-primary/5">
-          <span className="text-xs font-semibold text-foreground">{activeList.name}</span>
-          {/* Denominator is dialable, not total: members with no phone or a
-              terminal stage never enter the queue, so counting them would make
-              the list impossible to finish. */}
-          <div className="h-1.5 w-40 rounded-full bg-muted overflow-hidden">
-            <div className="h-full bg-primary transition-all"
-              style={{ width: `${activeList.dialable ? Math.round((activeList.worked / activeList.dialable) * 100) : 0}%` }} />
-          </div>
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {activeList.worked}/{activeList.dialable ?? activeList.total} called · {activeList.pending} left
-            {activeList.skipped > 0 && ` · ${activeList.skipped} skipped`}
-            {activeList.not_dialable > 0 && ` · ${activeList.not_dialable} not dialable`}
-            {activeList.due_date && ` · due ${activeList.due_date}`}
-          </span>
-          {activeList.priority_note && (
-            <span className="text-[11px] italic text-muted-foreground truncate">“{activeList.priority_note}”</span>
-          )}
-          <Button size="sm" variant="ghost" className="ml-auto h-6 text-[11px]"
-            onClick={() => { setQueueSource("smart"); setBucketFilter(null); }} disabled={dialerActive}>
-            Back to Smart Queue
-          </Button>
-        </div>
-      )}
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
@@ -2593,29 +2645,6 @@ export default function CloudDialer() {
                         </div>
                       )}
 
-                      {/* Everything a call outcome needs, without leaving the queue.
-                          These are the same dialogs the lead page uses — opening
-                          one pauses the auto-next countdown so the counsellor
-                          isn't raced into the next lead mid-action. */}
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                          onClick={() => holdCountdown(() => setShowPaymentLink(true))}>
-                          <IndianRupee className="h-3 w-3 mr-1" />Payment link
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                          onClick={() => holdCountdown(() => setShowWhatsApp(true))}>
-                          <MessageCircle className="h-3 w-3 mr-1" />WhatsApp…
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                          onClick={() => holdCountdown(() => setShowWalkin(true))}>
-                          <Footprints className="h-3 w-3 mr-1" />Log walk-in
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                          onClick={() => holdCountdown(() => setShowApplyLink(true))}>
-                          <FileText className="h-3 w-3 mr-1" />Apply link
-                        </Button>
-                      </div>
-
                       <div className="flex items-center gap-2">
                         <Button size="sm" onClick={moveToNext} className="bg-cyan-600 hover:bg-cyan-700 flex-1 h-8 text-xs">
                           <SkipForward className="h-3 w-3 mr-1" />{currentIdx < queue.length - 1 ? "Next Call" : "Finish"}
@@ -2649,6 +2678,34 @@ export default function CloudDialer() {
 
             {/* ── Scrollable content: lead info + script ──────────────── */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* Lead actions — available before, during and after a call, not
+                    only once a disposition is chosen. A lead who asks for the
+                    payment link mid-call shouldn't force the counsellor to hang
+                    up first. holdCountdown() stops the auto-next timer so the
+                    queue can't advance out from under an open dialog. */}
+                <div className="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => holdCountdown(() => setShowPaymentLink(true))}>
+                    <IndianRupee className="h-3 w-3 mr-1" />Payment link
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => holdCountdown(() => setShowWhatsApp(true))}>
+                    <MessageCircle className="h-3 w-3 mr-1" />WhatsApp
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => holdCountdown(() => setShowApplyLink(true))}>
+                    <FileText className="h-3 w-3 mr-1" />Login link
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => holdCountdown(() => setShowWalkin(true))}>
+                    <Footprints className="h-3 w-3 mr-1" />Log walk-in
+                  </Button>
+                  <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
+                    className="inline-flex h-7 items-center rounded-md border border-input px-2 text-[11px] font-medium hover:bg-muted">
+                    Open lead →
+                  </a>
+                </div>
+
                 {/* Lead info */}
                 <Card className="border-border/60 shadow-none">
                   <CardContent className="p-4">
@@ -2742,13 +2799,25 @@ export default function CloudDialer() {
                   </Suspense>
                 )}
 
-                {/* Previous Call Notes */}
+                {/* Previous Call Notes — collapsed by default. This was an
+                    always-expanded ~220px card; the summary line carries the one
+                    fact that matters before dialling (what happened last time). */}
                 {callHistory.length > 0 && (
-                  <Card className="border-border/60 shadow-none">
-                    <CardContent className="p-4">
-                      <p className="text-[10px] font-semibold text-warning-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                        <FileText className="h-3 w-3" />Previous Call Notes ({callHistory.length})
-                      </p>
+                  <Collapsible>
+                    <Card className="border-border/60 shadow-none">
+                    <CardContent className="p-3">
+                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-left">
+                        <FileText className="h-3 w-3 text-warning-foreground shrink-0" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-warning-foreground">
+                          Previous calls ({callHistory.length})
+                        </span>
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          · last: {callHistory[0].disposition?.replace(/_/g, " ") || "logged"}
+                          {callHistory[0].called_at && `, ${new Date(callHistory[0].called_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+                        </span>
+                        <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
                       <div className="space-y-2 max-h-[180px] overflow-y-auto">
                         {callHistory.map(c => (
                           <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-warning/20 pl-2.5 py-1">
@@ -2776,8 +2845,10 @@ export default function CloudDialer() {
                           </div>
                         ))}
                       </div>
+                      </CollapsibleContent>
                     </CardContent>
                   </Card>
+                  </Collapsible>
                 )}
 
                 {/* Course Info Panel (same component as lead page) + Script */}

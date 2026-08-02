@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCallListOverview } from "@/components/dashboard/CallListProgressPanel";
+import { describeFilterDefinition, type DynamicListFilterDefinition } from "@/lib/dynamicListFilters";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
-  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
+  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown, Lock,
   Megaphone,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
@@ -68,6 +70,11 @@ interface LeadList {
   member_count: number;
   filters_snapshot: Record<string, unknown> | null;
   created_at: string;
+  /** static = frozen set. dynamic = re-derived from filter_definition on a cron. */
+  list_type?: "static" | "dynamic";
+  filter_definition?: DynamicListFilterDefinition | null;
+  last_refreshed_at?: string | null;
+  include_terminal?: boolean;
 }
 
 type CampaignChannel = "whatsapp" | "email";
@@ -131,6 +138,13 @@ type LeadListAssignmentReportRow = {
   latest_call_response: string | null;
   latest_call_at: string | null;
   assigned_at: string;
+};
+
+type CallListPreview = {
+  total: number;
+  dialable: number;
+  no_phone: number;
+  terminal: number;
 };
 
 type CallListProgress = {
@@ -490,6 +504,9 @@ export default function LeadLists() {
   const [assignDueDate, setAssignDueDate] = useState("");
   // Re-running an assignment used to silently steal every already-owned lead.
   const [assignOnlyUnassigned, setAssignOnlyUnassigned] = useState(false);
+  // Some pushes (win-backs) deliberately want cold / not-interested leads.
+  const [assignIncludeTerminal, setAssignIncludeTerminal] = useState(false);
+  const [assignPreview, setAssignPreview] = useState<CallListPreview | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportList, setReportList] = useState<LeadList | null>(null);
   const [assignmentReport, setAssignmentReport] = useState<LeadListAssignmentReportRow[]>([]);
@@ -866,13 +883,48 @@ export default function LeadLists() {
       .sort((a, b) => a.name.localeCompare(b.name)));
   };
 
+  // Same RPC the cron runs, so an assigner never waits 15 minutes to see a
+  // dynamic list catch up.
+  const [refreshingListId, setRefreshingListId] = useState<string | null>(null);
+  const refreshDynamicList = async (list: LeadList) => {
+    setRefreshingListId(list.id);
+    const { data, error } = await supabase.rpc("resolve_dynamic_list_members" as any, { _list_id: list.id });
+    setRefreshingListId(null);
+    if (error) {
+      toast({ title: "Could not refresh list", description: error.message, variant: "destructive" });
+      return;
+    }
+    const res = (data as { added?: number; removed?: number }) || {};
+    toast({
+      title: "List refreshed",
+      description: `${res.added ?? 0} added · ${res.removed ?? 0} removed`,
+    });
+    await fetchLists();
+  };
+
   const openAssign = async (list: LeadList) => {
     setAssignList(list);
     setSelectedCounsellorIds([]);
     setAssignmentSummary(null);
+    setAssignIncludeTerminal(list.include_terminal ?? false);
+    setAssignPreview(null);
     setAssignOpen(true);
     await loadAssignableCounsellors();
   };
+
+  // Effective length, recomputed whenever the include-terminal choice flips, so
+  // the assigner sees what they're actually handing over before committing.
+  useEffect(() => {
+    if (!assignOpen || !assignList) return;
+    let cancelled = false;
+    supabase
+      .rpc("preview_call_list_assignment" as any, {
+        _list_id: assignList.id,
+        _include_terminal: assignIncludeTerminal,
+      })
+      .then(({ data }) => { if (!cancelled) setAssignPreview((data as CallListPreview) || null); });
+    return () => { cancelled = true; };
+  }, [assignOpen, assignList, assignIncludeTerminal]);
 
   const toggleCounsellor = (id: string) => {
     setSelectedCounsellorIds((current) =>
@@ -890,6 +942,7 @@ export default function LeadLists() {
       _only_unassigned: assignOnlyUnassigned,
       _priority_note: assignNote.trim() || null,
       _due_date: assignDueDate || null,
+      _include_terminal: assignIncludeTerminal,
     });
     setAssigning(false);
     if (error) {
@@ -1364,6 +1417,38 @@ export default function LeadLists() {
                       >
                         {list.name}
                       </button>
+                      {/* Static vs dynamic at a glance — a dynamic list keeps
+                          absorbing new matches, so the distinction changes what
+                          the assigner can expect from it. */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={`ml-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium align-middle ${
+                              list.list_type === "dynamic"
+                                ? "bg-primary/10 text-primary"
+                                : "bg-muted text-muted-foreground"
+                            }`}>
+                              {list.list_type === "dynamic"
+                                ? <><RefreshCw className="h-2.5 w-2.5" />Dynamic</>
+                                : <><Lock className="h-2.5 w-2.5" />Static</>}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            {list.list_type === "dynamic" ? (
+                              <>
+                                <p className="font-medium">Auto-updating list</p>
+                                <p className="text-xs">{describeFilterDefinition(list.filter_definition)}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  New matching leads are added every 15 min
+                                  {list.last_refreshed_at && ` · last refreshed ${new Date(list.last_refreshed_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
+                                </p>
+                              </>
+                            ) : (
+                              <p className="text-xs">Fixed set of leads — membership never changes on its own.</p>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       {list.description && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-md">{list.description}</p>
                       )}
@@ -1398,6 +1483,14 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" /> Members
                         </Button>
+                        {list.list_type === "dynamic" && canAssignLists && (
+                          <Button size="sm" variant="outline" className="gap-1.5 h-8"
+                            onClick={() => refreshDynamicList(list)} disabled={refreshingListId === list.id}>
+                            {refreshingListId === list.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <RefreshCw className="h-3.5 w-3.5" />} Refresh
+                          </Button>
+                        )}
                         {canAssignLists && (
                           <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
                             <Users className="h-3.5 w-3.5" /> Assign
@@ -1964,6 +2057,37 @@ export default function LeadLists() {
               />
               Only assign leads that currently have no counsellor
             </label>
+
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={assignIncludeTerminal}
+                onChange={(e) => setAssignIncludeTerminal(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Include cold / not-interested leads
+              <span className="text-xs text-muted-foreground/70">(for win-back pushes)</span>
+            </label>
+
+            {/* Effective length: what the counsellor will actually be able to dial. */}
+            {assignPreview && (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">{assignPreview.total} in list → </span>
+                <span className="font-semibold text-foreground">{assignPreview.dialable} will be dialable</span>
+                {assignPreview.dialable !== assignPreview.total && (
+                  <span className="text-muted-foreground">
+                    {" "}({assignPreview.total - assignPreview.dialable} excluded
+                    {assignPreview.terminal > 0 && !assignIncludeTerminal && `: ${assignPreview.terminal} cold/closed`}
+                    {assignPreview.no_phone > 0 && `${assignPreview.terminal > 0 && !assignIncludeTerminal ? ", " : ": "}${assignPreview.no_phone} without phone`})
+                  </span>
+                )}
+                {assignPreview.dialable === 0 && (
+                  <p className="mt-1 text-xs text-destructive">
+                    Nothing dialable — tick “Include cold / not-interested” or pick a different list.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
               {counsellors.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>

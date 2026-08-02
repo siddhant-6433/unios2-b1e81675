@@ -28,6 +28,9 @@ import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadSt
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
+  isEmptyFilterDefinition, toFilterDefinition, unsupportedDynamicFilters,
+} from "@/lib/dynamicListFilters";
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
@@ -322,6 +325,9 @@ const Admissions = () => {
   const [existingListId, setExistingListId] = useState("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
   const [savingList, setSavingList] = useState(false);
+  // Dynamic lists keep absorbing new matching leads. Only offered when every
+  // active filter is replayable in SQL — see src/lib/dynamicListFilters.ts.
+  const [makeDynamic, setMakeDynamic] = useState(false);
   // Create-and-assign: hand the list straight to counsellors as a call queue.
   const [assignAfterCreate, setAssignAfterCreate] = useState(false);
   const [assignCounsellorIds, setAssignCounsellorIds] = useState<string[]>([]);
@@ -343,6 +349,26 @@ const Admissions = () => {
   // Mirrors assign_lead_list_round_robin's own permission check.
   const canAssignLists = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "principal";
+
+  // A dynamic list is re-evaluated in SQL on a cron, so it can only carry
+  // filters that map to columns on leads. Activity filters (not-called, overdue
+  // follow-up, action bucket) resolve to id-Sets computed by other queries on
+  // this page and can't be re-derived later — the toggle is disabled and says so
+  // rather than silently dropping them.
+  const dynamicFilterState = {
+    stageFilter, sourceFilter, sourceFilterMode,
+    courseFilter: debouncedCourseFilter, courseFilterMode,
+    leadInstitutionType, tempFilter, selectedCampusId, fromDate, toDate,
+    applicationStageFilter, roleFilter, counsellorFilter, sharedWithNimtFilter,
+    search: debouncedSearch,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+    newLeadAssignmentFilter,
+  };
+  const dynamicBlockers = unsupportedDynamicFilters(dynamicFilterState as any);
+  const dynamicDefinition = toFilterDefinition(dynamicFilterState as any);
+  const canBeDynamic = listScope === "filtered"
+    && dynamicBlockers.length === 0
+    && !isEmptyFilterDefinition(dynamicDefinition);
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
@@ -1058,6 +1084,11 @@ const Admissions = () => {
           } : {},
           description: `Saved from Admissions — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} leads`,
           created_by: profile?.id || null,
+          // filters_snapshot above is audit-only; filter_definition is the
+          // canonical, replayable one the SQL resolver reads.
+          ...(makeDynamic && canBeDynamic
+            ? { list_type: "dynamic", filter_definition: dynamicDefinition }
+            : {}),
         })
         .select("id, name")
         .single();
@@ -1131,6 +1162,7 @@ const Admissions = () => {
     setExistingListId("");
     setListMode("new");
     setListScope("selected");
+    setMakeDynamic(false);
     setAssignAfterCreate(false);
     setAssignCounsellorIds([]);
     setAssignNote("");
@@ -2954,6 +2986,42 @@ const Admissions = () => {
                 </select>
                 {existingLists.length === 0 && (
                   <p className="mt-2 text-xs text-muted-foreground">No existing lists yet. Create a new list instead.</p>
+                )}
+              </div>
+            )}
+
+            {/* Dynamic lists: only offered for a filtered scope, since a
+                hand-picked selection has no filter to replay. */}
+            {listMode === "new" && (
+              <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+                <label className={`flex items-center gap-2 text-sm font-medium ${canBeDynamic ? "cursor-pointer text-foreground" : "cursor-not-allowed text-muted-foreground"}`}>
+                  <input
+                    type="checkbox"
+                    checked={makeDynamic && canBeDynamic}
+                    disabled={!canBeDynamic}
+                    onChange={(e) => setMakeDynamic(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Keep this list up to date automatically
+                </label>
+                {canBeDynamic ? (
+                  <p className="text-xs text-muted-foreground">
+                    New leads matching these filters join the list every 15 minutes — and are
+                    auto-assigned to whoever the list is assigned to.
+                  </p>
+                ) : listScope !== "filtered" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Only available for “All filtered” — a hand-picked selection has no filter to re-run.
+                  </p>
+                ) : dynamicBlockers.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Not available with these filters: {dynamicBlockers.join(", ")}. They're computed
+                    per-session and can't be re-run later.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Set at least one filter (course, source, stage, campus…) first.
+                  </p>
                 )}
               </div>
             )}
