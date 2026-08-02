@@ -295,6 +295,28 @@ describe("assigned call lists", () => {
     expect(dialer).toContain("Previous calls ({callHistory.length})");
   });
 
+  it("writes dialer-scheduled visits to campus_visits", () => {
+    // This wrote to `lead_visits`, which does not exist. The cast to `any` hid
+    // it from TypeScript and the error was never read, so the stage still
+    // advanced to visit_scheduled — leads looked booked with no visit row in
+    // Visit Center, the Visit Check-in bucket, post-visit follow-ups or the
+    // funnel. 3 leads were stranded that way.
+    expect(dialer).not.toContain('from("lead_visits"');
+    expect(dialer).toContain("scheduleCampusVisitFromDialer");
+    expect(dialer).toContain('from("campus_visits")');
+    // The stage must not advance when the visit write failed.
+    expect(dialer).toContain("if (!scheduled) return;");
+  });
+
+  it("offers schedule-visit and fee-proposal from the dialer", () => {
+    expect(dialer).toContain("Schedule visit");
+    expect(dialer).toContain("Fee proposal");
+    expect(dialer).toContain("ScheduleVisitDialog");
+    expect(dialer).toContain("SchoolFeeProposalDialog");
+    // Same role gate the lead page uses for proposals.
+    expect(dialer).toContain("const canCreateProposal");
+  });
+
   it("shows the call-list dropdown to first-time users, once", () => {
     expect(dialer).toContain("call-list-dropdown-seen-v1:");
     expect(dialer).toContain("Your call lists live here");
