@@ -1480,6 +1480,28 @@ export default function CloudDialer() {
       command: "scheduleVisit",
     });
     await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
+
+    // Same confirmation the lead page sends — a visit the student was never
+    // told about is barely a visit. Failure here must not undo the booking, so
+    // it only warns.
+    if (currentLead.phone) {
+      const { error: waErr } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: "visit_confirmation",
+          phone: currentLead.phone,
+          params: [currentLead.name || "Student", when, campusLabel || "NIMT Educational Institutions"],
+          lead_id: currentLead.id,
+          button_urls: ["1820424915210710582"], // Google Maps CID for campus location
+        },
+      });
+      if (waErr) {
+        toast({
+          title: "Visit saved, confirmation not sent",
+          description: waErr.message,
+          variant: "destructive",
+        });
+      }
+    }
     return true;
   };
 
