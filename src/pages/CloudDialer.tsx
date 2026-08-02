@@ -12,7 +12,7 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
-  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks,
+  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks, RefreshCw,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -2103,7 +2103,7 @@ export default function CloudDialer() {
           </Popover>
 
           <Button variant="outline" size="sm" className="h-7 px-2" onClick={loadQueue} disabled={dialerActive} title="Refresh queue">
-            <Users className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
 
           {/* Pause is reachable whenever there's a queue, not only mid-session:
