@@ -16,8 +16,17 @@ const TERM_PATTERNS = [
   { regex: /^installment[_\s-]?(\d+)$/i, label: (n: string) => `Installment ${n}` },
 ];
 
+// Terms that aren't part of a numbered series. 'adhoc' is the term the cashier
+// desk levies one-off charges under (Sports, Transfer Certificate, Arrear Fee).
+const EXPLICIT_TERM_LABELS: Record<string, string> = {
+  adhoc: "Other Charges",
+  admission: "Admission",
+  security_deposit: "Security Deposit",
+};
+
 export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {
   const normalized = String(term || "").trim().toLowerCase();
+  if (EXPLICIT_TERM_LABELS[normalized]) return EXPLICIT_TERM_LABELS[normalized];
   for (const { regex, label } of TERM_PATTERNS) {
     const match = normalized.match(regex);
     if (match) {
