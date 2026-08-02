@@ -103,6 +103,12 @@ Deno.serve(async (req) => {
         let billId = payout.zoho_bill_id;
         let billNumber = payout.zoho_bill_number;
         if (!billId) {
+          // Idempotency: reuse an existing bill for this payout (avoids duplicates on retry).
+          const existing = await zohoApi(token, "GET", "/bills", undefined, { reference_number: payoutId });
+          const found = existing.ok ? (existing.data?.bills || [])[0] : null;
+          if (found) { billId = found.bill_id; billNumber = found.bill_number; }
+        }
+        if (!billId) {
           // Expense account for the bill line. Explicit id/name (scope-free) wins;
           // else look it up in the chart of accounts.
           const acctId = Deno.env.get("ZOHO_PAYOUT_ACCOUNT_ID");
