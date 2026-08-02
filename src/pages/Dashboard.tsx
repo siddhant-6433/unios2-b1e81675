@@ -17,6 +17,7 @@ import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappin
 import { MetaCourseMappingPanel } from "@/components/admissions/MetaCourseMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
+import { CallListProgressPanel } from "@/components/dashboard/CallListProgressPanel";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
@@ -481,6 +482,9 @@ const Dashboard = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {isAdmin && <PendingApprovalsPanel />}
+      {/* Renders itself away when there are no active call lists. Team leaders
+          see it too — the RPC scopes their rows to their own members. */}
+      <CallListProgressPanel />
       {isAdmin && <ConsultantVoiceMessagesPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
       {isAdmin && <LeadAssignmentHistory limit={25} compact />}

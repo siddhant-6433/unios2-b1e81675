@@ -1,6 +1,6 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -12,7 +12,7 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
-  MessageCircle, ChevronRight,
+  MessageCircle, ChevronRight, IndianRupee, Footprints,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -23,7 +23,11 @@ import {
 } from "@/components/ui/collapsible";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
-import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
+import {
+  useCloudDialerBootstrap, useCloudDialerCampaignQueue, useCloudDialerListQueue,
+  useCloudDialerQueue, useCampuses, useMyCallLists, useMyProfileId,
+} from "@/hooks/useAdmissionsData";
+import { completeCampusVisit } from "@/lib/visitCompletion";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -31,6 +35,14 @@ import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
+// Inline post-call actions. Lazy so the dialer's first paint stays cheap — the
+// counsellor only pays for these once they actually act on a call outcome.
+const SendPaymentLinkDialog = lazy(() =>
+  import("@/components/finance/SendPaymentLinkDialog").then((m) => ({ default: m.SendPaymentLinkDialog })));
+const SendWhatsAppDialog = lazy(() =>
+  import("@/components/leads/SendWhatsAppDialog").then((m) => ({ default: m.SendWhatsAppDialog })));
+const ApplyMagicLinkButton = lazy(() =>
+  import("@/components/leads/ApplyMagicLinkButton").then((m) => ({ default: m.ApplyMagicLinkButton })));
 const PriorityInterestedCard = lazy(() =>
   import("@/components/leads/PriorityInterestedCard").then((m) => ({ default: m.PriorityInterestedCard })));
 
@@ -86,7 +98,11 @@ const CONNECTED_DISPOSITIONS = [
   { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-warning/10 text-warning-foreground border-warning/30 hover:bg-warning/5" },
 ];
 
-const FOLLOWUP_GAPS = [4, 8, 48]; // hours: 4h, 8h, 2 days
+// Retry ladder for unanswered attempts. MUST match voice-agent/server.ts's
+// /bridge-hangup handler (`const gap = att === 1 ? 4 : att === 2 ? 24 : 72`) —
+// both write lead_followups for the same call, so when they disagreed the
+// lead's next-call time depended on which writer landed first.
+const FOLLOWUP_GAPS = [4, 24, 72]; // hours: 4h, 1 day, 3 days
 const MAX_AUTO_ATTEMPTS = 4; // after 4 unanswered attempts → mark inactive
 
 const FOLLOWUP_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"];
@@ -209,6 +225,9 @@ const getCourseNudges = (courseName: string): string[] => {
 
 // Bucket label (as returned by cloud_dialer_queue RPC) → UI metadata.
 const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string }> = {
+  "Pinned":              { key: "pinned",        color: "bg-foreground", uiLabel: "Pinned" },
+  "Call List":           { key: "call_list",     color: "bg-primary", uiLabel: "Call List" },
+  "Interested & Hot":    { key: "hot",           color: "bg-destructive/70", uiLabel: "Interested & Hot" },
   "Priority Interested": { key: "priority",      color: "bg-primary", uiLabel: "Priority Interested" },
   "Missed Callback":     { key: "missed",        color: "bg-destructive",    uiLabel: "Missed Callbacks" },
   "Post-Visit":          { key: "post_visit",    color: "bg-warning/50",  uiLabel: "Post-Visit" },
@@ -223,6 +242,7 @@ const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string 
 export default function CloudDialer() {
   const { user, role, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [missedCount, setMissedCount] = useState(0);
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
@@ -234,7 +254,12 @@ export default function CloudDialer() {
   const [queueBuckets, setQueueBuckets] = useState<{key:string; label:string; color:string; count:number}[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [queueSource, setQueueSource] = useState<"smart" | "followups" | "fresh" | "all">("smart");
+  // "smart" | "followups" | "fresh" | "all" | "list:<lead_list_id>"
+  const [queueSource, setQueueSource] = useState<string>("smart");
+  // Chip strip: narrows the smart queue to one bucket without changing pages.
+  // Replaces /pending-followups, /fresh-leads, /missed-calls and the visit tabs
+  // for counsellors — same rows, no navigation.
+  const [bucketFilter, setBucketFilter] = useState<string | null>(null);
 
   // Dialer state
   const [dialerActive, setDialerActive] = useState(false);
@@ -279,6 +304,17 @@ export default function CloudDialer() {
   const [nudgeSentKeys, setNudgeSentKeys] = useState<Set<string>>(new Set());
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
 
+  // Inline post-call actions (payment link / WhatsApp / walk-in / apply link)
+  const [showPaymentLink, setShowPaymentLink] = useState(false);
+  const [showWhatsApp, setShowWhatsApp] = useState(false);
+  const [showApplyLink, setShowApplyLink] = useState(false);
+  const [showWalkin, setShowWalkin] = useState(false);
+  const [walkinCampusId, setWalkinCampusId] = useState("");
+  const [walkinFeedback, setWalkinFeedback] = useState("");
+  const [walkinFollowupDate, setWalkinFollowupDate] = useState("");
+  const [walkinSaving, setWalkinSaving] = useState(false);
+  const { data: campuses = [] } = useCampuses();
+
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const pauseTimerRef = useRef<number | null>(null);
@@ -313,7 +349,28 @@ export default function CloudDialer() {
 
   // Counsellor scope (NULL for admin views — RPC then returns org-wide queue)
   const counsellorId = isCounsellor ? (profileId ?? null) : null;
+  const activeListId = queueSource.startsWith("list:") ? queueSource.slice(5) : null;
   const isSmartQueue = queueSource === "smart" || queueSource === "followups";
+
+  // Assigned call lists. A principal/admission head pushes a named list at a
+  // counsellor; it shows up here and is worked start-to-finish.
+  const { data: myCallLists = [], refetch: refetchCallLists } = useMyCallLists();
+  const activeList = myCallLists.find(l => l.id === activeListId) ?? null;
+  const {
+    data: campaignPayload,
+    isLoading: campaignLoading,
+    refetch: refetchCampaignQueue,
+  } = useCloudDialerCampaignQueue({
+    listId: activeListId,
+    counsellorId,
+    enabled: !!activeListId && (!isCounsellor || !!counsellorId),
+  });
+
+  // Deep link from the assignment notification: /cloud-dialer?list=<id>
+  useEffect(() => {
+    const linked = searchParams.get("list");
+    if (linked) setQueueSource(`list:${linked}`);
+  }, [searchParams]);
 
   // Smart/followups: cached RPC via TanStack Query (survives navigation).
   const {
@@ -333,7 +390,7 @@ export default function CloudDialer() {
     counsellorId,
     mode: queueSource === "fresh" ? "fresh" : "all",
     limit: 100,
-    enabled: !isSmartQueue && (!isCounsellor || !!counsellorId),
+    enabled: (queueSource === "fresh" || queueSource === "all") && (!isCounsellor || !!counsellorId),
   });
   const { data: dialerBootstrap } = useCloudDialerBootstrap({ enabled: !!user?.id });
   const counsellorIdentity = dialerBootstrap?.counsellor_identity ?? {
@@ -387,14 +444,52 @@ export default function CloudDialer() {
       }
     });
 
-    setQueue(mapped);
+    // Chip strip narrows to one bucket. Counts stay whole so the counsellor can
+    // still see what's waiting in the buckets they aren't working right now.
+    const visible = bucketFilter
+      ? mapped.filter(l => BUCKET_META[l.bucket]?.key === bucketFilter)
+      : mapped;
+
+    setQueue(visible);
     setQueueBuckets(buckets);
     setCurrentIdx(0);
     setLoading(false);
-  }, [isSmartQueue, smartPayload, smartLoading]);
+  }, [isSmartQueue, smartPayload, smartLoading, bucketFilter]);
+
+  // Assigned call list — one list, worked start to finish, in list order.
+  useEffect(() => {
+    if (!activeListId) return;
+    if (!campaignPayload) {
+      setLoading(campaignLoading);
+      return;
+    }
+    const mapped: QueueLead[] = (campaignPayload.queue || []).map((r: any) => ({
+      id: r.id,
+      name: r.name || "Unknown",
+      phone: r.phone || "",
+      stage: r.stage || "",
+      source: r.source || "",
+      course_id: r.course_id || null,
+      course_name: r.course_name || "—",
+      campus_name: r.campus_name || "—",
+      bucket: "Call List",
+      attempt_count: r.attempt_count || 0,
+      course_fee: r.course_fee_per_year
+        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+        : undefined,
+      assigned_at: r.assigned_at ?? null,
+      first_contact_at: r.first_contact_at ?? null,
+    })).filter(l => l.phone);
+    setQueue(mapped);
+    setQueueBuckets(mapped.length
+      ? [{ key: "call_list", label: activeList?.name || "Call List", color: "bg-primary", count: mapped.length }]
+      : []);
+    setCurrentIdx(0);
+    setLoading(false);
+  }, [activeListId, campaignPayload, campaignLoading, activeList?.name]);
 
   useEffect(() => {
-    if (isSmartQueue) return;
+    if (isSmartQueue || activeListId) return;
     if (!listPayload) {
       setLoading(listLoading);
       return;
@@ -426,13 +521,14 @@ export default function CloudDialer() {
     setQueueBuckets(buckets);
     setCurrentIdx(0);
     setLoading(false);
-  }, [isSmartQueue, listPayload, listLoading, queueSource]);
+  }, [isSmartQueue, activeListId, listPayload, listLoading, queueSource]);
 
   // Unified callable used after dispositions and manual refreshes.
   const loadQueue = useCallback(() => {
-    if (isSmartQueue) refetchSmartQueue();
+    if (activeListId) { refetchCampaignQueue(); refetchCallLists(); }
+    else if (isSmartQueue) refetchSmartQueue();
     else refetchListQueue();
-  }, [isSmartQueue, refetchSmartQueue, refetchListQueue]);
+  }, [activeListId, isSmartQueue, refetchCampaignQueue, refetchCallLists, refetchSmartQueue, refetchListQueue]);
 
   // Reset the WhatsApp nudge when the lead changes so the previous lead's
   // sent-state never carries over.
@@ -1284,6 +1380,10 @@ export default function CloudDialer() {
     setAllowPostDispositionFollowup(true);
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
+    // Refresh the list banner only — refetching the queue itself here would
+    // drop the just-worked lead and reset the cursor mid-session.
+    if (activeListId) refetchCallLists();
+
     if (currentIdx < queue.length - 1) {
       setCurrentIdx(prev => prev + 1);
       // Auto-place next call if dialer is active and not paused
@@ -1292,11 +1392,56 @@ export default function CloudDialer() {
       }
     } else {
       setDialerActive(false);
-      toast({ title: "Queue Complete", description: "All leads in queue have been called." });
+      toast(activeListId
+        ? { title: "List complete", description: `“${activeList?.name || "Call list"}” is done. Switch back to the Smart Queue.` }
+        : { title: "Queue Complete", description: "All leads in queue have been called." });
+    }
+  };
+
+  // Opening an inline action kills the auto-next countdown — otherwise the queue
+  // advances out from under a half-filled payment-link form.
+  const holdCountdown = (open: () => void) => {
+    autoNextTriggered.current = false;
+    setAutoNextTimer(0);
+    open();
+  };
+
+  const saveWalkin = async () => {
+    if (!currentLead || !walkinFollowupDate) {
+      toast({ title: "Follow-up required", description: "Pick a post-visit follow-up date.", variant: "destructive" });
+      return;
+    }
+    setWalkinSaving(true);
+    try {
+      await completeCampusVisit({
+        leadId: currentLead.id,
+        userId: user?.id || null,
+        visitId: null,
+        campusId: walkinCampusId || null,
+        campusLabel: campuses.find(c => c.id === walkinCampusId)?.name || currentLead.campus_name,
+        counsellorLabel: counsellorDisplayName,
+        feedback: walkinFeedback,
+        followupDate: walkinFollowupDate,
+      });
+      toast({ title: "Walk-in recorded", description: "Post-visit follow-up scheduled." });
+      setShowWalkin(false);
+      setWalkinFeedback(""); setWalkinFollowupDate("");
+    } catch (e: any) {
+      toast({ title: "Could not save walk-in", description: e?.message || "Try again.", variant: "destructive" });
+    } finally {
+      setWalkinSaving(false);
     }
   };
 
   const skipLead = () => {
+    // In list mode a skip is a real decision the assigner needs to see, not just
+    // a UI advance — record it so progress doesn't stall on a lead nobody calls.
+    if (activeListId && currentLead) {
+      supabase.rpc("skip_call_list_member" as any, {
+        p_list_id: activeListId,
+        p_lead_id: currentLead.id,
+      }).then(() => refetchCallLists());
+    }
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
     setAutoNextTimer(0);
     setAllowPostDispositionFollowup(true);
@@ -1836,12 +1981,21 @@ export default function CloudDialer() {
         </div>
         <div className="flex items-center gap-2">
           {/* Queue source */}
-          <select value={queueSource} onChange={e => { setQueueSource(e.target.value as any); }} disabled={dialerActive}
+          <select value={queueSource} onChange={e => { setQueueSource(e.target.value); setBucketFilter(null); }} disabled={dialerActive}
             className="rounded-xl border border-input bg-background px-3 py-2 text-sm disabled:opacity-50">
             <option value="smart">Smart Queue (Priority)</option>
             <option value="followups">All Follow-ups</option>
             <option value="fresh">Fresh Leads Only</option>
             <option value="all">All Pipeline</option>
+            {myCallLists.length > 0 && (
+              <optgroup label="My Call Lists">
+                {myCallLists.map(l => (
+                  <option key={l.id} value={`list:${l.id}`}>
+                    {l.name} ({l.worked}/{l.total}){l.due_date ? ` · due ${l.due_date}` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           {/* Live call timer in header */}
           {(callState.status === "calling" || callState.status === "connected") && (
@@ -1897,6 +2051,29 @@ export default function CloudDialer() {
         </div>
       </div>
 
+      {/* Assigned call list progress — the counsellor's brief from the assigner */}
+      {activeListId && activeList && (
+        <div className="flex items-center gap-3 px-6 py-2 border-b border-border bg-primary/5">
+          <span className="text-xs font-semibold text-foreground">{activeList.name}</span>
+          <div className="h-1.5 w-40 rounded-full bg-muted overflow-hidden">
+            <div className="h-full bg-primary transition-all"
+              style={{ width: `${activeList.total ? Math.round((activeList.worked / activeList.total) * 100) : 0}%` }} />
+          </div>
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {activeList.worked}/{activeList.total} called · {activeList.pending} left
+            {activeList.skipped > 0 && ` · ${activeList.skipped} skipped`}
+            {activeList.due_date && ` · due ${activeList.due_date}`}
+          </span>
+          {activeList.priority_note && (
+            <span className="text-[11px] italic text-muted-foreground truncate">“{activeList.priority_note}”</span>
+          )}
+          <Button size="sm" variant="ghost" className="ml-auto h-6 text-[11px]"
+            onClick={() => { setQueueSource("smart"); setBucketFilter(null); }} disabled={dialerActive}>
+            Back to Smart Queue
+          </Button>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Queue */}
@@ -1904,12 +2081,27 @@ export default function CloudDialer() {
           <div className="px-4 py-3 border-b border-border">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Queue</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">{currentIdx + 1} of {queue.length}</p>
+            {/* Bucket chips double as the work-mode filter. Clicking one narrows
+                the queue in place — this is what replaces /pending-followups,
+                /fresh-leads, /missed-calls and the visit tabs for counsellors. */}
             {queueBuckets.length > 1 && (
               <div className="flex flex-wrap gap-1 mt-2">
+                {bucketFilter && (
+                  <button onClick={() => setBucketFilter(null)} disabled={dialerActive}
+                    className="inline-flex items-center gap-1 rounded-full border border-input px-1.5 py-0.5 text-[9px] font-medium hover:bg-muted disabled:opacity-50">
+                    <X className="h-2.5 w-2.5" />All
+                  </button>
+                )}
                 {queueBuckets.map(b => (
-                  <span key={b.key} className="inline-flex items-center gap-1 text-[9px] font-medium text-muted-foreground">
+                  <button key={b.key} onClick={() => setBucketFilter(prev => prev === b.key ? null : b.key)}
+                    disabled={dialerActive}
+                    className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium transition-colors disabled:opacity-50 ${
+                      bucketFilter === b.key
+                        ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                        : "text-muted-foreground hover:bg-muted"
+                    }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${b.color}`} />{b.label}: {b.count}
-                  </span>
+                  </button>
                 ))}
               </div>
             )}
@@ -2397,6 +2589,29 @@ export default function CloudDialer() {
                         </div>
                       )}
 
+                      {/* Everything a call outcome needs, without leaving the queue.
+                          These are the same dialogs the lead page uses — opening
+                          one pauses the auto-next countdown so the counsellor
+                          isn't raced into the next lead mid-action. */}
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                          onClick={() => holdCountdown(() => setShowPaymentLink(true))}>
+                          <IndianRupee className="h-3 w-3 mr-1" />Payment link
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                          onClick={() => holdCountdown(() => setShowWhatsApp(true))}>
+                          <MessageCircle className="h-3 w-3 mr-1" />WhatsApp…
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                          onClick={() => holdCountdown(() => setShowWalkin(true))}>
+                          <Footprints className="h-3 w-3 mr-1" />Log walk-in
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                          onClick={() => holdCountdown(() => setShowApplyLink(true))}>
+                          <FileText className="h-3 w-3 mr-1" />Apply link
+                        </Button>
+                      </div>
+
                       <div className="flex items-center gap-2">
                         <Button size="sm" onClick={moveToNext} className="bg-cyan-600 hover:bg-cyan-700 flex-1 h-8 text-xs">
                           <SkipForward className="h-3 w-3 mr-1" />{currentIdx < queue.length - 1 ? "Next Call" : "Finish"}
@@ -2658,6 +2873,81 @@ export default function CloudDialer() {
           <div className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-cyan-500" />{stats.interested} interested</div>
           <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 text-muted-foreground" />Talk time: {formatTime(stats.totalTalkTime)}</div>
           {paused && <Badge className="text-[9px] border-0 bg-warning/10 text-warning-foreground animate-pulse">PAUSED {formatTime(pauseTime)}</Badge>}
+        </div>
+      )}
+
+      {/* ── Inline post-call actions ──────────────────────────────────────── */}
+      {currentLead && (
+        <Suspense fallback={null}>
+          {showPaymentLink && (
+            <SendPaymentLinkDialog
+              open={showPaymentLink}
+              onOpenChange={setShowPaymentLink}
+              leadId={currentLead.id}
+            />
+          )}
+          {showWhatsApp && (
+            <SendWhatsAppDialog
+              open={showWhatsApp}
+              onOpenChange={setShowWhatsApp}
+              lead={{ id: currentLead.id, name: currentLead.name, phone: currentLead.phone, source: currentLead.source }}
+              courseName={currentLead.course_name}
+              campusName={currentLead.campus_name}
+            />
+          )}
+          {showApplyLink && (
+            <ApplyMagicLinkButton
+              leadId={currentLead.id}
+              leadName={currentLead.name}
+              leadPhone={currentLead.phone}
+              controlledOpen={showApplyLink}
+              onControlledOpenChange={setShowApplyLink}
+            />
+          )}
+        </Suspense>
+      )}
+
+      {/* Walk-in: a completed campus_visits row + the mandatory post-visit
+          follow-up, written through the same helper the lead page uses. */}
+      {showWalkin && currentLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !walkinSaving && setShowWalkin(false)}>
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 space-y-3"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">Log walk-in — {currentLead.name}</h3>
+              <button onClick={() => setShowWalkin(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Campus</label>
+              <select value={walkinCampusId} onChange={e => setWalkinCampusId(e.target.value)}
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs">
+                <option value="">Select campus…</option>
+                {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Feedback</label>
+              <textarea value={walkinFeedback} onChange={e => setWalkinFeedback(e.target.value)} rows={2}
+                placeholder="What did they say on campus?"
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Post-visit follow-up <span className="text-destructive">*</span>
+              </label>
+              <input type="date" value={walkinFollowupDate} onChange={e => setWalkinFollowupDate(e.target.value)}
+                min={new Date().toISOString().slice(0, 10)}
+                max={new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)}
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs" />
+            </div>
+            <Button size="sm" className="w-full h-8 text-xs" onClick={saveWalkin} disabled={walkinSaving || !walkinFollowupDate}>
+              {walkinSaving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Footprints className="h-3 w-3 mr-1" />}
+              Record walk-in
+            </Button>
+          </div>
         </div>
       )}
     </div>

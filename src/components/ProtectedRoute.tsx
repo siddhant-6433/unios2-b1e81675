@@ -146,6 +146,26 @@ export const RequireRole = ({
   }, roles), children);
 };
 
+// ── RedirectRole ────────────────────────────────────────────────────────────
+// Not an access control — a consolidation. Some pages exist only to render a
+// slice of data another page already shows; for the roles listed here we send
+// the user to that one surface instead of keeping two ways to see the same rows.
+// Everyone else gets the page unchanged.
+export const RedirectRole = ({
+  roles,
+  to,
+  children,
+}: {
+  roles: string[];
+  to: string;
+  children: ReactNode;
+}) => {
+  const { role, roleLoaded } = useAuth();
+  if (!roleLoaded) return <Spinner />;
+  if (role && roles.includes(role)) return <Navigate to={to} replace />;
+  return <>{children}</>;
+};
+
 // ── BlockRole ───────────────────────────────────────────────────────────────
 // Use when a broad permission is shared by a narrow portal role but a specific
 // full-staff route must stay unavailable to that role.

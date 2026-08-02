@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { useCallListOverview } from "@/components/dashboard/CallListProgressPanel";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -107,6 +109,23 @@ type LeadListAssignmentReportRow = {
   latest_call_response: string | null;
   latest_call_at: string | null;
   assigned_at: string;
+};
+
+type CallListProgress = {
+  list_id: string;
+  total: number;
+  pending: number;
+  worked: number;
+  skipped: number;
+  last_call_at: string | null;
+  dispositions: Record<string, number>;
+  by_counsellor: {
+    counsellor_id: string;
+    counsellor_name: string;
+    total: number;
+    worked: number;
+    pending: number;
+  }[];
 };
 
 type WaPhoneHealth = {
@@ -342,6 +361,7 @@ const WhatsAppBusinessIdentity = ({
 export default function LeadLists() {
   const { toast } = useToast();
   const { profile, role, realRole, permissions, isImpersonating, user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -441,15 +461,35 @@ export default function LeadLists() {
   const [selectedCounsellorIds, setSelectedCounsellorIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [assignmentSummary, setAssignmentSummary] = useState<string | null>(null);
+  // Working instructions the counsellor sees on the dialer's list banner.
+  const [assignNote, setAssignNote] = useState("");
+  const [assignDueDate, setAssignDueDate] = useState("");
+  // Re-running an assignment used to silently steal every already-owned lead.
+  const [assignOnlyUnassigned, setAssignOnlyUnassigned] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportList, setReportList] = useState<LeadList | null>(null);
   const [assignmentReport, setAssignmentReport] = useState<LeadListAssignmentReportRow[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportProgress, setReportProgress] = useState<CallListProgress | null>(null);
+  // Click an outcome chip to see only those leads.
+  const [reportDispositionFilter, setReportDispositionFilter] = useState<string | null>(null);
+  // One aggregated RPC for every active call list — cheaper and RLS-safe
+  // compared with counting lead_list_members client-side per row.
+  const { data: callListOverview = [] } = useCallListOverview({ enabled: role !== "counsellor" });
+  const callProgressByList = useMemo(
+    () => Object.fromEntries(callListOverview.map((l) => [l.id, l])),
+    [callListOverview],
+  );
 
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
   const [deleting, setDeleting] = useState(false);
   const canDeleteLists = role === "super_admin";
+  // Mirrors the check inside assign_lead_list_round_robin — the button used to
+  // render for everyone and only fail on submit.
+  const isTeamLeader = useIsTeamLeader();
+  const canAssignLists = role === "super_admin" || role === "admission_head"
+    || role === "principal" || isTeamLeader;
 
   const fetchLists = async () => {
     if (isAcademicPartnerPortalRole(role)) {
@@ -529,6 +569,15 @@ export default function LeadLists() {
     if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
   }, [role]);
+
+  // Deep link from the dashboard's "Assigned call lists" panel:
+  // /lists?report=<id> opens that list's Calling Report directly.
+  useEffect(() => {
+    const reportId = searchParams.get("report");
+    if (!reportId || lists.length === 0 || reportOpen) return;
+    const target = lists.find((l) => l.id === reportId);
+    if (target) openAssignmentReport(target);
+  }, [searchParams, lists]);
 
   const loadWaSenders = async () => {
     setWaSenderLoading(true);
@@ -814,6 +863,9 @@ export default function LeadLists() {
     const { data, error } = await supabase.rpc("assign_lead_list_round_robin" as any, {
       _list_id: assignList.id,
       _counsellor_ids: selectedCounsellorIds,
+      _only_unassigned: assignOnlyUnassigned,
+      _priority_note: assignNote.trim() || null,
+      _due_date: assignDueDate || null,
     });
     setAssigning(false);
     if (error) {
@@ -827,10 +879,29 @@ export default function LeadLists() {
     await fetchLists();
   };
 
+  // Called-first ordering: the assigner opens this to read outcomes, and rows
+  // with no call yet have nothing to say.
+  const visibleAssignmentReport = useMemo(() => {
+    const rows = reportDispositionFilter
+      ? assignmentReport.filter((r) =>
+          (r.latest_call_disposition || "unrecorded") === reportDispositionFilter)
+      : assignmentReport;
+    return [...rows].sort((a, b) => {
+      const at = a.latest_call_at ? new Date(a.latest_call_at).getTime() : -1;
+      const bt = b.latest_call_at ? new Date(b.latest_call_at).getTime() : -1;
+      return bt - at;
+    });
+  }, [assignmentReport, reportDispositionFilter]);
+
   const openAssignmentReport = async (list: LeadList) => {
     setReportList(list);
     setReportOpen(true);
     setReportLoading(true);
+    setReportDispositionFilter(null);
+    // Aggregated server-side — a per-row client fetch would hit the 1000-row cap
+    // on any list worth assigning.
+    supabase.rpc("call_list_progress" as any, { p_list_id: list.id })
+      .then(({ data: p }) => setReportProgress((p as CallListProgress) || null));
     const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
       _list_id: list.id,
       _batch_id: null,
@@ -1276,7 +1347,25 @@ export default function LeadLists() {
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] border-0 ${badge.cls}`}>{badge.label}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-foreground font-semibold">{list.member_count}</td>
+                    <td className="px-4 py-3 text-foreground font-semibold">
+                      {list.member_count}
+                      {/* Calling progress inline, so an assigner sees which lists
+                          are moving without opening each Calling Report. */}
+                      {callProgressByList[list.id] && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <div className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                            <div className="h-full bg-primary" style={{
+                              width: `${callProgressByList[list.id].total
+                                ? Math.round((callProgressByList[list.id].worked / callProgressByList[list.id].total) * 100)
+                                : 0}%`,
+                            }} />
+                          </div>
+                          <span className="text-[10px] font-normal tabular-nums text-muted-foreground">
+                            {callProgressByList[list.id].worked}/{callProgressByList[list.id].total} called
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {new Date(list.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
@@ -1285,9 +1374,11 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" /> Members
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
-                          <Users className="h-3.5 w-3.5" /> Assign
-                        </Button>
+                        {canAssignLists && (
+                          <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
+                            <Users className="h-3.5 w-3.5" /> Assign
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssignmentReport(list)}>
                           <Phone className="h-3.5 w-3.5" /> Calling Report
                         </Button>
@@ -1814,8 +1905,41 @@ export default function LeadLists() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              All list members will be reassigned in round-robin order across the selected counsellors.
+              Members are split round-robin across the selected counsellors and appear in their
+              Cloud Dialer under <span className="font-medium text-foreground">My Call Lists</span> —
+              they can work the list start to finish without searching or filtering.
             </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Priority note (optional)</label>
+                <input
+                  type="text"
+                  value={assignNote}
+                  onChange={(e) => setAssignNote(e.target.value)}
+                  placeholder="e.g. Call before the counselling deadline"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Due date (optional)</label>
+                <input
+                  type="date"
+                  value={assignDueDate}
+                  onChange={(e) => setAssignDueDate(e.target.value)}
+                  min={new Date().toISOString().slice(0, 10)}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={assignOnlyUnassigned}
+                onChange={(e) => setAssignOnlyUnassigned(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Only assign leads that currently have no counsellor
+            </label>
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
               {counsellors.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>
@@ -1853,6 +1977,66 @@ export default function LeadLists() {
           <DialogHeader>
             <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
           </DialogHeader>
+          {reportProgress && reportProgress.total > 0 && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="h-2 w-48 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.round((reportProgress.worked / reportProgress.total) * 100)}%` }} />
+                </div>
+                <span className="text-sm tabular-nums text-foreground">
+                  {reportProgress.worked}/{reportProgress.total} called
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {reportProgress.pending} pending
+                  {reportProgress.skipped > 0 && ` · ${reportProgress.skipped} skipped`}
+                </span>
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  {reportProgress.last_call_at
+                    ? `last call ${new Date(reportProgress.last_call_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                    : "no calls yet"}
+                </span>
+              </div>
+              {/* What actually came back on the calls — the number the assigner
+                  is looking for, not just how many were dialled. */}
+              {Object.keys(reportProgress.dispositions || {}).length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(reportProgress.dispositions)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([disposition, n]) => (
+                      <button
+                        key={disposition}
+                        onClick={() => setReportDispositionFilter((cur) => cur === disposition ? null : disposition)}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize transition-colors ${
+                          reportDispositionFilter === disposition
+                            ? "border-primary bg-primary/15 text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {disposition.replace(/_/g, " ")} {n}
+                      </button>
+                    ))}
+                  {reportDispositionFilter && (
+                    <button
+                      onClick={() => setReportDispositionFilter(null)}
+                      className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
+              {reportProgress.by_counsellor.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {reportProgress.by_counsellor.map((c) => (
+                    <Badge key={c.counsellor_id} variant="outline" className="text-[11px] font-normal">
+                      {c.counsellor_name}: {c.worked}/{c.total}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {reportLoading ? (
             <div className="flex h-40 items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -1873,7 +2057,7 @@ export default function LeadLists() {
                   </tr>
                 </thead>
                 <tbody>
-                  {assignmentReport.map((row) => (
+                  {visibleAssignmentReport.map((row) => (
                     <tr key={row.assignment_id} className="border-b border-border/50 last:border-b-0">
                       <td className="px-3 py-2">
                         <p className="font-medium text-foreground">{row.lead_name || "Unknown lead"}</p>

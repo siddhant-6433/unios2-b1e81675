@@ -67,6 +67,7 @@ import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/
 import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { completeCampusVisit } from "@/lib/visitCompletion";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -1962,13 +1963,6 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
     }
     setSaving(true);
 
-    const feedbackText = [
-      feedback ? `Feedback: ${feedback}` : "",
-      courseInterest ? `Course Interest: ${courseInterest}` : "",
-      schoolAdmissionType ? `Admission Type: ${schoolAdmissionType}` : "",
-      expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
-    ].filter(Boolean).join("\n") || null;
-
     // Get counsellor name and campus name for activity log
     const { data: myProfile } = await supabase.from("profiles").select("display_name").eq("user_id", userId).single();
     const counsellorLabel = myProfile?.display_name || "Counsellor";
@@ -1976,52 +1970,20 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
     const visitCampus = completingVisit ? campuses.find((c: any) => c.id === completingVisit.campus_id) : walkinCampus;
     const campusLabel = visitCampus?.name || "Campus";
 
-    // The campus_visits row this follow-up belongs to — links the post-visit
-    // follow-up to its visit so it shows in the Visit funnel's "Visit Follow-up"
-    // box (lead_followups.visit_id).
-    let postVisitId: string | null = completingVisitId;
-    if (isWalkin) {
-      // Walk-in: create a new campus_visits record as completed
-      const { data: walkinRow } = await supabase.from("campus_visits").insert({
-        lead_id: leadId,
-        campus_id: walkinCampusId || null,
-        scheduled_by: userId,
-        visit_date: new Date().toISOString(),
-        status: "completed",
-        visit_type: "walk_in",
-        feedback: feedbackText,
-      }).select("id").single();
-      postVisitId = walkinRow?.id ?? null;
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: userId, type: "visit_completed",
-        description: `Walk-in visit completed at ${campusLabel}. Attended by ${counsellorLabel}.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
-      });
-    } else {
-      // Scheduled visit: update existing record
-      await supabase.from("campus_visits").update({
-        status: "completed",
-        feedback: feedbackText,
-      }).eq("id", completingVisitId);
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: userId, type: "visit_completed",
-        description: `Visit completed at ${campusLabel}. Attended by ${counsellorLabel}.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
-      });
-    }
-
-    // Schedule mandatory follow-up — always a call, linked to the visit.
-    await supabase.from("lead_followups").insert({
-      lead_id: leadId,
-      user_id: userId,
-      scheduled_at: new Date(`${followupDate}T10:00:00`).toISOString(),
-      type: "call",
-      visit_id: postVisitId,
-      notes: `Post-visit follow-up${feedback ? `. Visit feedback: ${feedback}` : ""}`,
-      status: "pending",
-    });
-
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: userId, type: "followup",
-      description: `Post-visit follow-up scheduled for ${new Date(followupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
+    // Shared with the Cloud Dialer's inline "Log walk-in" action so the two
+    // surfaces can't write different rows for the same event.
+    await completeCampusVisit({
+      leadId,
+      userId,
+      visitId: isWalkin ? null : completingVisitId,
+      campusId: walkinCampusId,
+      campusLabel,
+      counsellorLabel,
+      feedback,
+      courseInterest,
+      schoolAdmissionType,
+      expectedAdmissionDate,
+      followupDate,
     });
 
     toast({ title: isWalkin ? "Walk-in visit recorded" : "Visit completed", description: "Follow-up scheduled." });
