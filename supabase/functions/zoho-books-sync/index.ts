@@ -11,7 +11,7 @@
 // "approved expense -> Zoho bill -> paid" flow.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone } from "../_shared/zoho.ts";
+import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoAddVendorBankAccount } from "../_shared/zoho.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
     const admissionNo = lead?.admission_no || lead?.pre_admission_no || "";
 
     const token = await zohoAccessToken();
+    let bankWarning: unknown = null; // surfaced in the response when the bank push fails
 
     // ---- Ensure vendor -------------------------------------------------------
     const ensureVendor = async (): Promise<string> => {
@@ -77,6 +78,18 @@ Deno.serve(async (req) => {
         });
         if (!res.ok) throw new Error(`vendor create failed: ${JSON.stringify(res.data)}`);
         vendorId = res.data.contact.contact_id;
+        // New vendor → push structured bank details (best-effort, non-fatal). Some
+        // connected-banking orgs require the account number encrypted; if so this
+        // fails and the warning is returned so we can adapt.
+        if (consultant?.bank_account_number) {
+          const bank = await zohoAddVendorBankAccount(token, vendorId!, {
+            bank_name: consultant.bank_name,
+            account_number: consultant.bank_account_number,
+            ifsc: consultant.bank_ifsc,
+            account_holder: consultant.bank_account_name || consultant.name,
+          });
+          if (!bank.ok) { bankWarning = bank.data; console.error("vendor bank add failed", bank.data); }
+        }
       }
       await admin.from("consultants").update({ zoho_vendor_id: vendorId }).eq("id", consultant!.id);
       return vendorId!;
@@ -112,7 +125,7 @@ Deno.serve(async (req) => {
         await admin.from("consultant_payouts").update({
           zoho_bill_id: billId, zoho_bill_number: billNumber, zoho_synced_at: new Date().toISOString(), zoho_sync_error: null,
         }).eq("id", payoutId);
-        return json({ ok: true, zoho_bill_id: billId, zoho_bill_number: billNumber });
+        return json({ ok: true, zoho_bill_id: billId, zoho_bill_number: billNumber, bank_warning: bankWarning });
       } catch (e) {
         await admin.from("consultant_payouts").update({ zoho_sync_error: String(e).slice(0, 500) }).eq("id", payoutId);
         return json({ error: String(e) }, 502);

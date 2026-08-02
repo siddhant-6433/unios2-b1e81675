@@ -82,6 +82,26 @@ export async function zohoAttach(
   return { ok: res.ok && data.code === 0, status: res.status, data };
 }
 
+// Add a bank account to a vendor (India: routing_number carries the IFSC).
+// Best-effort — connected-banking orgs may require the account number encrypted;
+// the caller treats a failure as non-fatal and surfaces res.data for debugging.
+export async function zohoAddVendorBankAccount(
+  token: string,
+  contactId: string,
+  bank: { bank_name?: string | null; account_number?: string | null; ifsc?: string | null; account_holder?: string | null; account_type?: string | null },
+): Promise<ZohoResult> {
+  return zohoApi(token, "POST", `/contacts/${contactId}/bankaccount`, {
+    beneficiary_name: bank.account_holder || undefined,
+    bank_name: bank.bank_name || undefined,
+    account_number: bank.account_number || undefined,
+    re_account_number: bank.account_number || undefined,
+    routing_number: bank.ifsc || undefined,
+    ifsc: bank.ifsc || undefined,
+    account_type: (bank.account_type || "current"),
+    is_primary_account: true,
+  });
+}
+
 // Find an existing vendor by phone; returns contact_id or null.
 export async function zohoFindVendorByPhone(token: string, phone: string): Promise<string | null> {
   const digits = (phone || "").replace(/\D/g, "").slice(-10);
