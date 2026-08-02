@@ -219,3 +219,6 @@ verify_jwt = false
 
 [functions.zoho-books-webhook]
 verify_jwt = false
+
+[functions.zoho-books-poll]
+verify_jwt = false
