@@ -148,6 +148,48 @@ describe("accessPolicy", () => {
     });
   });
 
+  it("does not widen a menu item's own roles with the route's permission", () => {
+    // /visit-monitor is RequireRole(super_admin/principal/admission_head) in
+    // App.tsx. Its route policy used to carry permission: leads:view, which
+    // every counsellor has — so the sidebar rendered a link that 403s.
+    const counsellor = state({ role: "counsellor", realRole: "counsellor" });
+    expect(canSeePolicyItem(counsellor, {
+      title: "Visit Monitor",
+      url: "/visit-monitor",
+      roles: ["super_admin", "principal", "admission_head"],
+    } as never)).toBe(false);
+
+    const head = state({ role: "admission_head", realRole: "admission_head" });
+    expect(canSeePolicyItem(head, {
+      title: "Visit Monitor",
+      url: "/visit-monitor",
+      roles: ["super_admin", "principal", "admission_head"],
+    } as never)).toBe(true);
+  });
+
+  it("hides the calling sprints from counsellors", () => {
+    const counsellor = state({ role: "counsellor", realRole: "counsellor" });
+    // They hold call_log:view, so only blockedRoles keeps these out.
+    expect(canSeePolicyItem(counsellor, {
+      title: "CAHET Sprint",
+      url: "/cahet-sprint",
+      permission: "call_log:view",
+      blockedRoles: ["counsellor"],
+    } as never)).toBe(false);
+  });
+
+  it("keeps Consultants visible to counsellors who hold the permission", () => {
+    const withPerm = state({ permissions: ["leads:view", "consultants:view"] });
+    expect(canSeePolicyItem(withPerm, {
+      title: "Consultants", url: "/consultants", permission: "consultants:view",
+    } as never)).toBe(true);
+
+    const withoutPerm = state({ permissions: ["leads:view"] });
+    expect(canSeePolicyItem(withoutPerm, {
+      title: "Consultants", url: "/consultants", permission: "consultants:view",
+    } as never)).toBe(false);
+  });
+
   it("blocks roles through the effective role", () => {
     const impersonatingAcademicPartner = state({
       role: "academic_partner",
