@@ -136,7 +136,8 @@ Deno.serve(async (req) => {
           if (!att.ok) console.error("attachment failed", att.data);
         }
         await admin.from("consultant_payouts").update({
-          zoho_bill_id: billId, zoho_bill_number: billNumber, zoho_synced_at: new Date().toISOString(), zoho_sync_error: null,
+          zoho_bill_id: billId, zoho_bill_number: billNumber, zoho_synced_at: new Date().toISOString(),
+          zoho_sync_error: bankWarning ? `bank: ${JSON.stringify(bankWarning)}`.slice(0, 800) : null,
         }).eq("id", payoutId);
         return json({ ok: true, zoho_bill_id: billId, zoho_bill_number: billNumber, bank_warning: bankWarning });
       } catch (e) {
