@@ -103,14 +103,22 @@ Deno.serve(async (req) => {
         let billId = payout.zoho_bill_id;
         let billNumber = payout.zoho_bill_number;
         if (!billId) {
-          const accountId = await zohoResolveExpenseAccount(token);
-          if (!accountId) throw new Error("No expense account found — set ZOHO_PAYOUT_ACCOUNT_ID (or _NAME) to a Chart-of-Accounts expense account.");
+          // Expense account for the bill line. Explicit id/name (scope-free) wins;
+          // else look it up in the chart of accounts.
+          const acctId = Deno.env.get("ZOHO_PAYOUT_ACCOUNT_ID");
+          const acctName = Deno.env.get("ZOHO_PAYOUT_ACCOUNT_NAME");
+          let lineAccount: Record<string, unknown>;
+          if (acctId) lineAccount = { account_id: acctId };
+          else {
+            try { lineAccount = { account_id: await zohoResolveExpenseAccount(token) }; }
+            catch (e) { if (acctName) lineAccount = { account_name: acctName }; else throw e; }
+          }
           const res = await zohoApi(token, "POST", "/bills", {
             vendor_id: vendorId,
             bill_number: `CP-${payoutId.slice(0, 8).toUpperCase()}`,
             reference_number: payoutId,
             line_items: [{
-              account_id: accountId,
+              ...lineAccount,
               name: `Consultant commission — ${candidate}`,
               description: `Admission ${admissionNo}`.trim(),
               rate: Number(payout.payout_amount),

@@ -105,19 +105,19 @@ export async function zohoAddVendorBankAccount(
 // Resolve the expense account to book the payout against (required on bill lines).
 // Prefer ZOHO_PAYOUT_ACCOUNT_ID; else match ZOHO_PAYOUT_ACCOUNT_NAME by name; else
 // the first active expense account.
-export async function zohoResolveExpenseAccount(token: string): Promise<string | null> {
-  const fixed = Deno.env.get("ZOHO_PAYOUT_ACCOUNT_ID");
-  if (fixed) return fixed;
-  const wantName = (Deno.env.get("ZOHO_PAYOUT_ACCOUNT_NAME") || "").toLowerCase();
+export async function zohoResolveExpenseAccount(token: string): Promise<string> {
   const res = await zohoApi(token, "GET", "/chartofaccounts");
+  if (!res.ok) throw new Error(`chartofaccounts read failed (grant scope may lack ZohoBooks.settings.READ): ${JSON.stringify(res.data)}`);
   const accounts: any[] = res.data?.chartofaccounts || [];
+  const wantName = (Deno.env.get("ZOHO_PAYOUT_ACCOUNT_NAME") || "").toLowerCase();
   const expenseTypes = new Set(["expense", "cost_of_goods_sold", "other_expense"]);
   const expenses = accounts.filter((a) => expenseTypes.has(a.account_type) && a.is_active !== false);
   if (wantName) {
-    const named = expenses.find((a) => (a.account_name || "").toLowerCase().includes(wantName));
+    const named = (expenses.length ? expenses : accounts).find((a) => (a.account_name || "").toLowerCase().includes(wantName));
     if (named) return named.account_id;
   }
-  return expenses[0]?.account_id || null;
+  if (expenses[0]?.account_id) return expenses[0].account_id;
+  throw new Error(`no expense account among ${accounts.length} accounts; set ZOHO_PAYOUT_ACCOUNT_NAME or ZOHO_PAYOUT_ACCOUNT_ID`);
 }
 
 // Does the vendor already have a bank account? (dedupe before adding one)
