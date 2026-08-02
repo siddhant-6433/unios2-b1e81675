@@ -1124,11 +1124,45 @@ const Admissions = () => {
       setShowDeleteConfirm(false);
       return;
     }
-    const { error } = await supabase.from("leads").delete().in("id", ids);
+    // Leads that have taken money are retained permanently — a DB trigger
+    // (20260802075753_protect_leads_with_financial_records.sql) refuses the
+    // delete outright. Checking here means a purge skips them with a readable
+    // reason instead of dying on a Postgres error halfway through the batch.
+    const { data: paidRows, error: paidError } = await supabase
+      .from("lead_payments")
+      .select("lead_id")
+      .in("lead_id", ids)
+      .or("receipt_no.not.is.null,status.eq.confirmed");
+    if (paidError) {
+      toast({ title: "Delete failed", description: paidError.message, variant: "destructive" });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    const protectedIds = new Set((paidRows || []).map((r: any) => r.lead_id));
+    const deletableIds = ids.filter((id) => !protectedIds.has(id));
+
+    if (deletableIds.length === 0) {
+      toast({
+        title: "Nothing deleted",
+        description: `All ${ids.length} selected lead(s) have receipts on file and must be retained.`,
+        variant: "destructive",
+      });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+
+    const { error } = await supabase.from("leads").delete().in("id", deletableIds);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Leads deleted", description: `${ids.length} lead(s) deleted successfully.` });
+      toast({
+        title: "Leads deleted",
+        description: protectedIds.size > 0
+          ? `${deletableIds.length} lead(s) deleted. ${protectedIds.size} skipped — they have receipts on file and must be retained.`
+          : `${deletableIds.length} lead(s) deleted successfully.`,
+      });
     }
     setDeleting(false);
     setShowDeleteConfirm(false);

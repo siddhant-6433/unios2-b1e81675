@@ -987,6 +987,31 @@ const LeadDetail = () => {
       setShowDeleteConfirm(false);
       return;
     }
+    // A lead that has taken money is retained permanently — a DB trigger
+    // (20260802075753_protect_leads_with_financial_records.sql) refuses the
+    // delete. Check first so the reason is readable rather than a raw error.
+    const { count: receiptCount, error: paidError } = await supabase
+      .from("lead_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", id)
+      .or("receipt_no.not.is.null,status.eq.confirmed");
+    if (paidError) {
+      toast({ title: "Delete failed", description: paidError.message, variant: "destructive" });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if ((receiptCount ?? 0) > 0) {
+      toast({
+        title: "Cannot delete a lead with receipts",
+        description: `${receiptCount} receipt(s) are on file against ${lead?.name || "this lead"}. Financial records must be retained.`,
+        variant: "destructive",
+      });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
