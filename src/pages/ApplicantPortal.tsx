@@ -68,7 +68,7 @@ function StatusBadge({ status, paymentStatus }: { status: string; paymentStatus:
 }
 
 export default function ApplicantPortal() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, role, signOut } = useAuth();
   const navigate = useNavigate();
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,12 +144,22 @@ export default function ApplicantPortal() {
               <p className="text-xs text-gray-500 leading-tight">Admission Portal</p>
             </div>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <LogOut className="h-4 w-4" /> Sign out
-          </button>
+          <div className="flex items-center gap-2">
+            {role === "student" && (
+              <button
+                onClick={() => navigate("/student")}
+                className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <GraduationCap className="h-4 w-4" /> Student dashboard
+              </button>
+            )}
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              <LogOut className="h-4 w-4" /> Sign out
+            </button>
+          </div>
         </div>
       </header>
 

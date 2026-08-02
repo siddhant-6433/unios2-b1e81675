@@ -99,7 +99,9 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action, lead_id, caller_user_id } = body;
 
-    const user = { id: isServiceRole ? "system" : (caller_user_id || "manual") };
+    // initiated_by is a uuid column: service-role (cron) calls have no user, so
+    // it must be null — never the string "system"/"manual" (→ 22P02 invalid uuid).
+    const user = { id: isServiceRole ? null : (caller_user_id || null) };
 
     if (action === "outbound") {
       if (!lead_id) return json({ error: "lead_id required" }, 400);

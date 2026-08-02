@@ -8,6 +8,18 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Month-anchored ad-hoc fee heads, e.g. m_2026_07 → "Jul 2026". Returns null
+// when the term isn't a month term so callers fall through to their normal path.
+const monthTermLabel = (normalized: string): string | null => {
+  const m = normalized.match(/^m_(\d{4})_(\d{2})$/);
+  if (!m) return null;
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) return null;
+  return `${MONTH_ABBR[month - 1]} ${m[1]}`;
+};
+
 const TERM_PATTERNS = [
   { regex: /^year[_\s-]?(\d+)$/i, label: (n: string) => `Year ${n}` },
   { regex: /^sem(?:ester)?[_\s-]?(\d+)$/i, label: (n: string) => `Sem ${n}` },
@@ -27,6 +39,8 @@ const EXPLICIT_TERM_LABELS: Record<string, string> = {
 export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {
   const normalized = String(term || "").trim().toLowerCase();
   if (EXPLICIT_TERM_LABELS[normalized]) return EXPLICIT_TERM_LABELS[normalized];
+  const monthLabel = monthTermLabel(normalized);
+  if (monthLabel) return monthLabel;
   for (const { regex, label } of TERM_PATTERNS) {
     const match = normalized.match(regex);
     if (match) {
@@ -47,6 +61,8 @@ export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata) => {
   }
 
   const normalized = String(term || "").trim().toLowerCase();
+  const monthLabel = monthTermLabel(normalized);
+  if (monthLabel) return monthLabel;
   if (normalized === "security_deposit") return "Security Deposit (Refundable)";
   const periodLabel = meta?.period_label;
 

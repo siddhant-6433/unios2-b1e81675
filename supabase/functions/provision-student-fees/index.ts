@@ -179,7 +179,7 @@ async function provisionStudent(
   // 3. Fetch fee_structure_items with fee_codes
   const { data: items } = await db
     .from("fee_structure_items")
-    .select("id, fee_code_id, term, amount, due_day, due_month, due_year_offset, due_date, fee_codes:fee_code_id(code, name, category)")
+    .select("id, fee_code_id, term, amount, due_day, due_month, due_year_offset, due_date, late_fee_config, fee_codes:fee_code_id(code, name, category)")
     .eq("fee_structure_id", feeStructure.id);
 
   if (!items || items.length === 0) throw new Error("Fee structure has no items");
@@ -293,6 +293,7 @@ async function provisionStudent(
       concession: 0,
       due_date: dueDate,
       status: "due",
+      late_fee_config: item.late_fee_config ?? null,
     };
   });
 

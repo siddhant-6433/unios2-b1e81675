@@ -154,6 +154,18 @@ Deno.serve(async (req) => {
     const studentId = parsed.student_id ? String(parsed.student_id) : null;
     const amount = Math.round(Number(parsed.amount) * 100) / 100;
     const note = parsed.note ? String(parsed.note).slice(0, 500) : null;
+    // Optional per-head breakup [{fee_code_id, amount, label}]. Applied to the
+    // student's matching fee_ledger heads at settlement/admission by
+    // provision_student_fees.
+    const rawAllocations = Array.isArray(parsed.allocations) ? parsed.allocations : null;
+    let allocations: { fee_code_id: string; amount: number; label?: string }[] | null =
+      rawAllocations && rawAllocations.length
+        ? rawAllocations.map((a: any) => ({
+            fee_code_id: String(a.fee_code_id || ""),
+            amount: Math.round(Number(a.amount) * 100) / 100,
+            label: a.label ? String(a.label).slice(0, 120) : undefined,
+          }))
+        : null;
     const expiresDays = Number.isFinite(Number(parsed.expires_days)) ? Number(parsed.expires_days) : 7;
     const sendChannel = String(parsed.send_channel || "none"); // 'whatsapp' | 'email' | 'both' | 'none'
     const wantsWhatsApp = sendChannel === "whatsapp" || sendChannel === "both";
@@ -174,6 +186,23 @@ Deno.serve(async (req) => {
     }
     if (!leadId && !studentId) return json({ error: "lead_id or student_id is required" }, 400);
     if (!Number.isFinite(amount) || amount <= 0) return json({ error: "amount must be > 0" }, 400);
+
+    // Validate the breakup (trust boundary): positive amounts, known fee heads,
+    // and total == amount.
+    if (allocations) {
+      if (allocations.some((a) => !a.fee_code_id || !Number.isFinite(a.amount) || a.amount <= 0)) {
+        return json({ error: "Each fee head needs a positive amount" }, 400);
+      }
+      const sum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+      if (Math.abs(sum - amount) > 0.01) {
+        return json({ error: `Breakup total (₹${sum}) must equal the amount (₹${amount})` }, 400);
+      }
+      const ids = [...new Set(allocations.map((a) => a.fee_code_id))];
+      const { data: codes } = await admin.from("fee_codes").select("id").in("id", ids);
+      if (!codes || codes.length !== ids.length) {
+        return json({ error: "Unknown fee head in the breakup" }, 400);
+      }
+    }
 
     // --- Authorise the caller ------------------------------------------------
     const { data: roleRows } = await admin
@@ -261,6 +290,13 @@ Deno.serve(async (req) => {
       payerEmail = student?.email || null;
     }
 
+    // Candidate-facing note carries the breakup so they see what they're paying for.
+    let effectiveNote = note;
+    if (allocations) {
+      const breakup = allocations.map((a) => `${a.label || "Fee"}: ₹${a.amount}`).join(", ");
+      effectiveNote = [note, `Breakup — ${breakup}`].filter(Boolean).join(" · ").slice(0, 500);
+    }
+
     // --- Insert the link row (service role; amount is authoritative) ----------
     const { data: linkRow, error: insErr } = await admin
       .from("payment_links")
@@ -269,7 +305,8 @@ Deno.serve(async (req) => {
         student_id: studentId,
         purpose,
         amount,
-        note,
+        note: effectiveNote,
+        allocations,
         created_by: user.id,
         consultant_id: consultantId,
         expires_at: new Date(Date.now() + expiresDays * 86400000).toISOString(),

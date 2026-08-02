@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
+import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
 import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
@@ -69,14 +70,12 @@ interface Props {
   defaultType?: string;
   /** Pre-fills the amount — the cashier desk passes the selected head's balance. */
   defaultAmount?: number | null;
-  /** Pre-selects the fee_ledger row the money should land on. */
-  defaultApplyToHead?: string | null;
   onRecorded?: () => void;
 }
 
 export function OfflinePaymentDialog({
   open, onOpenChange, leadId, applicationId, defaultType,
-  defaultAmount, defaultApplyToHead, onRecorded,
+  defaultAmount, onRecorded,
 }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
@@ -94,15 +93,9 @@ export function OfflinePaymentDialog({
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Optional "apply to head" — only offered once a student ledger exists for
-  // this lead (pre-admission leads have no fee_ledger rows to apply to).
-  const [studentId, setStudentId] = useState<string | null>(null);
-  const [headOptions, setHeadOptions] = useState<{ id: string; label: string }[]>([]);
-  const [applyToHead, setApplyToHead] = useState<string>(defaultApplyToHead || ""); // "" = credit (unallocated)
-
   // Ad-hoc charge heads a super_admin has enabled for this person. Only offered
   // pre-admission: an admitted student gets a real fee_ledger row via
-  // AddChargeDialog first, then the money is applied to it below.
+  // AddChargeDialog, and the allocation breakup below routes money to it.
   const [chargeHeads, setChargeHeads] = useState<ChargeHead[]>([]);
   const [chargeHeadId, setChargeHeadId] = useState<string>("");
   const selectedChargeHead = chargeHeads.find(h => h.id === chargeHeadId) || null;
@@ -111,30 +104,22 @@ export function OfflinePaymentDialog({
     if (!open || !leadId) return;
     (async () => {
       const { data: student } = await supabase.from("students").select("id").eq("lead_id", leadId).maybeSingle();
-      if (!student?.id) {
-        setStudentId(null);
-        setHeadOptions([]);
-        const { data: charges } = await (supabase.rpc as any)("available_fee_charges", { _student_id: null, _lead_id: leadId });
-        setChargeHeads((charges || []) as ChargeHead[]);
-        return;
-      }
-      setStudentId(student.id);
-      setChargeHeads([]);
-      const { data: heads } = await supabase
-        .from("fee_ledger")
-        .select("id, term, fee_codes:fee_code_id(code)")
-        .eq("student_id", student.id)
-        .order("due_date");
-      setHeadOptions((heads || []).map((h: any) => ({ id: h.id, label: `${h.fee_codes?.code || "Fee"} — ${h.term}` })));
+      if (student?.id) { setChargeHeads([]); return; }
+      const { data: charges } = await (supabase.rpc as any)("available_fee_charges", { _student_id: null, _lead_id: leadId });
+      setChargeHeads((charges || []) as ChargeHead[]);
     })();
   }, [open, leadId]);
 
-  // Re-seed from props whenever the dialog is reopened for a different head.
+  // Optional per-head breakup — split the receipt across specific fee heads so
+  // it maps to the right fee_ledger rows (via provision_student_fees). For
+  // pre-admission leads the breakup is held and mapped at admission.
+  const [allocations, setAllocations] = useState<FeeAllocation[]>([]);
+
+  // Re-seed the amount whenever the dialog reopens for a different ledger row.
   useEffect(() => {
     if (!open) return;
-    setApplyToHead(defaultApplyToHead || "");
     if (defaultAmount) setAmount(String(defaultAmount));
-  }, [open, defaultApplyToHead, defaultAmount]);
+  }, [open, defaultAmount]);
 
   // Consultant credit-note (super_admin only) state.
   const isSuperAdmin = role === "super_admin";
@@ -194,26 +179,14 @@ export function OfflinePaymentDialog({
     setConsultantId("");
     setCreditNoteId("");
     setCreditNotes([]);
-    setApplyToHead(defaultApplyToHead || "");
+    setAllocations([]);
   };
 
-  // Money always lands as unallocated credit first; if a specific head was
-  // chosen, immediately apply it there. Failure here doesn't undo the
-  // payment — it just stays as credit, so we toast a warning rather than error.
-  const applyToChosenHead = async (amt: number, sourcePaymentId?: string | null) => {
-    if (!applyToHead || !studentId) return;
-    const headLabel = headOptions.find(h => h.id === applyToHead)?.label || applyToHead;
-    const { error } = await (supabase.rpc as any)("apply_student_credit", {
-      _id: studentId,
-      _fee_ledger_id: applyToHead,
-      _amount: amt,
-      _reason: `Offline payment applied to ${headLabel}`,
-      _source_payment_id: sourcePaymentId || null,
-    });
-    if (error) {
-      toast({ title: "Payment recorded, but could not apply to head", description: error.message, variant: "destructive" });
-    }
-  };
+  const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  // A breakup, when present, must equal the amount so nothing is silently dropped.
+  const breakupValid = (amt: number) =>
+    allocations.length === 0 ||
+    (allocations.every((a) => a.fee_code_id && a.amount > 0) && Math.abs(breakupTotal - amt) < 0.01);
 
   // super_admin: settle the fee against a consultant credit note (non-cash).
   // A SECURITY DEFINER RPC atomically records the confirmed lead_payments
@@ -252,7 +225,6 @@ export function OfflinePaymentDialog({
       title: "Credit note applied",
       description: `${PAY_TYPES.find(p => p.value === type)?.label} of ₹${amt.toLocaleString("en-IN")} settled against the consultant credit note (no cash received).`,
     });
-    await applyToChosenHead(amt, paymentId);
     reset();
     onOpenChange(false);
     onRecorded?.();
@@ -265,6 +237,10 @@ export function OfflinePaymentDialog({
       return;
     }
     if (isCreditNote) { await submitCreditNote(amt); return; }
+    if (!breakupValid(amt)) {
+      toast({ title: "Breakup must equal the amount", description: `Breakup total ₹${breakupTotal.toLocaleString("en-IN")} vs amount ₹${amt.toLocaleString("en-IN")}. Each head also needs a positive amount.`, variant: "destructive" });
+      return;
+    }
     if (cashBlocked) {
       toast({ title: "Cash receipt not allowed", description: cashReason || undefined, variant: "destructive" });
       return;
@@ -323,6 +299,7 @@ export function OfflinePaymentDialog({
       proof_url:       proofUrl,
       fee_code_id:     selectedChargeHead?.fee_code_id || null,
       application_id:   type === "application_fee" ? applicationId || null : null,
+      allocations:     allocations.length ? allocations : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
 
@@ -350,7 +327,6 @@ export function OfflinePaymentDialog({
       title: "Payment recorded",
       description: `${PAY_TYPES.find(p => p.value === type)?.label} of ₹${amt.toLocaleString("en-IN")} marked as confirmed.`,
     });
-    await applyToChosenHead(amt, paymentId);
     reset();
     onOpenChange(false);
     onRecorded?.();
@@ -563,16 +539,12 @@ export function OfflinePaymentDialog({
             )}
           </div>
 
-          {studentId && headOptions.length > 0 && (
-            <SelectField
-              value={applyToHead}
-              onValueChange={setApplyToHead}
-              options={[
-                { value: "", label: "Credit (unallocated)" },
-                ...headOptions.map(h => ({ value: h.id, label: h.label })),
-              ]}
-              label="Apply to"
-              allowEmpty={false}
+          {!isCreditNote && (
+            <FeeHeadAllocationField
+              open={open}
+              leadId={leadId}
+              value={allocations}
+              onChange={setAllocations}
             />
           )}
 
