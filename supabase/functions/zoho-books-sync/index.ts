@@ -11,7 +11,7 @@
 // "approved expense -> Zoho bill -> paid" flow.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoAddVendorBankAccount } from "../_shared/zoho.ts";
+import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoAddVendorBankAccount, zohoResolveExpenseAccount, zohoVendorHasBank } from "../_shared/zoho.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -64,10 +64,10 @@ Deno.serve(async (req) => {
     const token = await zohoAccessToken();
     let bankWarning: unknown = null; // surfaced in the response when the bank push fails
 
-    // ---- Ensure vendor -------------------------------------------------------
+    // ---- Ensure vendor (+ bank details) -------------------------------------
     const ensureVendor = async (): Promise<string> => {
-      if (consultant?.zoho_vendor_id) return consultant.zoho_vendor_id;
-      let vendorId = consultant?.phone ? await zohoFindVendorByPhone(token, consultant.phone) : null;
+      let vendorId: string | null = consultant?.zoho_vendor_id
+        || (consultant?.phone ? await zohoFindVendorByPhone(token, consultant.phone) : null);
       if (!vendorId) {
         const res = await zohoApi(token, "POST", "/contacts", {
           contact_name: consultant?.name || "Consultant",
@@ -78,20 +78,22 @@ Deno.serve(async (req) => {
         });
         if (!res.ok) throw new Error(`vendor create failed: ${JSON.stringify(res.data)}`);
         vendorId = res.data.contact.contact_id;
-        // New vendor → push structured bank details (best-effort, non-fatal). Some
-        // connected-banking orgs require the account number encrypted; if so this
-        // fails and the warning is returned so we can adapt.
-        if (consultant?.bank_account_number) {
-          const bank = await zohoAddVendorBankAccount(token, vendorId!, {
-            bank_name: consultant.bank_name,
-            account_number: consultant.bank_account_number,
-            ifsc: consultant.bank_ifsc,
-            account_holder: consultant.bank_account_name || consultant.name,
-          });
-          if (!bank.ok) { bankWarning = bank.data; console.error("vendor bank add failed", bank.data); }
-        }
       }
-      await admin.from("consultants").update({ zoho_vendor_id: vendorId }).eq("id", consultant!.id);
+      // Push structured bank details if the vendor has none yet (best-effort,
+      // non-fatal). Connected-banking orgs may require the account number
+      // encrypted; if so this fails and the warning is surfaced so we can adapt.
+      if (consultant?.bank_account_number && !(await zohoVendorHasBank(token, vendorId!))) {
+        const bank = await zohoAddVendorBankAccount(token, vendorId!, {
+          bank_name: consultant.bank_name,
+          account_number: consultant.bank_account_number,
+          ifsc: consultant.bank_ifsc,
+          account_holder: consultant.bank_account_name || consultant.name,
+        });
+        if (!bank.ok) { bankWarning = bank.data; console.error("vendor bank add failed", bank.data); }
+      }
+      if (vendorId !== consultant?.zoho_vendor_id) {
+        await admin.from("consultants").update({ zoho_vendor_id: vendorId }).eq("id", consultant!.id);
+      }
       return vendorId!;
     };
 
@@ -101,11 +103,14 @@ Deno.serve(async (req) => {
         let billId = payout.zoho_bill_id;
         let billNumber = payout.zoho_bill_number;
         if (!billId) {
+          const accountId = await zohoResolveExpenseAccount(token);
+          if (!accountId) throw new Error("No expense account found — set ZOHO_PAYOUT_ACCOUNT_ID (or _NAME) to a Chart-of-Accounts expense account.");
           const res = await zohoApi(token, "POST", "/bills", {
             vendor_id: vendorId,
             bill_number: `CP-${payoutId.slice(0, 8).toUpperCase()}`,
             reference_number: payoutId,
             line_items: [{
+              account_id: accountId,
               name: `Consultant commission — ${candidate}`,
               description: `Admission ${admissionNo}`.trim(),
               rate: Number(payout.payout_amount),

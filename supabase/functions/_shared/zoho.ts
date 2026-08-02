@@ -102,6 +102,31 @@ export async function zohoAddVendorBankAccount(
   });
 }
 
+// Resolve the expense account to book the payout against (required on bill lines).
+// Prefer ZOHO_PAYOUT_ACCOUNT_ID; else match ZOHO_PAYOUT_ACCOUNT_NAME by name; else
+// the first active expense account.
+export async function zohoResolveExpenseAccount(token: string): Promise<string | null> {
+  const fixed = Deno.env.get("ZOHO_PAYOUT_ACCOUNT_ID");
+  if (fixed) return fixed;
+  const wantName = (Deno.env.get("ZOHO_PAYOUT_ACCOUNT_NAME") || "").toLowerCase();
+  const res = await zohoApi(token, "GET", "/chartofaccounts");
+  const accounts: any[] = res.data?.chartofaccounts || [];
+  const expenseTypes = new Set(["expense", "cost_of_goods_sold", "other_expense"]);
+  const expenses = accounts.filter((a) => expenseTypes.has(a.account_type) && a.is_active !== false);
+  if (wantName) {
+    const named = expenses.find((a) => (a.account_name || "").toLowerCase().includes(wantName));
+    if (named) return named.account_id;
+  }
+  return expenses[0]?.account_id || null;
+}
+
+// Does the vendor already have a bank account? (dedupe before adding one)
+export async function zohoVendorHasBank(token: string, contactId: string): Promise<boolean> {
+  const res = await zohoApi(token, "GET", `/contacts/${contactId}/bankaccount`);
+  const arr = res.data?.bank_accounts || res.data?.banks || [];
+  return Array.isArray(arr) && arr.length > 0;
+}
+
 // Find an existing vendor by phone; returns contact_id or null.
 export async function zohoFindVendorByPhone(token: string, phone: string): Promise<string | null> {
   const digits = (phone || "").replace(/\D/g, "").slice(-10);
