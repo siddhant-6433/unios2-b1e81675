@@ -8,6 +8,33 @@ const corsHeaders = {
 };
 
 const TEMPLATES: Record<string, any> = {
+  // Consultant payout disbursed — transactional confirmation sent to the
+  // consultant when their payout is paid (via Zoho connected banking / mark-paid).
+  // UTILITY: an account update on a specific transaction, no promotion.
+  consultant_payout_disbursed: {
+    name: "consultant_payout_disbursed",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text:
+          "Hi {{1}}, your consultant payout of ₹{{2}} for candidate {{3}} has been disbursed.\n\n" +
+          "Transaction ID: {{4}}\nDate: {{5}}\n\n" +
+          "NIMT Educational Institutions",
+        example: {
+          body_text: [[
+            "Piyush Sharma",
+            "10,000",
+            "Ariyan Mahanta",
+            "UTR402931PQRS",
+            "02 Aug 2026",
+          ]],
+        },
+      },
+    ],
+  },
+
   // Entrance-exam registration check — two quick-reply buttons. The webhook
   // (exam-registration-intake) matches the button titles "Yes, registered" /
   // "Not registered yet", so keep those EXACT.
