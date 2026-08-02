@@ -93,7 +93,6 @@ const HrAttendance         = lazy(() => import("./pages/HrAttendance"));
 const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
 const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
 const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
-const FeeCollections       = lazy(() => import("./pages/FeeCollections"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
@@ -340,7 +339,8 @@ const App = () => (
 
                       {/* Finance — accountant / admin only */}
                       <Route path="/finance" element={<RequirePermission module="finance" action="view"><Finance /></RequirePermission>} />
-                      <Route path="/collections" element={<RequirePermission module="finance" action="view"><FeeCollections /></RequirePermission>} />
+                      {/* Collections is now the Receipts tab inside Finance — one list, not two. */}
+                      <Route path="/collections" element={<Navigate to="/finance?tab=receipts" replace />} />
                       <Route path="/consultant-credit-notes" element={<RequireRole roles={["super_admin"]}><ConsultantCreditNotes /></RequireRole>} />
                       <Route path="/fee-structures" element={<RequirePermission module="courses_fees" action="view"><FeeStructures /></RequirePermission>} />
 

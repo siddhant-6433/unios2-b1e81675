@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { matchesCampus } from "@/lib/campusFilter";
 import {
   IndianRupee, TrendingUp, AlertTriangle, Loader2, Users,
 } from "lucide-react";
@@ -31,8 +32,12 @@ export function FinanceOverview() {
         .select("id, total_amount, paid_amount, balance, status, due_date, student_id, students:student_id(name, admission_no, campus_id, campuses:campus_id(name))")
         .order("due_date", { ascending: true })
         .limit(2000),
-      supabase.from("payments")
-        .select("id, amount, paid_at, payment_mode, students:student_id(campus_id)")
+      // v_all_payments, not `payments`. public.payments has zero rows and never
+      // had any — all 634 receipts live in lead_payments — so the collections
+      // trend below rendered a flat ₹0 for every month since launch. The view
+      // unions both and exposes campus_id directly.
+      supabase.from("v_all_payments" as any)
+        .select("id, amount, paid_at, payment_mode, campus_id")
         .order("paid_at", { ascending: false })
         .limit(2000),
     ]);
@@ -45,9 +50,10 @@ export function FinanceOverview() {
     selectedCampusId === "all" ? ledger : ledger.filter((l: any) => l.students?.campus_id === selectedCampusId),
   [ledger, selectedCampusId]);
 
-  const filteredPayments = useMemo(() =>
-    selectedCampusId === "all" ? payments : payments.filter((p: any) => p.students?.campus_id === selectedCampusId),
-  [payments, selectedCampusId]);
+  const filteredPayments = useMemo(
+    () => payments.filter((p: any) => matchesCampus(p.campus_id, selectedCampusId)),
+    [payments, selectedCampusId],
+  );
 
   // KPIs
   const totalCollected = filteredLedger.reduce((s: number, l: any) => s + Number(l.paid_amount || 0), 0);

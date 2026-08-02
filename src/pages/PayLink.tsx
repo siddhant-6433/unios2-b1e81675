@@ -5,7 +5,7 @@ import uniosLogo from "@/assets/unios-logo.png";
 import { Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck } from "lucide-react";
 
 // Public payment-link landing page.
-// - Razorpay hosted: redirect to short_url when present
+// - Razorpay hosted: branded page first, forward to short_url on Pay click
 // - Razorpay checkout: Standard Checkout on this page
 // - Easebuzz: open pay_url popup and poll until payment_links.status=paid
 
@@ -109,12 +109,11 @@ export default function PayLink() {
         }
         if (data.status === "paid") { setStep("done"); return; }
         if (data.status !== "active") { setStep("error"); setError(`This link is ${data.status}.`); return; }
-        // If the link is a Razorpay or Easebuzz *hosted* short URL, redirect there.
-        // UniOs /pay page with gateway=easebuzz (no short_url) stays here for popup checkout.
-        if (data.short_url && (data.gateway === "razorpay" || data.gateway === "easebuzz")) {
-          window.location.href = data.short_url;
-          return;
-        }
+        // Render the branded page instead of bouncing to data.short_url on
+        // load. That redirect meant nobody ever saw a UniOs-branded payment
+        // page — not even the WhatsApp recipients whose button pointed here.
+        // handlePay() forwards to the hosted checkout on click, so Razorpay's
+        // reminders and payment-link webhook still settle the same artifact.
         setStep("ready");
       } catch (e) {
         setStep("error");
@@ -225,6 +224,15 @@ export default function PayLink() {
   };
 
   const handlePay = () => {
+    // A gateway-hosted link is the artifact that carries Razorpay's own
+    // reminders and the payment-link webhook that settles the receipt, so the
+    // payer must finish there. We just no longer jump on page load — they see
+    // the branded page with our logo, amount and their name first, and the URL
+    // we hand out everywhere stays /pay/<token>.
+    if (link?.short_url) {
+      window.location.href = link.short_url;
+      return;
+    }
     const gw = (link?.gateway || "razorpay").toLowerCase();
     if (gw === "easebuzz") return handlePayEasebuzz();
     return handlePayRazorpay();

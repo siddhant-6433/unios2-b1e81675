@@ -275,24 +275,18 @@ export default function TransactionHistoryPanel() {
     setLoadingApp(false);
   };
 
-  // Student Fee = post-admission payments. Sources:
-  //   - payments table (current student-fee ledger payments)
-  //   - lead_payments rows where the lead has admission_no (a candidate's
-  //     pre-AN payments stay visible against them after AN issuance)
+  // Student Fee = post-admission payments, i.e. lead_payments rows whose lead
+  // has an admission_no (a candidate's pre-AN payments stay visible against
+  // them after AN issuance).
+  //
+  // This used to also query public.payments. That table has zero rows and never
+  // had any — every receipt in the system is written to lead_payments, keyed by
+  // lead_id, including post-admission collections. The query returned nothing on
+  // every render, so it has been dropped.
   const fetchStudentPmts = async () => {
     setLoadingStudent(true);
     setErrorStudent(null);
-    const [paymentsRes, lpRes] = await Promise.all([
-      (supabase as any)
-        .from("payments")
-        .select(`
-          id, amount, payment_mode, transaction_ref,
-          receipt_no, paid_at, notes,
-          students ( name, admission_no, pre_admission_no, phone, email, campus_id ),
-          profiles!recorded_by ( display_name )
-        `)
-        .order("paid_at", { ascending: false })
-        .limit(1000),
+    const [lpRes] = await Promise.all([
       (supabase as any)
         .from("lead_payments")
         .select(`
@@ -305,14 +299,7 @@ export default function TransactionHistoryPanel() {
         .limit(1000),
     ]);
 
-    if (paymentsRes.error) { setErrorStudent(paymentsRes.error.message); setLoadingStudent(false); return; }
-    if (lpRes.error)       { setErrorStudent(lpRes.error.message);       setLoadingStudent(false); return; }
-
-    // Native student-fee payments. Always shown.
-    const native: StudentPayment[] = (paymentsRes.data || []).map((p: any) => ({
-      ...p,
-      gateway: null,
-    }));
+    if (lpRes.error) { setErrorStudent(lpRes.error.message); setLoadingStudent(false); return; }
 
     // lead_payments graduate into student-fee view once the lead has an
     // admission_no. Tag with type so the row label distinguishes them from
@@ -339,7 +326,7 @@ export default function TransactionHistoryPanel() {
         profiles: null,
       }));
 
-    const merged = [...native, ...promoted].sort((a, b) =>
+    const merged = [...promoted].sort((a, b) =>
       (b.paid_at || "").localeCompare(a.paid_at || ""),
     );
     setStudentPmts(merged);

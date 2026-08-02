@@ -10,9 +10,9 @@ import {
   Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
   Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History,
 } from "lucide-react";
-import { AddFeeHeadDialog } from "./AddFeeHeadDialog";
 import { ConcessionDialog } from "./ConcessionDialog";
-import { AddCustomFeeDialog } from "./AddCustomFeeDialog";
+import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
+import { AddChargeDialog } from "./AddChargeDialog";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
@@ -46,13 +46,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
-  const [addFeeOpen, setAddFeeOpen] = useState(false);
   const [pendingWaivers, setPendingWaivers] = useState<Record<string, number>>({});
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
-  const [addFeeHeadOpen, setAddFeeHeadOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [chargeOpen, setChargeOpen] = useState(false);
+  // Which ledger row a per-row "Collect" click targeted — prefills the dialog.
+  const [collectTarget, setCollectTarget] = useState<{ id: string; amount: number } | null>(null);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
@@ -61,7 +63,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
-  const canManageFeeStructure = role === "super_admin" || hasPermission("fee_structure:manage");
+  // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
+  const canCollect = ["super_admin", "accountant"].includes(role || "") && !!student?.lead_id;
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   const isStethoBatch = student?.fee_structure_version === "stetho_batch";
@@ -260,6 +263,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
 
       {/* Action buttons */}
       <div className="flex flex-wrap items-center gap-2">
+        {canCollect && (
+          <Button size="sm" onClick={() => { setCollectTarget(null); setCollectOpen(true); }} className="gap-1.5">
+            <Receipt className="h-3.5 w-3.5" /> Collect Payment
+          </Button>
+        )}
+        {["super_admin", "accountant"].includes(role || "") && (
+          <Button size="sm" variant="outline" onClick={() => setChargeOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Add Charge
+          </Button>
+        )}
         {canProvision && (
           <>
             <Button size="sm" onClick={() => handleProvision(false)} disabled={provisioning} className="gap-1.5">
@@ -272,16 +285,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               </Button>
             )}
           </>
-        )}
-        {canProvision && (
-          <Button size="sm" variant="outline" onClick={() => setAddFeeOpen(true)} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" /> Add Fee
-          </Button>
-        )}
-        {canManageFeeStructure && student?.id && (
-          <Button size="sm" variant="outline" onClick={() => setAddFeeHeadOpen(true)} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" /> Add Fee Head
-          </Button>
         )}
         {canRequestConcession && fees.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
@@ -395,15 +398,29 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     </td>
                     {isFinanceRole && (
                       <td className="px-4 py-3">
-                        {Number(f.paid_amount) === 0 && (
-                          <button
-                            onClick={() => handleRemoveUnpaid(f.id)}
-                            className="text-muted-foreground hover:text-destructive transition-colors"
-                            title="Remove unpaid item"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {canCollect && Number(f.balance) > 0 && (
+                            <button
+                              onClick={() => {
+                                setCollectTarget({ id: f.id, amount: Math.round(Number(f.balance)) });
+                                setCollectOpen(true);
+                              }}
+                              className="text-primary hover:underline text-[11px] font-medium whitespace-nowrap"
+                              title="Collect against this head"
+                            >
+                              Collect
+                            </button>
+                          )}
+                          {Number(f.paid_amount) === 0 && (
+                            <button
+                              onClick={() => handleRemoveUnpaid(f.id)}
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              title="Remove unpaid item"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -522,11 +539,22 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         );
       })()}
 
-      <AddFeeHeadDialog
-        open={addFeeHeadOpen}
-        onOpenChange={setAddFeeHeadOpen}
+      {student?.lead_id && (
+        <OfflinePaymentDialog
+          open={collectOpen}
+          onOpenChange={(v) => { setCollectOpen(v); if (!v) setCollectTarget(null); }}
+          leadId={student.lead_id}
+          defaultType="other"
+          defaultAmount={collectTarget?.amount ?? null}
+          onRecorded={() => { fetchFees(); fetchPayments(); fetchCredit(); onRefresh?.(); }}
+        />
+      )}
+
+      <AddChargeDialog
+        open={chargeOpen}
+        onOpenChange={setChargeOpen}
         studentId={student.id}
-        onSuccess={() => { fetchFees(); onRefresh?.(); }}
+        onAdded={() => { fetchFees(); onRefresh?.(); }}
       />
 
       <ConcessionDialog
@@ -535,13 +563,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         studentId={student.id}
         feeItems={fees}
         onSuccess={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
-      />
-
-      <AddCustomFeeDialog
-        open={addFeeOpen}
-        onOpenChange={setAddFeeOpen}
-        student={student}
-        onSuccess={() => { fetchFees(); onRefresh?.(); }}
       />
 
       <SendPaymentLinkDialog

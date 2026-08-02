@@ -413,6 +413,7 @@ Deno.serve(async (req) => {
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
         payment_date, status, receipt_url, created_at, recorded_by, notes, application_id,
+        fee_codes:fee_code_id ( name ),
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
           courses:course_id ( name ),
@@ -497,7 +498,10 @@ Deno.serve(async (req) => {
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
       if (courseName) rows.push(["Course", courseName]);
     }
-    rows.push(["Fee Head", PAY_TYPE_LABELS[lp.type] || lp.type]);
+    // An ad-hoc charge collected at the counter names its actual head
+    // (Sports, Transfer Certificate…) instead of the generic "Other Charges".
+    const feeHeadName = (lp as { fee_codes?: { name?: string } | null }).fee_codes?.name;
+    rows.push(["Fee Head", feeHeadName || PAY_TYPE_LABELS[lp.type] || lp.type]);
     rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
 
     // Pre-admission token receipts must carry the adjustable-against-admission

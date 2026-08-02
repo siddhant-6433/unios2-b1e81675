@@ -12,6 +12,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useNavigate } from "react-router-dom";
+import { matchesCampus } from "@/lib/campusFilter";
 
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
@@ -28,7 +30,9 @@ const gatewayLabels: Record<string, string> = {
 const gatewayLabel = (gateway?: string | null) =>
   gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
-const FeeCollections = () => {
+/** Rendered standalone at /collections and embedded as Finance → Receipts. */
+const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
   const [modeFilter, setModeFilter] = useState("all");
@@ -94,9 +98,9 @@ const FeeCollections = () => {
 
   const filtered = useMemo(() => {
     let result = payments;
-    if (selectedCampusId !== "all") {
-      result = result.filter((p: any) => p.students?.campus_id === selectedCampusId);
-    }
+    // A NULL campus means "couldn't be resolved", not "not this campus" —
+    // dropping those rows is what made this page render empty for accountants.
+    result = result.filter((p: any) => matchesCampus(p.students?.campus_id, selectedCampusId));
     if (modeFilter !== "all") {
       result = result.filter((p: any) => p.payment_mode === modeFilter);
     }
@@ -124,16 +128,18 @@ const FeeCollections = () => {
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
       <div className="space-y-6 animate-fade-in">
-        <div className="flex items-center justify-between">
+        <div className={`flex items-center justify-between ${embedded ? "hidden" : ""}`}>
           <div>
             <h1 className="text-2xl font-bold text-foreground">Fee Collections</h1>
             <p className="text-sm text-muted-foreground mt-1">
               {isToday ? "Today's" : new Date(dateFilter).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} collections and receipts
             </p>
           </div>
-          {canCreateFinance && (
+          {canCreateFinance && !embedded && (
             <div className="flex items-center gap-2">
-              <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
+              <Button className="gap-2" onClick={() => navigate("/finance?tab=collect")}>
+                <Plus className="h-4 w-4" /> Record Payment
+              </Button>
             </div>
           )}
         </div>
@@ -246,7 +252,7 @@ const FeeCollections = () => {
                           </Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{p.fee_description || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{p.fee_head || "—"}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
                       <td className="px-4 py-3">
                         <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>
@@ -266,7 +272,7 @@ const FeeCollections = () => {
                             student_name: p.students?.name || undefined,
                             admission_no: p.students?.admission_no || undefined,
                             payment_mode: p.payment_mode,
-                            fee_description: p.fee_description || undefined,
+                            fee_description: p.fee_head || undefined,
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: Number(p.amount),
                             payment_ref: p.transaction_ref,
