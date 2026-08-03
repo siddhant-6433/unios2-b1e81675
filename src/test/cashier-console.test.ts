@@ -31,6 +31,9 @@ const admissionsPage = read("src/pages/Admissions.tsx");
 const leadDetailPage = read("src/pages/LeadDetail.tsx");
 const financeOverview = read("src/components/finance/FinanceOverview.tsx");
 const txnHistoryPanel = read("src/components/admin/TransactionHistoryPanel.tsx");
+const sendLinkDialog = read("src/components/finance/SendPaymentLinkDialog.tsx");
+const allocationField = read("src/components/finance/FeeHeadAllocationField.tsx");
+const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -200,5 +203,43 @@ describe("the dead `payments` table is no longer read", () => {
   it("the transaction history panel drops its empty-table query", () => {
     expect(txnHistoryPanel).not.toContain('from("payments")');
     expect(txnHistoryPanel).toContain('from("lead_payments")');
+  });
+});
+
+describe("payment link: Collect Fee vs Token Fee", () => {
+  it("offers exactly two modes — the free-form 'custom' purpose is gone from the UI", () => {
+    expect(sendLinkDialog).toContain('label: "Collect Fee (from the fee structure)"');
+    expect(sendLinkDialog).toContain('label: "Token Fee (prior to admission)"');
+    expect(sendLinkDialog).not.toContain('label: "Custom amount"');
+    // Still accepted server-side so older callers/links keep working.
+    expect(createLinkFn).toContain('["pre_admission_token", "fee_due", "custom"].includes(purpose)');
+  });
+
+  it("collapses a legacy custom purpose onto the free-amount mode", () => {
+    expect(sendLinkDialog).toContain('defaultPurpose === "custom" ? "pre_admission_token"');
+  });
+
+  it("shows the fee structure only for Collect Fee, and clears it on switch", () => {
+    expect(sendLinkDialog).toContain('variant="all"');
+    expect(sendLinkDialog).toContain("{collectingFee && (");
+    expect(sendLinkDialog).toContain('if (v !== "fee_due") setAllocations([]);');
+  });
+
+  it("pre-ticks every outstanding head at its due, once per open", () => {
+    expect(allocationField).toContain('if (variant !== "all" || prefilled.current || heads.length === 0) return;');
+    expect(allocationField).toContain("heads.filter((h) => h.due > 0)");
+    // The cashier's edits must survive a re-render.
+    expect(allocationField).toContain("if (value.length > 0) return;");
+  });
+
+  it("lets a head be switched off, which drops it from the wire format", () => {
+    expect(allocationField).toContain("const toggleHead = (h: HeadOption, on: boolean) =>");
+    expect(allocationField).toContain("value.filter((r) => r.fee_code_id !== h.fee_code_id)");
+  });
+
+  it("itemises the breakup on the receipt instead of one opaque total", () => {
+    expect(receiptFn).toContain("allocations,");
+    expect(receiptFn).toContain("see breakup below");
+    expect(receiptFn).toContain('rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);');
   });
 });
