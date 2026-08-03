@@ -113,7 +113,7 @@ export function FeeHeadAllocationField({ open, studentId, leadId, value, onChang
   if (heads.length === 0) return null;
 
   return (
-    <div className="space-y-2 rounded-xl border border-border/60 p-3">
+    <div className="min-w-0 space-y-2 rounded-xl border border-border/60 p-3">
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-medium text-muted-foreground">
           Fee head breakup {hasLedger ? "" : "(mapped at admission)"}
@@ -142,7 +142,7 @@ export function FeeHeadAllocationField({ open, studentId, leadId, value, onChang
                   // heads have no ledger yet → 0.
                   updateRow(i, { fee_code_id: e.target.value, label: h?.label || "", amount: h?.due ?? 0 });
                 }}
-                className={`${inputCls} min-w-0 flex-1 truncate`}
+                className={`${inputCls} w-0 min-w-0 flex-1 truncate`}
               >
                 <option value="">Select head…</option>
                 {heads.map((h) => (

@@ -148,7 +148,7 @@ export function SendPaymentLinkDialog({
         )}
 
         {createdUrl ? (
-          <div className="space-y-3 py-2">
+          <div className="min-w-0 space-y-3 py-2">
             <p className="text-sm text-muted-foreground">Payment link ready:</p>
             <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <span className="flex-1 truncate text-xs text-foreground">{createdUrl}</span>
@@ -158,7 +158,7 @@ export function SendPaymentLinkDialog({
             </div>
           </div>
         ) : (
-          <div className="space-y-3 py-2">
+          <div className="min-w-0 space-y-3 py-2">
             <SelectField
               value={purpose}
               onValueChange={(v) => setPurpose(v as Purpose)}
