@@ -178,6 +178,19 @@ describe("accessPolicy", () => {
     } as never)).toBe(false);
   });
 
+  it("separates the consultants directory from consultant attribution", () => {
+    // consultants:view is no longer granted to the counsellor role — it is
+    // per-user now (20260803095753). Counsellors keep lead-to-consultant
+    // attribution through leads:assign_external_owner, which is an independent
+    // branch of can_assign_lead_external_owner, so revoking the directory does
+    // not silently break commission attribution.
+    const counsellor = state({ permissions: ["leads:view", "leads:assign_external_owner"] });
+    expect(canSeePolicyItem(counsellor, {
+      title: "Consultants", url: "/consultants", permission: "consultants:view",
+    } as never)).toBe(false);
+    expect(canUsePermission(counsellor, "leads:assign_external_owner")).toBe(true);
+  });
+
   it("keeps Consultants visible to counsellors who hold the permission", () => {
     const withPerm = state({ permissions: ["leads:view", "consultants:view"] });
     expect(canSeePolicyItem(withPerm, {
