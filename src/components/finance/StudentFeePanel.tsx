@@ -58,6 +58,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
+  // Fee codes that came from the ad-hoc catalog. A cashier may remove those
+  // (the mirror of Add Charge) but not a structural tuition/boarding row.
+  const [adhocCodeIds, setAdhocCodeIds] = useState<Set<string>>(new Set());
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
@@ -76,6 +79,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchConsultantFlag();
       fetchCredit();
       fetchPendingWaivers();
+      fetchRemovableCodes();
     }
   }, [student?.id, student?.lead_id]);
 
@@ -92,6 +96,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       if (c.fee_ledger_id) map[c.fee_ledger_id] = (map[c.fee_ledger_id] || 0) + Number(c.value || 0);
     }
     setPendingWaivers(map);
+  };
+
+  const fetchRemovableCodes = async () => {
+    const { data } = await (supabase.rpc as any)("removable_fee_code_ids", { _student_id: student.id });
+    setAdhocCodeIds(new Set(((data || []) as { fee_code_id: string }[]).map(r => r.fee_code_id)));
+  };
+
+  // Mirrors remove_fee_charge's server-side gate so we never render a button
+  // that answers with a raw privilege error.
+  const canRemoveRow = (f: any) => {
+    if (Number(f.paid_amount) !== 0) return false;
+    if (role === "super_admin" || hasPermission("fee_structure:manage")) return true;
+    return role === "accountant" && adhocCodeIds.has(f.fee_code_id);
   };
 
   const fetchCredit = async () => {
@@ -191,18 +208,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     onRefresh?.();
   };
 
+  // Goes through remove_fee_charge: `authenticated` has no DELETE grant on
+  // fee_ledger, so the direct .delete() failed with a privilege error for
+  // every role — including the super_admin the RLS policy was written for.
   const handleRemoveUnpaid = async (feeId: string) => {
-    const { error } = await supabase
-      .from("fee_ledger")
-      .delete()
-      .eq("id", feeId)
-      .eq("paid_amount", 0);
+    const { error } = await (supabase.rpc as any)("remove_fee_charge", {
+      _fee_ledger_id: feeId, _reason: null,
+    });
 
     if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Could not remove", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Removed" });
       fetchFees();
+      onRefresh?.();
     }
   };
 
@@ -427,7 +446,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                               Collect
                             </button>
                           )}
-                          {Number(f.paid_amount) === 0 && (
+                          {canRemoveRow(f) && (
                             <button
                               onClick={() => handleRemoveUnpaid(f.id)}
                               className="text-muted-foreground hover:text-destructive transition-colors"

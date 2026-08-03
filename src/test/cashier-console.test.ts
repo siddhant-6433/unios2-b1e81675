@@ -36,6 +36,7 @@ const allocationField = read("src/components/finance/FeeHeadAllocationField.tsx"
 const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
 const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
 const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
+const removeMigration = readMigration("remove_fee_charge_rpc");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -294,5 +295,32 @@ describe("a recurring add-on rides the existing collection terms", () => {
     expect(addCharge).toContain("_terms: selectedTerms.length ? selectedTerms : null");
     // The free-date field only makes sense for a genuine one-off.
     expect(addCharge).toContain("{selectedTerms.length === 0 && (");
+  });
+});
+
+describe("removing a fee row", () => {
+  // The Remove button raised "permission denied for table fee_ledger" for EVERY
+  // role: fee_ledger has a super_admin DELETE policy but `authenticated` was
+  // never granted DELETE, so the privilege check fails before RLS is consulted.
+  it("goes through an RPC rather than a direct delete", () => {
+    expect(studentFeePanel).toContain('"remove_fee_charge"');
+    expect(studentFeePanel).not.toContain('.from("fee_ledger")\n      .delete()');
+  });
+
+  it("never removes a row that has money against it", () => {
+    expect(removeMigration).toContain("IF COALESCE(v_row.paid_amount, 0) > 0 THEN");
+    expect(removeMigration).toContain("Reallocate or refund it instead");
+  });
+
+  it("lets a cashier undo only what a cashier could add", () => {
+    expect(removeMigration).toContain("FROM public.optional_fee_heads ofh");
+    expect(removeMigration).toContain("A cashier can only remove ad-hoc charges");
+    expect(removeMigration).toContain("public.can_manage_fee_structure(auth.uid())");
+  });
+
+  it("hides the button instead of failing on click", () => {
+    expect(studentFeePanel).toContain("const canRemoveRow = (f: any) =>");
+    expect(studentFeePanel).toContain("adhocCodeIds.has(f.fee_code_id)");
+    expect(studentFeePanel).toContain("{canRemoveRow(f) && (");
   });
 });
