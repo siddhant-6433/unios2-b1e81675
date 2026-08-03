@@ -80,8 +80,10 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
   { title: "Applications", url: "/applications", icon: FileText, permission: "students:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
-  { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
-  { title: "UPDELED Sprint", url: "/updeled-sprint", icon: GraduationCap, permission: "call_log:view" },
+  // Sprints are run by admissions leadership; counsellors work them through
+  // their dialer queue, so the standalone pages only add sidebar noise for them.
+  { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view", blockedRoles: ["counsellor"] },
+  { title: "UPDELED Sprint", url: "/updeled-sprint", icon: GraduationCap, permission: "call_log:view", blockedRoles: ["counsellor"] },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: WhatsAppIcon, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
@@ -350,7 +352,10 @@ export function AppSidebar() {
   // sidebar canvas. No DOM/structure change — just className tuning.
   const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
   const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(214_32%_12%/0.08)]";
-  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  // h-auto/min-h-7 overrides SidebarMenuSubButton's fixed h-7: long labels like
+  // "Pending Follow-ups" wrap to two lines and were being clipped by the base
+  // overflow-hidden, so the text spilled outside the active pill.
+  const subLinkClass = "h-auto min-h-7 items-center leading-tight gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all duration-160 ease-standard hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">

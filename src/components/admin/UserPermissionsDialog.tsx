@@ -46,6 +46,17 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
       supabase.from("user_permission_overrides" as any).select("permission_id, granted").eq("user_id", userId),
     ]);
 
+    // Reading another user's overrides needs the super_admin SELECT policy
+    // (20260802140659). Without surfacing this, an RLS-filtered read looks
+    // identical to "this user has no overrides".
+    if (overridesRes.error) {
+      toast({
+        title: "Could not load permission overrides",
+        description: `${overridesRes.error.message} — showing role defaults only.`,
+        variant: "destructive",
+      });
+    }
+
     setAllPermissions(permsRes.data || []);
     setRolePermissionIds(new Set((rolePermsRes.data || []).map((rp: any) => rp.permission_id)));
     const ovMap = new Map<string, boolean>();
@@ -109,22 +120,34 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
     }
 
     try {
+      // These writes are super_admin-only at the RLS layer. Without reading the
+      // error back, a blocked write still flipped the local checkbox and toasted
+      // "Permission updated" — the change looked saved and silently wasn't.
+      // .select() makes RLS-filtered no-ops visible too: a policy-filtered write
+      // returns no error and no rows.
       if (newOverride === null) {
-        // Remove override
-        await supabase.from("user_permission_overrides" as any)
+        const { error, data } = await supabase.from("user_permission_overrides" as any)
           .delete()
           .eq("user_id", userId)
-          .eq("permission_id", permId);
+          .eq("permission_id", permId)
+          .select("permission_id");
+        if (error) throw error;
+        // A delete matching nothing is fine — there may have been no override.
+        void data;
         const newMap = new Map(overrides);
         newMap.delete(permId);
         setOverrides(newMap);
       } else {
-        // Upsert override
-        await supabase.from("user_permission_overrides" as any)
+        const { error, data } = await supabase.from("user_permission_overrides" as any)
           .upsert(
             { user_id: userId, permission_id: permId, granted: newOverride, granted_by: user?.id },
             { onConflict: "user_id,permission_id" }
-          );
+          )
+          .select("permission_id");
+        if (error) throw error;
+        if (!data || (data as unknown[]).length === 0) {
+          throw new Error("Not saved — only a super admin can change permission overrides.");
+        }
         const newMap = new Map(overrides);
         newMap.set(permId, newOverride);
         setOverrides(newMap);

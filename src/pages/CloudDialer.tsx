@@ -12,7 +12,7 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
-  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks,
+  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks, RefreshCw,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -44,6 +44,10 @@ const SendWhatsAppDialog = lazy(() =>
   import("@/components/leads/SendWhatsAppDialog").then((m) => ({ default: m.SendWhatsAppDialog })));
 const ApplyMagicLinkButton = lazy(() =>
   import("@/components/leads/ApplyMagicLinkButton").then((m) => ({ default: m.ApplyMagicLinkButton })));
+const ScheduleVisitDialog = lazy(() =>
+  import("@/components/admissions/ScheduleVisitDialog").then((m) => ({ default: m.ScheduleVisitDialog })));
+const SchoolFeeProposalDialog = lazy(() =>
+  import("@/components/admissions/SchoolFeeProposalDialog").then((m) => ({ default: m.SchoolFeeProposalDialog })));
 const PriorityInterestedCard = lazy(() =>
   import("@/components/leads/PriorityInterestedCard").then((m) => ({ default: m.PriorityInterestedCard })));
 
@@ -318,6 +322,11 @@ export default function CloudDialer() {
 
   // Toolbar: dial-pad + incoming lookup share one popover.
   const [dialPadOpen, setDialPadOpen] = useState(false);
+  const [showScheduleVisit, setShowScheduleVisit] = useState(false);
+  const [showFeeProposal, setShowFeeProposal] = useState(false);
+  // Same role set the lead page gates the proposal on.
+  const canCreateProposal = role === "super_admin" || role === "principal"
+    || role === "counsellor" || role === "admission_head" || role === "campus_admin";
 
   // First-run coach-mark on the queue selector. Call lists are new, and the
   // dropdown gives a counsellor no reason to look at it. Per-user, versioned
@@ -1373,20 +1382,16 @@ export default function CloudDialer() {
       });
     }
 
-    // Save visit if interested + visit date set
+    // Save visit if interested + visit date set.
+    // This wrote to `lead_visits`, a table that does not exist — cast `as any`,
+    // so TypeScript stayed quiet, and the error was never read, so the stage
+    // still advanced to visit_scheduled. Leads looked booked with no visit row
+    // anywhere: absent from Visit Center, the Visit Check-in bucket, post-visit
+    // follow-ups and the visit funnel. campus_visits is the real table.
     if (currentLead && callState.disposition === "interested" && visitDate) {
       const visitAt = new Date(`${visitDate}T${visitTime || "10:00"}:00`);
-      await supabase.from("lead_visits" as any).insert({
-        lead_id: currentLead.id,
-        visit_date: visitAt.toISOString(),
-        status: "scheduled",
-        notes: `Scheduled via Cloud Dialer`,
-      });
-      const transition = resolveLeadTransitionCommand({
-        currentStage: currentLead.stage,
-        command: "scheduleVisit",
-      });
-      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
+      const scheduled = await scheduleCampusVisitFromDialer(visitAt.toISOString(), null);
+      if (!scheduled) return; // toast already shown; don't advance a stage we can't back up
     }
 
     // Save future session note for ineligible
@@ -1427,6 +1432,77 @@ export default function CloudDialer() {
     autoNextTriggered.current = false;
     setAutoNextTimer(0);
     open();
+  };
+
+  // Writes the campus_visits row (reschedules an open one rather than stacking
+  // duplicates, same as the lead page) plus the activity, then advances the
+  // stage. Returns false if the write failed so callers don't advance a stage
+  // that isn't backed by a visit.
+  const scheduleCampusVisitFromDialer = async (visitIso: string, campusId: string | null): Promise<boolean> => {
+    if (!currentLead) return false;
+    const campusLabel = campuses.find(c => c.id === campusId)?.name || currentLead.campus_name || "";
+
+    const { data: openVisit } = await supabase
+      .from("campus_visits")
+      .select("id")
+      .eq("lead_id", currentLead.id)
+      .in("status", ["scheduled", "confirmed"])
+      .maybeSingle();
+
+    const { error } = openVisit
+      ? await supabase.from("campus_visits")
+          .update({ visit_date: visitIso, ...(campusId ? { campus_id: campusId } : {}), status: "scheduled" })
+          .eq("id", (openVisit as any).id)
+      : await supabase.from("campus_visits").insert({
+          lead_id: currentLead.id,
+          scheduled_by: user?.id,
+          visit_date: visitIso,
+          campus_id: campusId,
+        });
+
+    if (error) {
+      toast({ title: "Could not schedule visit", description: error.message, variant: "destructive" });
+      return false;
+    }
+
+    const when = new Date(visitIso).toLocaleString("en-IN", {
+      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true,
+    });
+    await supabase.from("lead_activities").insert({
+      lead_id: currentLead.id,
+      user_id: profileId,
+      type: "visit",
+      description: `Campus visit ${openVisit ? "rescheduled" : "scheduled"} for ${when}${campusLabel ? ` at ${campusLabel}` : ""} (Cloud Dialer)`,
+    });
+
+    const transition = resolveLeadTransitionCommand({
+      currentStage: currentLead.stage,
+      command: "scheduleVisit",
+    });
+    await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
+
+    // Same confirmation the lead page sends — a visit the student was never
+    // told about is barely a visit. Failure here must not undo the booking, so
+    // it only warns.
+    if (currentLead.phone) {
+      const { error: waErr } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: "visit_confirmation",
+          phone: currentLead.phone,
+          params: [currentLead.name || "Student", when, campusLabel || "NIMT Educational Institutions"],
+          lead_id: currentLead.id,
+          button_urls: ["1820424915210710582"], // Google Maps CID for campus location
+        },
+      });
+      if (waErr) {
+        toast({
+          title: "Visit saved, confirmation not sent",
+          description: waErr.message,
+          variant: "destructive",
+        });
+      }
+    }
+    return true;
   };
 
   const saveWalkin = async () => {
@@ -2103,7 +2179,7 @@ export default function CloudDialer() {
           </Popover>
 
           <Button variant="outline" size="sm" className="h-7 px-2" onClick={loadQueue} disabled={dialerActive} title="Refresh queue">
-            <Users className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
 
           {/* Pause is reachable whenever there's a queue, not only mid-session:
@@ -2697,6 +2773,16 @@ export default function CloudDialer() {
                     <FileText className="h-3 w-3 mr-1" />Login link
                   </Button>
                   <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => holdCountdown(() => setShowScheduleVisit(true))}>
+                    <Calendar className="h-3 w-3 mr-1" />Schedule visit
+                  </Button>
+                  {canCreateProposal && (
+                    <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                      onClick={() => holdCountdown(() => setShowFeeProposal(true))}>
+                      <FileText className="h-3 w-3 mr-1" />Fee proposal
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
                     onClick={() => holdCountdown(() => setShowWalkin(true))}>
                     <Footprints className="h-3 w-3 mr-1" />Log walk-in
                   </Button>
@@ -2977,6 +3063,24 @@ export default function CloudDialer() {
               leadPhone={currentLead.phone}
               controlledOpen={showApplyLink}
               onControlledOpenChange={setShowApplyLink}
+            />
+          )}
+          {showScheduleVisit && (
+            <ScheduleVisitDialog
+              open={showScheduleVisit}
+              onOpenChange={setShowScheduleVisit}
+              campuses={campuses}
+              onSchedule={async ({ visit_date, campus_id }) => {
+                const ok = await scheduleCampusVisitFromDialer(visit_date, campus_id || null);
+                if (ok) toast({ title: "Visit scheduled", description: currentLead.name });
+              }}
+            />
+          )}
+          {showFeeProposal && (
+            <SchoolFeeProposalDialog
+              open={showFeeProposal}
+              onOpenChange={setShowFeeProposal}
+              lead={{ id: currentLead.id, name: currentLead.name, phone: currentLead.phone }}
             />
           )}
         </Suspense>

@@ -81,7 +81,11 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/pending-followups", permission: "leads:view", staffOnly: true },
   { path: "/fresh-leads", permission: "leads:view", staffOnly: true },
   { path: "/visit-center", permission: "leads:view", staffOnly: true },
-  { path: "/visit-monitor", permission: "leads:view", staffOnly: true },
+  // App.tsx guards this with RequireRole, not a permission. The table said
+  // leads:view, which every counsellor has — so the sidebar rendered a link
+  // that 403s, and the item's own roles allow-list was silently widened by this
+  // fallback (see canSeePolicyItem).
+  { path: "/visit-monitor", roles: ["super_admin", "principal", "admission_head"], staffOnly: true },
   { path: "/call-log", permission: "call_log:view", staffOnly: true },
   { path: "/ai-call-log", permission: "call_log:view", staffOnly: true },
   { path: "/cloud-dialer", permission: "call_log:view", staffOnly: true },
@@ -269,7 +273,12 @@ export function canSeePolicyItem(state: AccessState, item: AccessPolicyItem): bo
   const routePolicy = routePolicyFor(item.url);
   const roles = item.roles ?? routePolicy?.roles;
   const anyPermission = item.anyPermission ?? routePolicy?.anyPermission;
-  const permission = item.permission ?? routePolicy?.permission;
+  // When a menu item declares its own roles, that IS the allow-list. Falling
+  // back to the route policy's permission here would widen it — that is how
+  // /visit-monitor (roles: super_admin/principal/admission_head) ended up
+  // visible to every counsellor, via the route's leads:view.
+  const permission = item.permission
+    ?? (item.roles ? undefined : routePolicy?.permission);
 
   if (roles?.includes(state.role as AppRole)) return true;
   if (anyPermission && canUseAnyPermission(state, anyPermission)) return true;
