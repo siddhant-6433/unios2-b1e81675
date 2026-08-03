@@ -18,9 +18,21 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { SelectField, TextField, FieldShell } from "@/components/ui/state-fields";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw, IndianRupee,
 } from "lucide-react";
+
+// Offline payment modes — mirror the finance OfflinePaymentDialog labels so the
+// experience is consistent across the app.
+const OFFLINE_PAYMENT_MODES: { value: string; label: string }[] = [
+  { value: "cash",          label: "Cash" },
+  { value: "upi",           label: "UPI / Wallet / QR" },
+  { value: "bank_transfer", label: "NEFT / IMPS / Bank Transfer" },
+  { value: "cheque",        label: "Cheque / DD" },
+  { value: "online",        label: "Online (Manual / Reconciled)" },
+];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
@@ -114,6 +126,9 @@ export default function AlumniVerifications() {
   const [manualSaving, setManualSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
+  const [showOfflinePay, setShowOfflinePay] = useState(false);
+  const [offlinePayMode, setOfflinePayMode] = useState("cash");
+  const [offlinePayRef, setOfflinePayRef] = useState("");
 
   // Email preview dialog
   const [showEmailPreview, setShowEmailPreview] = useState(false);
@@ -764,26 +779,34 @@ registrar@nimt.ac.in`,
     fetchRequests();
   };
 
-  const handleMarkOfflinePaid = async () => {
-    if (!selectedReq || selectedReq.status !== "pending_payment") return;
-    if (!canManageStudentServices) return;
-    const method = window.prompt(
-      "Payment mode (e.g. Cash, UPI, Bank Transfer, Easebuzz-reconciled):",
-      "offline",
-    );
-    if (method === null) return;
-    const reference = window.prompt("Reference / receipt no (optional):", "") || null;
+  const openOfflinePayDialog = () => {
+    setOfflinePayMode("cash");
+    setOfflinePayRef("");
+    setShowOfflinePay(true);
+  };
+
+  const submitOfflinePayment = async () => {
+    if (!selectedReq || selectedReq.status !== "pending_payment" || !canManageStudentServices) return;
+    // UPI / bank / cheque are reference-bearing modes — require it like the
+    // finance dialog does; cash needs none.
+    if (["upi", "bank_transfer", "cheque"].includes(offlinePayMode) && !offlinePayRef.trim()) {
+      toast({ title: "Reference / transaction number is required for this mode", variant: "destructive" });
+      return;
+    }
+    const method = OFFLINE_PAYMENT_MODES.find(m => m.value === offlinePayMode)?.label || offlinePayMode;
+    const reference = offlinePayRef.trim() || null;
     setMarkingPaid(true);
     try {
       const { error } = await supabase.rpc("mark_alumni_request_paid_offline" as any, {
         _request_id: selectedReq.id,
-        _method: method || "offline",
+        _method: method,
         _reference: reference,
       });
       if (error) throw error;
       toast({ title: "Payment recorded", description: "Request moved to Pending Review." });
-      const patch = { status: "paid", paid_at: new Date().toISOString(), payment_method: method || "offline", payment_ref: reference };
+      const patch = { status: "paid", paid_at: new Date().toISOString(), payment_method: method, payment_ref: reference };
       setSelectedReq((prev: any) => prev ? { ...prev, ...patch } : prev);
+      setShowOfflinePay(false);
       fetchRequests();
     } catch (error) {
       toast({
@@ -1323,8 +1346,8 @@ registrar@nimt.ac.in`,
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
                 {canManageStudentServices && selectedReq.status === "pending_payment" && (
                   <div className="pt-1">
-                    <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleMarkOfflinePaid} disabled={markingPaid}>
-                      {markingPaid ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={openOfflinePayDialog} disabled={markingPaid}>
+                      <IndianRupee className="h-3.5 w-3.5" />
                       Mark Offline Payment
                     </Button>
                     <p className="mt-1 text-[10px] text-muted-foreground">
@@ -1828,6 +1851,55 @@ registrar@nimt.ac.in`,
             <Button onClick={handleManualEntry} disabled={manualSaving} className="gap-2">
               {manualSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Offline Payment Dialog — mirrors the finance OfflinePaymentDialog look */}
+      <Dialog open={showOfflinePay} onOpenChange={setShowOfflinePay}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <IndianRupee className="h-4 w-4 text-primary" />
+              Record Offline Payment
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <FieldShell label="Amount (₹)">
+                <Input value={selectedReq?.fee_amount ?? ""} readOnly title="Amount is fixed by the request fee" />
+              </FieldShell>
+              <SelectField
+                value={offlinePayMode}
+                onValueChange={value => { setOfflinePayMode(value); setOfflinePayRef(""); }}
+                options={OFFLINE_PAYMENT_MODES.map(m => ({ value: m.value, label: m.label }))}
+                label="Payment Mode"
+                allowEmpty={false}
+              />
+            </div>
+            {offlinePayMode !== "cash" && (
+              <TextField
+                value={offlinePayRef}
+                onValueChange={setOfflinePayRef}
+                label={
+                  offlinePayMode === "cheque" ? "Cheque / DD Number"
+                  : offlinePayMode === "upi" ? "UPI / Txn Reference"
+                  : offlinePayMode === "bank_transfer" ? "UTR / Reference Number"
+                  : "Reference / Receipt Number"
+                }
+                placeholder={offlinePayMode === "online" ? "External ref no (e.g. Easebuzz easepayid)" : "Reference / txn no"}
+              />
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Marking this confirmed records the payment and moves the request to <span className="font-medium text-foreground">Pending Review</span>. Use it for cash/UPI/bank payments or to reconcile an online payment that didn't confirm.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOfflinePay(false)} disabled={markingPaid}>Cancel</Button>
+            <Button onClick={submitOfflinePayment} disabled={markingPaid} className="gap-2">
+              {markingPaid ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              Mark as Paid
             </Button>
           </DialogFooter>
         </DialogContent>
