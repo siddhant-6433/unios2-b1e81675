@@ -185,7 +185,11 @@ export default function AlumniVerifications() {
 
   const fetchRoutingData = async () => {
     const [coursesRes, handlersRes, rulesRes] = await Promise.all([
-      supabase.from("courses").select("id, name, code").eq("is_active", true).order("name"),
+      // Include inactive courses: alumni verification / degree / marksheet
+      // requests routinely arrive for discontinued courses (e.g. the old
+      // Ghaziabad-campus PGDM), so they must be selectable in handler rules and
+      // manual entry. Active courses sort first.
+      supabase.from("courses").select("id, name, code, is_active").order("is_active", { ascending: false }).order("name"),
       // Dedicated handler list gated on alumni_verification:manage (not
       // user_management:view) so Student Services managers who aren't super
       // admins still see names in the "Assign handler" dropdown.
@@ -1069,7 +1073,7 @@ registrar@nimt.ac.in`,
                     setRuleDraft(p => ({ ...p, course_id: e.target.value, course_text: selected?.name || "" }));
                   }} className={inputCls}>
                     <option value="">Global / text fallback</option>
-                    {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
+                    {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}{c.is_active === false ? " · inactive" : ""}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1370,7 +1374,7 @@ registrar@nimt.ac.in`,
                 ) : (
                   <p className="text-sm text-amber-600 font-medium">No handler assigned yet.</p>
                 )}
-                {canManageStudentServices && ["paid", "under_review"].includes(selectedReq.status) && (
+                {canManageStudentServices && ["pending_payment", "paid", "under_review"].includes(selectedReq.status) && (
                   <div className="flex gap-2 pt-2">
                     <select
                       value={selectedReq.assigned_handler_user_id || ""}
