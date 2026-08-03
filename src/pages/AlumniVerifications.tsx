@@ -502,7 +502,7 @@ export default function AlumniVerifications() {
 
     const displayName = handler.display_name || (profile as any)?.display_name || (profile as any)?.email || "Assigned handler";
     const workEmail = handler.work_email || (profile as any)?.email || "";
-    const officialPhone = handler.work_number || "";
+    const officialPhone = handler.work_number || handler.personal_mobile || "";
 
     const { error } = await supabase
       .from("alumni_verification_requests" as any)
@@ -1089,7 +1089,7 @@ registrar@nimt.ac.in`,
                   <select value={ruleDraft.handler_user_id} onChange={e => setRuleDraft(p => ({ ...p, handler_user_id: e.target.value }))} className={inputCls}>
                     <option value="">Select</option>
                     {handlers.map((h: any) => (
-                      <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                      <option key={h.user_id} value={h.user_id}>{h.display_name} {(h.work_number || h.personal_mobile) ? "" : "(no phone on file)"}</option>
                     ))}
                   </select>
                 </div>
@@ -1126,7 +1126,7 @@ registrar@nimt.ac.in`,
                         <td className="py-2">{c?.name || rule.course_text || "Global"}</td>
                         <td className="py-2">{rule.batch_year || "Any"}</td>
                         <td className="py-2">{handler.display_name || rule.handler_user_id}</td>
-                        <td className="py-2">{handler.work_number || <span className="text-amber-600">Missing</span>}</td>
+                        <td className="py-2">{handler.work_number || handler.personal_mobile || <span className="text-amber-600">Missing</span>}</td>
                         <td className="py-2 text-right">
                           <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => handleDeactivateRule(rule.id)}>Remove</Button>
                         </td>
@@ -1384,7 +1384,7 @@ registrar@nimt.ac.in`,
                     >
                       <option value="">Assign handler...</option>
                       {handlers.map((h: any) => (
-                        <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                        <option key={h.user_id} value={h.user_id}>{h.display_name} {(h.work_number || h.personal_mobile) ? "" : "(no phone on file)"}</option>
                       ))}
                     </select>
                     {assigningHandler && <Loader2 className="h-4 w-4 animate-spin mt-3 text-muted-foreground" />}
