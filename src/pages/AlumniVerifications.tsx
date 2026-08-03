@@ -30,6 +30,33 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
 };
 
+// For PGDM diploma requests the base `status` stays "under_review" through the
+// whole certificate lifecycle, so a request awaiting approval, being printed,
+// or already collected all looked identical ("Under Review"). Overlay the
+// certificate stage onto the displayed status + tab so the stage is visible.
+// `key` is the tab bucket it counts under; `label`/`color` drive the badge.
+const isPgdmDiplomaReq = (req: any) => {
+  const courseText = `${req?.course || ""} ${req?.course_code || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return req?.request_type === "diploma" && (
+    courseText.includes("pgdm") || courseText.includes("postgraduatediplomainmanagement")
+  );
+};
+
+const CERT_STAGE_CONFIG: Record<string, { key: string; label: string; color: string }> = {
+  pending_approval: { key: "under_review", label: "Pending Approval", color: "bg-warning/10 text-warning-foreground" },
+  approved: { key: "under_review", label: "Approved · Printing", color: "bg-info/10 text-info-foreground" },
+  ready_notified: { key: "verified", label: "Ready · Candidate Notified", color: "bg-success/10 text-success" },
+};
+
+const statusMetaFor = (req: any): { key: string; label: string; color: string } => {
+  if (isPgdmDiplomaReq(req)) {
+    const stage = CERT_STAGE_CONFIG[req?.pgdm_certificate_status];
+    if (stage) return stage;
+  }
+  const c = STATUS_CONFIG[req?.status] || STATUS_CONFIG.pending_payment;
+  return { key: req?.status || "pending_payment", label: c.label, color: c.color };
+};
+
 const RESULT_LABELS: Record<string, { label: string; color: string }> = {
   confirmed: { label: "Confirmed", color: "bg-success/10 text-success" },
   discrepancy_marks: { label: "Discrepancy", color: "bg-warning/10 text-warning-foreground" },
@@ -86,6 +113,7 @@ export default function AlumniVerifications() {
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
 
   // Email preview dialog
   const [showEmailPreview, setShowEmailPreview] = useState(false);
@@ -141,34 +169,47 @@ export default function AlumniVerifications() {
   };
 
   const fetchRoutingData = async () => {
-    const [coursesRes, directoryRes, employeeRes, rulesRes] = await Promise.all([
+    const [coursesRes, handlersRes, rulesRes] = await Promise.all([
       supabase.from("courses").select("id, name, code").eq("is_active", true).order("name"),
-      supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
-      supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number, employment_status"),
+      // Dedicated handler list gated on alumni_verification:manage (not
+      // user_management:view) so Student Services managers who aren't super
+      // admins still see names in the "Assign handler" dropdown.
+      supabase.rpc("student_service_assignable_handlers" as any),
       supabase.from("student_service_handler_rules" as any).select("*").eq("is_active", true).order("updated_at", { ascending: false }),
     ]);
     setCourses((coursesRes.data || []) as any[]);
-    const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
-    const staff = ((directoryRes.data || []) as any[])
-      .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
-      .map((u: any) => {
-        const emp = employeeByUser.get(u.user_id) || {};
-        return {
-          ...u,
-          display_name: emp.display_name || u.display_name || u.email || u.user_id,
-          work_email: emp.work_email || u.email || "",
-          work_number: emp.work_number || "",
-          personal_mobile: emp.mobile_number || u.phone || "",
-        };
-      });
-    setHandlers(staff);
+
+    if (handlersRes.error && isMissingRpcError(handlersRes.error)) {
+      // Fallback (RPC not deployed yet): the admin directory, which only returns
+      // rows for super_admin / user_management:view callers.
+      const [directoryRes, employeeRes] = await Promise.all([
+        supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
+        supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number"),
+      ]);
+      const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
+      const staff = ((directoryRes.data || []) as any[])
+        .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
+        .map((u: any) => {
+          const emp = employeeByUser.get(u.user_id) || {};
+          return {
+            ...u,
+            display_name: emp.display_name || u.display_name || u.email || u.user_id,
+            work_email: emp.work_email || u.email || "",
+            work_number: emp.work_number || "",
+            personal_mobile: emp.mobile_number || u.phone || "",
+          };
+        });
+      setHandlers(staff);
+    } else {
+      setHandlers((handlersRes.data || []) as any[]);
+    }
     setHandlerRules((rulesRes.data || []) as any[]);
   };
 
   useEffect(() => { fetchRequests(); fetchRoutingData(); }, []);
 
-  const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
-  const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
+  const filtered = statusFilter === "all" ? requests : requests.filter(r => statusMetaFor(r).key === statusFilter);
+  const paidPending = requests.filter(r => ["paid", "under_review"].includes(statusMetaFor(r).key)).length;
 
   const fetchPgdmAudit = async (requestId: string) => {
     const { data } = await supabase
@@ -723,6 +764,38 @@ registrar@nimt.ac.in`,
     fetchRequests();
   };
 
+  const handleMarkOfflinePaid = async () => {
+    if (!selectedReq || selectedReq.status !== "pending_payment") return;
+    if (!canManageStudentServices) return;
+    const method = window.prompt(
+      "Payment mode (e.g. Cash, UPI, Bank Transfer, Easebuzz-reconciled):",
+      "offline",
+    );
+    if (method === null) return;
+    const reference = window.prompt("Reference / receipt no (optional):", "") || null;
+    setMarkingPaid(true);
+    try {
+      const { error } = await supabase.rpc("mark_alumni_request_paid_offline" as any, {
+        _request_id: selectedReq.id,
+        _method: method || "offline",
+        _reference: reference,
+      });
+      if (error) throw error;
+      toast({ title: "Payment recorded", description: "Request moved to Pending Review." });
+      const patch = { status: "paid", paid_at: new Date().toISOString(), payment_method: method || "offline", payment_ref: reference };
+      setSelectedReq((prev: any) => prev ? { ...prev, ...patch } : prev);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to record payment",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setMarkingPaid(false);
+    }
+  };
+
   const getDocUrl = async (path: string) => {
     const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
@@ -936,7 +1009,7 @@ registrar@nimt.ac.in`,
       {/* Status filter */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit overflow-x-auto">
         {[{ key: "all", label: `All (${requests.length})` }, ...Object.entries(STATUS_CONFIG).map(([k, v]) => ({
-          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => r.status === k).length})`,
+          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => statusMetaFor(r).key === k).length})`,
         }))].map(t => (
           <button key={t.key} onClick={() => setStatusFilter(t.key)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -1083,7 +1156,7 @@ registrar@nimt.ac.in`,
                 </thead>
                 <tbody>
                   {paginatedRequests.map((req: any) => {
-                    const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending_payment;
+                    const cfg = statusMetaFor(req);
                     const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
                     const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
                     return (
@@ -1248,6 +1321,17 @@ registrar@nimt.ac.in`,
                   {selectedReq.paid_at ? <Badge className="bg-success/10 text-success border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
                 </div>
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
+                {canManageStudentServices && selectedReq.status === "pending_payment" && (
+                  <div className="pt-1">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleMarkOfflinePaid} disabled={markingPaid}>
+                      {markingPaid ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                      Mark Offline Payment
+                    </Button>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Use for cash/UPI/bank payments or to reconcile an online payment that didn't confirm.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Handler assignment */}
