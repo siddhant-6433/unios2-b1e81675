@@ -34,6 +34,26 @@ const EXPLICIT_TERM_LABELS: Record<string, string> = {
   adhoc: "Other Charges",
   admission: "Admission",
   security_deposit: "Security Deposit",
+  // The NB-REG head has been called "Application Fee" since the app_fee↔
+  // registration naming was unified; the term label was the last place still
+  // saying "Registration".
+  registration: "Application Fee",
+};
+
+// One-time charges: billed once at admission rather than per quarter/year.
+// They are collected under one heading so the ledger opens with what the
+// candidate paid to join, before the recurring collection terms.
+export const ONE_TIME_TERMS = ["registration", "admission", "security_deposit"];
+export const ONE_TIME_GROUP = "__one_time__";
+
+// Order inside the one-time group: application fee, admission fee, then the
+// refundable security deposit last. Matched on the fee code/name rather than a
+// hardcoded code list so non-Beacon structures sort sensibly too.
+export const oneTimeRank = (code?: string | null, name?: string | null) => {
+  const hay = `${code || ""} ${name || ""}`.toLowerCase();
+  if (hay.includes("application") || hay.includes("reg")) return 0;
+  if (hay.includes("security") || hay.includes("sec") || hay.includes("deposit")) return 2;
+  return 1; // admission fee and anything else one-time
 };
 
 export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {

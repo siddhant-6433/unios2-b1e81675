@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { matchesCampus } from "@/lib/campusFilter";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { defaultFeeTermLabel, oneTimeRank } from "@/lib/feeTermLabels";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -34,6 +34,8 @@ const txnHistoryPanel = read("src/components/admin/TransactionHistoryPanel.tsx")
 const sendLinkDialog = read("src/components/finance/SendPaymentLinkDialog.tsx");
 const allocationField = read("src/components/finance/FeeHeadAllocationField.tsx");
 const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
+const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
+const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -241,5 +243,56 @@ describe("payment link: Collect Fee vs Token Fee", () => {
     expect(receiptFn).toContain("allocations,");
     expect(receiptFn).toContain("see breakup below");
     expect(receiptFn).toContain('rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);');
+  });
+});
+
+describe("ledger reads the way the cashier thinks", () => {
+  it("never shows a settled row as overdue", () => {
+    // A security deposit fully covered by an offer waiver — total 20,000,
+    // concession 20,000, balance 0 — sat flagged Overdue because
+    // fn_mark_overdue_fees only ever SETS overdue and nothing clears it.
+    expect(ledgerMigration).toContain("BEFORE INSERT OR UPDATE OF total_amount, concession, paid_amount, status ON public.fee_ledger");
+    expect(ledgerMigration).toContain("IF v_outstanding <= 0 THEN");
+    expect(ledgerMigration).toContain("NEW.status := 'paid';");
+    // balance is a STORED generated column, computed after before-triggers.
+    expect(ledgerMigration).toContain("v_outstanding := COALESCE(NEW.total_amount, 0)");
+  });
+
+  it("re-opens a row if a waiver or payment is reversed", () => {
+    expect(ledgerMigration).toContain("ELSIF NEW.status = 'paid' THEN");
+    expect(ledgerMigration).toContain("NEW.status := 'due';");
+  });
+
+  it("groups the one-time charges first, application fee at the top", () => {
+    expect(studentFeePanel).toContain("ONE_TIME_GROUP");
+    expect(studentFeePanel).toContain('"One-time Fees"');
+    expect(defaultFeeTermLabel("registration")).toBe("Application Fee");
+    expect(oneTimeRank("NB-REG", "Application Fee")).toBeLessThan(oneTimeRank("NB-ADM", "Beacon Admission Fee"));
+    expect(oneTimeRank("NB-ADM", "Beacon Admission Fee")).toBeLessThan(oneTimeRank("NB-SEC", "Security Deposit"));
+  });
+});
+
+describe("a recurring add-on rides the existing collection terms", () => {
+  it("posts one row per term at that term's own due date", () => {
+    expect(ledgerMigration).toContain("FOREACH v_term IN ARRAY v_terms LOOP");
+    expect(ledgerMigration).toContain("SELECT MIN(fl.due_date) INTO v_due");
+    expect(ledgerMigration).toContain("COALESCE(v_due, _due_date, CURRENT_DATE)");
+  });
+
+  it("still takes the amount from the catalog, per term", () => {
+    expect(ledgerMigration).toContain("v_head.amount");
+    expect(ledgerMigration).toContain("NOT public.can_collect_fee(auth.uid())");
+  });
+
+  it("keeps the duplicate guard per term, not just per head", () => {
+    expect(ledgerMigration).toContain("AND fl.term = v_term");
+    expect(ledgerMigration).toContain("already exists on %");
+  });
+
+  it("offers the student's real terms in the charge dialog", () => {
+    expect(addCharge).toContain('"student_fee_terms"');
+    expect(addCharge).toContain("_terms: selectedTerms.length ? selectedTerms : null");
+    // The free-date field only makes sense for a genuine one-off.
+    expect(addCharge).toContain("{selectedTerms.length === 0 && (");
   });
 });

@@ -17,7 +17,7 @@ import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
   student: any;
@@ -215,8 +215,22 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // rows are already adjacent) — lets tuition + boarding for a quarter read
   // together under one header instead of as a flat list.
   const feeGroups = useMemo(() => {
+    // The one-time charges (application fee, admission fee, security deposit)
+    // share a due date and live under two different terms, so a plain
+    // due_date/term sort interleaved them arbitrarily. Collapse them into one
+    // leading section, ordered application → admission → deposit, then the
+    // recurring collection terms in due-date order.
+    const oneTime = fees
+      .filter((f: any) => ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase()))
+      .sort((a: any, b: any) =>
+        oneTimeRank(a.fee_codes?.code, a.fee_codes?.name) -
+        oneTimeRank(b.fee_codes?.code, b.fee_codes?.name));
+
     const groups: { term: string; rows: any[] }[] = [];
+    if (oneTime.length) groups.push({ term: ONE_TIME_GROUP, rows: oneTime });
+
     for (const f of fees) {
+      if (ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase())) continue;
       const last = groups[groups.length - 1];
       if (last && last.term === f.term) last.rows.push(f);
       else groups.push({ term: f.term, rows: [f] });
@@ -362,7 +376,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               <Fragment key={g.term}>
                 <tr className="bg-muted/40 border-b border-border">
                   <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
-                    {defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
+                    {g.term === ONE_TIME_GROUP
+                      ? "One-time Fees"
+                      : defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
                   </td>
                   <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
