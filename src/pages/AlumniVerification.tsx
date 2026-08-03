@@ -19,7 +19,9 @@ const COURSES = [
 
 const CAMPUSES = [
   "Greater Noida Campus",
-  "Jaipur Campus",
+  "Ghaziabad Campus 1 (Arthala)",
+  "Ghaziabad Campus 2 (Avantika)",
+  "Ghaziabad Campus 3 (Avantika II)",
   "Kotputli Jaipur Campus",
 ];
 
@@ -837,22 +839,24 @@ export default function AlumniVerification() {
                     </div>
                   </div>
 
-                  {/* Enrollment + Campus (for marksheet, diploma, transcript) */}
-                  {requestType !== "verification" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Enrollment (marksheet/diploma/transcript) + Campus (all types —
+                      campus is needed to route e.g. PGDM to the right campus, and
+                      to pick the correct certificate template). */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {requestType !== "verification" && (
                       <div>
                         <label className="text-xs font-medium text-foreground mb-1 block">Enrollment Number {requestType !== "transcript" ? "*" : ""}</label>
                         <input value={enrollmentNo} onChange={e => setEnrollmentNo(e.target.value)} placeholder="e.g. NIMT/2020/001" className={inputCls} />
                       </div>
-                      <div>
-                        <label className="text-xs font-medium text-foreground mb-1 block">Campus {requestType !== "transcript" ? "*" : ""}</label>
-                        <select value={campus} onChange={e => setCampus(e.target.value)} className={inputCls}>
-                          <option value="">Select campus</option>
-                          {CAMPUSES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
+                    )}
+                    <div>
+                      <label className="text-xs font-medium text-foreground mb-1 block">Campus {(requestType === "marksheet" || requestType === "diploma") ? "*" : ""}</label>
+                      <select value={campus} onChange={e => setCampus(e.target.value)} className={inputCls}>
+                        <option value="">Select campus</option>
+                        {CAMPUSES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </div>
-                  )}
+                  </div>
                 </div>
 
                 {/* Documents */}
