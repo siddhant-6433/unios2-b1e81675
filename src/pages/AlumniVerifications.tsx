@@ -388,10 +388,17 @@ export default function AlumniVerifications() {
     email: "umesh@nimt.ac.in",
     phone: "+91-7428477664",
   };
+  // The stored assigned_handler_official_phone is a snapshot from assignment
+  // time; prefer the handler's CURRENT number from the directory so a work
+  // number added/changed after assignment shows immediately (work > mobile).
+  const handlerPhoneFor = (req: any): string => {
+    const h = handlerByUserId.get(req?.assigned_handler_user_id);
+    return h?.work_number || h?.personal_mobile || req?.assigned_handler_official_phone || "";
+  };
   const contactFor = (req: any) => ({
     name: req.assigned_handler_name || fallbackContact.name,
     email: req.assigned_handler_email || fallbackContact.email,
-    phone: req.assigned_handler_official_phone || fallbackContact.phone,
+    phone: handlerPhoneFor(req) || fallbackContact.phone,
   });
 
   const isPgdmDiplomaRequest = (req: any) => {
@@ -1202,7 +1209,7 @@ registrar@nimt.ac.in`,
 	                          {req.assigned_handler_user_id ? (
 	                            <div>
 	                              <div className="font-medium text-foreground">{req.assigned_handler_name || "Assigned"}</div>
-	                              <div className="text-[10px] text-muted-foreground">{req.assigned_handler_official_phone || "Official no missing"}</div>
+	                              <div className="text-[10px] text-muted-foreground">{handlerPhoneFor(req) || "Official no missing"}</div>
 	                            </div>
 	                          ) : (
 	                            <span className="text-amber-600 font-medium">Unassigned</span>
@@ -1368,7 +1375,7 @@ registrar@nimt.ac.in`,
                   <div className="text-sm space-y-1">
                     <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{selectedReq.assigned_handler_name || "Assigned handler"}</span></p>
                     <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{selectedReq.assigned_handler_email || "—"}</span></p>
-                    <p><span className="text-muted-foreground">Official Allotted No:</span> <span className="font-medium">{selectedReq.assigned_handler_official_phone || "—"}</span></p>
+                    <p><span className="text-muted-foreground">Official Allotted No:</span> <span className="font-medium">{handlerPhoneFor(selectedReq) || "—"}</span></p>
                     <p className="text-[10px] text-muted-foreground">Assignment: {selectedReq.assignment_status || "assigned"}{selectedReq.assigned_at ? ` · ${new Date(selectedReq.assigned_at).toLocaleString("en-IN")}` : ""}</p>
                   </div>
                 ) : (
