@@ -78,6 +78,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
   const canCollect = ["super_admin", "accountant"].includes(role || "") && !!student?.lead_id;
+  // Counsellors can ask their own candidate to pay — a payment link or a portal
+  // login — but never take money. RLS scopes what they can even see here to
+  // students on their assigned leads (can_view_student_via_lead).
+  const canSendLink = isFinanceRole || ["counsellor", "admission_head"].includes(role || "");
+  // Ticking rows builds either a receipt or a link, so anyone who can do one
+  // may select. The Collect button itself stays cashier-only.
+  const canPick = canCollect || canSendLink;
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   const isStethoBatch = student?.fee_structure_version === "stetho_batch";
@@ -243,9 +250,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // ── Counter selection ────────────────────────────────────────────────────
   // Fee Code, Total, Concession, Paid, Balance, Due Date, Status (+ tick,
   // Paying for cashiers; + the row-actions column for finance roles).
-  const colCount = 7 + (canCollect ? 2 : 0) + (isFinanceRole ? 1 : 0);
+  const colCount = 7 + (canPick ? 2 : 0) + (isFinanceRole ? 1 : 0);
   const rowBalance = (f: any) => Math.max(0, Math.round(Number(f.balance || 0)));
-  const isPickable = (f: any) => canCollect && rowBalance(f) > 0;
+  const isPickable = (f: any) => canPick && rowBalance(f) > 0;
   const pickedTotal = Object.values(picked).reduce((s, v) => s + (Number(v) || 0), 0);
   const pickedCount = Object.keys(picked).length;
 
@@ -429,12 +436,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <Plus className="h-3.5 w-3.5" /> Add Charge
           </Button>
         )}
-        {isFinanceRole && student?.id && (
+        {canSendLink && student?.id && (
           <Button size="sm" variant="outline" onClick={() => setSendLinkOpen(true)} className="gap-1.5">
             <LinkIcon className="h-3.5 w-3.5" /> Send Payment Link
           </Button>
         )}
-        {isFinanceRole && student?.id && (
+        {canSendLink && student?.id && (
           <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
             {issuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
             Generate Login Link
@@ -537,13 +544,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left">
-              {canCollect && <th className="w-10 px-4 py-3"></th>}
+              {canPick && <th className="w-10 px-4 py-3"></th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Balance</th>
-              {canCollect && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
+              {canPick && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Due Date</th>
               <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
               {isFinanceRole && <th className="px-4 py-3 font-medium text-muted-foreground w-10"></th>}
@@ -564,7 +571,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               return (
               <Fragment key={g.term}>
                 <tr className="bg-muted/40 border-b border-border">
-                  {canCollect && (
+                  {canPick && (
                     <td className="px-4 py-1.5">
                       {gPickable.length > 0 && (
                         <input
@@ -585,11 +592,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   </td>
                   <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
-                  <td colSpan={colCount - (canCollect ? 4 : 3)} />
+                  <td colSpan={colCount - (canPick ? 4 : 3)} />
                 </tr>
                 {g.rows.map((f: any) => (
                   <tr key={f.id} className={`border-b border-border last:border-0 transition-colors ${picked[f.id] !== undefined ? "bg-primary/5" : "hover:bg-muted/30"}`}>
-                    {canCollect && (
+                    {canPick && (
                       <td className="px-4 py-3">
                         {isPickable(f) && (
                           <input
@@ -627,7 +634,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     </td>
                     <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
-                    {canCollect && (
+                    {canPick && (
                       <td className="px-4 py-3 text-right">
                         {picked[f.id] !== undefined ? (
                           <input
@@ -693,7 +700,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {/* Running total for the ticked rows — the cashier's confirmation that
             the drawer amount and the receipt will agree before anything is
             recorded. Mirrors the old ERP's Total Amount row. */}
-        {canCollect && pickedCount > 0 && (
+        {canPick && pickedCount > 0 && (
           <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
             <span className="text-xs text-muted-foreground">
               {pickedCount} head{pickedCount === 1 ? "" : "s"} selected
@@ -704,14 +711,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <span className="ml-auto text-sm font-semibold text-foreground">
               Total ₹{pickedTotal.toLocaleString("en-IN")}
             </span>
-            {isFinanceRole && (
+            {canSendLink && (
               <Button size="sm" variant="outline" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openLinkForSelection(fees)}>
                 <LinkIcon className="h-3.5 w-3.5" /> Send Link
               </Button>
             )}
-            <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
-              <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
-            </Button>
+            {canCollect && (
+              <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
+                <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
+              </Button>
+            )}
           </div>
         )}
       </div>

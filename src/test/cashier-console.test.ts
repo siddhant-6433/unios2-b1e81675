@@ -28,6 +28,7 @@ const accountantPermsMigration = readMigration("accountant_drop_attendance_exams
 const studentPortal = read("src/pages/StudentPortal.tsx");
 const sendOnDemandMigration = readMigration("login_link_send_on_demand");
 const gatewaySettlement = read("supabase/functions/_shared/gateway-settlement.ts");
+const counsellorMigration = readMigration("counsellor_fee_ledger_and_login_link");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -628,5 +629,53 @@ describe("shareable link for specific fee rows", () => {
 
   it("still validates that the breakup equals the amount", () => {
     expect(createLinkFn).toContain("must equal the amount");
+  });
+});
+
+describe("counsellors: ask for payment, never take it", () => {
+  it("can see the ledger of their own students only", () => {
+    // The tab was already reachable but empty — fee_ledger's finance policy
+    // covers super_admin/campus_admin/accountant/principal, not counsellors.
+    expect(counsellorMigration).toContain('CREATE POLICY "Counsellors can view assigned student ledger"');
+    expect(counsellorMigration).toContain("FOR SELECT");
+    // Reuses the exact predicate behind the students policy they already have,
+    // rather than inventing a second notion of "assigned".
+    expect(counsellorMigration).toContain("public.can_view_student_via_lead(auth.uid(), student_id)");
+  });
+
+  it("checks the cheap role test first so finance scans never pay for can_view_lead", () => {
+    const policy = counsellorMigration.slice(counsellorMigration.indexOf("USING ("));
+    expect(policy.indexOf("has_role")).toBeLessThan(policy.indexOf("can_view_student_via_lead"));
+  });
+
+  it("gets read access only — no insert, update or delete policy", () => {
+    expect(counsellorMigration).not.toContain("FOR INSERT");
+    expect(counsellorMigration).not.toContain("FOR UPDATE");
+    expect(counsellorMigration).not.toContain("FOR DELETE");
+    expect(counsellorMigration).not.toContain("FOR ALL");
+  });
+
+  it("can issue and send a login link, scoped to their own candidate", () => {
+    expect(counsellorMigration).toContain("OR public.can_view_student_via_lead(auth.uid(), _student_id)");
+    // The send path authorises against the token's student, not a caller-supplied one.
+    expect(counsellorMigration).toContain("public.can_view_student_via_lead(auth.uid(), v_tok.student_id)");
+  });
+
+  it("can select rows and raise a link, but the Collect button stays cashier-only", () => {
+    expect(studentFeePanel).toContain('const canSendLink = isFinanceRole || ["counsellor", "admission_head"].includes(role || "");');
+    expect(studentFeePanel).toContain("const canPick = canCollect || canSendLink;");
+    expect(studentFeePanel).toContain("const isPickable = (f: any) => canPick && rowBalance(f) > 0;");
+    expect(studentFeePanel).toContain("{canCollect && (\n              <Button size=\"sm\" className=\"gap-1.5\" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>");
+  });
+
+  it("keeps provisioning, transfers and row deletion out of their reach", () => {
+    // Manage and the row-actions column remain isFinanceRole, which excludes them.
+    expect(studentFeePanel).toContain("{(canProvision || canReallocate || isFinanceRole) && (");
+    expect(studentFeePanel).toContain('const canRemoveRow = (f: any) =>');
+    expect(studentFeePanel).toContain('["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage")');
+  });
+
+  it("is already accepted by the payment-link edge function", () => {
+    expect(createLinkFn).toContain('"counsellor"');
   });
 });
