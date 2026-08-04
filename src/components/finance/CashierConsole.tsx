@@ -280,7 +280,21 @@ export function CashierConsole() {
                 className="h-12 w-12 rounded-xl"
               />
               <Field label="Name" value={person.name} strong />
-              <Field label="Father's Name" value={person.father_name} />
+              {/* Both parents, not just the father. mother_name is in fact the
+                  better-filled column (300 of 328 students against 294), and a
+                  counter that only ever names the father is telling half the
+                  family they are not on the record.
+                  Leads have no father/mother columns at all — only
+                  guardian_name — so the old Father's Name field rendered a dash
+                  for every one of them. */}
+              {target.kind === "student" ? (
+                <>
+                  <Field label="Father's Name" value={person.father_name} />
+                  <Field label="Mother's Name" value={person.mother_name} />
+                </>
+              ) : (
+                <Field label="Guardian" value={person.guardian_name} />
+              )}
               <Field
                 label={target.kind === "student" ? "Admission No." : "Application / PAN"}
                 value={person.admission_no || person.pre_admission_no || person.application_id}
