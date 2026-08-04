@@ -135,6 +135,7 @@ export default function AlumniVerifications() {
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [emailSending, setEmailSending] = useState(false);
+  const [sendEmailEnabled, setSendEmailEnabled] = useState(true);
 
   const handleDelete = async (requestToDelete = selectedReq) => {
     if (!requestToDelete || !isSuperAdmin) return;
@@ -654,6 +655,7 @@ registrar@nimt.ac.in`,
     const draft = generateEmailDraft(selectedReq, result);
     setEmailSubject(draft.subject);
     setEmailBody(draft.body);
+    setSendEmailEnabled(true);
     setShowEmailPreview(true);
   };
 
@@ -676,7 +678,8 @@ registrar@nimt.ac.in`,
 
     const approvedAt = new Date().toISOString();
 
-    // Update status + store sent email for audit
+    // Update status + store the approved email text for audit (only when it's
+    // actually sent, so the "Final Email Sent" record isn't misleading).
     await supabase.from("alumni_verification_requests" as any).update({
       status: finalStatus,
       verification_result: result,
@@ -686,12 +689,11 @@ registrar@nimt.ac.in`,
       admin_approved_by: user?.id,
       admin_approval_notes: reviewNotes,
       admin_approved_at: approvedAt,
-      sent_email_subject: emailSubject,
-      sent_email_body: emailBody,
+      ...(sendEmailEnabled ? { sent_email_subject: emailSubject, sent_email_body: emailBody } : {}),
     }).eq("id", selectedReq.id);
 
-    // Send email
-    if (selectedReq.contact_email) {
+    // Send email (skipped when the "send email" toggle is off)
+    if (sendEmailEnabled && selectedReq.contact_email) {
       try {
         const htmlBody = emailBody.replace(/\n/g, "<br/>");
         const { error: emailErr } = await supabase.functions.invoke("send-email", {
@@ -710,10 +712,11 @@ registrar@nimt.ac.in`,
       }
     }
 
-    // Send WhatsApp (plain text, not template)
+    // Send WhatsApp (plain text, not template) — only when emailing, since the
+    // message tells the requestor to check their email.
     try {
       const waPhone = selectedReq.requestor_phone?.replace(/[^0-9]/g, "");
-      if (waPhone) {
+      if (sendEmailEnabled && waPhone) {
         const whatsappToken = (await supabase.functions.invoke("alumni-payment", { body: { action: "noop" } })); // dummy to get env
         // Use direct Graph API via alumni-payment or just call whatsapp-send with a custom approach
         // For now, send via the webhook's plain text pattern
@@ -732,7 +735,11 @@ registrar@nimt.ac.in`,
       console.error("WhatsApp error:", e);
     }
 
-    toast({ title: `Result sent to ${selectedReq.contact_email}` });
+    toast({
+      title: sendEmailEnabled
+        ? `Result sent to ${selectedReq.contact_email}`
+        : "Result recorded (email not sent)",
+    });
     setEmailSending(false);
     setShowEmailPreview(false);
     setSelectedReq(null);
@@ -1790,15 +1797,28 @@ registrar@nimt.ac.in`,
               <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={14}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none font-mono text-xs leading-relaxed" />
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              WhatsApp notification will also be sent: "The result has been emailed to {selectedReq?.contact_email}. Please do not reply on this number."
-            </p>
+            <label className="flex items-start gap-2 rounded-xl border border-input bg-muted/20 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendEmailEnabled}
+                onChange={e => setSendEmailEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+              />
+              <span className="text-xs text-foreground">
+                Send result email{selectedReq?.contact_email ? ` to ${selectedReq.contact_email}` : ""}
+                <span className="block text-[10px] text-muted-foreground mt-0.5">
+                  {sendEmailEnabled
+                    ? "The edited email + a WhatsApp notification will be sent. Uncheck to just record the result without notifying."
+                    : "No email or WhatsApp will be sent — the result is recorded only. You can notify the requestor separately."}
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Cancel</Button>
             <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-success hover:bg-success/90">
               {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              Approve & Send Email
+              {sendEmailEnabled ? "Approve & Send Email" : "Approve (don't send email)"}
             </Button>
           </DialogFooter>
         </DialogContent>
