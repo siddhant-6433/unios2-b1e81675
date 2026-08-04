@@ -154,8 +154,9 @@ export function CashierConsole() {
     <div className="space-y-4">
       {/* Search */}
       <div className="relative max-w-2xl">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -165,7 +166,8 @@ export function CashierConsole() {
           className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           autoFocus
         />
-        {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+        </div>
 
         {/* Search scope */}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">

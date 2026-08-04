@@ -549,13 +549,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Summary. Five cards in a four-column grid orphaned the fifth on its own
+          row; the unallocated credit is also rarely non-zero, so it only earns a
+          slot when there is credit to show. */}
+      <div className={`grid grid-cols-2 gap-3 ${
+        Number(credit?.general_credit || 0) > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"
+      }`}>
         <SummaryCard label="Total Fee" value={totalFee} color="bg-chart-5/10 text-chart-5" />
         <SummaryCard label="Paid" value={totalPaid} color="bg-success/10 text-success" />
         <SummaryCard label="Concession" value={totalConcession} color="bg-pastel-purple text-foreground/70" />
         <SummaryCard label="Balance" value={totalBalance} color={totalBalance > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"} />
-        <SummaryCard label="Credit (unallocated)" value={Number(credit?.general_credit || 0)} color="bg-pastel-mint text-foreground/70" />
+        {Number(credit?.general_credit || 0) > 0 && (
+          <SummaryCard label="Credit (unallocated)" value={Number(credit?.general_credit || 0)} color="bg-pastel-mint text-foreground/70" />
+        )}
       </div>
       {Number(credit?.application_fee_paid || 0) > 0 && (
         <p className="text-[11px] text-muted-foreground -mt-2">
@@ -569,7 +575,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           <thead>
             <tr className="border-b border-border text-left">
               {canPick && <th className="w-10 px-4 py-3"></th>}
-              <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
+              <th className="px-4 py-3 font-medium text-muted-foreground">Fee Head</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
@@ -594,9 +600,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               const gPicked = gPickable.filter((r: any) => picked[r.id] !== undefined);
               return (
               <Fragment key={g.term}>
-                <tr className="bg-muted/40 border-b border-border">
+                <tr className="border-y border-border bg-muted/60">
                   {canPick && (
-                    <td className="px-4 py-1.5">
+                    <td className="px-4 py-2.5">
                       {gPickable.length > 0 && (
                         <input
                           type="checkbox"
@@ -609,13 +615,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                       )}
                     </td>
                   )}
-                  <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
+                  <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-foreground">
                     {g.term === ONE_TIME_GROUP
                       ? "One-time Fees"
                       : defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
                   </td>
-                  <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
-                  <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
+                  <td className="px-4 py-2.5 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-2.5 text-right text-[11px] tabular-nums text-success">{gConcession > 0 ? `−₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
                   <td colSpan={colCount - (canPick ? 4 : 3)} />
                 </tr>
                 {g.rows.map((f: any) => (
@@ -633,31 +639,56 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         )}
                       </td>
                     )}
+                    {/* Name leads. The code is an internal identifier — in caps
+                        it was the loudest thing in the row, so a cashier read
+                        IB-MEAL-ADD-ON-QUARTERLY-FEE before "IB Meal Add On". */}
                     <td className="px-4 py-3 pl-6">
-                      <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
-                      <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
+                      <span className="block font-medium text-foreground">
+                        {f.fee_codes?.name || f.fee_codes?.code || "—"}
+                      </span>
+                      {f.fee_codes?.name && f.fee_codes?.code && (
+                        <span className="block font-mono text-[10px] text-muted-foreground">
+                          {f.fee_codes.code}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">
-                      <div className="flex flex-col items-end gap-0.5">
-                        <span>{Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}</span>
-                        {pendingWaivers[f.id] > 0 && (
-                          <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
-                            +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
-                          </span>
-                        )}
-                        {/* Waiver lives on the row it applies to, rather than in
-                            a dialog that re-asks which row you meant. */}
-                        {canRequestConcession && Number(f.balance || 0) > 0 && (
-                          <RowConcessionPopover
-                            fee={f}
-                            onDone={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
-                          />
-                        )}
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
+                    {/* The waiver control sits inline as a quiet icon rather than
+                        a blue "+ Waiver" link under an em dash on every row —
+                        that repeated twice per row down the whole table and
+                        competed with Collect. Still always rendered, never
+                        hover-only, so it works on touch. */}
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex flex-col items-end">
+                          {Number(f.concession) > 0 ? (
+                            <span className="font-medium text-success">
+                              −₹{Number(f.concession).toLocaleString("en-IN")}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                          {pendingWaivers[f.id] > 0 && (
+                            <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
+                              +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                            </span>
+                          )}
+                        </div>
+                        {canRequestConcession ? (
+                          Number(f.balance || 0) > 0 ? (
+                            <RowConcessionPopover
+                              fee={f}
+                              onDone={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
+                            />
+                          ) : (
+                            // Keeps the amounts right-aligned down the column.
+                            <span className="h-6 w-6 shrink-0" aria-hidden />
+                          )
+                        ) : null}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
+                    <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                     {canPick && (
                       <td className="px-4 py-3 text-right">
                         {picked[f.id] !== undefined ? (
@@ -932,9 +963,9 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
         <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
           <span className="text-xs font-bold">₹</span>
         </div>
-        <div>
-          <p className="text-[11px] text-muted-foreground">{label}</p>
-          <p className="text-lg font-bold text-foreground">₹{value.toLocaleString("en-IN")}</p>
+        <div className="min-w-0">
+          <p className="truncate text-[11px] text-muted-foreground">{label}</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">₹{value.toLocaleString("en-IN")}</p>
         </div>
       </CardContent>
     </Card>

@@ -88,10 +88,11 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <PopoverTrigger asChild>
         <button
-          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-primary hover:underline"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary focus-visible:text-primary"
           title="Add a waiver / concession on this head"
+          aria-label="Add a waiver on this head"
         >
-          <Plus className="h-3 w-3" /> Waiver
+          <Plus className="h-3.5 w-3.5" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-2.5">
