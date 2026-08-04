@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { matchesCampus } from "@/lib/campusFilter";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { defaultFeeTermLabel, oneTimeRank } from "@/lib/feeTermLabels";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -31,6 +31,13 @@ const admissionsPage = read("src/pages/Admissions.tsx");
 const leadDetailPage = read("src/pages/LeadDetail.tsx");
 const financeOverview = read("src/components/finance/FinanceOverview.tsx");
 const txnHistoryPanel = read("src/components/admin/TransactionHistoryPanel.tsx");
+const sendLinkDialog = read("src/components/finance/SendPaymentLinkDialog.tsx");
+const allocationField = read("src/components/finance/FeeHeadAllocationField.tsx");
+const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
+const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
+const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
+const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
+const searchMigration = readMigration("cashier_search_course");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -200,5 +207,153 @@ describe("the dead `payments` table is no longer read", () => {
   it("the transaction history panel drops its empty-table query", () => {
     expect(txnHistoryPanel).not.toContain('from("payments")');
     expect(txnHistoryPanel).toContain('from("lead_payments")');
+  });
+});
+
+describe("payment link: Collect Fee vs Token Fee", () => {
+  it("offers exactly two modes — the free-form 'custom' purpose is gone from the UI", () => {
+    expect(sendLinkDialog).toContain('label: "Collect Fee (from the fee structure)"');
+    expect(sendLinkDialog).toContain('label: "Token Fee (prior to admission)"');
+    expect(sendLinkDialog).not.toContain('label: "Custom amount"');
+    // Still accepted server-side so older callers/links keep working.
+    expect(createLinkFn).toContain('["pre_admission_token", "fee_due", "custom"].includes(purpose)');
+  });
+
+  it("collapses a legacy custom purpose onto the free-amount mode", () => {
+    expect(sendLinkDialog).toContain('defaultPurpose === "custom" ? "pre_admission_token"');
+  });
+
+  it("shows the fee structure only for Collect Fee, and clears it on switch", () => {
+    expect(sendLinkDialog).toContain('variant="all"');
+    expect(sendLinkDialog).toContain("{collectingFee && (");
+    expect(sendLinkDialog).toContain('if (v !== "fee_due") setAllocations([]);');
+  });
+
+  it("pre-ticks every outstanding head at its due, once per open", () => {
+    expect(allocationField).toContain('if (variant !== "all" || prefilled.current || heads.length === 0) return;');
+    expect(allocationField).toContain("heads.filter((h) => h.due > 0)");
+    // The cashier's edits must survive a re-render.
+    expect(allocationField).toContain("if (value.length > 0) return;");
+  });
+
+  it("lets a head be switched off, which drops it from the wire format", () => {
+    expect(allocationField).toContain("const toggleHead = (h: HeadOption, on: boolean) =>");
+    expect(allocationField).toContain("value.filter((r) => r.fee_code_id !== h.fee_code_id)");
+  });
+
+  it("itemises the breakup on the receipt instead of one opaque total", () => {
+    expect(receiptFn).toContain("allocations,");
+    expect(receiptFn).toContain("see breakup below");
+    expect(receiptFn).toContain('rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);');
+  });
+});
+
+describe("ledger reads the way the cashier thinks", () => {
+  it("never shows a settled row as overdue", () => {
+    // A security deposit fully covered by an offer waiver — total 20,000,
+    // concession 20,000, balance 0 — sat flagged Overdue because
+    // fn_mark_overdue_fees only ever SETS overdue and nothing clears it.
+    expect(ledgerMigration).toContain("BEFORE INSERT OR UPDATE OF total_amount, concession, paid_amount, status ON public.fee_ledger");
+    expect(ledgerMigration).toContain("IF v_outstanding <= 0 THEN");
+    expect(ledgerMigration).toContain("NEW.status := 'paid';");
+    // balance is a STORED generated column, computed after before-triggers.
+    expect(ledgerMigration).toContain("v_outstanding := COALESCE(NEW.total_amount, 0)");
+  });
+
+  it("re-opens a row if a waiver or payment is reversed", () => {
+    expect(ledgerMigration).toContain("ELSIF NEW.status = 'paid' THEN");
+    expect(ledgerMigration).toContain("NEW.status := 'due';");
+  });
+
+  it("groups the one-time charges first, application fee at the top", () => {
+    expect(studentFeePanel).toContain("ONE_TIME_GROUP");
+    expect(studentFeePanel).toContain('"One-time Fees"');
+    expect(defaultFeeTermLabel("registration")).toBe("Application Fee");
+    expect(oneTimeRank("NB-REG", "Application Fee")).toBeLessThan(oneTimeRank("NB-ADM", "Beacon Admission Fee"));
+    expect(oneTimeRank("NB-ADM", "Beacon Admission Fee")).toBeLessThan(oneTimeRank("NB-SEC", "Security Deposit"));
+  });
+});
+
+describe("a recurring add-on rides the existing collection terms", () => {
+  it("posts one row per term at that term's own due date", () => {
+    expect(ledgerMigration).toContain("FOREACH v_term IN ARRAY v_terms LOOP");
+    expect(ledgerMigration).toContain("SELECT MIN(fl.due_date) INTO v_due");
+    expect(ledgerMigration).toContain("COALESCE(v_due, _due_date, CURRENT_DATE)");
+  });
+
+  it("still takes the amount from the catalog, per term", () => {
+    expect(ledgerMigration).toContain("v_head.amount");
+    expect(ledgerMigration).toContain("NOT public.can_collect_fee(auth.uid())");
+  });
+
+  it("keeps the duplicate guard per term, not just per head", () => {
+    expect(ledgerMigration).toContain("AND fl.term = v_term");
+    expect(ledgerMigration).toContain("already exists on %");
+  });
+
+  it("offers the student's real terms in the charge dialog", () => {
+    expect(addCharge).toContain('"student_fee_terms"');
+    expect(addCharge).toContain("_terms: selectedTerms.length ? selectedTerms : null");
+    // The free-date field only makes sense for a genuine one-off.
+    expect(addCharge).toContain("{selectedTerms.length === 0 && (");
+  });
+});
+
+describe("removing a fee row", () => {
+  // The Remove button raised "permission denied for table fee_ledger" for EVERY
+  // role: fee_ledger has a super_admin DELETE policy but `authenticated` was
+  // never granted DELETE, so the privilege check fails before RLS is consulted.
+  it("goes through an RPC rather than a direct delete", () => {
+    expect(studentFeePanel).toContain('"remove_fee_charge"');
+    expect(studentFeePanel).not.toContain('.from("fee_ledger")\n      .delete()');
+  });
+
+  it("never removes a row that has money against it", () => {
+    expect(removeMigration).toContain("IF COALESCE(v_row.paid_amount, 0) > 0 THEN");
+    expect(removeMigration).toContain("Reallocate or refund it instead");
+  });
+
+  // Removing a row edits ONE candidate's ledger; the fee structure template is
+  // untouched and every other student on it is unaffected. So a cashier may
+  // correct any unpaid row — a day scholar mis-provisioned with a boarding
+  // head, a term that does not apply to this candidate.
+  it("lets a cashier correct any unpaid row on this candidate's ledger", () => {
+    expect(removeMigration).toContain("public.can_collect_fee(auth.uid())");
+    expect(removeMigration).toContain("public.can_manage_fee_structure(auth.uid())");
+    expect(removeMigration).not.toContain("A cashier can only remove ad-hoc charges");
+  });
+
+  it("hides the button instead of failing on click", () => {
+    expect(studentFeePanel).toContain("const canRemoveRow = (f: any) =>");
+    expect(studentFeePanel).toContain("{canRemoveRow(f) && (");
+  });
+
+  it("confirms before dropping a row, naming the amount", () => {
+    expect(studentFeePanel).toContain("window.confirm(");
+    expect(studentFeePanel).toContain("This affects only this candidate. The fee structure is unchanged.");
+  });
+});
+
+describe("counter search disambiguates same-name candidates", () => {
+  // "anjali kumari" returned seven visually identical rows separated only by a
+  // phone number. The cashier has the candidate in front of them and knows the
+  // course — that is the field that actually tells them apart.
+  it("returns the course and campus", () => {
+    expect(searchMigration).toContain("co.name AS course");
+    expect(searchMigration).toContain("ca.name AS campus");
+    expect(searchMigration).toContain("LEFT JOIN public.courses  co ON co.id = st.course_id");
+    expect(searchMigration).toContain("LEFT JOIN public.courses  co ON co.id = ld.course_id");
+  });
+
+  it("shows the course above the phone line", () => {
+    expect(cashierConsole).toContain("{h.course && (");
+    expect(cashierConsole).toContain("course: r.course");
+  });
+
+  it("still matches on mobile number", () => {
+    // Typing a bare 10-digit number matches a stored +91… via the ilike.
+    expect(searchMigration).toContain("st.phone ilike v_like");
+    expect(searchMigration).toContain("ld.phone ilike v_like");
+    expect(cashierConsole).toContain("Search by name, mobile no., admission no., PAN or application ID");
   });
 });

@@ -28,6 +28,8 @@ type Hit = {
   identifier: string | null;
   identifierLabel: string | null;
   stage?: string | null;
+  course: string | null;
+  campus: string | null;
 };
 
 type Target = {
@@ -83,6 +85,8 @@ export function CashierConsole() {
       identifier: r.identifier,
       identifierLabel: r.identifier_label,
       stage: r.stage,
+      course: r.course,
+      campus: r.campus,
     })));
   };
 
@@ -144,7 +148,7 @@ export function CashierConsole() {
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Enter student name, admission no., PAN, application ID or phone"
+          placeholder="Search by name, mobile no., admission no., PAN or application ID"
           className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           autoFocus
         />
@@ -163,6 +167,15 @@ export function CashierConsole() {
                   : <User className="h-4 w-4 text-muted-foreground shrink-0" />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-foreground">{h.name}</div>
+                  {/* Course first: at a busy counter seven "Anjali Kumari" rows are
+                      told apart by the course the candidate names, not by a phone
+                      number the cashier cannot check at a glance. */}
+                  {h.course && (
+                    <div className="truncate text-[11px] text-foreground/70">
+                      {h.course}
+                      {h.campus ? ` · ${h.campus}` : ""}
+                    </div>
+                  )}
                   <div className="truncate text-[11px] text-muted-foreground">
                     {h.phone || "—"}
                     {h.identifier ? ` · ${h.identifierLabel} ${h.identifier}` : ""}

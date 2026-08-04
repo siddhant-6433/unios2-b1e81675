@@ -14,6 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { Loader2, PlusCircle } from "lucide-react";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+
+type TermOption = { term: string; due_date: string | null; rows: number };
 
 export type ChargeHead = {
   id: string;
@@ -37,6 +40,11 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
   const [headId, setHeadId] = useState("");
   const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
+  // A recurring add-on (meal, transport) is billed with the quarters it belongs
+  // to, not on a date of its own — so the charge can be hung off the student's
+  // existing collection terms and inherit their due dates.
+  const [terms, setTerms] = useState<TermOption[]>([]);
+  const [selectedTerms, setSelectedTerms] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -45,19 +53,28 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
   useEffect(() => {
     if (!open || !studentId) return;
     setLoading(true);
-    (supabase.rpc as any)("available_fee_charges", { _student_id: studentId, _lead_id: null })
-      .then(({ data, error }: { data: ChargeHead[] | null; error: { message: string } | null }) => {
-        if (error) toast({ title: "Could not load fee heads", description: error.message, variant: "destructive" });
-        setHeads(data || []);
-        setLoading(false);
-      });
+    Promise.all([
+      (supabase.rpc as any)("available_fee_charges", { _student_id: studentId, _lead_id: null }),
+      (supabase.rpc as any)("student_fee_terms", { _student_id: studentId }),
+    ]).then(([headsRes, termsRes]: any[]) => {
+      if (headsRes.error) {
+        toast({ title: "Could not load fee heads", description: headsRes.error.message, variant: "destructive" });
+      }
+      setHeads(headsRes.data || []);
+      setTerms((termsRes.data || []) as TermOption[]);
+      setLoading(false);
+    });
   }, [open, studentId, toast]);
 
   const reset = () => {
     setHeadId("");
     setNote("");
+    setSelectedTerms([]);
     setDueDate(new Date().toISOString().slice(0, 10));
   };
+
+  const toggleTerm = (t: string) =>
+    setSelectedTerms((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
 
   const handleSubmit = async () => {
     if (!headId) {
@@ -70,6 +87,7 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
       _head_id: headId,
       _due_date: dueDate || null,
       _note: note.trim() || null,
+      _terms: selectedTerms.length ? selectedTerms : null,
     });
     setSaving(false);
 
@@ -77,9 +95,12 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
       toast({ title: "Could not add the charge", description: error.message, variant: "destructive" });
       return;
     }
+    const each = Number(selected?.amount || 0).toLocaleString("en-IN");
     toast({
       title: "Charge added",
-      description: `${selected?.name} of ₹${Number(selected?.amount || 0).toLocaleString("en-IN")} added to the ledger.`,
+      description: selectedTerms.length
+        ? `${selected?.name} of ₹${each} added to ${selectedTerms.length} term(s) — ₹${(Number(selected?.amount || 0) * selectedTerms.length).toLocaleString("en-IN")} total.`
+        : `${selected?.name} of ₹${each} added to the ledger.`,
     });
     reset();
     onOpenChange(false);
@@ -126,9 +147,54 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
                 Fixed by the super admin who enabled this head.
               </p>
 
-              <FieldShell label="Due Date">
-                <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
-              </FieldShell>
+              {/* Attach to existing collection terms so a recurring add-on is
+                  billed on the same dates as the rest of that quarter. */}
+              {terms.length > 0 && (
+                <div className="rounded-lg border border-input bg-muted/20 p-3">
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Apply to collection terms
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    Each ticked term gets its own charge, due on that term&rsquo;s existing date.
+                    Leave all unticked for a one-off charge with the date below.
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    {terms.map((t) => (
+                      <label
+                        key={t.term}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedTerms.includes(t.term)}
+                          onChange={() => toggleTerm(t.term)}
+                          className="h-3.5 w-3.5 shrink-0 accent-primary"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          {defaultFeeTermLabel(t.term)}
+                        </span>
+                        {t.due_date && (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {new Date(t.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                          </span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  {selectedTerms.length > 0 && selected && (
+                    <p className="mt-2 border-t border-border/60 pt-2 text-[11px] font-medium text-foreground">
+                      {selectedTerms.length} × ₹{Number(selected.amount).toLocaleString("en-IN")} = ₹
+                      {(Number(selected.amount) * selectedTerms.length).toLocaleString("en-IN")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {selectedTerms.length === 0 && (
+                <FieldShell label="Due Date">
+                  <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                </FieldShell>
+              )}
 
               <TextAreaField
                 value={note}

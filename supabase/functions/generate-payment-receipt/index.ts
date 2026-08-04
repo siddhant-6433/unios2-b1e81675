@@ -413,6 +413,7 @@ Deno.serve(async (req) => {
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
         payment_date, status, receipt_url, created_at, recorded_by, notes, application_id,
+        allocations,
         fee_codes:fee_code_id ( name ),
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
@@ -501,7 +502,20 @@ Deno.serve(async (req) => {
     // An ad-hoc charge collected at the counter names its actual head
     // (Sports, Transfer Certificate…) instead of the generic "Other Charges".
     const feeHeadName = (lp as { fee_codes?: { name?: string } | null }).fee_codes?.name;
-    rows.push(["Fee Head", feeHeadName || PAY_TYPE_LABELS[lp.type] || lp.type]);
+
+    // When the payment carried a per-head breakup, itemise it: the payer should
+    // be able to see exactly which head each rupee went against, not a single
+    // opaque total. Falls back to the one-line Fee Head for everything else.
+    const allocs = (lp as { allocations?: Array<{ label?: string; amount?: number }> | null }).allocations;
+    if (Array.isArray(allocs) && allocs.length > 0) {
+      rows.push(["Fee Head", `${allocs.length} head${allocs.length === 1 ? "" : "s"} — see breakup below`]);
+      for (const a of allocs) {
+        const amt = Number(a?.amount || 0);
+        rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);
+      }
+    } else {
+      rows.push(["Fee Head", feeHeadName || PAY_TYPE_LABELS[lp.type] || lp.type]);
+    }
     rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
 
     // Pre-admission token receipts must carry the adjustable-against-admission

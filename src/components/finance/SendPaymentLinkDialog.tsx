@@ -30,10 +30,14 @@ interface Props {
   onCreated?: () => void;
 }
 
+// Two modes, deliberately. "Collect Fee" shows the whole fee structure with
+// waivers applied and lets the cashier trim it; "Token Fee" is a free amount for
+// candidates who have no ledger yet. The legacy 'custom' purpose is still
+// accepted by the edge function but is no longer offered here — it was
+// indistinguishable from a token fee in practice.
 const PURPOSE_OPTIONS: { value: Purpose; label: string }[] = [
-  { value: "pre_admission_token", label: "Token fee (prior to admission)" },
-  { value: "fee_due", label: "Fee due" },
-  { value: "custom", label: "Custom amount" },
+  { value: "fee_due", label: "Collect Fee (from the fee structure)" },
+  { value: "pre_admission_token", label: "Token Fee (prior to admission)" },
 ];
 
 const CHANNEL_OPTIONS = [
@@ -47,7 +51,11 @@ export function SendPaymentLinkDialog({
   open, onOpenChange, leadId, studentId, defaultAmount, defaultPurpose, onCreated,
 }: Props) {
   const { toast } = useToast();
-  const [purpose, setPurpose] = useState<Purpose>(defaultPurpose || (studentId ? "fee_due" : "pre_admission_token"));
+  const initialPurpose: Purpose =
+    defaultPurpose === "custom" ? "pre_admission_token"
+      : defaultPurpose || (studentId ? "fee_due" : "pre_admission_token");
+  const [purpose, setPurpose] = useState<Purpose>(initialPurpose);
+  const collectingFee = purpose === "fee_due";
   const [amount, setAmount] = useState<string>(defaultAmount ? String(defaultAmount) : "");
   const [allocations, setAllocations] = useState<FeeAllocation[]>([]);
   const [note, setNote] = useState<string>("");
@@ -139,8 +147,9 @@ export function SendPaymentLinkDialog({
           <div className="rounded-lg border border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-300 space-y-1">
             <p className="font-semibold">How to use</p>
             <ol className="list-decimal list-inside space-y-0.5">
-              <li>Select a purpose — token fee, fee due, or custom amount</li>
-              <li>Enter the amount and set link expiry (default 7 days)</li>
+              <li><b>Collect Fee</b> — every outstanding head, waivers applied; untick or edit any head</li>
+              <li><b>Token Fee</b> — a free amount for candidates with no fee structure yet</li>
+              <li>Set link expiry (default 7 days)</li>
               <li>Choose to send via WhatsApp, Email, or just copy the link</li>
               <li>Click "Create Link" — the candidate receives a payment page</li>
             </ol>
@@ -148,7 +157,7 @@ export function SendPaymentLinkDialog({
         )}
 
         {createdUrl ? (
-          <div className="space-y-3 py-2">
+          <div className="min-w-0 space-y-3 py-2">
             <p className="text-sm text-muted-foreground">Payment link ready:</p>
             <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <span className="flex-1 truncate text-xs text-foreground">{createdUrl}</span>
@@ -158,10 +167,13 @@ export function SendPaymentLinkDialog({
             </div>
           </div>
         ) : (
-          <div className="space-y-3 py-2">
+          <div className="min-w-0 space-y-3 py-2">
             <SelectField
               value={purpose}
-              onValueChange={(v) => setPurpose(v as Purpose)}
+              onValueChange={(v) => {
+                setPurpose(v as Purpose);
+                if (v !== "fee_due") setAllocations([]);
+              }}
               options={PURPOSE_OPTIONS.map((p) => ({ value: p.value, label: p.label }))}
               label="Purpose"
               allowEmpty={false}
@@ -176,16 +188,23 @@ export function SendPaymentLinkDialog({
                 autoFocus
               />
               {usingBreakup && (
-                <p className="mt-1 text-[10px] text-muted-foreground">Total is set by the breakup below.</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Total is set by the fee heads below — untick a head or edit its amount to change it.
+                </p>
               )}
             </FieldShell>
-            <FeeHeadAllocationField
-              open={open}
-              studentId={studentId}
-              leadId={leadId}
-              value={allocations}
-              onChange={setAllocations}
-            />
+            {/* Collect Fee lists the whole structure pre-ticked; Token Fee is a
+                free amount with no breakup at all. */}
+            {collectingFee && (
+              <FeeHeadAllocationField
+                open={open}
+                studentId={studentId}
+                leadId={leadId}
+                value={allocations}
+                onChange={setAllocations}
+                variant="all"
+              />
+            )}
             <FieldShell label="Link valid for (days)">
               <Input
                 type="number" min="1" max="90" step="1"

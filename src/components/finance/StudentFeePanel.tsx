@@ -17,7 +17,7 @@ import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
   student: any;
@@ -93,6 +93,14 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     }
     setPendingWaivers(map);
   };
+
+  // Mirrors remove_fee_charge's server-side gate so we never render a button
+  // that answers with a raw privilege error. Removing a row edits THIS
+  // candidate's ledger only — the fee structure template is untouched — so the
+  // cashier may correct any row that has no money against it.
+  const canRemoveRow = (f: any) =>
+    Number(f.paid_amount) === 0 &&
+    (["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage"));
 
   const fetchCredit = async () => {
     const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
@@ -191,18 +199,31 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     onRefresh?.();
   };
 
-  const handleRemoveUnpaid = async (feeId: string) => {
-    const { error } = await supabase
-      .from("fee_ledger")
-      .delete()
-      .eq("id", feeId)
-      .eq("paid_amount", 0);
+  // Goes through remove_fee_charge: `authenticated` has no DELETE grant on
+  // fee_ledger, so the direct .delete() failed with a privilege error for
+  // every role — including the super_admin the RLS policy was written for.
+  const handleRemoveUnpaid = async (fee: any) => {
+    // Now that a structural row can be removed too, make the amount explicit
+    // before it disappears — a misclick on a 56,184 boarding row is expensive
+    // to notice later.
+    const label = fee.fee_codes?.name || fee.fee_codes?.code || "this fee";
+    const ok = window.confirm(
+      `Remove ${label} of ₹${Number(fee.total_amount).toLocaleString("en-IN")} from ` +
+      `${student?.name || "this candidate"}'s ledger?\n\n` +
+      `This affects only this candidate. The fee structure is unchanged.`,
+    );
+    if (!ok) return;
+
+    const { error } = await (supabase.rpc as any)("remove_fee_charge", {
+      _fee_ledger_id: fee.id, _reason: null,
+    });
 
     if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Could not remove", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Removed" });
       fetchFees();
+      onRefresh?.();
     }
   };
 
@@ -215,8 +236,22 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // rows are already adjacent) — lets tuition + boarding for a quarter read
   // together under one header instead of as a flat list.
   const feeGroups = useMemo(() => {
+    // The one-time charges (application fee, admission fee, security deposit)
+    // share a due date and live under two different terms, so a plain
+    // due_date/term sort interleaved them arbitrarily. Collapse them into one
+    // leading section, ordered application → admission → deposit, then the
+    // recurring collection terms in due-date order.
+    const oneTime = fees
+      .filter((f: any) => ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase()))
+      .sort((a: any, b: any) =>
+        oneTimeRank(a.fee_codes?.code, a.fee_codes?.name) -
+        oneTimeRank(b.fee_codes?.code, b.fee_codes?.name));
+
     const groups: { term: string; rows: any[] }[] = [];
+    if (oneTime.length) groups.push({ term: ONE_TIME_GROUP, rows: oneTime });
+
     for (const f of fees) {
+      if (ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase())) continue;
       const last = groups[groups.length - 1];
       if (last && last.term === f.term) last.rows.push(f);
       else groups.push({ term: f.term, rows: [f] });
@@ -362,7 +397,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               <Fragment key={g.term}>
                 <tr className="bg-muted/40 border-b border-border">
                   <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
-                    {defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
+                    {g.term === ONE_TIME_GROUP
+                      ? "One-time Fees"
+                      : defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
                   </td>
                   <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
@@ -411,11 +448,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                               Collect
                             </button>
                           )}
-                          {Number(f.paid_amount) === 0 && (
+                          {canRemoveRow(f) && (
                             <button
-                              onClick={() => handleRemoveUnpaid(f.id)}
+                              onClick={() => handleRemoveUnpaid(f)}
                               className="text-muted-foreground hover:text-destructive transition-colors"
-                              title="Remove unpaid item"
+                              title="Remove from this candidate's ledger"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
