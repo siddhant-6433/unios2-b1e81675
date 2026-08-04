@@ -62,9 +62,9 @@ const SUPPORT_FIELD: Record<PaymentContext, keyof PaymentGateway> = {
 };
 
 export const DEFAULT_GATEWAY_PRIORITY: Record<string, number> = {
-  razorpay: 10,
-  icici: 20,
-  easebuzz: 30,
+  easebuzz: 10,
+  razorpay: 20,
+  icici: 30,
   cashfree: 40,
 };
 
@@ -283,8 +283,8 @@ export function useScopedPaymentGateways(args: UseScopedGatewaysArgs) {
   const fallbackGateways = useMemo<PaymentGateway[]>(() => {
     if (gateways.length > 0 || loading) return gateways;
     return [{
-      gateway: args.context === "alumni_service" ? "easebuzz" : "razorpay",
-      display_name: args.context === "alumni_service" ? "EaseBuzz" : "Razorpay",
+      gateway: "easebuzz",
+      display_name: "EaseBuzz",
       is_staff_pilot_only: false,
       priority: 999,
     }];
