@@ -31,10 +31,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok");
   try {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    if ((req.headers.get("Authorization") || "") !== `Bearer ${serviceKey}`) return json({ error: "Unauthorized" }, 401);
-    if (!zohoConfigured()) return json({ error: "Zoho not configured" }, 400);
-
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey, { auth: { persistSession: false } });
+    // Accept the runtime env key OR the key pg_cron sends (stored in _app_config,
+    // which can differ from the injected env key).
+    const authHeader = req.headers.get("Authorization") || "";
+    const { data: cfg } = await admin.from("_app_config").select("value").eq("key", "service_role_key").maybeSingle();
+    const allowed = [`Bearer ${serviceKey}`];
+    if (cfg?.value) allowed.push(`Bearer ${cfg.value}`);
+    if (!allowed.includes(authHeader)) return json({ error: "Unauthorized" }, 401);
+    if (!zohoConfigured()) return json({ error: "Zoho not configured" }, 400);
     const { data: pending } = await admin.from("consultant_payouts")
       .select("id, zoho_bill_id")
       .not("zoho_bill_id", "is", null)
