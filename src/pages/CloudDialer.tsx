@@ -274,6 +274,10 @@ export default function CloudDialer() {
   const [autoNextTimer, setAutoNextTimer] = useState(0);
   const [followupDate, setFollowupDate] = useState("");
   const [followupTime, setFollowupTime] = useState("");
+  // Free-text note the counsellor jots during/after any call. Written straight
+  // to call_logs.notes (surfaces as the "Notes" column in the Calling Report);
+  // falls back to the auto "Cloud Dialer: <disposition>" summary when blank.
+  const [callNote, setCallNote] = useState("");
   const [visitDate, setVisitDate] = useState("");
   const [visitTime, setVisitTime] = useState("10:00");
   const [futureSession, setFutureSession] = useState("2027-28");
@@ -1033,6 +1037,11 @@ export default function CloudDialer() {
     });
   };
 
+  // The typed note wins; otherwise fall back to the auto disposition summary so
+  // a row always carries some context.
+  const composeCallNote = (disposition: string, auto = false) =>
+    callNote.trim() || `Cloud Dialer: ${disposition.replace("_", " ")}${auto ? " (auto)" : ""}`;
+
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
@@ -1060,7 +1069,7 @@ export default function CloudDialer() {
         p_user_id:       user?.id || null,
         p_disposition:   disposition,
         p_duration:      duration,
-        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_notes:         composeCallNote(disposition),
         p_source:        "manual",
         p_recording_url: null,
         p_call_source:   "cloud_dialer",
@@ -1072,7 +1081,7 @@ export default function CloudDialer() {
         p_user_id:       user?.id || null,
         p_disposition:   disposition,
         p_duration:      duration,
-        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_notes:         composeCallNote(disposition),
         p_source:        "manual",
         p_recording_url: null,
         p_call_source:   "cloud_dialer",
@@ -1130,7 +1139,7 @@ export default function CloudDialer() {
         p_user_id:       user?.id || null,
         p_disposition:   disposition,
         p_duration:      callState.elapsed,
-        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_notes:         composeCallNote(disposition),
         p_source:        "manual",
         p_recording_url: null,
         p_call_source:   "cloud_dialer",
@@ -1142,7 +1151,7 @@ export default function CloudDialer() {
         p_user_id:       user?.id || null,
         p_disposition:   disposition,
         p_duration:      callState.elapsed,
-        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_notes:         composeCallNote(disposition),
         p_source:        "manual",
         p_recording_url: null,
         p_call_source:   "cloud_dialer",
@@ -1258,7 +1267,7 @@ export default function CloudDialer() {
         p_user_id:       user?.id || null,
         p_disposition:   disposition,
         p_duration:      callState.elapsed,
-        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")} (auto)`,
+        p_notes:         composeCallNote(disposition, true),
         p_source:        "manual",
         p_recording_url: null,
         p_call_source:   "cloud_dialer",
@@ -1273,6 +1282,7 @@ export default function CloudDialer() {
     setAutoNextTimer(0);
     preDispositionRef.current = null;
     cancellingRef.current = false;
+    setCallNote("");
     toast({ title, description: "No disposition recorded and no call metrics changed." });
   };
 
@@ -1406,6 +1416,7 @@ export default function CloudDialer() {
     setAutoNextTimer(0);
     preDispositionRef.current = null;
     setAllowPostDispositionFollowup(true);
+    setCallNote("");
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
     // Refresh the list banner only — refetching the queue itself here would
@@ -1827,6 +1838,13 @@ export default function CloudDialer() {
                       </div>
                     </div>
                   )}
+                  <textarea
+                    value={callNote}
+                    onChange={e => setCallNote(e.target.value)}
+                    rows={2}
+                    placeholder="Call note (optional) — saved with the disposition"
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-y"
+                  />
                   <div className="grid grid-cols-2 gap-2">
                     {CONNECTED_DISPOSITIONS.map(d => (
                       <button key={d.value} onClick={() => dispoOnClick(d.value)}
@@ -2475,6 +2493,13 @@ export default function CloudDialer() {
                           </div>
                         </div>
                       )}
+                      <textarea
+                        value={callNote}
+                        onChange={e => setCallNote(e.target.value)}
+                        rows={2}
+                        placeholder="Call note (optional) — saved with the disposition"
+                        className="mb-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-xs resize-y"
+                      />
                       <div className="flex flex-wrap gap-1.5">
                         {CONNECTED_DISPOSITIONS.map(d => (
                           <button key={d.value}

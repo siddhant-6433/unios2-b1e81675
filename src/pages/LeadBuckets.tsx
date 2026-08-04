@@ -5,6 +5,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
+import { buildListName } from "@/lib/leadListName";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
@@ -262,6 +263,19 @@ export default function LeadBuckets() {
   const [savingList, setSavingList] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
+
+  // Prefill the canonical list name; the user can edit before saving. Course =
+  // the active course filter (else "Mixed"); a counsellor's own list is prefixed
+  // with their name (non-editable convention). Due date is chosen later at assign.
+  const openSaveList = (scope: "selected" | "filtered") => {
+    setListScope(scope);
+    setNewListName(buildListName({
+      course: courseFilter !== "all" ? courseFilter : "Mixed",
+      source: scope === "selected" ? "manual" : "filter",
+      counsellorPrefix: role === "counsellor" ? (profile?.display_name || null) : null,
+    }));
+    setShowSaveList(true);
+  };
 
   const fetchCounts = async () => {
     // Single RPC call returns all (bucket_key, source_key, n) rows in one
@@ -879,7 +893,7 @@ export default function LeadBuckets() {
             {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected
           </span>
           <div className="ml-auto flex gap-2">
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => { setListScope("selected"); setShowSaveList(true); }}>
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => openSaveList("selected")}>
               <ListPlus className="h-4 w-4" />
               Save as List
             </Button>
@@ -1031,7 +1045,7 @@ export default function LeadBuckets() {
           size="sm"
           className="h-9 px-3 text-xs gap-1.5 ml-auto"
           disabled={loadedFilteredCount === 0}
-          onClick={() => { setListScope("filtered"); setShowSaveList(true); }}
+          onClick={() => openSaveList("filtered")}
           title="Save the current filtered view as a reusable list for bulk WhatsApp/email"
         >
           <ListPlus className="h-3.5 w-3.5" />

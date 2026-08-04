@@ -3,8 +3,9 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
-import { useCallListOverview } from "@/components/dashboard/CallListProgressPanel";
+import { useCallListOverview, type CallListOverviewRow } from "@/components/dashboard/CallListProgressPanel";
 import { describeFilterDefinition, type DynamicListFilterDefinition } from "@/lib/dynamicListFilters";
+import { buildListName, dominantCourse } from "@/lib/leadListName";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +21,7 @@ import {
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown, Lock,
-  Megaphone,
+  Megaphone, MoreHorizontal, Download,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -70,6 +71,11 @@ interface LeadList {
   member_count: number;
   filters_snapshot: Record<string, unknown> | null;
   created_at: string;
+  created_by?: string | null;
+  /** Set to 'calling' once the list is assigned out as a priority call list. */
+  purpose?: "marketing" | "calling";
+  is_active?: boolean;
+  due_date?: string | null;
   /** static = frozen set. dynamic = re-derived from filter_definition on a cron. */
   list_type?: "static" | "dynamic";
   filter_definition?: DynamicListFilterDefinition | null;
@@ -514,6 +520,13 @@ export default function LeadLists() {
   const [reportProgress, setReportProgress] = useState<CallListProgress | null>(null);
   // Click an outcome chip to see only those leads.
   const [reportDispositionFilter, setReportDispositionFilter] = useState<string | null>(null);
+  // Spin a fresh calling list out of leads with chosen dispositions.
+  const [followupOpen, setFollowupOpen] = useState(false);
+  const [followupDispositions, setFollowupDispositions] = useState<string[]>([]);
+  const [followupDueDate, setFollowupDueDate] = useState("");
+  const [followupIdentifier, setFollowupIdentifier] = useState("");
+  const [followupCounsellorIds, setFollowupCounsellorIds] = useState<string[]>([]);
+  const [followupCreating, setFollowupCreating] = useState(false);
   // One aggregated RPC for every active call list — cheaper and RLS-safe
   // compared with counting lead_list_members client-side per row.
   const { data: callListOverview = [] } = useCallListOverview({ enabled: role !== "counsellor" });
@@ -521,6 +534,46 @@ export default function LeadLists() {
     () => Object.fromEntries(callListOverview.map((l) => [l.id, l])),
     [callListOverview],
   );
+
+  // ── Filter / sort controls ──────────────────────────────────────────────
+  const [listFilter, setListFilter] = useState<"all" | "calling" | "mine">("all");
+  const [counsellorFilter, setCounsellorFilter] = useState<string>("");
+  const [sortKey, setSortKey] = useState<"created" | "due" | "assigned" | "members" | "name">("created");
+
+  // Counsellors that appear on any active calling list — drives the filter.
+  const counsellorOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    callListOverview.forEach((o) => o.by_counsellor.forEach((c) => m.set(c.counsellor_id, c.counsellor_name)));
+    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [callListOverview]);
+
+  const displayLists = useMemo(() => {
+    let rows = lists.map((list) => ({ list, ov: callProgressByList[list.id] as CallListOverviewRow | undefined }));
+    if (listFilter === "calling") rows = rows.filter((r) => r.list.purpose === "calling" && r.list.is_active);
+    if (listFilter === "mine") rows = rows.filter((r) => r.list.created_by && r.list.created_by === profile?.id);
+    if (counsellorFilter) rows = rows.filter((r) => r.ov?.by_counsellor.some((c) => c.counsellor_id === counsellorFilter));
+    const time = (v: string | null | undefined) => (v ? new Date(v).getTime() : null);
+    rows.sort((a, b) => {
+      switch (sortKey) {
+        case "name": return a.list.name.localeCompare(b.list.name);
+        case "members": return b.list.member_count - a.list.member_count;
+        case "due": { // soonest due first, lists without a due date last
+          const da = time(a.ov?.due_date ?? a.list.due_date), db = time(b.ov?.due_date ?? b.list.due_date);
+          if (da === null) return db === null ? 0 : 1;
+          if (db === null) return -1;
+          return da - db;
+        }
+        case "assigned": { // most recently assigned first
+          const da = time(a.ov?.assigned_at), db = time(b.ov?.assigned_at);
+          if (da === null) return db === null ? 0 : 1;
+          if (db === null) return -1;
+          return db - da;
+        }
+        default: return time(b.list.created_at)! - time(a.list.created_at)!;
+      }
+    });
+    return rows;
+  }, [lists, callProgressByList, listFilter, counsellorFilter, sortKey, profile?.id]);
 
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
@@ -531,6 +584,10 @@ export default function LeadLists() {
   const isTeamLeader = useIsTeamLeader();
   const canAssignLists = role === "super_admin" || role === "admission_head"
     || role === "principal" || isTeamLeader;
+  // A counsellor can put a list on their OWN dialer. loadAssignableCounsellors
+  // returns only themselves, and assign_lead_list_round_robin restricts a plain
+  // counsellor to self — so this button just needs to be reachable for them.
+  const canSelfAssign = canAssignLists || role === "counsellor";
 
   const fetchLists = async () => {
     if (isAcademicPartnerPortalRole(role)) {
@@ -910,6 +967,10 @@ export default function LeadLists() {
     setAssignPreview(null);
     setAssignOpen(true);
     await loadAssignableCounsellors();
+    // A pure counsellor can only assign themselves — preselect so it's one click.
+    if (!canAssignLists && role === "counsellor" && profile?.id) {
+      setSelectedCounsellorIds([profile.id]);
+    }
   };
 
   // Effective length, recomputed whenever the include-terminal choice flips, so
@@ -991,6 +1052,129 @@ export default function LeadLists() {
       setAssignmentReport(((data as any[]) || []) as LeadListAssignmentReportRow[]);
     }
     setReportLoading(false);
+  };
+
+  const [reportExporting, setReportExporting] = useState(false);
+
+  // Full-list CSV — pages the report RPC 1000 rows at a time (the RPC hard-caps
+  // per call; see project-supabase-1000-row-cap) so large lists aren't silently
+  // truncated. Respects the active disposition chip.
+  const downloadCallingReportCsv = async () => {
+    if (!reportList) return;
+    setReportExporting(true);
+    try {
+      const PAGE = 1000;
+      const all: LeadListAssignmentReportRow[] = [];
+      for (let offset = 0; ; offset += PAGE) {
+        const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
+          _list_id: reportList.id, _batch_id: null, _limit: PAGE, _offset: offset,
+        });
+        if (error) throw error;
+        const page = ((data as any[]) || []) as LeadListAssignmentReportRow[];
+        all.push(...page);
+        if (page.length < PAGE) break;
+      }
+      const rows = reportDispositionFilter
+        ? all.filter((r) => (r.latest_call_disposition || "unrecorded") === reportDispositionFilter)
+        : all;
+      const dt = (v: string | null) => (v ? new Date(v).toLocaleString("en-IN") : "");
+      const header = ["Lead", "Phone", "Course", "Campus", "Counsellor", "Assigned At", "Stage", "Latest Disposition", "Latest Call At", "Notes"];
+      const cell = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const body = rows.map((r) => [
+        r.lead_name || "", r.lead_phone || "", r.course_name || "", r.campus_name || "",
+        r.assigned_to_name || "", dt(r.assigned_at), (r.lead_stage || "").replace(/_/g, " "),
+        (r.latest_call_disposition || "").replace(/_/g, " "), dt(r.latest_call_at), r.latest_call_response || "",
+      ]);
+      const csv = [header, ...body].map((cols) => cols.map(cell).join(",")).join("\r\n");
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${reportList.name.replace(/[^\w -]+/g, "_")} - calling report.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ title: "CSV export failed", description: e?.message, variant: "destructive" });
+    } finally {
+      setReportExporting(false);
+    }
+  };
+
+  // Dispositions actually present in the loaded report — the follow-up picker.
+  const reportDispositionsPresent = useMemo(() => {
+    const counts = new Map<string, number>();
+    assignmentReport.forEach((r) => {
+      const d = r.latest_call_disposition || "unrecorded";
+      counts.set(d, (counts.get(d) ?? 0) + 1);
+    });
+    return [...counts].sort((a, b) => b[1] - a[1]);
+  }, [assignmentReport]);
+
+  const followupLeadIds = useMemo(() => {
+    const set = new Set(followupDispositions);
+    return Array.from(new Set(
+      assignmentReport
+        .filter((r) => set.has(r.latest_call_disposition || "unrecorded"))
+        .map((r) => r.lead_id),
+    ));
+  }, [assignmentReport, followupDispositions]);
+
+  const openFollowupFromReport = async () => {
+    setFollowupDispositions(reportDispositionFilter ? [reportDispositionFilter] : []);
+    setFollowupDueDate("");
+    setFollowupIdentifier("");
+    setFollowupCounsellorIds([]);
+    setFollowupOpen(true);
+    await loadAssignableCounsellors();
+  };
+
+  const toggleFollowupDisposition = (d: string) =>
+    setFollowupDispositions((cur) => cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]);
+  const toggleFollowupCounsellor = (id: string) =>
+    setFollowupCounsellorIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+
+  const createFollowupList = async () => {
+    if (!reportList || followupLeadIds.length === 0 || followupCounsellorIds.length === 0) return;
+    setFollowupCreating(true);
+    try {
+      const set = new Set(followupDispositions);
+      const rows = assignmentReport.filter((r) => set.has(r.latest_call_disposition || "unrecorded"));
+      const course = dominantCourse(rows.map((r) => r.course_name));
+      const name = buildListName({
+        course,
+        dueDate: followupDueDate || null,
+        source: "followup",
+        identifier: followupIdentifier.trim() || null,
+      });
+      const { data: list, error: listErr } = await supabase
+        .from("lead_lists" as any)
+        .insert({ name, source: "filter", description: `Follow-up from “${reportList.name}” — ${followupLeadIds.length} leads` })
+        .select("id")
+        .single();
+      if (listErr || !list) throw listErr || new Error("Could not create list");
+      const listId = (list as any).id;
+      const members = followupLeadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+      for (let i = 0; i < members.length; i += 500) {
+        const { error } = await supabase.from("lead_list_members" as any).insert(members.slice(i, i + 500));
+        if (error) throw error;
+      }
+      const { error: assignErr } = await supabase.rpc("assign_lead_list_round_robin" as any, {
+        _list_id: listId,
+        _counsellor_ids: followupCounsellorIds,
+        _only_unassigned: false,
+        _priority_note: `Follow-up from “${reportList.name}”`,
+        _due_date: followupDueDate || null,
+        _include_terminal: true, // follow-ups often re-engage cold / not-interested leads
+      });
+      if (assignErr) throw assignErr;
+      toast({ title: "Follow-up list created", description: `${followupLeadIds.length} leads → ${name}` });
+      setFollowupOpen(false);
+      await fetchLists();
+    } catch (e: any) {
+      toast({ title: "Could not create follow-up list", description: e?.message, variant: "destructive" });
+    } finally {
+      setFollowupCreating(false);
+    }
   };
 
   const handleSendWhatsApp = async () => {
@@ -1389,10 +1573,52 @@ export default function LeadLists() {
         </Card>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
-          <div className="flex flex-col gap-1 border-b border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 border-b border-border bg-card px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold text-foreground">Lists</p>
               <p className="text-xs text-muted-foreground">Use Marketing Hub to initiate campaigns; use this page to maintain and assign lists.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-lg border border-border p-0.5">
+                {([
+                  ["all", "All"],
+                  ["calling", "Calling"],
+                  ["mine", "My lists"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setListFilter(key)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      listFilter === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {counsellorOptions.length > 0 && (
+                <select
+                  value={counsellorFilter}
+                  onChange={(e) => setCounsellorFilter(e.target.value)}
+                  className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                >
+                  <option value="">All counsellors</option>
+                  {counsellorOptions.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as typeof sortKey)}
+                className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+              >
+                <option value="created">Sort: Created</option>
+                <option value="due">Sort: Due date</option>
+                <option value="assigned">Sort: Date assigned</option>
+                <option value="members">Sort: Members</option>
+                <option value="name">Sort: Name</option>
+              </select>
             </div>
           </div>
           <table className="w-full text-sm">
@@ -1401,13 +1627,23 @@ export default function LeadLists() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Source</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Members</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Due</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Created</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {lists.map((list) => {
+              {displayLists.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No lists match this filter.
+                  </td>
+                </tr>
+              )}
+              {displayLists.map(({ list, ov }) => {
                 const badge = SOURCE_BADGE[list.source];
+                const dueDate = ov?.due_date ?? list.due_date ?? null;
+                const overdue = ov?.overdue ?? false;
                 return (
                   <tr key={list.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
@@ -1475,6 +1711,18 @@ export default function LeadLists() {
                         </div>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-xs">
+                      {dueDate ? (
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${
+                          overdue ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
+                        }`}>
+                          {new Date(dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                          {overdue && " · overdue"}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {new Date(list.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
@@ -1483,32 +1731,48 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" /> Members
                         </Button>
-                        {list.list_type === "dynamic" && canAssignLists && (
-                          <Button size="sm" variant="outline" className="gap-1.5 h-8"
-                            onClick={() => refreshDynamicList(list)} disabled={refreshingListId === list.id}>
-                            {refreshingListId === list.id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <RefreshCw className="h-3.5 w-3.5" />} Refresh
-                          </Button>
-                        )}
-                        {canAssignLists && (
+                        {canSelfAssign && (
                           <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
-                            <Users className="h-3.5 w-3.5" /> Assign
+                            <Users className="h-3.5 w-3.5" /> {canAssignLists ? "Assign" : "Call this"}
                           </Button>
                         )}
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssignmentReport(list)}>
                           <Phone className="h-3.5 w-3.5" /> Calling Report
                         </Button>
-                        <Button asChild size="sm" variant="outline" className="gap-1.5 h-8">
-                          <Link to={`/marketing?listId=${list.id}`}>
-                            <Megaphone className="h-3.5 w-3.5" /> New Campaign
-                          </Link>
-                        </Button>
-                        {canDeleteLists && (
-                          <Button size="sm" variant="ghost" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => setDeleteList(list)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
+                        {/* Secondary actions collapse into an overflow menu so the row
+                            never clips the way "New Campaign" used to. */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link to={`/marketing?listId=${list.id}`}>
+                                <Megaphone className="mr-2 h-4 w-4" /> New Campaign
+                              </Link>
+                            </DropdownMenuItem>
+                            {list.list_type === "dynamic" && canAssignLists && (
+                              <DropdownMenuItem
+                                onSelect={(e) => { e.preventDefault(); refreshDynamicList(list); }}
+                                disabled={refreshingListId === list.id}
+                              >
+                                {refreshingListId === list.id
+                                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  : <RefreshCw className="mr-2 h-4 w-4" />} Refresh members
+                              </DropdownMenuItem>
+                            )}
+                            {canDeleteLists && (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onSelect={(e) => { e.preventDefault(); setDeleteList(list); }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete list
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </td>
                   </tr>
@@ -2134,7 +2398,21 @@ export default function LeadLists() {
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="max-w-6xl">
           <DialogHeader>
-            <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
+            <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
+              <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
+              <div className="flex items-center gap-2">
+                {canAssignLists && assignmentReport.length > 0 && (
+                  <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={openFollowupFromReport}>
+                    <Phone className="h-3.5 w-3.5" /> Create follow-up list
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" className="gap-1.5 h-8"
+                  onClick={downloadCallingReportCsv} disabled={reportExporting || assignmentReport.length === 0}>
+                  {reportExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Download CSV
+                </Button>
+              </div>
+            </div>
           </DialogHeader>
           {reportProgress && reportProgress.total > 0 && (
             <div className="space-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3">
@@ -2256,6 +2534,91 @@ export default function LeadLists() {
               </table>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create follow-up list from selected dispositions */}
+      <Dialog open={followupOpen} onOpenChange={setFollowupOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New follow-up list — {reportList?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Include leads with disposition</p>
+              <div className="flex flex-wrap gap-1.5">
+                {reportDispositionsPresent.map(([d, n]) => (
+                  <button
+                    key={d}
+                    onClick={() => toggleFollowupDisposition(d)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                      followupDispositions.includes(d)
+                        ? "border-primary bg-primary/15 text-primary"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {d.replace(/_/g, " ")} {n}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">{followupLeadIds.length} leads selected</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground">Due date</label>
+                <input
+                  type="date"
+                  value={followupDueDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setFollowupDueDate(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground">Identifier (optional)</label>
+                <input
+                  type="text"
+                  value={followupIdentifier}
+                  placeholder="e.g. Retry batch"
+                  onChange={(e) => setFollowupIdentifier(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assign to counsellors</p>
+              <div className="max-h-44 overflow-auto rounded-md border border-border">
+                {counsellors.length === 0 ? (
+                  <div className="p-3 text-center text-xs text-muted-foreground">Loading counsellors…</div>
+                ) : counsellors.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => toggleFollowupCounsellor(c.id)}
+                    className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/40"
+                  >
+                    <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                      followupCounsellorIds.includes(c.id) ? "border-primary bg-primary text-primary-foreground" : "border-input"
+                    }`}>
+                      {followupCounsellorIds.includes(c.id) && <Check className="h-3 w-3" />}
+                    </span>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFollowupOpen(false)}>Cancel</Button>
+            <Button
+              onClick={createFollowupList}
+              disabled={followupCreating || followupLeadIds.length === 0 || followupCounsellorIds.length === 0}
+            >
+              {followupCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create &amp; assign
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
