@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { StudentAvatar } from "@/components/ui/student-avatar";
 import {
   defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
 } from "@/lib/feeTermLabels";
@@ -24,6 +25,7 @@ const tabs = [
 interface StudentInfo {
   id: string;
   name: string;
+  photo_url: string | null;
   admission_no: string;
   course_id: string | null;
   campus_id: string | null;
@@ -149,7 +151,7 @@ export default function StudentPortal() {
 
     const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("user_id", user?.id)
       .limit(1)
       .single();
@@ -160,6 +162,7 @@ export default function StudentPortal() {
       setStudent({
         id: studentData.id,
         name: studentData.name,
+        photo_url: (studentData as any).photo_url || null,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
         course_id: studentData.course_id || null,
         campus_id: studentData.campus_id || null,
@@ -367,9 +370,11 @@ export default function StudentPortal() {
       {/* Student Info Card */}
       <div className="rounded-2xl bg-white border border-gray-200 p-5 mb-6">
         <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-bold shrink-0">
-            {student.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-          </div>
+          <StudentAvatar
+            src={student.photo_url}
+            name={student.name}
+            className="h-12 w-12 rounded-full text-sm"
+          />
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold text-gray-900 truncate">{student.name}</h2>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-0.5">

@@ -16,6 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StudentFeePanel } from "./StudentFeePanel";
 import { LeadFeeLedger } from "./LeadFeeLedger";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
+import { StudentAvatar } from "@/components/ui/student-avatar";
 import {
   Search, Loader2, IndianRupee, Link as LinkIcon, X, User, GraduationCap, Copy,
 } from "lucide-react";
@@ -270,6 +271,14 @@ export function CashierConsole() {
           {/* Header strip */}
           <Card className="border-border/60 shadow-none">
             <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 p-4">
+              {/* The face, so the cashier can confirm they have the right
+                  candidate before taking money. Leads carry no photo — they
+                  fall back to initials. */}
+              <StudentAvatar
+                src={person.photo_url}
+                name={person.name}
+                className="h-12 w-12 rounded-xl"
+              />
               <Field label="Name" value={person.name} strong />
               <Field label="Father's Name" value={person.father_name} />
               <Field
