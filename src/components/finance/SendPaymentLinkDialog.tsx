@@ -33,7 +33,8 @@ interface Props {
    * rows. Shown read-only; the picker is skipped.
    */
   defaultAllocations?: FeeAllocation[] | null;
-  onCreated?: () => void;
+  /** Receives the created pay URL so callers can keep it on screen. */
+  onCreated?: (payUrl?: string) => void;
 }
 
 // Two modes, deliberately. "Collect Fee" shows the whole fee structure with
@@ -135,7 +136,7 @@ export function SendPaymentLinkDialog({
       title: "Payment link created",
       description: channel === "none" ? "Copy the link to share it." : "Link created and sent to the candidate.",
     });
-    onCreated?.();
+    onCreated?.(data.pay_url);
   };
 
   const copyUrl = async () => {

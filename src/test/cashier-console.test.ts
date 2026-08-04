@@ -30,6 +30,7 @@ const sendOnDemandMigration = readMigration("login_link_send_on_demand");
 const gatewaySettlement = read("supabase/functions/_shared/gateway-settlement.ts");
 const counsellorMigration = readMigration("counsellor_fee_ledger_and_login_link");
 const searchScopeMigration = readMigration("cashier_search_scope_and_active");
+const adhocWaiverMigration = readMigration("offer_waiver_skips_adhoc_heads");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -713,5 +714,45 @@ describe("counter search scope", () => {
 
   it("badges a surfaced inactive student instead of calling it just 'Student'", () => {
     expect(cashierConsole).toContain('h.stage !== "active"');
+  });
+});
+
+describe("offer waivers stay on the structure they were granted against", () => {
+  it("skips ad-hoc heads when spreading a term waiver", () => {
+    // A Q4 offer waiver was landing 5,767 on a meal add-on nobody discounted,
+    // and diluting the tuition heads it was actually granted against.
+    const marker = "NOT EXISTS (SELECT 1 FROM optional_fee_heads o WHERE o.fee_code_id = fl.fee_code_id)";
+    // Both the cap-sum and the distribution loop must exclude them, or the
+    // shares stop summing to the waiver.
+    expect(adhocWaiverMigration.split(marker).length - 1).toBe(2);
+  });
+
+  it("still honours a waiver requested ON an ad-hoc row", () => {
+    // The per-row concessions block is untouched: asking for a waiver on the
+    // meal charge means the meal charge.
+    const perRow = adhocWaiverMigration.slice(
+      adhocWaiverMigration.indexOf("UPDATE fee_ledger fl"),
+      adhocWaiverMigration.indexOf("SELECT id INTO v_offer"),
+    );
+    expect(perRow).toContain("WHERE c.fee_ledger_id = fl.id");
+    expect(perRow).not.toContain("optional_fee_heads");
+  });
+
+  it("recomputes the students already carrying a leaked share", () => {
+    expect(adhocWaiverMigration).toContain("PERFORM public.sync_fee_ledger_concessions(r.student_id);");
+  });
+});
+
+describe("a created payment link stays on screen", () => {
+  it("is handed back to the caller instead of dying with the dialog", () => {
+    expect(sendLinkDialog).toContain("onCreated?: (payUrl?: string) => void;");
+    expect(sendLinkDialog).toContain("onCreated?.(data.pay_url);");
+  });
+
+  it("is shown with a copy control on both the counter and the student page", () => {
+    expect(studentFeePanel).toContain("setPayLink(payUrl)");
+    expect(studentFeePanel).toContain("Payment link copied");
+    expect(cashierConsole).toContain("setPayLink(payUrl)");
+    expect(cashierConsole).toContain("Payment link copied");
   });
 });

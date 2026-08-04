@@ -17,7 +17,7 @@ import { StudentFeePanel } from "./StudentFeePanel";
 import { LeadFeeLedger } from "./LeadFeeLedger";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import {
-  Search, Loader2, IndianRupee, Link as LinkIcon, X, User, GraduationCap,
+  Search, Loader2, IndianRupee, Link as LinkIcon, X, User, GraduationCap, Copy,
 } from "lucide-react";
 
 type Hit = {
@@ -56,6 +56,7 @@ export function CashierConsole() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [linkOpen, setLinkOpen] = useState(false);
+  const [payLink, setPayLink] = useState<string | null>(null);
 
   const canCollect = ["super_admin", "accountant"].includes(role || "");
   const debounce = useRef<number | null>(null);
@@ -310,6 +311,25 @@ export function CashierConsole() {
             </div>
           )}
 
+          {/* The created link, kept on screen so it can be pasted anywhere. */}
+          {payLink && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+              <LinkIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Payment link</span>
+              <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{payLink}</code>
+              <button
+                onClick={() => { navigator.clipboard?.writeText(payLink); toast({ title: "Payment link copied" }); }}
+                className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                title="Copy link"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => setPayLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Ledger */}
           {target.kind === "student"
             ? <StudentFeePanel key={refreshKey} student={target.student} onRefresh={refresh} />
@@ -321,7 +341,7 @@ export function CashierConsole() {
             leadId={leadId || undefined}
             studentId={target.student?.id || undefined}
             defaultPurpose={target.kind === "student" ? "fee_due" : "pre_admission_token"}
-            onCreated={refresh}
+            onCreated={(payUrl) => { if (payUrl) setPayLink(payUrl); refresh(); }}
           />
         </>
       )}

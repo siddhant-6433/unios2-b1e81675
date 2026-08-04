@@ -68,6 +68,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   >(null);
   const [issuingLink, setIssuingLink] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
+  const [payLink, setPayLink] = useState<string | null>(null);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
@@ -491,8 +492,31 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         )}
       </div>
 
-      {/* The minted link. Nothing has been messaged yet — the cashier decides
-          whether to read it out, copy it, or send it on WhatsApp. */}
+      {/* The payment link just created, kept on screen after the dialog closes
+          so it can be copied into any channel. */}
+      {payLink && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+          <LinkIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Payment link</span>
+          <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{payLink}</code>
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(payLink);
+              toast({ title: "Payment link copied" });
+            }}
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            title="Copy link"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => setPayLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* The minted login link. Nothing has been messaged yet — the cashier
+          decides whether to read it out, copy it, or send it on WhatsApp. */}
       {loginLink && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
           <LogIn className="h-3.5 w-3.5 shrink-0 text-success" />
@@ -867,7 +891,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           : (totalBalance > 0 ? Math.round(totalBalance) : null)}
         defaultAllocations={linkAllocations}
         defaultPurpose="fee_due"
-        onCreated={() => { setLinkAllocations(null); fetchPayments(); onRefresh?.(); }}
+        onCreated={(payUrl) => {
+          // Keep the link on screen after the dialog closes — the cashier
+          // often needs to paste it somewhere the send channels don't cover.
+          if (payUrl) setPayLink(payUrl);
+          setLinkAllocations(null); setPicked({}); fetchPayments(); onRefresh?.();
+        }}
       />
 
       <ApplyCreditDialog
