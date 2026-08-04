@@ -1,14 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import {
+  defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
+} from "@/lib/feeTermLabels";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
   AlertCircle, CheckCircle, Clock, CreditCard, FileText,
+  // Aliased: `Receipt` is the payment-row type in this file.
+  Receipt as ReceiptIcon, ChevronDown,
 } from "lucide-react";
 
 const tabs = [
@@ -33,11 +37,22 @@ interface StudentInfo {
 interface FeeItem {
   id: string;
   fee_code_name: string;
+  fee_code: string | null;
+  term: string;
   total_amount: number;
   paid_amount: number;
   balance: number;
+  concession: number;
   status: string;
   due_date: string;
+}
+
+interface Receipt {
+  receipt_no: string | null;
+  amount: number;
+  type: string;
+  payment_date: string | null;
+  receipt_url: string | null;
 }
 
 interface AttendanceSummary {
@@ -61,8 +76,12 @@ export default function StudentPortal() {
   // fallback (due total + receipts only — no structure/installments).
   const [hiddenFee, setHiddenFee] = useState<{
     due_total: number;
-    receipts: { receipt_no: string | null; amount: number; type: string; payment_date: string | null; receipt_url: string | null }[];
+    receipts: Receipt[];
   } | null>(null);
+  // Every confirmed payment on file, for the "what have I already paid" question
+  // the ledger alone can't answer.
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [showReceipts, setShowReceipts] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimError, setClaimError] = useState<string | null>(null);
@@ -159,7 +178,7 @@ export default function StudentPortal() {
 
       const [feeRes, attRes] = await Promise.all([
         supabase.from("fee_ledger")
-          .select("id, total_amount, paid_amount, balance, status, due_date, term, fee_codes:fee_code_id(name, category)")
+          .select("id, total_amount, paid_amount, balance, concession, status, due_date, term, fee_codes:fee_code_id(code, name, category)")
           .eq("student_id", studentData.id)
           .order("due_date", { ascending: true }),
         supabase.from("daily_attendance")
@@ -171,26 +190,32 @@ export default function StudentPortal() {
         setFees(feeRes.data.map((f: any) => ({
           id: f.id,
           fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
+          fee_code: f.fee_codes?.code || null,
+          term: f.term,
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
           balance: Number(f.balance || 0),
+          concession: Number(f.concession || 0),
           status: f.status,
           due_date: f.due_date,
         })));
 
-        // Zero visible rows can also mean the fee structure is consultant-
-        // managed and hidden for this student — fall back to the due-summary
-        // RPC (due + receipts only, no structure).
-        if (feeRes.data.length === 0) {
-          const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentData.id });
-          const dueTotal = Number((summary as any)?.due_total || 0);
-          const receipts = ((summary as any)?.receipts || []) as {
-            receipt_no: string | null; amount: number; type: string; payment_date: string | null; receipt_url: string | null;
-          }[];
-          if (dueTotal > 0 || receipts.length > 0) {
-            setHiddenFee({ due_total: dueTotal, receipts });
-          }
-        } else {
+        // student_fee_due_summary is SECURITY DEFINER and self-scoped
+        // (students.user_id = auth.uid()), so it serves every student — not
+        // just the consultant-managed ones. Call it always: receipts live in
+        // lead_payments, which a student login cannot read directly, and this
+        // is the only path that hands them over.
+        const { data: summary } = await supabase.rpc("student_fee_due_summary" as any, { _student_id: studentData.id });
+        const dueTotal = Number((summary as any)?.due_total || 0);
+        const receipts = ((summary as any)?.receipts || []) as Receipt[];
+        setReceipts(receipts);
+
+        // Zero visible ledger rows means the fee structure is consultant-
+        // managed and hidden for this student — fall back to due + receipts
+        // only, with no structure.
+        if (feeRes.data.length === 0 && (dueTotal > 0 || receipts.length > 0)) {
+          setHiddenFee({ due_total: dueTotal, receipts });
+        } else if (feeRes.data.length > 0) {
           setHiddenFee(null);
         }
       }
@@ -242,6 +267,30 @@ export default function StudentPortal() {
       },
     });
   };
+
+  // Same grouping the counter sees, so a parent reading this page and a cashier
+  // reading the staff ledger are looking at the same shape: the one-time joining
+  // charges collapsed into one section (application fee → admission → deposit),
+  // then each collection term in due-date order. A flat due-date sort put the
+  // security deposit above the application fee and scattered a quarter's heads.
+  const feeGroups = useMemo(() => {
+    const oneTime = fees
+      .filter((f) => ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase()))
+      .sort((a, b) => oneTimeRank(a.fee_code, a.fee_code_name) - oneTimeRank(b.fee_code, b.fee_code_name));
+
+    const groups: { term: string; rows: FeeItem[] }[] = [];
+    if (oneTime.length) groups.push({ term: ONE_TIME_GROUP, rows: oneTime });
+
+    for (const f of fees) {
+      if (ONE_TIME_TERMS.includes(String(f.term || "").toLowerCase())) continue;
+      const last = groups[groups.length - 1];
+      if (last && last.term === f.term) last.rows.push(f);
+      else groups.push({ term: f.term, rows: [f] });
+    }
+    return groups;
+  }, [fees]);
+
+  const receiptsTotal = receipts.reduce((s, r) => s + Number(r.amount || 0), 0);
 
   const todayKey = new Date().toLocaleDateString("en-CA");
   const isOutstanding = (fee: FeeItem) => fee.balance > 0 && fee.status !== "paid";
@@ -443,7 +492,25 @@ export default function StudentPortal() {
             {fees.length === 0 ? (
               <div className="p-8 text-center text-sm text-gray-400">No fees due right now</div>
             ) : (
-              fees.map((fee) => {
+              feeGroups.map((g) => {
+                const gOutstanding = g.rows.reduce((s, r) => s + (r.status === "paid" ? 0 : r.balance), 0);
+                const gWaived = g.rows.reduce((s, r) => s + r.concession, 0);
+                return (
+                <Fragment key={g.term}>
+                  <div className="flex items-baseline gap-2 bg-gray-50 px-4 py-2">
+                    <span className="text-xs font-semibold text-gray-700">
+                      {g.term === ONE_TIME_GROUP ? "One-time Fees" : defaultFeeTermLabel(g.term)}
+                    </span>
+                    {gWaived > 0 && (
+                      <span className="text-[10px] font-medium text-success">
+                        ₹{gWaived.toLocaleString("en-IN")} waived
+                      </span>
+                    )}
+                    <span className="ml-auto text-[11px] font-semibold text-gray-500">
+                      {gOutstanding > 0 ? `₹${gOutstanding.toLocaleString("en-IN")} due` : "Cleared"}
+                    </span>
+                  </div>
+                  {g.rows.map((fee) => {
                 const futureDue = isFutureDue(fee);
                 const paid = fee.status === "paid";
                 const overdue = fee.status === "overdue" && !futureDue;
@@ -461,6 +528,16 @@ export default function StudentPortal() {
                     <p className="text-xs text-gray-400">
                       {futureDue ? "Upcoming" : "Due"} {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </p>
+                    {/* What the family was actually let off on this head. Without
+                        it a waived row just looks like a smaller bill. */}
+                    {fee.concession > 0 && (
+                      <p className="text-[11px] font-medium text-success">
+                        ₹{fee.concession.toLocaleString("en-IN")} waiver applied
+                        <span className="text-gray-400">
+                          {" "}· ₹{fee.total_amount.toLocaleString("en-IN")} before waiver
+                        </span>
+                      </p>
+                    )}
                   </div>
                   <div className="text-right shrink-0">
                     <p className={`text-sm font-semibold ${paid ? "text-success" : "text-gray-900"}`}>
@@ -479,9 +556,68 @@ export default function StudentPortal() {
                     )}
                   </div>
                 </div>
+              )})}
+                </Fragment>
               )})
             )}
           </div>
+
+          {/* Paid receipts. Collapsed by default — the ledger answers "what do I
+              owe", this answers "what have I already paid", and only one of
+              those is urgent on open. */}
+          {receipts.length > 0 && (
+            <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
+              <button
+                onClick={() => setShowReceipts((v) => !v)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-gray-50"
+              >
+                <ReceiptIcon className="h-4 w-4 text-gray-400" />
+                <span className="text-sm font-semibold text-gray-900">Paid Fee Receipts</span>
+                <span className="text-xs text-gray-400">
+                  {receipts.length} · ₹{receiptsTotal.toLocaleString("en-IN")} paid
+                </span>
+                <ChevronDown className={`ml-auto h-4 w-4 text-gray-400 transition-transform ${showReceipts ? "rotate-180" : ""}`} />
+              </button>
+              {showReceipts && (
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {receipts.map((r, i) => (
+                    <div key={r.receipt_no || i} className="flex items-center gap-3 p-4">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/10">
+                        <CheckCircle className="h-4 w-4 text-success" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-gray-900">
+                          Receipt {r.receipt_no || "—"}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {r.payment_date
+                            ? new Date(r.payment_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                            : "—"}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-semibold text-gray-900">
+                          ₹{Number(r.amount).toLocaleString("en-IN")}
+                        </p>
+                        {r.receipt_url ? (
+                          <a
+                            href={r.receipt_url}
+                            target="_blank"
+                            rel="noopener"
+                            className="text-[11px] font-medium text-primary hover:underline"
+                          >
+                            Download PDF
+                          </a>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">PDF generating…</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

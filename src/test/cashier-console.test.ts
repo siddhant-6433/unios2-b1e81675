@@ -25,6 +25,7 @@ const allocRowMigration = readMigration("payment_allocations_by_ledger_row");
 const authLookupMigration = readMigration("auth_user_lookup_for_student_claim");
 const loginLinkMigration = readMigration("issue_student_login_link");
 const accountantPermsMigration = readMigration("accountant_drop_attendance_exams");
+const studentPortal = read("src/pages/StudentPortal.tsx");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -498,5 +499,43 @@ describe("the accountant sidebar is a cash counter", () => {
     const sidebar = read("src/components/layout/AppSidebar.tsx");
     expect(sidebar).toContain('permission: "attendance:view"');
     expect(sidebar).toContain('permission: "exams:view"');
+  });
+});
+
+describe("student portal fee ledger", () => {
+  it("groups by term with the same helpers as the staff ledger", () => {
+    // A flat due-date sort put the security deposit above the application fee
+    // and scattered a quarter's heads across the list.
+    expect(studentPortal).toContain("ONE_TIME_TERMS");
+    expect(studentPortal).toContain("ONE_TIME_GROUP");
+    expect(studentPortal).toContain("oneTimeRank");
+    expect(studentPortal).toContain("One-time Fees");
+  });
+
+  it("shows the waiver on the head it was applied to", () => {
+    expect(studentPortal).toContain("concession");
+    expect(studentPortal).toContain("waiver applied");
+    // And what the head cost before it, so a waived row doesn't just read as a
+    // smaller bill.
+    expect(studentPortal).toContain("before waiver");
+  });
+
+  it("selects concession from the ledger, since the row can't show what it never fetched", () => {
+    expect(studentPortal).toContain("balance, concession, status");
+  });
+
+  it("lists every paid receipt with its PDF", () => {
+    expect(studentPortal).toContain("Paid Fee Receipts");
+    expect(studentPortal).toContain("Download PDF");
+  });
+
+  it("fetches receipts for every student, not just consultant-managed ones", () => {
+    // student_fee_due_summary is SECURITY DEFINER and self-scoped, and it is the
+    // only path to lead_payments for a student login — so it must not stay
+    // behind the zero-ledger-rows branch it used to sit in.
+    const call = studentPortal.indexOf('"student_fee_due_summary"');
+    const hiddenBranch = studentPortal.indexOf("feeRes.data.length === 0 &&");
+    expect(call).toBeGreaterThan(-1);
+    expect(call).toBeLessThan(hiddenBranch);
   });
 });
