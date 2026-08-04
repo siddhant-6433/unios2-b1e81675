@@ -367,8 +367,12 @@ export default function AlumniVerifications() {
   const ISSUANCE_SERVICE_LABELS: Record<string, string> = {
     marksheet: "marksheet",
     diploma: "diploma",
+    transcript: "transcript",
   };
-  const isIssuanceRequest = (req: any) => ["marksheet", "diploma"].includes(req?.request_type);
+  // Transcript is an issuance request (a document is issued to the candidate),
+  // like marksheet/diploma — not an employer verification. Without this it fell
+  // through to the verification review flow (Confirmed/Discrepancy/Not Found).
+  const isIssuanceRequest = (req: any) => ["marksheet", "diploma", "transcript"].includes(req?.request_type);
   const issuanceDocumentName = (req: any) => ISSUANCE_SERVICE_LABELS[req?.request_type] || "document";
   const ISSUANCE_DECISION_OPTIONS = [
     { value: "verified", label: "Details verified - proceed to generate" },
