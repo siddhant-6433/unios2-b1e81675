@@ -29,6 +29,7 @@ const studentPortal = read("src/pages/StudentPortal.tsx");
 const sendOnDemandMigration = readMigration("login_link_send_on_demand");
 const gatewaySettlement = read("supabase/functions/_shared/gateway-settlement.ts");
 const counsellorMigration = readMigration("counsellor_fee_ledger_and_login_link");
+const searchScopeMigration = readMigration("cashier_search_scope_and_active");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -377,7 +378,10 @@ describe("counter search disambiguates same-name candidates", () => {
     // Typing a bare 10-digit number matches a stored +91… via the ilike.
     expect(searchMigration).toContain("st.phone ilike v_like");
     expect(searchMigration).toContain("ld.phone ilike v_like");
-    expect(cashierConsole).toContain("Search by name, mobile no., admission no., PAN or application ID");
+    // The placeholder is now scope-dependent; both variants still advertise
+    // that a mobile number works.
+    expect(cashierConsole).toContain("Search students by name, mobile no., admission no. or PAN");
+    expect(cashierConsole).toContain("Search students, leads and applications — name, mobile,");
   });
 });
 
@@ -677,5 +681,37 @@ describe("counsellors: ask for payment, never take it", () => {
 
   it("is already accepted by the payment-link edge function", () => {
     expect(createLinkFn).toContain('"counsellor"');
+  });
+});
+
+describe("counter search scope", () => {
+  it("defaults to students only, with leads behind a switch", () => {
+    expect(searchScopeMigration).toContain("_include_leads boolean DEFAULT true");
+    expect(searchScopeMigration).toContain("WHERE _include_leads");
+    // The counter opens on students; enquiries are opt-in.
+    expect(cashierConsole).toContain("useState(false);");
+    expect(cashierConsole).toContain("_include_leads: includeLeads");
+  });
+
+  it("hides inactive students by default but keeps pre_admitted", () => {
+    expect(searchScopeMigration).toContain("NOT _active_only OR st.status IS DISTINCT FROM 'inactive'");
+    // A pre_admitted candidate is exactly who pays at a counter, so the filter
+    // must be "not inactive", never "= active".
+    expect(searchScopeMigration).not.toContain("st.status = 'active'");
+    expect(cashierConsole).toContain("_active_only: activeOnly");
+    expect(cashierConsole).toContain("Active students only");
+  });
+
+  it("re-runs the search when a switch flips, not on the next keystroke", () => {
+    expect(cashierConsole).toContain("}, [query, includeLeads, activeOnly]);");
+  });
+
+  it("replaces the old signature instead of overloading it", () => {
+    // Two signatures would make cashier_search(_q) ambiguous to PostgREST.
+    expect(searchScopeMigration).toContain("DROP FUNCTION IF EXISTS public.cashier_search(text);");
+  });
+
+  it("badges a surfaced inactive student instead of calling it just 'Student'", () => {
+    expect(cashierConsole).toContain('h.stage !== "active"');
   });
 });

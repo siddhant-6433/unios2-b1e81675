@@ -45,6 +45,12 @@ export function CashierConsole() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [searching, setSearching] = useState(false);
+  // At a fee counter you are nearly always looking for an enrolled student, so
+  // enquiries stay out until asked for — otherwise half the list is leads of
+  // the same name. "Active" excludes status='inactive' only: a pre_admitted
+  // candidate is exactly who pays here.
+  const [includeLeads, setIncludeLeads] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(true);
   const [target, setTarget] = useState<Target | null>(null);
   const [loadingTarget, setLoadingTarget] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -60,7 +66,9 @@ export function CashierConsole() {
     if (q.length < 2) { setHits([]); return; }
     debounce.current = window.setTimeout(() => runSearch(q), 250);
     return () => { if (debounce.current) window.clearTimeout(debounce.current); };
-  }, [query]);
+    // Re-run on toggle too, so flipping a switch updates the open list instead
+    // of waiting for the next keystroke.
+  }, [query, includeLeads, activeOnly]);
 
   // One SECURITY DEFINER RPC rather than two RLS-filtered client queries.
   // Measured on prod: the client-side version took ~12s for an accountant,
@@ -68,7 +76,9 @@ export function CashierConsole() {
   // can_view_lead() call. See 20260801175219_cashier_search_rpc.sql.
   const runSearch = async (q: string) => {
     setSearching(true);
-    const { data, error } = await (supabase.rpc as any)("cashier_search", { _q: q });
+    const { data, error } = await (supabase.rpc as any)("cashier_search", {
+      _q: q, _include_leads: includeLeads, _active_only: activeOnly,
+    });
     setSearching(false);
     if (error) {
       // Silence here used to look like "no such student", which is the worst
@@ -148,11 +158,48 @@ export function CashierConsole() {
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Search by name, mobile no., admission no., PAN or application ID"
+          placeholder={includeLeads
+            ? "Search students, leads and applications — name, mobile, admission no., PAN or application ID"
+            : "Search students by name, mobile no., admission no. or PAN"}
           className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           autoFocus
         />
         {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+
+        {/* Search scope */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex overflow-hidden rounded-lg border border-input">
+            <button
+              type="button"
+              onClick={() => setIncludeLeads(false)}
+              className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                !includeLeads ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            >
+              Students
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncludeLeads(true)}
+              className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                includeLeads ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            >
+              + Leads &amp; Applications
+            </button>
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={activeOnly}
+              onChange={(e) => setActiveOnly(e.target.checked)}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Active students only
+            {!activeOnly && (
+              <span className="text-warning">· including inactive</span>
+            )}
+          </label>
+        </div>
 
         {hits.length > 0 && (
           <div className="absolute z-20 mt-1 w-full rounded-xl border border-input bg-card shadow-lg divide-y divide-border overflow-hidden">
@@ -181,8 +228,16 @@ export function CashierConsole() {
                     {h.identifier ? ` · ${h.identifierLabel} ${h.identifier}` : ""}
                   </div>
                 </div>
-                <Badge className="border-0 bg-muted text-[10px] capitalize text-muted-foreground">
-                  {h.kind === "student" ? "Student" : (h.stage || "Lead").replace(/_/g, " ")}
+                {/* An inactive student can now surface, so say so rather than
+                    labelling every student row identically. */}
+                <Badge className={`border-0 text-[10px] capitalize ${
+                  h.kind === "student" && h.stage && h.stage !== "active"
+                    ? "bg-warning/10 text-warning"
+                    : "bg-muted text-muted-foreground"
+                }`}>
+                  {h.kind === "student"
+                    ? (h.stage && h.stage !== "active" ? h.stage.replace(/_/g, " ") : "Student")
+                    : (h.stage || "Lead").replace(/_/g, " ")}
                 </Badge>
               </button>
             ))}
