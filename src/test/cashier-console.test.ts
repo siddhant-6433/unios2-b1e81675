@@ -17,7 +17,13 @@ const readMigration = (suffix: string) => {
   return readFileSync(join(dir, file), "utf8");
 };
 
-const concessionDialog = read("src/components/finance/ConcessionDialog.tsx");
+// ConcessionDialog was retired: the waiver now lives in the Concession column
+// of the fee table, on the row it applies to.
+const concessionPopover = read("src/components/finance/RowConcessionPopover.tsx");
+const claimFn = read("supabase/functions/student-portal-claim/index.ts");
+const allocRowMigration = readMigration("payment_allocations_by_ledger_row");
+const authLookupMigration = readMigration("auth_user_lookup_for_student_claim");
+const loginLinkMigration = readMigration("issue_student_login_link");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -65,9 +71,19 @@ describe("concessions never write the ledger from the client", () => {
   // rather than summed — silently wiping any approved offer waiver mapped onto
   // the same ledger row. All writes now go through the recompute-from-source
   // sync_fee_ledger_concessions().
-  it("the request dialog only calls the RPC", () => {
-    expect(concessionDialog).toContain('"request_fee_concession"');
-    expect(concessionDialog).not.toContain('.from("fee_ledger")');
+  it("the row popover only calls the RPC", () => {
+    expect(concessionPopover).toContain('"request_fee_concession"');
+    expect(concessionPopover).not.toContain('.from("fee_ledger")');
+  });
+
+  it("a super admin's own waiver is decided immediately, everyone else's waits", () => {
+    expect(concessionPopover).toContain('"decide_fee_concession"');
+    expect(concessionPopover).toContain("isSuperAdmin && id");
+  });
+
+  it("the waiver sits on the row rather than behind a header button", () => {
+    expect(studentFeePanel).toContain("RowConcessionPopover");
+    expect(studentFeePanel).not.toContain("Request Waiver / Concession");
   });
 
   it("the approval panel decides through the RPC", () => {
@@ -355,5 +371,114 @@ describe("counter search disambiguates same-name candidates", () => {
     expect(searchMigration).toContain("st.phone ilike v_like");
     expect(searchMigration).toContain("ld.phone ilike v_like");
     expect(cashierConsole).toContain("Search by name, mobile no., admission no., PAN or application ID");
+  });
+});
+
+describe("counter collection: many heads, one receipt", () => {
+  // A cashier taking admission + Q1 tuition + boarding used to produce three
+  // receipts, because Collect was per-row and the dialog took a single amount.
+  it("the fee table carries the selection and hands down a settled breakup", () => {
+    expect(studentFeePanel).toContain("openCollect");
+    expect(studentFeePanel).toContain("defaultAllocations={collectAllocations}");
+    // Every entry names the exact ledger row the cashier ticked.
+    expect(studentFeePanel).toContain("fee_ledger_id: f.id");
+  });
+
+  it("part payments are allowed but never exceed the row balance", () => {
+    expect(studentFeePanel).toContain("Math.min(Math.max(0, raw), rowBalance(f))");
+  });
+
+  it("the per-row Collect shortcut goes through the same path, not a second one", () => {
+    expect(studentFeePanel).toContain("openCollect([f], one)");
+    // The old single-target prop is gone.
+    expect(studentFeePanel).not.toContain("collectTarget");
+  });
+
+  it("a seeded breakup locks the amount so the table and the receipt agree", () => {
+    expect(offlineDialog).toContain("defaultAllocations");
+    expect(offlineDialog).toContain("readOnly={!!selectedChargeHead || seeded}");
+    expect(offlineDialog).toContain("setAllocations(defaultAllocations!)");
+  });
+
+  it("selection is cleared once the receipt is recorded", () => {
+    expect(studentFeePanel).toContain("setPicked({});");
+  });
+});
+
+describe("row-targeted allocations", () => {
+  it("apply to exactly the named ledger row, never spilling to a sibling term", () => {
+    expect(allocRowMigration).toContain("v_fl := NULLIF(v_alloc->>'fee_ledger_id','')::uuid");
+    expect(allocRowMigration).toContain("IF v_fl IS NOT NULL THEN");
+    // Bounded by that row's own balance and the payment budget.
+    expect(allocRowMigration).toContain("LEAST(v_balance, v_remaining_alloc, v_budget)");
+  });
+
+  it("stay idempotent per row, so a re-run cannot double-credit", () => {
+    expect(allocRowMigration).toContain("flp.fee_ledger_id = v_fl");
+  });
+
+  it("keep the earliest-due spillover when no row is named", () => {
+    // The legacy per-fee_code loop must still be present for existing payments.
+    expect(allocRowMigration).toContain("ORDER BY fl.due_date NULLS LAST, fl.term, fl.id");
+  });
+});
+
+describe("direct student login link", () => {
+  it("is minted by a gated SECURITY DEFINER RPC, since the table blocks clients", () => {
+    expect(loginLinkMigration).toContain("public.can_collect_fee(auth.uid())");
+    expect(loginLinkMigration).toContain("SECURITY DEFINER");
+    expect(loginLinkMigration).toContain("insufficient_privilege");
+  });
+
+  it("leaves only one live link per student", () => {
+    expect(loginLinkMigration).toContain("SET expires_at = now()");
+    expect(loginLinkMigration).toContain("claimed_at IS NULL");
+  });
+
+  it("refuses to mint a link that could never be delivered", () => {
+    expect(loginLinkMigration).toContain("has no phone number on file");
+  });
+
+  // The claim path had never once succeeded in production: 31 tokens issued,
+  // zero claimed. Two independent bugs, both silent.
+  it("resolves the auth user by index instead of a truncated page scan", () => {
+    expect(claimFn).toContain("find_auth_user_by_email_or_phone");
+    // The capped scan is gone from the code (it survives only in a comment
+    // explaining why), so assert on the call itself.
+    expect(claimFn).not.toContain("db.auth.admin.listUsers(");
+  });
+
+  it("does not leak the user lookup to browser sessions", () => {
+    expect(authLookupMigration).toContain("REVOKE ALL ON FUNCTION public.find_auth_user_by_email_or_phone(text, text) FROM authenticated");
+    expect(authLookupMigration).toContain("GRANT EXECUTE ON FUNCTION public.find_auth_user_by_email_or_phone(text, text) TO service_role");
+  });
+
+  it("verifies the OTP on a throwaway client so the admin client keeps its role", () => {
+    // verifyOtp replaces the calling client's session; doing it on `db` demoted
+    // it to the student, so the claimed_at write silently matched zero rows and
+    // the token stayed reusable forever.
+    expect(claimFn).toContain("const authClient = createClient(");
+    expect(claimFn).toContain("authClient.auth.verifyOtp(");
+    expect(claimFn).not.toContain("await db.auth.verifyOtp(");
+  });
+
+  it("treats a zero-row token burn as an error, not a success", () => {
+    expect(claimFn).toContain('.select("id")');
+    expect(claimFn).toContain("Could not mark the claim link as used");
+  });
+});
+
+describe("ledger header stays a counter, not a control panel", () => {
+  it("keeps the cashier's four actions in reach", () => {
+    for (const label of ["Collect Payment", "Add Charge", "Send Payment Link", "Send Login Link"]) {
+      expect(studentFeePanel).toContain(label);
+    }
+  });
+
+  it("moves the rare admin operations behind Manage", () => {
+    expect(studentFeePanel).toContain("DropdownMenuTrigger");
+    for (const label of ["Auto-Assign Fees", "Re-provision (clear unpaid)", "Transfer", "Reallocation History"]) {
+      expect(studentFeePanel).toContain(label);
+    }
   });
 });

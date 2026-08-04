@@ -70,12 +70,19 @@ interface Props {
   defaultType?: string;
   /** Pre-fills the amount — the cashier desk passes the selected head's balance. */
   defaultAmount?: number | null;
+  /**
+   * Counter collection: the cashier already picked the heads and amounts by
+   * ticking rows in the fee table, so the breakup arrives settled. When present
+   * it is shown read-only and the total drives the amount — one receipt across
+   * every ticked head instead of one receipt per head.
+   */
+  defaultAllocations?: FeeAllocation[] | null;
   onRecorded?: () => void;
 }
 
 export function OfflinePaymentDialog({
   open, onOpenChange, leadId, applicationId, defaultType,
-  defaultAmount, onRecorded,
+  defaultAmount, defaultAllocations, onRecorded,
 }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
@@ -115,11 +122,23 @@ export function OfflinePaymentDialog({
   // pre-admission leads the breakup is held and mapped at admission.
   const [allocations, setAllocations] = useState<FeeAllocation[]>([]);
 
+  // A breakup handed down from the fee table. Locks the amount to its total so
+  // the two can't drift apart between the table and the receipt.
+  const seeded = !!(defaultAllocations && defaultAllocations.length > 0);
+  const seededTotal = Math.round(
+    (defaultAllocations || []).reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+
   // Re-seed the amount whenever the dialog reopens for a different ledger row.
   useEffect(() => {
     if (!open) return;
+    if (seeded) {
+      setAllocations(defaultAllocations!);
+      setAmount(String(seededTotal));
+      return;
+    }
     if (defaultAmount) setAmount(String(defaultAmount));
-  }, [open, defaultAmount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultAmount, seeded, seededTotal]);
 
   // Consultant credit-note (super_admin only) state.
   const isSuperAdmin = role === "super_admin";
@@ -359,8 +378,11 @@ export function OfflinePaymentDialog({
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 autoFocus
-                readOnly={!!selectedChargeHead}
-                title={selectedChargeHead ? "Amount is fixed by the fee head" : undefined}
+                readOnly={!!selectedChargeHead || seeded}
+                title={
+                  seeded ? "Total of the heads ticked in the fee table"
+                    : selectedChargeHead ? "Amount is fixed by the fee head" : undefined
+                }
               />
             </FieldShell>
           </div>
@@ -539,7 +561,30 @@ export function OfflinePaymentDialog({
             )}
           </div>
 
-          {!isCreditNote && (
+          {/* Counter collection: the heads came from the fee table, so show
+              them rather than a second editor that could disagree with it. */}
+          {seeded ? (
+            <div className="min-w-0 space-y-1.5 rounded-xl border border-border/60 p-3">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Collecting against {allocations.length} head{allocations.length === 1 ? "" : "s"}
+              </p>
+              {allocations.map((a, i) => (
+                <div key={a.fee_ledger_id || `${a.fee_code_id}-${i}`} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
+                  <span className="shrink-0 font-medium text-foreground">
+                    ₹{Number(a.amount).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-border/60 pt-2 text-xs font-semibold text-foreground">
+                <span>Total</span>
+                <span>₹{seededTotal.toLocaleString("en-IN")}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                One receipt covering all of the above. Change the split by re-ticking rows in the fee table.
+              </p>
+            </div>
+          ) : !isCreditNote && (
             <FeeHeadAllocationField
               open={open}
               leadId={leadId}

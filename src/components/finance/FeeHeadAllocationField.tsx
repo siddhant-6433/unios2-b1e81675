@@ -11,6 +11,13 @@ export interface FeeAllocation {
   fee_code_id: string;
   amount: number;
   label: string;
+  /**
+   * Targets one exact fee_ledger row. Set by the counter flow, where the
+   * cashier ticked specific rows and money must land on those and no others.
+   * Omitted elsewhere, which keeps the earliest-due-with-spillover routing.
+   * See 20260804090002_payment_allocations_by_ledger_row.sql.
+   */
+  fee_ledger_id?: string;
 }
 
 interface HeadOption {

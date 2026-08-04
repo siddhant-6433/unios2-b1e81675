@@ -44,12 +44,23 @@ function studentEmail(studentId: string, phone: string | null, email: string | n
   return `student.${studentId}@student.unios.local`;
 }
 
+// Indexed lookup via a service_role-only SECURITY DEFINER RPC.
+//
+// This used to be auth.admin.listUsers({ page: 1, perPage: 1000 }) scanned in
+// JS. Production has 2,836 auth users, so ~65% were never even fetched: the
+// function concluded "no account exists", createUser then failed on the
+// already-registered email, and the fallback re-ran the same capped scan —
+// 500, every time. 31 tokens had been issued and not one was ever claimed.
 async function findUserByEmailOrPhone(db: any, email: string, phone: string | null) {
-  const { data } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  return (data?.users || []).find((u: any) =>
-    u.email?.toLowerCase() === email.toLowerCase() ||
-    (phone && u.phone?.replace(/\D/g, "") === phone)
-  ) || null;
+  const { data, error } = await db.rpc("find_auth_user_by_email_or_phone", {
+    _email: email || null,
+    _phone: phone || null,
+  });
+  if (error) {
+    console.error("[student-portal-claim] user lookup failed:", error.message);
+    return null;
+  }
+  return data ? { id: data as string } : null;
 }
 
 async function createSession(db: any, userId: string) {
@@ -63,7 +74,18 @@ async function createSession(db: any, userId: string) {
   });
   if (magicError || !magicLink?.properties?.hashed_token) return null;
 
-  const { data: sessionData, error: verifyError } = await db.auth.verifyOtp({
+  // verifyOtp on a client REPLACES that client's auth state with the returned
+  // session. Calling it on `db` silently demoted our service-role client to the
+  // student for every subsequent request — so the claimed_at write below ran as
+  // `authenticated`, matched 0 rows under the SELECT-only student policy, and
+  // returned no error. Tokens stayed reusable forever after being redeemed.
+  // Burn a throwaway client so `db` keeps its service-role identity.
+  const authClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { data: sessionData, error: verifyError } = await authClient.auth.verifyOtp({
     token_hash: magicLink.properties.hashed_token,
     type: "magiclink",
   });
@@ -169,11 +191,18 @@ Deno.serve(async (req) => {
   const session = await createSession(db, userId);
   if (!session) return json({ error: "Could not create student session" }, 500);
 
-  const { error: claimErr } = await db
+  // .select() so a zero-row update is an error rather than a silent success —
+  // an unburned token is a login link that works forever.
+  const { data: claimed, error: claimErr } = await db
     .from("student_magic_tokens")
     .update({ claimed_at: new Date().toISOString(), claimed_user_id: userId })
-    .eq("id", row.id);
+    .eq("id", row.id)
+    .select("id");
   if (claimErr) return json({ error: claimErr.message }, 500);
+  if (!claimed?.length) {
+    console.error("[student-portal-claim] token not burned:", row.id);
+    return json({ error: "Could not mark the claim link as used" }, 500);
+  }
 
   if (row.lead_id) {
     await db.from("lead_activities").insert({

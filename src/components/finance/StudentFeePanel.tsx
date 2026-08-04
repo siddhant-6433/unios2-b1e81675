@@ -7,16 +7,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
-  Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History,
+  Loader2, Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
+  Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy,
 } from "lucide-react";
-import { ConcessionDialog } from "./ConcessionDialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 import { AddChargeDialog } from "./AddChargeDialog";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
+import { RowConcessionPopover } from "./RowConcessionPopover";
+import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
@@ -45,7 +49,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
-  const [concessionOpen, setConcessionOpen] = useState(false);
   const [pendingWaivers, setPendingWaivers] = useState<Record<string, number>>({});
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
@@ -53,8 +56,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [auditOpen, setAuditOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
   const [chargeOpen, setChargeOpen] = useState(false);
-  // Which ledger row a per-row "Collect" click targeted — prefills the dialog.
-  const [collectTarget, setCollectTarget] = useState<{ id: string; amount: number } | null>(null);
+  // Counter selection: which ledger rows the cashier ticked, and how much to
+  // take against each (defaults to the row's balance, editable down to a part
+  // payment). One receipt is then issued across every ticked row.
+  const [picked, setPicked] = useState<Record<string, number>>({});
+  const [collectAllocations, setCollectAllocations] = useState<FeeAllocation[] | null>(null);
+  const [loginLink, setLoginLink] = useState<{ url: string; phone: string } | null>(null);
+  const [issuingLink, setIssuingLink] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
@@ -227,6 +235,72 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     }
   };
 
+  // ── Counter selection ────────────────────────────────────────────────────
+  // Fee Code, Total, Concession, Paid, Balance, Due Date, Status (+ tick,
+  // Paying for cashiers; + the row-actions column for finance roles).
+  const colCount = 7 + (canCollect ? 2 : 0) + (isFinanceRole ? 1 : 0);
+  const rowBalance = (f: any) => Math.max(0, Math.round(Number(f.balance || 0)));
+  const isPickable = (f: any) => canCollect && rowBalance(f) > 0;
+  const pickedTotal = Object.values(picked).reduce((s, v) => s + (Number(v) || 0), 0);
+  const pickedCount = Object.keys(picked).length;
+
+  const togglePick = (f: any, on: boolean) =>
+    setPicked((prev) => {
+      const next = { ...prev };
+      if (on) next[f.id] = rowBalance(f);
+      else delete next[f.id];
+      return next;
+    });
+
+  const setPickAmount = (f: any, raw: number) =>
+    setPicked((prev) => ({ ...prev, [f.id]: Math.min(Math.max(0, raw), rowBalance(f)) }));
+
+  const toggleGroup = (rows: any[], on: boolean) =>
+    setPicked((prev) => {
+      const next = { ...prev };
+      for (const f of rows.filter(isPickable)) {
+        if (on) next[f.id] = rowBalance(f);
+        else delete next[f.id];
+      }
+      return next;
+    });
+
+  // Hand the ticked rows to OfflinePaymentDialog as a settled breakup. Each
+  // entry carries fee_ledger_id so provision_student_fees credits that exact
+  // row — without it the money spills onto the earliest-due row of the same
+  // fee code, which is wrong when the cashier deliberately skipped a quarter.
+  const openCollect = (rows: any[], amounts: Record<string, number> = picked) => {
+    const allocs: FeeAllocation[] = rows
+      .filter((f) => Number(amounts[f.id]) > 0)
+      .map((f) => ({
+        fee_code_id: f.fee_code_id,
+        fee_ledger_id: f.id,
+        amount: Number(amounts[f.id]),
+        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
+          defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
+      }));
+    if (!allocs.length) return;
+    setCollectAllocations(allocs);
+    setCollectOpen(true);
+  };
+
+  const handleIssueLoginLink = async () => {
+    setIssuingLink(true);
+    const { data, error } = await (supabase.rpc as any)("issue_student_login_link", {
+      _student_id: student.id,
+    });
+    setIssuingLink(false);
+    if (error) {
+      toast({ title: "Could not create the login link", description: error.message, variant: "destructive" });
+      return;
+    }
+    setLoginLink({ url: data?.url, phone: data?.phone });
+    toast({
+      title: "Login link sent",
+      description: `WhatsApp sent to ${data?.phone}. The link signs the student straight in — no OTP — and expires in 7 days.`,
+    });
+  };
+
   const totalFee = fees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
   const totalPaid = fees.reduce((s, f) => s + Number(f.paid_amount || 0), 0);
   const totalConcession = fees.reduce((s, f) => s + Number(f.concession || 0), 0);
@@ -296,10 +370,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         </div>
       )}
 
-      {/* Action buttons */}
+      {/* Counter actions. Everything a cashier reaches for stays visible; the
+          rare admin operations (provisioning, transfers, migrations) sit behind
+          Manage so they can't be hit by accident mid-transaction. */}
       <div className="flex flex-wrap items-center gap-2">
         {canCollect && (
-          <Button size="sm" onClick={() => { setCollectTarget(null); setCollectOpen(true); }} className="gap-1.5">
+          <Button size="sm" onClick={() => { setCollectAllocations(null); setCollectOpen(true); }} className="gap-1.5">
             <Receipt className="h-3.5 w-3.5" /> Collect Payment
           </Button>
         )}
@@ -308,51 +384,83 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <Plus className="h-3.5 w-3.5" /> Add Charge
           </Button>
         )}
-        {canProvision && (
-          <>
-            <Button size="sm" onClick={() => handleProvision(false)} disabled={provisioning} className="gap-1.5">
-              {provisioning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-              Auto-Assign Fees
-            </Button>
-            {fees.length > 0 && (
-              <Button size="sm" variant="outline" onClick={() => handleProvision(true)} disabled={provisioning} className="gap-1.5">
-                <Wand2 className="h-3.5 w-3.5" /> Re-provision (clear unpaid)
-              </Button>
-            )}
-          </>
-        )}
-        {canRequestConcession && fees.length > 0 && (
-          <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
-            <HandCoins className="h-3.5 w-3.5" /> Request Waiver / Concession
-          </Button>
-        )}
         {isFinanceRole && student?.id && (
           <Button size="sm" variant="outline" onClick={() => setSendLinkOpen(true)} className="gap-1.5">
             <LinkIcon className="h-3.5 w-3.5" /> Send Payment Link
           </Button>
         )}
-        {isFinanceRole && isDaott && !isStethoBatch && (
-          <Button size="sm" variant="outline" onClick={handleMigrateToStetho} disabled={migratingStetho} className="gap-1.5">
-            {migratingStetho ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Migrate to Stetho Batch
+        {isFinanceRole && student?.id && (
+          <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
+            {issuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+            Send Login Link
           </Button>
         )}
-        {isFinanceRole && Number(credit?.general_credit || 0) > 0 && (
-          <Button size="sm" variant="outline" onClick={() => setApplyCreditOpen(true)} className="gap-1.5">
-            <Wallet className="h-3.5 w-3.5" /> Apply Credit
-          </Button>
-        )}
-        {canReallocate && fees.length > 0 && (
-          <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)} className="gap-1.5">
-            <ArrowLeftRight className="h-3.5 w-3.5" /> Transfer
-          </Button>
-        )}
-        {isFinanceRole && (
-          <Button size="sm" variant="outline" onClick={() => setAuditOpen(true)} className="gap-1.5">
-            <History className="h-3.5 w-3.5" /> Reallocation History
-          </Button>
+
+        {(canProvision || canReallocate || isFinanceRole) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5">
+                <Settings2 className="h-3.5 w-3.5" /> Manage
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {canProvision && (
+                <DropdownMenuItem onClick={() => handleProvision(false)} disabled={provisioning} className="gap-2">
+                  <Wand2 className="h-3.5 w-3.5" /> Auto-Assign Fees
+                </DropdownMenuItem>
+              )}
+              {canProvision && fees.length > 0 && (
+                <DropdownMenuItem onClick={() => handleProvision(true)} disabled={provisioning} className="gap-2">
+                  <Wand2 className="h-3.5 w-3.5" /> Re-provision (clear unpaid)
+                </DropdownMenuItem>
+              )}
+              {isFinanceRole && Number(credit?.general_credit || 0) > 0 && (
+                <DropdownMenuItem onClick={() => setApplyCreditOpen(true)} className="gap-2">
+                  <Wallet className="h-3.5 w-3.5" /> Apply Credit
+                </DropdownMenuItem>
+              )}
+              {canReallocate && fees.length > 0 && (
+                <DropdownMenuItem onClick={() => setTransferOpen(true)} className="gap-2">
+                  <ArrowLeftRight className="h-3.5 w-3.5" /> Transfer
+                </DropdownMenuItem>
+              )}
+              {isFinanceRole && (
+                <DropdownMenuItem onClick={() => setAuditOpen(true)} className="gap-2">
+                  <History className="h-3.5 w-3.5" /> Reallocation History
+                </DropdownMenuItem>
+              )}
+              {isFinanceRole && isDaott && !isStethoBatch && (
+                <DropdownMenuItem onClick={handleMigrateToStetho} disabled={migratingStetho} className="gap-2">
+                  <RefreshCw className="h-3.5 w-3.5" /> Migrate to Stetho Batch
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
+
+      {/* The freshly minted login link, so the cashier can also read it out or
+          paste it elsewhere when WhatsApp doesn't land. */}
+      {loginLink && (
+        <div className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
+          <LogIn className="h-3.5 w-3.5 shrink-0 text-success" />
+          <span className="text-[11px] text-muted-foreground">Sent to {loginLink.phone} ·</span>
+          <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{loginLink.url}</code>
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(loginLink.url);
+              toast({ title: "Link copied" });
+            }}
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            title="Copy link"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => setLoginLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -373,11 +481,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left">
+              {canCollect && <th className="w-10 px-4 py-3"></th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Balance</th>
+              {canCollect && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Due Date</th>
               <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
               {isFinanceRole && <th className="px-4 py-3 font-medium text-muted-foreground w-10"></th>}
@@ -386,16 +496,32 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           <tbody>
             {fees.length === 0 ? (
               <tr>
-                <td colSpan={isFinanceRole ? 8 : 7} className="px-4 py-8 text-center text-muted-foreground">
-                  No fee records found. {canProvision && "Click 'Auto-Assign Fees' to provision."}
+                <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
+                  No fee records found. {canProvision && "Use Manage → Auto-Assign Fees to provision."}
                 </td>
               </tr>
             ) : feeGroups.map((g) => {
               const gTotal = g.rows.reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
               const gConcession = g.rows.reduce((s: number, r: any) => s + Number(r.concession || 0), 0);
+              const gPickable = g.rows.filter(isPickable);
+              const gPicked = gPickable.filter((r: any) => picked[r.id] !== undefined);
               return (
               <Fragment key={g.term}>
                 <tr className="bg-muted/40 border-b border-border">
+                  {canCollect && (
+                    <td className="px-4 py-1.5">
+                      {gPickable.length > 0 && (
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-primary"
+                          checked={gPicked.length === gPickable.length && gPickable.length > 0}
+                          ref={(el) => { if (el) el.indeterminate = gPicked.length > 0 && gPicked.length < gPickable.length; }}
+                          onChange={(e) => toggleGroup(g.rows, e.target.checked)}
+                          title="Select every outstanding head in this term"
+                        />
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
                     {g.term === ONE_TIME_GROUP
                       ? "One-time Fees"
@@ -403,25 +529,63 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   </td>
                   <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
-                  <td colSpan={isFinanceRole ? 5 : 4} />
+                  <td colSpan={colCount - (canCollect ? 4 : 3)} />
                 </tr>
                 {g.rows.map((f: any) => (
-                  <tr key={f.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                  <tr key={f.id} className={`border-b border-border last:border-0 transition-colors ${picked[f.id] !== undefined ? "bg-primary/5" : "hover:bg-muted/30"}`}>
+                    {canCollect && (
+                      <td className="px-4 py-3">
+                        {isPickable(f) && (
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-primary"
+                            checked={picked[f.id] !== undefined}
+                            onChange={(e) => togglePick(f, e.target.checked)}
+                            title="Include this head in the receipt"
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3 pl-6">
                       <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
                       <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
                     </td>
                     <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">
-                      {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}
-                      {pendingWaivers[f.id] > 0 && (
-                        <span className="block text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
-                          +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
-                        </span>
-                      )}
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span>{Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}</span>
+                        {pendingWaivers[f.id] > 0 && (
+                          <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
+                            +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                          </span>
+                        )}
+                        {/* Waiver lives on the row it applies to, rather than in
+                            a dialog that re-asks which row you meant. */}
+                        {canRequestConcession && Number(f.balance || 0) > 0 && (
+                          <RowConcessionPopover
+                            fee={f}
+                            onDone={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
+                          />
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
+                    {canCollect && (
+                      <td className="px-4 py-3 text-right">
+                        {picked[f.id] !== undefined ? (
+                          <input
+                            type="number" min={0} max={rowBalance(f)} step={1} inputMode="numeric"
+                            value={picked[f.id] || ""}
+                            onChange={(e) => setPickAmount(f, Math.round(Number(e.target.value) || 0))}
+                            className="w-24 rounded-lg border border-input bg-background px-2 py-1 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                            title="Part payments are allowed — capped at the balance"
+                          />
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-muted-foreground">
                       {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
                     </td>
@@ -439,8 +603,10 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           {canCollect && Number(f.balance) > 0 && (
                             <button
                               onClick={() => {
-                                setCollectTarget({ id: f.id, amount: Math.round(Number(f.balance)) });
-                                setCollectOpen(true);
+                                // Same path as the tick-boxes — just this one row.
+                                const one = { [f.id]: rowBalance(f) };
+                                setPicked(one);
+                                openCollect([f], one);
                               }}
                               className="text-primary hover:underline text-[11px] font-medium whitespace-nowrap"
                               title="Collect against this head"
@@ -467,6 +633,26 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             })}
           </tbody>
         </table>
+
+        {/* Running total for the ticked rows — the cashier's confirmation that
+            the drawer amount and the receipt will agree before anything is
+            recorded. Mirrors the old ERP's Total Amount row. */}
+        {canCollect && pickedCount > 0 && (
+          <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
+            <span className="text-xs text-muted-foreground">
+              {pickedCount} head{pickedCount === 1 ? "" : "s"} selected
+            </span>
+            <button onClick={() => setPicked({})} className="text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+              Clear
+            </button>
+            <span className="ml-auto text-sm font-semibold text-foreground">
+              Total ₹{pickedTotal.toLocaleString("en-IN")}
+            </span>
+            <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
+              <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Receipts — confirmed payments only. Pending and failed/abandoned
@@ -579,11 +765,18 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       {student?.lead_id && (
         <OfflinePaymentDialog
           open={collectOpen}
-          onOpenChange={(v) => { setCollectOpen(v); if (!v) setCollectTarget(null); }}
+          onOpenChange={(v) => { setCollectOpen(v); if (!v) setCollectAllocations(null); }}
           leadId={student.lead_id}
           defaultType="other"
-          defaultAmount={collectTarget?.amount ?? null}
-          onRecorded={() => { fetchFees(); fetchPayments(); fetchCredit(); onRefresh?.(); }}
+          defaultAmount={collectAllocations
+            ? collectAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
+            : null}
+          defaultAllocations={collectAllocations}
+          onRecorded={() => {
+            setPicked({});
+            setCollectAllocations(null);
+            fetchFees(); fetchPayments(); fetchCredit(); onRefresh?.();
+          }}
         />
       )}
 
@@ -592,14 +785,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         onOpenChange={setChargeOpen}
         studentId={student.id}
         onAdded={() => { fetchFees(); onRefresh?.(); }}
-      />
-
-      <ConcessionDialog
-        open={concessionOpen}
-        onOpenChange={setConcessionOpen}
-        studentId={student.id}
-        feeItems={fees}
-        onSuccess={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
       />
 
       <SendPaymentLinkDialog
