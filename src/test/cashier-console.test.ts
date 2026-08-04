@@ -27,6 +27,7 @@ const loginLinkMigration = readMigration("issue_student_login_link");
 const accountantPermsMigration = readMigration("accountant_drop_attendance_exams");
 const studentPortal = read("src/pages/StudentPortal.tsx");
 const sendOnDemandMigration = readMigration("login_link_send_on_demand");
+const gatewaySettlement = read("supabase/functions/_shared/gateway-settlement.ts");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -244,7 +245,9 @@ describe("payment link: Collect Fee vs Token Fee", () => {
 
   it("shows the fee structure only for Collect Fee, and clears it on switch", () => {
     expect(sendLinkDialog).toContain('variant="all"');
-    expect(sendLinkDialog).toContain("{collectingFee && (");
+    // The picker is now the not-seeded branch: a breakup handed down from the
+    // fee table is rendered read-only instead.
+    expect(sendLinkDialog).toContain("{collectingFee && !seeded && (");
     expect(sendLinkDialog).toContain('if (v !== "fee_due") setAllocations([]);');
   });
 
@@ -589,5 +592,41 @@ describe("student portal fee ledger", () => {
     const hiddenBranch = studentPortal.indexOf("feeRes.data.length === 0 &&");
     expect(call).toBeGreaterThan(-1);
     expect(call).toBeLessThan(hiddenBranch);
+  });
+});
+
+describe("shareable link for specific fee rows", () => {
+  it("keeps fee_ledger_id on the link instead of flattening it to the head", () => {
+    // Dropping it turned "pay this quarter's meal charge" into "pay the
+    // earliest unpaid meal charge".
+    expect(createLinkFn).toContain("isUuid(a.fee_ledger_id)");
+    expect(createLinkFn).toContain("fee_ledger_id: String(a.fee_ledger_id)");
+  });
+
+  it("refuses a row that isn't this student's, or is filed under the wrong head", () => {
+    expect(createLinkFn).toContain("does not belong to this student");
+    expect(createLinkFn).toContain("does not match its fee head");
+    expect(createLinkFn).toContain('.eq("student_id", ownerId).in("id", ledgerIds)');
+  });
+
+  it("carries the breakup through settlement onto the receipt", () => {
+    expect(gatewaySettlement).toContain("fee_ledger_id?: string");
+    expect(gatewaySettlement).toContain("allocations: hasAllocations ? link.allocations : null");
+  });
+
+  it("lets staff raise the link from the ticked rows", () => {
+    expect(studentFeePanel).toContain("openLinkForSelection");
+    expect(studentFeePanel).toContain("defaultAllocations={linkAllocations}");
+    expect(studentFeePanel).toContain("Send Link");
+  });
+
+  it("shows a seeded breakup read-only rather than a second editor", () => {
+    expect(sendLinkDialog).toContain("defaultAllocations");
+    expect(sendLinkDialog).toContain("{collectingFee && seeded && (");
+    expect(sendLinkDialog).toContain("{collectingFee && !seeded && (");
+  });
+
+  it("still validates that the breakup equals the amount", () => {
+    expect(createLinkFn).toContain("must equal the amount");
   });
 });

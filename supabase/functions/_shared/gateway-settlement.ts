@@ -532,7 +532,10 @@ export async function settlePaymentLink(
     note?: string | null;
     lead_id?: string | null;
     student_id?: string | null;
-    allocations?: Array<{ fee_code_id: string; amount: number; label?: string }> | null;
+    // fee_ledger_id, when present, pins the allocation to one exact ledger row.
+    // Copied verbatim onto lead_payments.allocations below, where
+    // provision_student_fees honours it.
+    allocations?: Array<{ fee_code_id: string; fee_ledger_id?: string; amount: number; label?: string }> | null;
   },
   paymentRef: string,
   gateway: GatewayName,

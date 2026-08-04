@@ -62,6 +62,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // payment). One receipt is then issued across every ticked row.
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [collectAllocations, setCollectAllocations] = useState<FeeAllocation[] | null>(null);
+  const [linkAllocations, setLinkAllocations] = useState<FeeAllocation[] | null>(null);
   const [loginLink, setLoginLink] = useState<
     { tokenId: string; url: string; phone: string | null; sent: boolean } | null
   >(null);
@@ -286,6 +287,24 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     if (!allocs.length) return;
     setCollectAllocations(allocs);
     setCollectOpen(true);
+  };
+
+  // Same ticked rows, but hand them to the payer instead of taking cash. The
+  // link's breakup carries fee_ledger_id, so when it is paid the money lands on
+  // exactly these rows.
+  const openLinkForSelection = (rows: any[], amounts: Record<string, number> = picked) => {
+    const allocs: FeeAllocation[] = rows
+      .filter((f) => Number(amounts[f.id]) > 0)
+      .map((f) => ({
+        fee_code_id: f.fee_code_id,
+        fee_ledger_id: f.id,
+        amount: Number(amounts[f.id]),
+        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
+          defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
+      }));
+    if (!allocs.length) return;
+    setLinkAllocations(allocs);
+    setSendLinkOpen(true);
   };
 
   // Generate only. Sending is a second, deliberate click — a cashier who just
@@ -685,6 +704,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <span className="ml-auto text-sm font-semibold text-foreground">
               Total ₹{pickedTotal.toLocaleString("en-IN")}
             </span>
+            {isFinanceRole && (
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openLinkForSelection(fees)}>
+                <LinkIcon className="h-3.5 w-3.5" /> Send Link
+              </Button>
+            )}
             <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
               <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
             </Button>
@@ -826,12 +850,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
 
       <SendPaymentLinkDialog
         open={sendLinkOpen}
-        onOpenChange={setSendLinkOpen}
+        onOpenChange={(v) => { setSendLinkOpen(v); if (!v) setLinkAllocations(null); }}
         studentId={student.id}
         leadId={student.lead_id || undefined}
-        defaultAmount={totalBalance > 0 ? Math.round(totalBalance) : null}
+        defaultAmount={linkAllocations
+          ? linkAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
+          : (totalBalance > 0 ? Math.round(totalBalance) : null)}
+        defaultAllocations={linkAllocations}
         defaultPurpose="fee_due"
-        onCreated={() => { fetchPayments(); onRefresh?.(); }}
+        onCreated={() => { setLinkAllocations(null); fetchPayments(); onRefresh?.(); }}
       />
 
       <ApplyCreditDialog

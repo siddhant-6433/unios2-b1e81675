@@ -158,10 +158,16 @@ Deno.serve(async (req) => {
     // student's matching fee_ledger heads at settlement/admission by
     // provision_student_fees.
     const rawAllocations = Array.isArray(parsed.allocations) ? parsed.allocations : null;
-    let allocations: { fee_code_id: string; amount: number; label?: string }[] | null =
+    const isUuid = (v: unknown) => /^[0-9a-f-]{36}$/i.test(String(v || ""));
+    let allocations:
+      { fee_code_id: string; fee_ledger_id?: string; amount: number; label?: string }[] | null =
       rawAllocations && rawAllocations.length
         ? rawAllocations.map((a: any) => ({
             fee_code_id: String(a.fee_code_id || ""),
+            // Carried through so a link raised against one specific ledger row
+            // settles that row. Dropping it here silently turned "pay this
+            // quarter's meal charge" into "pay the earliest unpaid meal charge".
+            ...(isUuid(a.fee_ledger_id) ? { fee_ledger_id: String(a.fee_ledger_id) } : {}),
             amount: Math.round(Number(a.amount) * 100) / 100,
             label: a.label ? String(a.label).slice(0, 120) : undefined,
           }))
@@ -201,6 +207,33 @@ Deno.serve(async (req) => {
       const { data: codes } = await admin.from("fee_codes").select("id").in("id", ids);
       if (!codes || codes.length !== ids.length) {
         return json({ error: "Unknown fee head in the breakup" }, 400);
+      }
+
+      // A named ledger row must belong to this payer and match the head it is
+      // filed under — otherwise a crafted request could credit someone else's
+      // ledger, or the wrong head on this one.
+      const ledgerIds = [...new Set(
+        allocations.map((a) => a.fee_ledger_id).filter((v): v is string => !!v),
+      )];
+      if (ledgerIds.length) {
+        let ownerId = studentId;
+        if (!ownerId && leadId) {
+          const { data: s } = await admin.from("students").select("id").eq("lead_id", leadId).maybeSingle();
+          ownerId = s?.id || null;
+        }
+        if (!ownerId) {
+          return json({ error: "A fee-row breakup needs an admitted student" }, 400);
+        }
+        const { data: rows } = await admin
+          .from("fee_ledger").select("id, fee_code_id")
+          .eq("student_id", ownerId).in("id", ledgerIds);
+        if (!rows || rows.length !== ledgerIds.length) {
+          return json({ error: "A fee row in the breakup does not belong to this student" }, 400);
+        }
+        const codeByRow = new Map(rows.map((r: any) => [r.id, r.fee_code_id]));
+        if (allocations.some((a) => a.fee_ledger_id && codeByRow.get(a.fee_ledger_id) !== a.fee_code_id)) {
+          return json({ error: "A fee row in the breakup does not match its fee head" }, 400);
+        }
       }
     }
 

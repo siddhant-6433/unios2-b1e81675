@@ -6,7 +6,7 @@
 // Surfaced from LeadDetail QuickActions, staff StudentFeePanel, and the
 // consultant portal (AcademicPartnerPortal).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -27,6 +27,12 @@ interface Props {
   defaultAmount?: number | null;
   /** Defaults the purpose. Pre-application surfaces should pass 'pre_admission_token'. */
   defaultPurpose?: Purpose;
+  /**
+   * A breakup already chosen elsewhere — the rows ticked in the fee table.
+   * Each entry carries fee_ledger_id, so paying the link settles those exact
+   * rows. Shown read-only; the picker is skipped.
+   */
+  defaultAllocations?: FeeAllocation[] | null;
   onCreated?: () => void;
 }
 
@@ -48,7 +54,8 @@ const CHANNEL_OPTIONS = [
 ];
 
 export function SendPaymentLinkDialog({
-  open, onOpenChange, leadId, studentId, defaultAmount, defaultPurpose, onCreated,
+  open, onOpenChange, leadId, studentId, defaultAmount, defaultPurpose,
+  defaultAllocations, onCreated,
 }: Props) {
   const { toast } = useToast();
   const initialPurpose: Purpose =
@@ -65,8 +72,17 @@ export function SendPaymentLinkDialog({
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const seeded = !!(defaultAllocations && defaultAllocations.length > 0);
   const usingBreakup = allocations.length > 0;
   const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+
+  // Re-seed each time the dialog opens for a different set of ticked rows.
+  useEffect(() => {
+    if (!open || !seeded) return;
+    setPurpose("fee_due");
+    setAllocations(defaultAllocations!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, seeded, defaultAllocations]);
 
   const reset = () => {
     setPurpose(defaultPurpose || (studentId ? "fee_due" : "pre_admission_token"));
@@ -195,7 +211,30 @@ export function SendPaymentLinkDialog({
             </FieldShell>
             {/* Collect Fee lists the whole structure pre-ticked; Token Fee is a
                 free amount with no breakup at all. */}
-            {collectingFee && (
+            {collectingFee && seeded && (
+              <div className="min-w-0 space-y-1.5 rounded-xl border border-border/60 p-3">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Link covers {allocations.length} head{allocations.length === 1 ? "" : "s"}
+                </p>
+                {allocations.map((a, i) => (
+                  <div key={a.fee_ledger_id || `${a.fee_code_id}-${i}`} className="flex items-center gap-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
+                    <span className="shrink-0 font-medium text-foreground">
+                      ₹{Number(a.amount).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-border/60 pt-2 text-xs font-semibold text-foreground">
+                  <span>Total</span>
+                  <span>₹{breakupTotal.toLocaleString("en-IN")}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Paying this link settles exactly these rows. Change it by re-ticking the fee table.
+                </p>
+              </div>
+            )}
+
+            {collectingFee && !seeded && (
               <FeeHeadAllocationField
                 open={open}
                 studentId={studentId}
