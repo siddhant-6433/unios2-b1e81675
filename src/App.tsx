@@ -18,6 +18,7 @@ import {
   RequirePermission,
   RequireRole,
   BlockRole,
+  RedirectRole,
 } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 
@@ -312,7 +313,11 @@ const App = () => (
                       <Route path="/lists" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><LeadLists /></RequirePermission></BlockRole>} />
                       <Route path="/marketing" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
-                      <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
+                      {/* Counsellors work one queue: /fresh-leads and /missed-calls are
+                          the Cloud Dialer's "New Lead" and "Missed Callback" buckets.
+                          Admins and team leaders keep the standalone pages (bulk reassign
+                          lives there and counsellors can't see it anyway). */}
+                      <Route path="/fresh-leads" element={<RedirectRole roles={["counsellor"]} to="/cloud-dialer"><RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission></RedirectRole>} />
                       <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
                       <Route path="/visit-center" element={<RequirePermission module="leads" action="view"><VisitCenter /></RequirePermission>} />
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
@@ -320,7 +325,7 @@ const App = () => (
                       <Route path="/cloud-dialer" element={<RequirePermission module="call_log" action="view"><CloudDialer /></RequirePermission>} />
                       <Route path="/cahet-sprint" element={<RequirePermission module="call_log" action="view"><CahetSprint /></RequirePermission>} />
                       <Route path="/updeled-sprint" element={<RequirePermission module="call_log" action="view"><UpdeledSprint /></RequirePermission>} />
-                      <Route path="/missed-calls" element={<RequirePermission module="call_log" action="view"><MissedCalls /></RequirePermission>} />
+                      <Route path="/missed-calls" element={<RedirectRole roles={["counsellor"]} to="/cloud-dialer"><RequirePermission module="call_log" action="view"><MissedCalls /></RequirePermission></RedirectRole>} />
                       <Route path="/referrals" element={<RequirePermission module="referrals" action="view"><StudentReferrals /></RequirePermission>} />
 
                       {/* Lead allocation & automation — restricted roles */}

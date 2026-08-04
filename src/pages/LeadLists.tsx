@@ -1,7 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { useCallListOverview } from "@/components/dashboard/CallListProgressPanel";
+import { describeFilterDefinition, type DynamicListFilterDefinition } from "@/lib/dynamicListFilters";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
-  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
+  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown, Lock,
   Megaphone,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
@@ -66,6 +70,11 @@ interface LeadList {
   member_count: number;
   filters_snapshot: Record<string, unknown> | null;
   created_at: string;
+  /** static = frozen set. dynamic = re-derived from filter_definition on a cron. */
+  list_type?: "static" | "dynamic";
+  filter_definition?: DynamicListFilterDefinition | null;
+  last_refreshed_at?: string | null;
+  include_terminal?: boolean;
 }
 
 type CampaignChannel = "whatsapp" | "email";
@@ -88,7 +97,29 @@ interface CampaignQueueItem {
 type CounsellorOption = {
   id: string;
   name: string;
+  /** Null = has never placed a call. */
+  last_call_at?: string | null;
+  open_leads?: number;
+  /** Still-pending members across their other active call lists. */
+  pending_call_list?: number;
 };
+
+// login_disabled=false is a poor proxy for "active" — several counsellors
+// holding hundreds of leads have not dialled in weeks, and a test account is
+// selectable. Rather than guess who is on leave, show the evidence and let the
+// assigner decide.
+const daysSince = (iso: string | null | undefined) =>
+  iso == null ? null : Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
+const lastCallLabel = (iso: string | null | undefined) => {
+  const d = daysSince(iso);
+  if (d === null) return "never called";
+  if (d === 0) return "called today";
+  if (d === 1) return "called yesterday";
+  return `last called ${d}d ago`;
+};
+
+const DORMANT_DAYS = 14;
 
 type LeadListAssignmentReportRow = {
   assignment_id: string;
@@ -107,6 +138,32 @@ type LeadListAssignmentReportRow = {
   latest_call_response: string | null;
   latest_call_at: string | null;
   assigned_at: string;
+};
+
+type CallListPreview = {
+  total: number;
+  dialable: number;
+  no_phone: number;
+  terminal: number;
+};
+
+type CallListProgress = {
+  list_id: string;
+  total: number;
+  dialable: number;
+  pending: number;
+  worked: number;
+  skipped: number;
+  not_dialable: number;
+  last_call_at: string | null;
+  dispositions: Record<string, number>;
+  by_counsellor: {
+    counsellor_id: string;
+    counsellor_name: string;
+    total: number;
+    worked: number;
+    pending: number;
+  }[];
 };
 
 type WaPhoneHealth = {
@@ -342,6 +399,7 @@ const WhatsAppBusinessIdentity = ({
 export default function LeadLists() {
   const { toast } = useToast();
   const { profile, role, realRole, permissions, isImpersonating, user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -441,15 +499,38 @@ export default function LeadLists() {
   const [selectedCounsellorIds, setSelectedCounsellorIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [assignmentSummary, setAssignmentSummary] = useState<string | null>(null);
+  // Working instructions the counsellor sees on the dialer's list banner.
+  const [assignNote, setAssignNote] = useState("");
+  const [assignDueDate, setAssignDueDate] = useState("");
+  // Re-running an assignment used to silently steal every already-owned lead.
+  const [assignOnlyUnassigned, setAssignOnlyUnassigned] = useState(false);
+  // Some pushes (win-backs) deliberately want cold / not-interested leads.
+  const [assignIncludeTerminal, setAssignIncludeTerminal] = useState(false);
+  const [assignPreview, setAssignPreview] = useState<CallListPreview | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportList, setReportList] = useState<LeadList | null>(null);
   const [assignmentReport, setAssignmentReport] = useState<LeadListAssignmentReportRow[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportProgress, setReportProgress] = useState<CallListProgress | null>(null);
+  // Click an outcome chip to see only those leads.
+  const [reportDispositionFilter, setReportDispositionFilter] = useState<string | null>(null);
+  // One aggregated RPC for every active call list — cheaper and RLS-safe
+  // compared with counting lead_list_members client-side per row.
+  const { data: callListOverview = [] } = useCallListOverview({ enabled: role !== "counsellor" });
+  const callProgressByList = useMemo(
+    () => Object.fromEntries(callListOverview.map((l) => [l.id, l])),
+    [callListOverview],
+  );
 
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
   const [deleting, setDeleting] = useState(false);
   const canDeleteLists = role === "super_admin";
+  // Mirrors the check inside assign_lead_list_round_robin — the button used to
+  // render for everyone and only fail on submit.
+  const isTeamLeader = useIsTeamLeader();
+  const canAssignLists = role === "super_admin" || role === "admission_head"
+    || role === "principal" || isTeamLeader;
 
   const fetchLists = async () => {
     if (isAcademicPartnerPortalRole(role)) {
@@ -529,6 +610,15 @@ export default function LeadLists() {
     if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
   }, [role]);
+
+  // Deep link from the dashboard's "Assigned call lists" panel:
+  // /lists?report=<id> opens that list's Calling Report directly.
+  useEffect(() => {
+    const reportId = searchParams.get("report");
+    if (!reportId || lists.length === 0 || reportOpen) return;
+    const target = lists.find((l) => l.id === reportId);
+    if (target) openAssignmentReport(target);
+  }, [searchParams, lists]);
 
   const loadWaSenders = async () => {
     setWaSenderLoading(true);
@@ -774,32 +864,67 @@ export default function LeadLists() {
       return;
     }
 
-    const { data: roleRows } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "counsellor");
-    const userIds = [...new Set((roleRows || []).map((row: any) => row.user_id).filter(Boolean))];
-    if (userIds.length === 0) {
+    // One RPC instead of user_roles + profiles: it also carries the activity
+    // signals the assigner needs (last call, open leads, outstanding list work).
+    const { data, error } = await supabase.rpc("assignable_counsellors" as any);
+    if (error) {
+      toast({ title: "Could not load counsellors", description: error.message, variant: "destructive" });
       setCounsellors([]);
       return;
     }
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, display_name")
-      .in("user_id", userIds)
-      .eq("login_disabled", false);
-    setCounsellors(((profiles || []) as any[])
-      .map((item) => ({ id: item.id, name: item.display_name || "Unknown" }))
+    setCounsellors(((data || []) as any[])
+      .map((item) => ({
+        id: item.id,
+        name: item.name || "Unknown",
+        last_call_at: item.last_call_at ?? null,
+        open_leads: item.open_leads ?? 0,
+        pending_call_list: item.pending_call_list ?? 0,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name)));
+  };
+
+  // Same RPC the cron runs, so an assigner never waits 15 minutes to see a
+  // dynamic list catch up.
+  const [refreshingListId, setRefreshingListId] = useState<string | null>(null);
+  const refreshDynamicList = async (list: LeadList) => {
+    setRefreshingListId(list.id);
+    const { data, error } = await supabase.rpc("resolve_dynamic_list_members" as any, { _list_id: list.id });
+    setRefreshingListId(null);
+    if (error) {
+      toast({ title: "Could not refresh list", description: error.message, variant: "destructive" });
+      return;
+    }
+    const res = (data as { added?: number; removed?: number }) || {};
+    toast({
+      title: "List refreshed",
+      description: `${res.added ?? 0} added · ${res.removed ?? 0} removed`,
+    });
+    await fetchLists();
   };
 
   const openAssign = async (list: LeadList) => {
     setAssignList(list);
     setSelectedCounsellorIds([]);
     setAssignmentSummary(null);
+    setAssignIncludeTerminal(list.include_terminal ?? false);
+    setAssignPreview(null);
     setAssignOpen(true);
     await loadAssignableCounsellors();
   };
+
+  // Effective length, recomputed whenever the include-terminal choice flips, so
+  // the assigner sees what they're actually handing over before committing.
+  useEffect(() => {
+    if (!assignOpen || !assignList) return;
+    let cancelled = false;
+    supabase
+      .rpc("preview_call_list_assignment" as any, {
+        _list_id: assignList.id,
+        _include_terminal: assignIncludeTerminal,
+      })
+      .then(({ data }) => { if (!cancelled) setAssignPreview((data as CallListPreview) || null); });
+    return () => { cancelled = true; };
+  }, [assignOpen, assignList, assignIncludeTerminal]);
 
   const toggleCounsellor = (id: string) => {
     setSelectedCounsellorIds((current) =>
@@ -814,6 +939,10 @@ export default function LeadLists() {
     const { data, error } = await supabase.rpc("assign_lead_list_round_robin" as any, {
       _list_id: assignList.id,
       _counsellor_ids: selectedCounsellorIds,
+      _only_unassigned: assignOnlyUnassigned,
+      _priority_note: assignNote.trim() || null,
+      _due_date: assignDueDate || null,
+      _include_terminal: assignIncludeTerminal,
     });
     setAssigning(false);
     if (error) {
@@ -827,10 +956,29 @@ export default function LeadLists() {
     await fetchLists();
   };
 
+  // Called-first ordering: the assigner opens this to read outcomes, and rows
+  // with no call yet have nothing to say.
+  const visibleAssignmentReport = useMemo(() => {
+    const rows = reportDispositionFilter
+      ? assignmentReport.filter((r) =>
+          (r.latest_call_disposition || "unrecorded") === reportDispositionFilter)
+      : assignmentReport;
+    return [...rows].sort((a, b) => {
+      const at = a.latest_call_at ? new Date(a.latest_call_at).getTime() : -1;
+      const bt = b.latest_call_at ? new Date(b.latest_call_at).getTime() : -1;
+      return bt - at;
+    });
+  }, [assignmentReport, reportDispositionFilter]);
+
   const openAssignmentReport = async (list: LeadList) => {
     setReportList(list);
     setReportOpen(true);
     setReportLoading(true);
+    setReportDispositionFilter(null);
+    // Aggregated server-side — a per-row client fetch would hit the 1000-row cap
+    // on any list worth assigning.
+    supabase.rpc("call_list_progress" as any, { p_list_id: list.id })
+      .then(({ data: p }) => setReportProgress((p as CallListProgress) || null));
     const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
       _list_id: list.id,
       _batch_id: null,
@@ -1269,6 +1417,38 @@ export default function LeadLists() {
                       >
                         {list.name}
                       </button>
+                      {/* Static vs dynamic at a glance — a dynamic list keeps
+                          absorbing new matches, so the distinction changes what
+                          the assigner can expect from it. */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={`ml-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium align-middle ${
+                              list.list_type === "dynamic"
+                                ? "bg-primary/10 text-primary"
+                                : "bg-muted text-muted-foreground"
+                            }`}>
+                              {list.list_type === "dynamic"
+                                ? <><RefreshCw className="h-2.5 w-2.5" />Dynamic</>
+                                : <><Lock className="h-2.5 w-2.5" />Static</>}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            {list.list_type === "dynamic" ? (
+                              <>
+                                <p className="font-medium">Auto-updating list</p>
+                                <p className="text-xs">{describeFilterDefinition(list.filter_definition)}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  New matching leads are added every 15 min
+                                  {list.last_refreshed_at && ` · last refreshed ${new Date(list.last_refreshed_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
+                                </p>
+                              </>
+                            ) : (
+                              <p className="text-xs">Fixed set of leads — membership never changes on its own.</p>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       {list.description && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-md">{list.description}</p>
                       )}
@@ -1276,7 +1456,25 @@ export default function LeadLists() {
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] border-0 ${badge.cls}`}>{badge.label}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-foreground font-semibold">{list.member_count}</td>
+                    <td className="px-4 py-3 text-foreground font-semibold">
+                      {list.member_count}
+                      {/* Calling progress inline, so an assigner sees which lists
+                          are moving without opening each Calling Report. */}
+                      {callProgressByList[list.id] && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <div className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                            <div className="h-full bg-primary" style={{
+                              width: `${callProgressByList[list.id].total
+                                ? Math.round((callProgressByList[list.id].worked / callProgressByList[list.id].total) * 100)
+                                : 0}%`,
+                            }} />
+                          </div>
+                          <span className="text-[10px] font-normal tabular-nums text-muted-foreground">
+                            {callProgressByList[list.id].worked}/{callProgressByList[list.id].total} called
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {new Date(list.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
@@ -1285,9 +1483,19 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" /> Members
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
-                          <Users className="h-3.5 w-3.5" /> Assign
-                        </Button>
+                        {list.list_type === "dynamic" && canAssignLists && (
+                          <Button size="sm" variant="outline" className="gap-1.5 h-8"
+                            onClick={() => refreshDynamicList(list)} disabled={refreshingListId === list.id}>
+                            {refreshingListId === list.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <RefreshCw className="h-3.5 w-3.5" />} Refresh
+                          </Button>
+                        )}
+                        {canAssignLists && (
+                          <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
+                            <Users className="h-3.5 w-3.5" /> Assign
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssignmentReport(list)}>
                           <Phone className="h-3.5 w-3.5" /> Calling Report
                         </Button>
@@ -1814,14 +2022,80 @@ export default function LeadLists() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              All list members will be reassigned in round-robin order across the selected counsellors.
+              Members are split round-robin across the selected counsellors and appear in their
+              Cloud Dialer under <span className="font-medium text-foreground">My Call Lists</span> —
+              they can work the list start to finish without searching or filtering.
             </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Priority note (optional)</label>
+                <input
+                  type="text"
+                  value={assignNote}
+                  onChange={(e) => setAssignNote(e.target.value)}
+                  placeholder="e.g. Call before the counselling deadline"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Due date (optional)</label>
+                <input
+                  type="date"
+                  value={assignDueDate}
+                  onChange={(e) => setAssignDueDate(e.target.value)}
+                  min={new Date().toISOString().slice(0, 10)}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={assignOnlyUnassigned}
+                onChange={(e) => setAssignOnlyUnassigned(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Only assign leads that currently have no counsellor
+            </label>
+
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={assignIncludeTerminal}
+                onChange={(e) => setAssignIncludeTerminal(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Include cold / not-interested leads
+              <span className="text-xs text-muted-foreground/70">(for win-back pushes)</span>
+            </label>
+
+            {/* Effective length: what the counsellor will actually be able to dial. */}
+            {assignPreview && (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">{assignPreview.total} in list → </span>
+                <span className="font-semibold text-foreground">{assignPreview.dialable} will be dialable</span>
+                {assignPreview.dialable !== assignPreview.total && (
+                  <span className="text-muted-foreground">
+                    {" "}({assignPreview.total - assignPreview.dialable} excluded
+                    {assignPreview.terminal > 0 && !assignIncludeTerminal && `: ${assignPreview.terminal} cold/closed`}
+                    {assignPreview.no_phone > 0 && `${assignPreview.terminal > 0 && !assignIncludeTerminal ? ", " : ": "}${assignPreview.no_phone} without phone`})
+                  </span>
+                )}
+                {assignPreview.dialable === 0 && (
+                  <p className="mt-1 text-xs text-destructive">
+                    Nothing dialable — tick “Include cold / not-interested” or pick a different list.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
               {counsellors.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>
               ) : (
                 counsellors.map((counsellor) => {
                   const checked = selectedCounsellorIds.includes(counsellor.id);
+                  const days = daysSince(counsellor.last_call_at);
+                  const dormant = days === null || days >= DORMANT_DAYS;
                   return (
                     <label key={counsellor.id} className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 hover:bg-muted/30">
                       <input
@@ -1831,6 +2105,15 @@ export default function LeadLists() {
                         className="h-4 w-4"
                       />
                       <span className="text-sm font-medium text-foreground">{counsellor.name}</span>
+                      <span className={`ml-auto flex items-center gap-2 text-[11px] ${dormant ? "text-destructive" : "text-muted-foreground"}`}>
+                        {dormant && <AlertTriangle className="h-3 w-3" />}
+                        {lastCallLabel(counsellor.last_call_at)}
+                        {!!counsellor.pending_call_list && (
+                          <Badge variant="outline" className="text-[10px] font-normal">
+                            {counsellor.pending_call_list} on other lists
+                          </Badge>
+                        )}
+                      </span>
                     </label>
                   );
                 })
@@ -1853,6 +2136,67 @@ export default function LeadLists() {
           <DialogHeader>
             <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
           </DialogHeader>
+          {reportProgress && reportProgress.total > 0 && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="h-2 w-48 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.round((reportProgress.worked / Math.max(reportProgress.dialable || reportProgress.total, 1)) * 100)}%` }} />
+                </div>
+                <span className="text-sm tabular-nums text-foreground">
+                  {reportProgress.worked}/{reportProgress.dialable ?? reportProgress.total} called
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {reportProgress.pending} pending
+                  {reportProgress.skipped > 0 && ` · ${reportProgress.skipped} skipped`}
+                  {reportProgress.not_dialable > 0 && ` · ${reportProgress.not_dialable} not dialable (no phone or closed)`}
+                </span>
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  {reportProgress.last_call_at
+                    ? `last call ${new Date(reportProgress.last_call_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                    : "no calls yet"}
+                </span>
+              </div>
+              {/* What actually came back on the calls — the number the assigner
+                  is looking for, not just how many were dialled. */}
+              {Object.keys(reportProgress.dispositions || {}).length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(reportProgress.dispositions)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([disposition, n]) => (
+                      <button
+                        key={disposition}
+                        onClick={() => setReportDispositionFilter((cur) => cur === disposition ? null : disposition)}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize transition-colors ${
+                          reportDispositionFilter === disposition
+                            ? "border-primary bg-primary/15 text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {disposition.replace(/_/g, " ")} {n}
+                      </button>
+                    ))}
+                  {reportDispositionFilter && (
+                    <button
+                      onClick={() => setReportDispositionFilter(null)}
+                      className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
+              {reportProgress.by_counsellor.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {reportProgress.by_counsellor.map((c) => (
+                    <Badge key={c.counsellor_id} variant="outline" className="text-[11px] font-normal">
+                      {c.counsellor_name}: {c.worked}/{c.total}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {reportLoading ? (
             <div className="flex h-40 items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -1873,7 +2217,7 @@ export default function LeadLists() {
                   </tr>
                 </thead>
                 <tbody>
-                  {assignmentReport.map((row) => (
+                  {visibleAssignmentReport.map((row) => (
                     <tr key={row.assignment_id} className="border-b border-border/50 last:border-b-0">
                       <td className="px-3 py-2">
                         <p className="font-medium text-foreground">{row.lead_name || "Unknown lead"}</p>

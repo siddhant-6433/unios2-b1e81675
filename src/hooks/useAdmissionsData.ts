@@ -324,6 +324,66 @@ export function useCloudDialerListQueue(opts: {
   });
 }
 
+/**
+ * A call list assigned by a principal / admission head / team leader, rendered
+ * as a start-to-finish dialer queue. Same payload shape as the smart queue, so
+ * CloudDialer's existing parser handles it unchanged.
+ */
+export function useCloudDialerCampaignQueue(opts: {
+  listId: string | null;
+  counsellorId: string | null;
+  limit?: number;
+  enabled?: boolean;
+}) {
+  const { listId, counsellorId, limit = 500, enabled = true } = opts;
+  return useQuery<CloudDialerQueuePayload>({
+    queryKey: ["cloud-dialer-campaign-queue", listId, counsellorId, limit],
+    enabled: enabled && !!listId,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("cloud_dialer_campaign_queue" as any, {
+        p_list_id: listId,
+        p_counsellor_id: counsellorId,
+        p_limit: limit,
+      });
+      if (error) throw error;
+      return (data || { queue: [], buckets: [] }) as CloudDialerQueuePayload;
+    },
+  });
+}
+
+export interface MyCallList {
+  id: string;
+  name: string;
+  priority_note: string | null;
+  due_date: string | null;
+  total: number;
+  /** total minus not_dialable — what the counsellor can actually work. */
+  dialable: number;
+  pending: number;
+  worked: number;
+  skipped: number;
+  /** No phone or terminal stage at hand-off; never enters the queue. */
+  not_dialable: number;
+  last_worked_at: string | null;
+}
+
+/** Call lists assigned to me (all active call lists, for admins/team leaders). */
+export function useMyCallLists(opts?: { enabled?: boolean }) {
+  const { user } = useAuth();
+  const enabled = opts?.enabled ?? true;
+  return useQuery<MyCallList[]>({
+    queryKey: ["my-call-lists", user?.id ?? null],
+    enabled: enabled && !!user?.id,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_call_lists" as any);
+      if (error) throw error;
+      return (Array.isArray(data) ? data : []) as MyCallList[];
+    },
+  });
+}
+
 export function useCloudDialerBootstrap(opts?: { enabled?: boolean }) {
   const { user } = useAuth();
   const enabled = opts?.enabled ?? true;

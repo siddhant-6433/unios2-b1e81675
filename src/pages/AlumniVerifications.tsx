@@ -18,9 +18,21 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { SelectField, TextField, FieldShell } from "@/components/ui/state-fields";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw, IndianRupee,
 } from "lucide-react";
+
+// Offline payment modes — mirror the finance OfflinePaymentDialog labels so the
+// experience is consistent across the app.
+const OFFLINE_PAYMENT_MODES: { value: string; label: string }[] = [
+  { value: "cash",          label: "Cash" },
+  { value: "upi",           label: "UPI / Wallet / QR" },
+  { value: "bank_transfer", label: "NEFT / IMPS / Bank Transfer" },
+  { value: "cheque",        label: "Cheque / DD" },
+  { value: "online",        label: "Online (Manual / Reconciled)" },
+];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
@@ -28,6 +40,33 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   under_review: { label: "Under Review", color: "bg-warning/10 text-warning-foreground" },
   verified: { label: "Completed", color: "bg-success/10 text-success" },
   rejected: { label: "Rejected", color: "bg-destructive/10 text-destructive" },
+};
+
+// For PGDM diploma requests the base `status` stays "under_review" through the
+// whole certificate lifecycle, so a request awaiting approval, being printed,
+// or already collected all looked identical ("Under Review"). Overlay the
+// certificate stage onto the displayed status + tab so the stage is visible.
+// `key` is the tab bucket it counts under; `label`/`color` drive the badge.
+const isPgdmDiplomaReq = (req: any) => {
+  const courseText = `${req?.course || ""} ${req?.course_code || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return req?.request_type === "diploma" && (
+    courseText.includes("pgdm") || courseText.includes("postgraduatediplomainmanagement")
+  );
+};
+
+const CERT_STAGE_CONFIG: Record<string, { key: string; label: string; color: string }> = {
+  pending_approval: { key: "under_review", label: "Pending Approval", color: "bg-warning/10 text-warning-foreground" },
+  approved: { key: "under_review", label: "Approved · Printing", color: "bg-info/10 text-info-foreground" },
+  ready_notified: { key: "verified", label: "Ready · Candidate Notified", color: "bg-success/10 text-success" },
+};
+
+const statusMetaFor = (req: any): { key: string; label: string; color: string } => {
+  if (isPgdmDiplomaReq(req)) {
+    const stage = CERT_STAGE_CONFIG[req?.pgdm_certificate_status];
+    if (stage) return stage;
+  }
+  const c = STATUS_CONFIG[req?.status] || STATUS_CONFIG.pending_payment;
+  return { key: req?.status || "pending_payment", label: c.label, color: c.color };
 };
 
 const RESULT_LABELS: Record<string, { label: string; color: string }> = {
@@ -86,12 +125,17 @@ export default function AlumniVerifications() {
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [showOfflinePay, setShowOfflinePay] = useState(false);
+  const [offlinePayMode, setOfflinePayMode] = useState("cash");
+  const [offlinePayRef, setOfflinePayRef] = useState("");
 
   // Email preview dialog
   const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [emailSending, setEmailSending] = useState(false);
+  const [sendEmailEnabled, setSendEmailEnabled] = useState(true);
 
   const handleDelete = async (requestToDelete = selectedReq) => {
     if (!requestToDelete || !isSuperAdmin) return;
@@ -141,34 +185,51 @@ export default function AlumniVerifications() {
   };
 
   const fetchRoutingData = async () => {
-    const [coursesRes, directoryRes, employeeRes, rulesRes] = await Promise.all([
-      supabase.from("courses").select("id, name, code").eq("is_active", true).order("name"),
-      supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
-      supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number, employment_status"),
+    const [coursesRes, handlersRes, rulesRes] = await Promise.all([
+      // Include inactive courses: alumni verification / degree / marksheet
+      // requests routinely arrive for discontinued courses (e.g. the old
+      // Ghaziabad-campus PGDM), so they must be selectable in handler rules and
+      // manual entry. Active courses sort first.
+      supabase.from("courses").select("id, name, code, is_active").order("is_active", { ascending: false }).order("name"),
+      // Dedicated handler list gated on alumni_verification:manage (not
+      // user_management:view) so Student Services managers who aren't super
+      // admins still see names in the "Assign handler" dropdown.
+      supabase.rpc("student_service_assignable_handlers" as any),
       supabase.from("student_service_handler_rules" as any).select("*").eq("is_active", true).order("updated_at", { ascending: false }),
     ]);
     setCourses((coursesRes.data || []) as any[]);
-    const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
-    const staff = ((directoryRes.data || []) as any[])
-      .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
-      .map((u: any) => {
-        const emp = employeeByUser.get(u.user_id) || {};
-        return {
-          ...u,
-          display_name: emp.display_name || u.display_name || u.email || u.user_id,
-          work_email: emp.work_email || u.email || "",
-          work_number: emp.work_number || "",
-          personal_mobile: emp.mobile_number || u.phone || "",
-        };
-      });
-    setHandlers(staff);
+
+    if (handlersRes.error && isMissingRpcError(handlersRes.error)) {
+      // Fallback (RPC not deployed yet): the admin directory, which only returns
+      // rows for super_admin / user_management:view callers.
+      const [directoryRes, employeeRes] = await Promise.all([
+        supabase.rpc("admin_user_directory" as any, { _show_archived: false }),
+        supabase.from("employee_profiles" as any).select("user_id, display_name, work_email, work_number, mobile_number"),
+      ]);
+      const employeeByUser = new Map((employeeRes.data || []).map((e: any) => [e.user_id, e]));
+      const staff = ((directoryRes.data || []) as any[])
+        .filter((u: any) => u.user_id && u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role))
+        .map((u: any) => {
+          const emp = employeeByUser.get(u.user_id) || {};
+          return {
+            ...u,
+            display_name: emp.display_name || u.display_name || u.email || u.user_id,
+            work_email: emp.work_email || u.email || "",
+            work_number: emp.work_number || "",
+            personal_mobile: emp.mobile_number || u.phone || "",
+          };
+        });
+      setHandlers(staff);
+    } else {
+      setHandlers((handlersRes.data || []) as any[]);
+    }
     setHandlerRules((rulesRes.data || []) as any[]);
   };
 
   useEffect(() => { fetchRequests(); fetchRoutingData(); }, []);
 
-  const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
-  const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
+  const filtered = statusFilter === "all" ? requests : requests.filter(r => statusMetaFor(r).key === statusFilter);
+  const paidPending = requests.filter(r => ["paid", "under_review"].includes(statusMetaFor(r).key)).length;
 
   const fetchPgdmAudit = async (requestId: string) => {
     const { data } = await supabase
@@ -307,8 +368,12 @@ export default function AlumniVerifications() {
   const ISSUANCE_SERVICE_LABELS: Record<string, string> = {
     marksheet: "marksheet",
     diploma: "diploma",
+    transcript: "transcript",
   };
-  const isIssuanceRequest = (req: any) => ["marksheet", "diploma"].includes(req?.request_type);
+  // Transcript is an issuance request (a document is issued to the candidate),
+  // like marksheet/diploma — not an employer verification. Without this it fell
+  // through to the verification review flow (Confirmed/Discrepancy/Not Found).
+  const isIssuanceRequest = (req: any) => ["marksheet", "diploma", "transcript"].includes(req?.request_type);
   const issuanceDocumentName = (req: any) => ISSUANCE_SERVICE_LABELS[req?.request_type] || "document";
   const ISSUANCE_DECISION_OPTIONS = [
     { value: "verified", label: "Details verified - proceed to generate" },
@@ -328,10 +393,17 @@ export default function AlumniVerifications() {
     email: "umesh@nimt.ac.in",
     phone: "+91-7428477664",
   };
+  // The stored assigned_handler_official_phone is a snapshot from assignment
+  // time; prefer the handler's CURRENT number from the directory so a work
+  // number added/changed after assignment shows immediately (work > mobile).
+  const handlerPhoneFor = (req: any): string => {
+    const h = handlerByUserId.get(req?.assigned_handler_user_id);
+    return h?.work_number || h?.personal_mobile || req?.assigned_handler_official_phone || "";
+  };
   const contactFor = (req: any) => ({
     name: req.assigned_handler_name || fallbackContact.name,
     email: req.assigned_handler_email || fallbackContact.email,
-    phone: req.assigned_handler_official_phone || fallbackContact.phone,
+    phone: handlerPhoneFor(req) || fallbackContact.phone,
   });
 
   const isPgdmDiplomaRequest = (req: any) => {
@@ -442,7 +514,7 @@ export default function AlumniVerifications() {
 
     const displayName = handler.display_name || (profile as any)?.display_name || (profile as any)?.email || "Assigned handler";
     const workEmail = handler.work_email || (profile as any)?.email || "";
-    const officialPhone = handler.work_number || "";
+    const officialPhone = handler.work_number || handler.personal_mobile || "";
 
     const { error } = await supabase
       .from("alumni_verification_requests" as any)
@@ -583,6 +655,7 @@ registrar@nimt.ac.in`,
     const draft = generateEmailDraft(selectedReq, result);
     setEmailSubject(draft.subject);
     setEmailBody(draft.body);
+    setSendEmailEnabled(true);
     setShowEmailPreview(true);
   };
 
@@ -605,7 +678,8 @@ registrar@nimt.ac.in`,
 
     const approvedAt = new Date().toISOString();
 
-    // Update status + store sent email for audit
+    // Update status + store the approved email text for audit (only when it's
+    // actually sent, so the "Final Email Sent" record isn't misleading).
     await supabase.from("alumni_verification_requests" as any).update({
       status: finalStatus,
       verification_result: result,
@@ -615,12 +689,11 @@ registrar@nimt.ac.in`,
       admin_approved_by: user?.id,
       admin_approval_notes: reviewNotes,
       admin_approved_at: approvedAt,
-      sent_email_subject: emailSubject,
-      sent_email_body: emailBody,
+      ...(sendEmailEnabled ? { sent_email_subject: emailSubject, sent_email_body: emailBody } : {}),
     }).eq("id", selectedReq.id);
 
-    // Send email
-    if (selectedReq.contact_email) {
+    // Send email (skipped when the "send email" toggle is off)
+    if (sendEmailEnabled && selectedReq.contact_email) {
       try {
         const htmlBody = emailBody.replace(/\n/g, "<br/>");
         const { error: emailErr } = await supabase.functions.invoke("send-email", {
@@ -639,10 +712,11 @@ registrar@nimt.ac.in`,
       }
     }
 
-    // Send WhatsApp (plain text, not template)
+    // Send WhatsApp (plain text, not template) — only when emailing, since the
+    // message tells the requestor to check their email.
     try {
       const waPhone = selectedReq.requestor_phone?.replace(/[^0-9]/g, "");
-      if (waPhone) {
+      if (sendEmailEnabled && waPhone) {
         const whatsappToken = (await supabase.functions.invoke("alumni-payment", { body: { action: "noop" } })); // dummy to get env
         // Use direct Graph API via alumni-payment or just call whatsapp-send with a custom approach
         // For now, send via the webhook's plain text pattern
@@ -661,7 +735,11 @@ registrar@nimt.ac.in`,
       console.error("WhatsApp error:", e);
     }
 
-    toast({ title: `Result sent to ${selectedReq.contact_email}` });
+    toast({
+      title: sendEmailEnabled
+        ? `Result sent to ${selectedReq.contact_email}`
+        : "Result recorded (email not sent)",
+    });
     setEmailSending(false);
     setShowEmailPreview(false);
     setSelectedReq(null);
@@ -721,6 +799,46 @@ registrar@nimt.ac.in`,
       enrollment_no: "", campus: "", fee_amount: "1500", status: "paid", course_id: "" });
     setManualPaymentProof(null);
     fetchRequests();
+  };
+
+  const openOfflinePayDialog = () => {
+    setOfflinePayMode("cash");
+    setOfflinePayRef("");
+    setShowOfflinePay(true);
+  };
+
+  const submitOfflinePayment = async () => {
+    if (!selectedReq || selectedReq.status !== "pending_payment" || !canManageStudentServices) return;
+    // UPI / bank / cheque are reference-bearing modes — require it like the
+    // finance dialog does; cash needs none.
+    if (["upi", "bank_transfer", "cheque"].includes(offlinePayMode) && !offlinePayRef.trim()) {
+      toast({ title: "Reference / transaction number is required for this mode", variant: "destructive" });
+      return;
+    }
+    const method = OFFLINE_PAYMENT_MODES.find(m => m.value === offlinePayMode)?.label || offlinePayMode;
+    const reference = offlinePayRef.trim() || null;
+    setMarkingPaid(true);
+    try {
+      const { error } = await supabase.rpc("mark_alumni_request_paid_offline" as any, {
+        _request_id: selectedReq.id,
+        _method: method,
+        _reference: reference,
+      });
+      if (error) throw error;
+      toast({ title: "Payment recorded", description: "Request moved to Pending Review." });
+      const patch = { status: "paid", paid_at: new Date().toISOString(), payment_method: method, payment_ref: reference };
+      setSelectedReq((prev: any) => prev ? { ...prev, ...patch } : prev);
+      setShowOfflinePay(false);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to record payment",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setMarkingPaid(false);
+    }
   };
 
   const getDocUrl = async (path: string) => {
@@ -936,7 +1054,7 @@ registrar@nimt.ac.in`,
       {/* Status filter */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit overflow-x-auto">
         {[{ key: "all", label: `All (${requests.length})` }, ...Object.entries(STATUS_CONFIG).map(([k, v]) => ({
-          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => r.status === k).length})`,
+          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => statusMetaFor(r).key === k).length})`,
         }))].map(t => (
           <button key={t.key} onClick={() => setStatusFilter(t.key)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -973,7 +1091,7 @@ registrar@nimt.ac.in`,
                     setRuleDraft(p => ({ ...p, course_id: e.target.value, course_text: selected?.name || "" }));
                   }} className={inputCls}>
                     <option value="">Global / text fallback</option>
-                    {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
+                    {courses.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}{c.is_active === false ? " · inactive" : ""}</option>)}
                   </select>
                 </div>
                 <div>
@@ -989,7 +1107,7 @@ registrar@nimt.ac.in`,
                   <select value={ruleDraft.handler_user_id} onChange={e => setRuleDraft(p => ({ ...p, handler_user_id: e.target.value }))} className={inputCls}>
                     <option value="">Select</option>
                     {handlers.map((h: any) => (
-                      <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                      <option key={h.user_id} value={h.user_id}>{h.display_name} {(h.work_number || h.personal_mobile) ? "" : "(no phone on file)"}</option>
                     ))}
                   </select>
                 </div>
@@ -1026,7 +1144,7 @@ registrar@nimt.ac.in`,
                         <td className="py-2">{c?.name || rule.course_text || "Global"}</td>
                         <td className="py-2">{rule.batch_year || "Any"}</td>
                         <td className="py-2">{handler.display_name || rule.handler_user_id}</td>
-                        <td className="py-2">{handler.work_number || <span className="text-amber-600">Missing</span>}</td>
+                        <td className="py-2">{handler.work_number || handler.personal_mobile || <span className="text-amber-600">Missing</span>}</td>
                         <td className="py-2 text-right">
                           <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => handleDeactivateRule(rule.id)}>Remove</Button>
                         </td>
@@ -1083,7 +1201,7 @@ registrar@nimt.ac.in`,
                 </thead>
                 <tbody>
                   {paginatedRequests.map((req: any) => {
-                    const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending_payment;
+                    const cfg = statusMetaFor(req);
                     const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
                     const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
                     return (
@@ -1102,7 +1220,7 @@ registrar@nimt.ac.in`,
 	                          {req.assigned_handler_user_id ? (
 	                            <div>
 	                              <div className="font-medium text-foreground">{req.assigned_handler_name || "Assigned"}</div>
-	                              <div className="text-[10px] text-muted-foreground">{req.assigned_handler_official_phone || "Official no missing"}</div>
+	                              <div className="text-[10px] text-muted-foreground">{handlerPhoneFor(req) || "Official no missing"}</div>
 	                            </div>
 	                          ) : (
 	                            <span className="text-amber-600 font-medium">Unassigned</span>
@@ -1248,6 +1366,17 @@ registrar@nimt.ac.in`,
                   {selectedReq.paid_at ? <Badge className="bg-success/10 text-success border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
                 </div>
                 {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
+                {canManageStudentServices && selectedReq.status === "pending_payment" && (
+                  <div className="pt-1">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={openOfflinePayDialog} disabled={markingPaid}>
+                      <IndianRupee className="h-3.5 w-3.5" />
+                      Mark Offline Payment
+                    </Button>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Use for cash/UPI/bank payments or to reconcile an online payment that didn't confirm.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Handler assignment */}
@@ -1257,13 +1386,13 @@ registrar@nimt.ac.in`,
                   <div className="text-sm space-y-1">
                     <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{selectedReq.assigned_handler_name || "Assigned handler"}</span></p>
                     <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{selectedReq.assigned_handler_email || "—"}</span></p>
-                    <p><span className="text-muted-foreground">Official Allotted No:</span> <span className="font-medium">{selectedReq.assigned_handler_official_phone || "—"}</span></p>
+                    <p><span className="text-muted-foreground">Official Allotted No:</span> <span className="font-medium">{handlerPhoneFor(selectedReq) || "—"}</span></p>
                     <p className="text-[10px] text-muted-foreground">Assignment: {selectedReq.assignment_status || "assigned"}{selectedReq.assigned_at ? ` · ${new Date(selectedReq.assigned_at).toLocaleString("en-IN")}` : ""}</p>
                   </div>
                 ) : (
                   <p className="text-sm text-amber-600 font-medium">No handler assigned yet.</p>
                 )}
-                {canManageStudentServices && ["paid", "under_review"].includes(selectedReq.status) && (
+                {canManageStudentServices && ["pending_payment", "paid", "under_review"].includes(selectedReq.status) && (
                   <div className="flex gap-2 pt-2">
                     <select
                       value={selectedReq.assigned_handler_user_id || ""}
@@ -1273,7 +1402,7 @@ registrar@nimt.ac.in`,
                     >
                       <option value="">Assign handler...</option>
                       {handlers.map((h: any) => (
-                        <option key={h.user_id} value={h.user_id}>{h.display_name} {h.work_number ? "" : "(no official no)"}</option>
+                        <option key={h.user_id} value={h.user_id}>{h.display_name} {(h.work_number || h.personal_mobile) ? "" : "(no phone on file)"}</option>
                       ))}
                     </select>
                     {assigningHandler && <Loader2 className="h-4 w-4 animate-spin mt-3 text-muted-foreground" />}
@@ -1668,15 +1797,28 @@ registrar@nimt.ac.in`,
               <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={14}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none font-mono text-xs leading-relaxed" />
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              WhatsApp notification will also be sent: "The result has been emailed to {selectedReq?.contact_email}. Please do not reply on this number."
-            </p>
+            <label className="flex items-start gap-2 rounded-xl border border-input bg-muted/20 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendEmailEnabled}
+                onChange={e => setSendEmailEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+              />
+              <span className="text-xs text-foreground">
+                Send result email{selectedReq?.contact_email ? ` to ${selectedReq.contact_email}` : ""}
+                <span className="block text-[10px] text-muted-foreground mt-0.5">
+                  {sendEmailEnabled
+                    ? "The edited email + a WhatsApp notification will be sent. Uncheck to just record the result without notifying."
+                    : "No email or WhatsApp will be sent — the result is recorded only. You can notify the requestor separately."}
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Cancel</Button>
             <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-success hover:bg-success/90">
               {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              Approve & Send Email
+              {sendEmailEnabled ? "Approve & Send Email" : "Approve (don't send email)"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1744,6 +1886,55 @@ registrar@nimt.ac.in`,
             <Button onClick={handleManualEntry} disabled={manualSaving} className="gap-2">
               {manualSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Create Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Offline Payment Dialog — mirrors the finance OfflinePaymentDialog look */}
+      <Dialog open={showOfflinePay} onOpenChange={setShowOfflinePay}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <IndianRupee className="h-4 w-4 text-primary" />
+              Record Offline Payment
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <FieldShell label="Amount (₹)">
+                <Input value={selectedReq?.fee_amount ?? ""} readOnly title="Amount is fixed by the request fee" />
+              </FieldShell>
+              <SelectField
+                value={offlinePayMode}
+                onValueChange={value => { setOfflinePayMode(value); setOfflinePayRef(""); }}
+                options={OFFLINE_PAYMENT_MODES.map(m => ({ value: m.value, label: m.label }))}
+                label="Payment Mode"
+                allowEmpty={false}
+              />
+            </div>
+            {offlinePayMode !== "cash" && (
+              <TextField
+                value={offlinePayRef}
+                onValueChange={setOfflinePayRef}
+                label={
+                  offlinePayMode === "cheque" ? "Cheque / DD Number"
+                  : offlinePayMode === "upi" ? "UPI / Txn Reference"
+                  : offlinePayMode === "bank_transfer" ? "UTR / Reference Number"
+                  : "Reference / Receipt Number"
+                }
+                placeholder={offlinePayMode === "online" ? "External ref no (e.g. Easebuzz easepayid)" : "Reference / txn no"}
+              />
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Marking this confirmed records the payment and moves the request to <span className="font-medium text-foreground">Pending Review</span>. Use it for cash/UPI/bank payments or to reconcile an online payment that didn't confirm.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOfflinePay(false)} disabled={markingPaid}>Cancel</Button>
+            <Button onClick={submitOfflinePayment} disabled={markingPaid} className="gap-2">
+              {markingPaid ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              Mark as Paid
             </Button>
           </DialogFooter>
         </DialogContent>

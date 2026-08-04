@@ -146,7 +146,18 @@ Deno.serve(async (req) => {
   }
 
   if (body.event === "approved") {
-    await sendTemplate("pgdm_certificate_approved_handler", requestRow.assigned_handler_official_phone, [
+    // Most staff have no official work_number on record, so fall back to the
+    // assigned handler's personal mobile — otherwise the "print + notify the
+    // candidate" alert silently goes nowhere.
+    let handlerPhone = requestRow.assigned_handler_official_phone || "";
+    if (!cleanPhone(handlerPhone) && requestRow.assigned_handler_user_id) {
+      const [{ data: emp }, { data: prof }] = await Promise.all([
+        db.from("employee_profiles").select("mobile_number, work_number").eq("user_id", requestRow.assigned_handler_user_id).maybeSingle(),
+        db.from("profiles").select("phone").eq("user_id", requestRow.assigned_handler_user_id).maybeSingle(),
+      ]);
+      handlerPhone = emp?.work_number || emp?.mobile_number || prof?.phone || "";
+    }
+    await sendTemplate("pgdm_certificate_approved_handler", handlerPhone, [
       requestRow.assigned_handler_name || "Team member",
       requestRow.request_number,
       requestRow.alumni_name,
