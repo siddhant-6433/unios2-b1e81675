@@ -127,6 +127,17 @@ export async function zohoVendorHasBank(token: string, contactId: string): Promi
   return Array.isArray(arr) && arr.length > 0;
 }
 
+// Fetch an entity's PDF (e.g. a vendor payment) as bytes. Returns null on error.
+export async function zohoGetPdf(token: string, path: string): Promise<Uint8Array | null> {
+  const q = new URLSearchParams({ organization_id: zohoOrgId(), accept: "pdf" });
+  const res = await fetch(`https://${API}/books/v3${path}?${q.toString()}`, {
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, Accept: "application/pdf" },
+  });
+  if (!res.ok) return null;
+  if (!(res.headers.get("content-type") || "").includes("pdf")) return null; // JSON error, not a PDF
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 // Find an existing vendor by phone; returns contact_id or null.
 export async function zohoFindVendorByPhone(token: string, phone: string): Promise<string | null> {
   const digits = (phone || "").replace(/\D/g, "").slice(-10);

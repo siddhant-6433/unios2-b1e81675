@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useCampus } from "@/contexts/CampusContext";
 import {
+  ChevronDown,
   CreditCard,
   Download,
   FileSpreadsheet,
   Loader2,
-  Printer,
   Search,
   ShieldAlert,
   UserCheck,
@@ -16,6 +18,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/state-fields";
 import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
@@ -218,7 +226,14 @@ const IdCardCenter = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Transparent-background cutouts (Beacon front), keyed by student id. Generated on print.
   const [cutouts, setCutouts] = useState<Record<string, string>>({});
+  // Rows currently mounted full-size in the offscreen host purely as the html2canvas source.
+  const [rasterRows, setRasterRows] = useState<CardPerson[]>([]);
+  // Cards mounted in the print DOM for the vector (browser print → PDF) path; separate from raster.
+  const [vectorRows, setVectorRows] = useState<CardPerson[]>([]);
+  const rasterHostRef = useRef<HTMLDivElement>(null);
   const [preparing, setPreparing] = useState(false);
+  // Snapshot progress for bulk batches so the button shows "34/150" instead of looking frozen.
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const hasHrAccess = can("hr", "view");
   const canOpenCenter = role === "super_admin" || (role ? CENTER_ROLES.has(role) : false) || hasHrAccess;
@@ -447,30 +462,168 @@ const IdCardCenter = () => {
     setSelectedIds(new Set());
   }
 
-  async function printCards(rows: CardPerson[]) {
+  /** Two output modes: crisp vectors (browser print → PDF) or flattened raster (jsPDF, CorelDRAW-safe). */
+  type CardOutput = "vector" | "raster";
+
+  async function generateCards(rows: CardPerson[], output: CardOutput) {
     if (rows.length === 0) return;
-    // Student wave fronts show the pupil cut out over the signal-wave rings — build transparent
-    // cutouts (from the pure-white studio bg) first. Employee photos aren't white-bg studio
-    // shots, so they keep the boxed photo instead.
-    const pending = rows.filter((row) => row.type === "students" && row.photoUrl && !cutouts[row.id]);
-    if (pending.length) {
-      setPreparing(true);
-      const done = await Promise.all(
-        pending.map(async (row) => {
-          try {
-            return [row.id, await whiteBgCutout(row.photoUrl as string)] as const;
-          } catch (err) {
+    await prepareCutouts(rows);
+    if (output === "raster") {
+      // Pre-bake raster-safe logo variants (white knockout + inline data URL for QR centres).
+      await ensureLogoAssets(Array.from(new Set(rows.map((r) => cardTheme(r).brand.logo))));
+      await buildPdf(rows);
+    } else {
+      await printVector(rows);
+    }
+  }
+
+  /**
+   * Build transparent cutouts (shared by both outputs). Student wave fronts show the pupil cut out
+   * over the signal-wave rings; cut from the AI-processed (pure-white bg) photo — the raw photo_url
+   * can carry a real background whiteBgCutout can't knock out (→ a boxed white-bg photo). Employee
+   * photos aren't white-bg studio shots, so they keep the boxed photo.
+   */
+  async function prepareCutouts(rows: CardPerson[]) {
+    const cutoutSrc = (row: CardPerson) => row.photoProcessedUrl || row.photoUrl;
+    const pending = rows.filter((row) => row.type === "students" && cutoutSrc(row) && !cutouts[row.id]);
+    if (!pending.length) return;
+    setPreparing(true);
+    const done = await Promise.all(
+      pending.map(async (row) => {
+        // Bound the fetch so a stalled photo download can't wedge the whole batch on "Preparing…".
+        const cut = await withTimeout(
+          whiteBgCutout(cutoutSrc(row) as string).catch((err) => {
             console.warn("[IdCardCenter] cutout failed for", row.name, err);
             return null;
-          }
-        }),
-      );
-      setCutouts((prev) => ({ ...prev, ...Object.fromEntries(done.filter(Boolean) as [string, string][]) }));
+          }),
+          12000,
+          null,
+        );
+        return cut ? ([row.id, cut] as const) : null;
+      }),
+    );
+    setCutouts((prev) => ({ ...prev, ...Object.fromEntries(done.filter(Boolean) as [string, string][]) }));
+    setPreparing(false);
+    // let React paint the cutouts before we snapshot / print
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+  }
+
+  /**
+   * Vector output: mount the selected cards live in the print DOM and hand off to the browser's
+   * print → "Save as PDF". Text and QR stay vector (crisp, tiny file) — but CorelDRAW's importer
+   * splits every object and drops clips/filters, so this is best for direct printing, not Corel.
+   */
+  async function printVector(rows: CardPerson[]) {
+    setPreparing(true);
+    setVectorRows(rows);
+    try {
+      await new Promise((r) => window.setTimeout(r, 150));
+      await withTimeout(Promise.resolve(document.fonts?.ready), 3000, undefined);
+      const dom = document.getElementById("id-card-print");
+      if (dom) {
+        await withTimeout(
+          Promise.all(
+            Array.from(dom.querySelectorAll("img")).map((img) =>
+              img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = () => res(null); }),
+            ),
+          ),
+          8000,
+          undefined,
+        );
+      }
+      window.print(); // blocks until the print dialog is dismissed in most desktop browsers
+    } finally {
       setPreparing(false);
-      // let React paint the cutouts into the hidden print DOM before opening the dialog
-      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      window.setTimeout(() => setVectorRows([]), 800);
     }
-    window.setTimeout(() => window.print(), 60);
+  }
+
+  /**
+   * Flatten each face to a JPEG and assemble a multi-page PDF with jsPDF — 3 students per page,
+   * front stacked over back, matching the old print sheet. We add each image straight into the doc
+   * instead of rendering 240 high-res <img> into a print DOM (which decodes to ~1 GB of bitmaps and
+   * blanks the browser's print output on a full class).
+   *
+   * Rendering is CHUNKED: only ~8 cards are mounted in the offscreen host at a time. Each card face
+   * carries a QR (an SVG of ~1.5k nodes), so mounting a whole class at once (~170 faces) OOM-crashes
+   * the tab. Mount a chunk → snapshot → unmount → next chunk keeps peak DOM tiny.
+   */
+  async function buildPdf(rows: CardPerson[]) {
+    setPreparing(true);
+    setProgress({ done: 0, total: rows.length });
+    const faces: ({ front: string; back: string } | null)[] = new Array(rows.length).fill(null);
+    const failed: string[] = [];
+    const snapPair = async (frontEl: HTMLElement, backEl: HTMLElement) => {
+      const front = await withTimeout(snapshotFace(frontEl).catch(() => null), 15000, null);
+      const back = await withTimeout(snapshotFace(backEl).catch(() => null), 15000, null);
+      return front && back ? { front, back } : null;
+    };
+    try {
+      await withTimeout(Promise.resolve(document.fonts?.ready), 3000, undefined);
+      const CHUNK = 8;
+      let finished = 0;
+      for (let start = 0; start < rows.length; start += CHUNK) {
+        const chunk = rows.slice(start, start + CHUNK);
+        setRasterRows(chunk); // mount only this chunk in the offscreen host
+        await new Promise((r) => window.setTimeout(r, 120)); // let React paint it
+        const host = rasterHostRef.current;
+        if (!host) continue;
+        // Wait for this chunk's images (logos/cutouts) to load, bounded so nothing freezes us.
+        await withTimeout(
+          Promise.all(
+            Array.from(host.querySelectorAll("img")).map((img) =>
+              img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = () => res(null); }),
+            ),
+          ),
+          6000,
+          undefined,
+        );
+        // Snapshot the chunk with a small worker pool (async clone/decode phases overlap).
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < chunk.length) {
+            const j = cursor++;
+            const row = chunk[j];
+            const wrap = host.querySelector(`[data-raster-id="${row.id}"]`);
+            const frontEl = wrap?.querySelector<HTMLElement>('[data-face="front"] .dc-card');
+            const backEl = wrap?.querySelector<HTMLElement>('[data-face="back"] .dc-card');
+            if (frontEl && backEl) {
+              // one retry — a transient snapshot failure shouldn't drop a student from the sheet
+              faces[start + j] = (await snapPair(frontEl, backEl)) ?? (await snapPair(frontEl, backEl));
+              if (!faces[start + j]) { failed.push(row.name); console.warn("[IdCardCenter] snapshot failed for", row.name); }
+            }
+            setProgress({ done: ++finished, total: rows.length });
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, chunk.length) }, worker));
+      }
+
+      // Assemble: A4 portrait, 3 columns of front-over-back CR80 cards.
+      const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const M = 8, CW = 54, CH = 85.6, COL_GAP = 6, FB_GAP = 4, COLS = 3;
+      let placed = 0;
+      for (const face of faces) {
+        if (!face) continue;
+        const col = placed % COLS;
+        if (col === 0 && placed > 0) doc.addPage();
+        const x = M + col * (CW + COL_GAP);
+        doc.addImage(face.front, "JPEG", x, M, CW, CH);
+        doc.addImage(face.back, "JPEG", x, M + CH + FB_GAP, CW, CH);
+        placed++;
+      }
+      if (placed === 0) {
+        window.alert("Couldn't render any cards — please check the photos and try again.");
+        return;
+      }
+      if (failed.length) {
+        window.alert(`${placed} card(s) generated. ${failed.length} could not be rendered and were skipped:\n${failed.join(", ")}`);
+      }
+      doc.save(`id-cards-${mode}.pdf`);
+    } finally {
+      setRasterRows([]);
+      setProgress(null);
+      setPreparing(false);
+    }
   }
 
   if (!canOpenCenter) {
@@ -489,7 +642,7 @@ const IdCardCenter = () => {
     <div className="space-y-6 animate-fade-in">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap');
-        /* Round-3 card is authored at 400x634px; on screen shown natural, in print scaled to CR80 portrait. */
+        /* Round-3 card is authored at 400x634px; raster path snapshots full-size, vector path scales in print. */
         .dc-scale { width: 400px; height: 634px; }
         .dc-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         @media print {
@@ -538,10 +691,12 @@ const IdCardCenter = () => {
           <Button variant="outline" onClick={clearSelection} disabled={selectedIds.size === 0}>
             Clear
           </Button>
-          <Button className="gap-2" onClick={() => printCards(selectedRows)} disabled={selectedRows.length === 0 || preparing}>
-            {preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-            {preparing ? "Preparing photos…" : "Print / Save PDF"}
-          </Button>
+          <GenerateMenu
+            label={preparing ? (progress ? `Generating ${progress.done}/${progress.total}…` : "Preparing photos…") : "Download PDF"}
+            busy={preparing}
+            disabled={selectedRows.length === 0 || preparing}
+            onSelect={(output) => generateCards(selectedRows, output)}
+          />
         </div>
       </div>
 
@@ -656,12 +811,15 @@ const IdCardCenter = () => {
                       {row.primaryNo} - {row.subtitle} - {row.group}
                     </p>
                   </div>
-                  <Button variant="outline" size="sm" className="gap-2" onClick={() => {
-                    setSelectedIds(new Set([row.id]));
-                    printCards([row]);
-                  }}>
-                    <Download className="h-3.5 w-3.5" /> Generate
-                  </Button>
+                  <GenerateMenu
+                    label="Generate"
+                    size="sm"
+                    disabled={preparing}
+                    onSelect={(output) => {
+                      setSelectedIds(new Set([row.id]));
+                      generateCards([row], output);
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -669,9 +827,10 @@ const IdCardCenter = () => {
         </div>
       )}
 
+      {/* Vector output: live cards printed by the browser. Mounted only during a vector print. */}
       <div id="id-card-print" className="hidden print:block">
         <div className="id-card-sheet">
-          {selectedRows.map((row) => (
+          {vectorRows.map((row) => (
             <div key={row.id} className="id-card-pair space-y-3">
               <div className="dc-scale"><IdCardFront person={row} cutoutUrl={cutouts[row.id]} /></div>
               <div className="dc-scale"><IdCardBack person={row} /></div>
@@ -679,11 +838,187 @@ const IdCardCenter = () => {
           ))}
         </div>
       </div>
+
+      {/* Offscreen full-size faces — only mounted while snapshotting; the html2canvas raster source.
+          Memoised so per-card progress ticks don't re-reconcile the whole (possibly 100+) card host. */}
+      <RasterHost hostRef={rasterHostRef} rows={rasterRows} cutouts={cutouts} />
     </div>
   );
 };
 
+/** Dropdown button offering the two ID-card outputs (vector for print, raster for CorelDRAW). */
+function GenerateMenu({
+  label,
+  busy,
+  disabled,
+  size,
+  onSelect,
+}: {
+  label: string;
+  busy?: boolean;
+  disabled?: boolean;
+  size?: "sm" | "default";
+  onSelect: (output: "vector" | "raster") => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button className="gap-2" size={size} disabled={disabled}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {label}
+          {!busy && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuItem className="flex-col items-start gap-0.5" onClick={() => onSelect("vector")}>
+          <span className="font-medium">High-res vector PDF</span>
+          <span className="text-xs text-muted-foreground">Crisp &amp; small — best for printing</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem className="flex-col items-start gap-0.5" onClick={() => onSelect("raster")}>
+          <span className="font-medium">Rasterised PDF</span>
+          <span className="text-xs text-muted-foreground">Flattened images — for CorelDRAW</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Offscreen host that renders the selected faces full-size as the html2canvas snapshot source. */
+const RasterHost = memo(function RasterHost({
+  hostRef,
+  rows,
+  cutouts,
+}: {
+  hostRef: RefObject<HTMLDivElement>;
+  rows: CardPerson[];
+  cutouts: Record<string, string>;
+}) {
+  return (
+    <div ref={hostRef} aria-hidden style={{ position: "fixed", left: -100000, top: 0, opacity: 0, pointerEvents: "none" }}>
+      {rows.map((row) => (
+        <div key={row.id} className="dc-scale" data-raster-id={row.id}>
+          <div data-face="front"><IdCardFront person={row} cutoutUrl={cutouts[row.id]} /></div>
+          <div data-face="back"><IdCardBack person={row} /></div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
 // ── Round-3 "beacon colour-shade waves" card faces (authored at 400×634px) ──
+
+/**
+ * Flatten one 400×634 card face to a PNG data URL. scale:3 ≈ 300 dpi at the 54 mm print width.
+ * backgroundColor:null preserves the rounded-corner transparency; useCORS lets remote photos in.
+ */
+/** Race a promise against a timeout; resolves `fallback` if it doesn't settle in time (never rejects). */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p, new Promise<T>((resolve) => window.setTimeout(() => resolve(fallback), ms))]);
+}
+
+async function snapshotFace(node: HTMLElement): Promise<string> {
+  // Drop the card's drop-shadow for the snapshot — html2canvas renders box-shadow as a hard blue
+  // blob rather than a soft glow. It's a screen-only flourish anyway.
+  const prevShadow = node.style.boxShadow;
+  node.style.boxShadow = "none";
+  try {
+    // scale:2 ≈ 375 dpi at 54 mm — plenty for a printed card. White bg + JPEG keeps each face ~40 KB
+    // (vs ~400 KB PNG), so a full class fits in memory; rounded corners read white on the white page.
+    // imageTimeout caps html2canvas's internal per-image wait so one slow photo can't stall the batch.
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true, imageTimeout: 8000, logging: false });
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } finally {
+    node.style.boxShadow = prevShadow;
+  }
+}
+
+/**
+ * html2canvas (1.4.1) ignores CSS `object-fit` and `filter`. Two consequences we neutralise here
+ * so the flattened faces match the on-screen vector render:
+ *  - Logos sized with a fixed box + `object-fit:contain` come out stretched → size the box to the
+ *    logo's true aspect instead (containBox), so no object-fit is needed.
+ *  - The back-band white "reverse" logo (a CSS `brightness(0) invert(1)` knockout) comes out in its
+ *    original colours → pre-bake an actual white-silhouette PNG (whiteKnockout).
+ */
+function containBox(maxW: number, maxH: number, aspect: number): { width: number; height: number } {
+  let w = maxW, h = maxW / aspect;
+  if (h > maxH) { h = maxH; w = maxH * aspect; }
+  return { width: Math.round(w), height: Math.round(h) };
+}
+
+const whiteLogoCache = new Map<string, string>();
+// Colour logo re-encoded as a PNG data URL. The QR centre logo is an SVG <image href>; html2canvas
+// can't load an external asset href while serialising the inline SVG, so it renders blank unless the
+// href is already inline (a data URL).
+const logoDataCache = new Map<string, string>();
+
+function loadImg(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const timer = window.setTimeout(() => reject(new Error("image load timeout")), 8000);
+    img.onload = () => { window.clearTimeout(timer); resolve(img); };
+    img.onerror = () => { window.clearTimeout(timer); reject(new Error("image load error")); };
+    img.src = src;
+  });
+}
+
+/** Recolour every opaque pixel of a logo to solid white, preserving its alpha, via source-in composite. */
+async function whiteKnockout(url: string): Promise<string> {
+  const img = await loadImg(url);
+  const w = img.naturalWidth || 512;
+  const h = img.naturalHeight || 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  return canvas.toDataURL("image/png");
+}
+
+/** Re-encode a logo (bundled asset URL) as a self-contained PNG data URL. */
+async function logoToDataUrl(url: string): Promise<string> {
+  const img = await loadImg(url);
+  const w = img.naturalWidth || 512;
+  const h = img.naturalHeight || 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Pre-bake the raster-safe logo variants for the distinct logos in this batch:
+ * a white knockout (back-band reverse logo) and an inline data URL (QR centre logo).
+ * Failures fall back to the on-screen behaviour (CSS filter / bundled URL).
+ */
+async function ensureLogoAssets(logos: string[]): Promise<void> {
+  await Promise.all(
+    logos.map(async (url) => {
+      if (!whiteLogoCache.has(url)) {
+        try {
+          whiteLogoCache.set(url, await whiteKnockout(url));
+        } catch (err) {
+          console.warn("[IdCardCenter] white knockout failed for", url, err);
+        }
+      }
+      if (!logoDataCache.has(url)) {
+        try {
+          logoDataCache.set(url, await logoToDataUrl(url));
+        } catch (err) {
+          console.warn("[IdCardCenter] logo data-url failed for", url, err);
+        }
+      }
+    }),
+  );
+}
 
 const DC_CARD: CSSProperties = {
   width: 400,
@@ -728,7 +1063,8 @@ function StudentQr({ value, display, color, brand }: { value: string; display?: 
           // Near-black modules: a coloured QR + centre logo drops below the scan margin (verified).
           fgColor="#111111"
           bgColor="#FFFFFF"
-          imageSettings={{ src: brand.logo, ...qrLogoSize(brand, 26), excavate: true }}
+          // Inline data URL so the centre logo survives html2canvas SVG serialisation (else blank).
+          imageSettings={{ src: logoDataCache.get(brand.logo) ?? brand.logo, ...qrLogoSize(brand, 26), excavate: true }}
         />
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -770,13 +1106,11 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
   ];
   return (
     <div className="dc-card" style={DC_CARD}>
-      {/* lanyard slot */}
-      <div style={{ height: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        <div style={{ width: 62, height: 9, borderRadius: 5, background: "#E3E7F0" }} />
-      </div>
-      {/* wordmark logo */}
-      <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 0" }}>
-        <img src={brand.logo} alt={brand.logoAlt} decoding="async" style={{ width: 234, height: 138, objectFit: "contain", display: "block" }} />
+      {/* top margin (lanyard-slot pill removed per request) */}
+      <div style={{ height: 50 }} />
+      {/* wordmark logo — box sized to the logo's true aspect (no object-fit; html2canvas ignores it) */}
+      <div style={{ height: 138, display: "flex", alignItems: "center", justifyContent: "center", padding: "14px 0 0" }}>
+        <img src={brand.logo} alt={brand.logoAlt} decoding="async" style={{ ...containBox(234, 138, brand.logoAspect ?? 1), display: "block" }} />
       </div>
       {/* photo + radiating rings */}
       <div style={{ position: "relative", height: 296, display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
@@ -811,7 +1145,7 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
                 level="H"
                 fgColor="#111111"
                 bgColor="#FFFFFF"
-                imageSettings={{ src: brand.logo, ...qrLogoSize(brand, 18), excavate: true }}
+                imageSettings={{ src: logoDataCache.get(brand.logo) ?? brand.logo, ...qrLogoSize(brand, 18), excavate: true }}
               />
             </div>
             <span style={{ fontSize: 7, letterSpacing: ".18em", color: "#98A2B3", fontWeight: 700, fontFamily: "'Archivo',sans-serif" }}>SCAN</span>
@@ -862,13 +1196,20 @@ function IdCardBack({ person }: { person: CardPerson }) {
       <div style={{ position: "relative", background: accent, padding: "26px 30px 22px", display: "flex", flexDirection: "column", gap: 3, overflow: "hidden" }}>
         <div style={{ position: "absolute", right: -70, top: -70, width: 190, height: 190, borderRadius: "50%", border: "16px solid rgba(255,255,255,.16)" }} />
         <div style={{ position: "absolute", right: -46, top: -46, width: 126, height: 126, borderRadius: "50%", border: "14px solid rgba(255,255,255,.26)" }} />
-        <img
-          src={brand.logo}
-          alt={brand.logoAlt}
-          decoding="async"
-          // reverse logo: knock the wordmark out to solid white so it reads on any band colour
-          style={{ position: "absolute", right: 18, top: 14, width: 62, height: 62, objectFit: "contain", filter: "brightness(0) invert(1)" }}
-        />
+        {/* reverse logo: solid white so it reads on any band colour. Prefer a pre-baked white PNG
+            (html2canvas can't apply the CSS filter); fall back to the filter for on-screen preview. */}
+        {(() => {
+          const white = whiteLogoCache.get(brand.logo);
+          const box = containBox(62, 62, brand.logoAspect ?? 1);
+          return (
+            <img
+              src={white ?? brand.logo}
+              alt={brand.logoAlt}
+              decoding="async"
+              style={{ position: "absolute", right: 18, top: 14, ...box, ...(white ? {} : { filter: "brightness(0) invert(1)" }) }}
+            />
+          );
+        })()}
         <div style={{ position: "relative", color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: ".2em" }}>
           {person.type === "students" ? "STUDENT IDENTITY CARD" : "EMPLOYEE IDENTITY CARD"}
         </div>
