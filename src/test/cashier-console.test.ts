@@ -36,7 +36,7 @@ const allocationField = read("src/components/finance/FeeHeadAllocationField.tsx"
 const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
 const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
 const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
-const removeMigration = readMigration("remove_fee_charge_rpc");
+const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -312,15 +312,23 @@ describe("removing a fee row", () => {
     expect(removeMigration).toContain("Reallocate or refund it instead");
   });
 
-  it("lets a cashier undo only what a cashier could add", () => {
-    expect(removeMigration).toContain("FROM public.optional_fee_heads ofh");
-    expect(removeMigration).toContain("A cashier can only remove ad-hoc charges");
+  // Removing a row edits ONE candidate's ledger; the fee structure template is
+  // untouched and every other student on it is unaffected. So a cashier may
+  // correct any unpaid row — a day scholar mis-provisioned with a boarding
+  // head, a term that does not apply to this candidate.
+  it("lets a cashier correct any unpaid row on this candidate's ledger", () => {
+    expect(removeMigration).toContain("public.can_collect_fee(auth.uid())");
     expect(removeMigration).toContain("public.can_manage_fee_structure(auth.uid())");
+    expect(removeMigration).not.toContain("A cashier can only remove ad-hoc charges");
   });
 
   it("hides the button instead of failing on click", () => {
     expect(studentFeePanel).toContain("const canRemoveRow = (f: any) =>");
-    expect(studentFeePanel).toContain("adhocCodeIds.has(f.fee_code_id)");
     expect(studentFeePanel).toContain("{canRemoveRow(f) && (");
+  });
+
+  it("confirms before dropping a row, naming the amount", () => {
+    expect(studentFeePanel).toContain("window.confirm(");
+    expect(studentFeePanel).toContain("This affects only this candidate. The fee structure is unchanged.");
   });
 });

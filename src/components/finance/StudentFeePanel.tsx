@@ -58,9 +58,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
-  // Fee codes that came from the ad-hoc catalog. A cashier may remove those
-  // (the mirror of Add Charge) but not a structural tuition/boarding row.
-  const [adhocCodeIds, setAdhocCodeIds] = useState<Set<string>>(new Set());
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
@@ -79,7 +76,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchConsultantFlag();
       fetchCredit();
       fetchPendingWaivers();
-      fetchRemovableCodes();
     }
   }, [student?.id, student?.lead_id]);
 
@@ -98,18 +94,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     setPendingWaivers(map);
   };
 
-  const fetchRemovableCodes = async () => {
-    const { data } = await (supabase.rpc as any)("removable_fee_code_ids", { _student_id: student.id });
-    setAdhocCodeIds(new Set(((data || []) as { fee_code_id: string }[]).map(r => r.fee_code_id)));
-  };
-
   // Mirrors remove_fee_charge's server-side gate so we never render a button
-  // that answers with a raw privilege error.
-  const canRemoveRow = (f: any) => {
-    if (Number(f.paid_amount) !== 0) return false;
-    if (role === "super_admin" || hasPermission("fee_structure:manage")) return true;
-    return role === "accountant" && adhocCodeIds.has(f.fee_code_id);
-  };
+  // that answers with a raw privilege error. Removing a row edits THIS
+  // candidate's ledger only — the fee structure template is untouched — so the
+  // cashier may correct any row that has no money against it.
+  const canRemoveRow = (f: any) =>
+    Number(f.paid_amount) === 0 &&
+    (["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage"));
 
   const fetchCredit = async () => {
     const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
@@ -211,9 +202,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // Goes through remove_fee_charge: `authenticated` has no DELETE grant on
   // fee_ledger, so the direct .delete() failed with a privilege error for
   // every role — including the super_admin the RLS policy was written for.
-  const handleRemoveUnpaid = async (feeId: string) => {
+  const handleRemoveUnpaid = async (fee: any) => {
+    // Now that a structural row can be removed too, make the amount explicit
+    // before it disappears — a misclick on a 56,184 boarding row is expensive
+    // to notice later.
+    const label = fee.fee_codes?.name || fee.fee_codes?.code || "this fee";
+    const ok = window.confirm(
+      `Remove ${label} of ₹${Number(fee.total_amount).toLocaleString("en-IN")} from ` +
+      `${student?.name || "this candidate"}'s ledger?\n\n` +
+      `This affects only this candidate. The fee structure is unchanged.`,
+    );
+    if (!ok) return;
+
     const { error } = await (supabase.rpc as any)("remove_fee_charge", {
-      _fee_ledger_id: feeId, _reason: null,
+      _fee_ledger_id: fee.id, _reason: null,
     });
 
     if (error) {
@@ -448,9 +450,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           )}
                           {canRemoveRow(f) && (
                             <button
-                              onClick={() => handleRemoveUnpaid(f.id)}
+                              onClick={() => handleRemoveUnpaid(f)}
                               className="text-muted-foreground hover:text-destructive transition-colors"
-                              title="Remove unpaid item"
+                              title="Remove from this candidate's ledger"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
