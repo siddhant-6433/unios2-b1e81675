@@ -24,6 +24,7 @@ const claimFn = read("supabase/functions/student-portal-claim/index.ts");
 const allocRowMigration = readMigration("payment_allocations_by_ledger_row");
 const authLookupMigration = readMigration("auth_user_lookup_for_student_claim");
 const loginLinkMigration = readMigration("issue_student_login_link");
+const accountantPermsMigration = readMigration("accountant_drop_attendance_exams");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -480,5 +481,22 @@ describe("ledger header stays a counter, not a control panel", () => {
     for (const label of ["Auto-Assign Fees", "Re-provision (clear unpaid)", "Transfer", "Reallocation History"]) {
       expect(studentFeePanel).toContain(label);
     }
+  });
+});
+
+describe("the accountant sidebar is a cash counter", () => {
+  it("drops attendance and exams from the role rather than hiding them in the nav", () => {
+    // The sidebar gates those two items on exactly these permissions, so the
+    // grants also let the role open /attendance and /exams directly — hiding
+    // the links would have left the pages reachable.
+    expect(accountantPermsMigration).toContain("rp.role = 'accountant'");
+    expect(accountantPermsMigration).toContain("p.module IN ('attendance', 'exams')");
+    expect(accountantPermsMigration).toContain("DELETE FROM public.role_permissions");
+  });
+
+  it("leaves the nav itself permission-driven", () => {
+    const sidebar = read("src/components/layout/AppSidebar.tsx");
+    expect(sidebar).toContain('permission: "attendance:view"');
+    expect(sidebar).toContain('permission: "exams:view"');
   });
 });
