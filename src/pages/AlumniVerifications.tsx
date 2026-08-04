@@ -1754,7 +1754,7 @@ registrar@nimt.ac.in`,
                     disabled={saving}
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    {isIssuanceRequest(selectedReq) ? issuanceActionLabel(selectedReq) : "Preview & Send Result Email"}
+                    {isIssuanceRequest(selectedReq) ? issuanceActionLabel(selectedReq) : "Preview & Edit Email"}
                   </Button>
                 </div>
               )}
