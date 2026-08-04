@@ -350,11 +350,20 @@ const Admissions = () => {
   const canAssignLists = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "principal";
 
+  const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
+  const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
+  const [leadSortOrder, setLeadSortOrder] = useState<LeadSortOrder>("newest");
+
   // A dynamic list is re-evaluated in SQL on a cron, so it can only carry
   // filters that map to columns on leads. Activity filters (not-called, overdue
   // follow-up, action bucket) resolve to id-Sets computed by other queries on
   // this page and can't be re-derived later — the toggle is disabled and says so
   // rather than silently dropping them.
+  // NOTE: must stay below the useState declarations it reads (fromDate/toDate/
+  // notCalledIds) — referencing them earlier is a temporal-dead-zone crash.
   const dynamicFilterState = {
     stageFilter, sourceFilter, sourceFilterMode,
     courseFilter: debouncedCourseFilter, courseFilterMode,
@@ -369,12 +378,6 @@ const Admissions = () => {
   const canBeDynamic = listScope === "filtered"
     && dynamicBlockers.length === 0
     && !isEmptyFilterDefinition(dynamicDefinition);
-  const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
-  const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
-  const [datePreset, setDatePreset] = useState<DatePreset>("all");
-  const [fromDate, setFromDate] = useState<string>("");
-  const [toDate, setToDate] = useState<string>("");
-  const [leadSortOrder, setLeadSortOrder] = useState<LeadSortOrder>("newest");
 
   // Read URL params on mount — store in ref to survive re-renders.
   // Supports drill-down from external dashboards (e.g. Publisher Analytics):
