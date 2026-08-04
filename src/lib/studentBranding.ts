@@ -58,6 +58,7 @@ export function brandForStudentOwner(input: StudentBrandInput): StudentBrand {
   if (
     text.includes("beacon") ||
     text.includes("avantika") ||
+    text.includes("arthala") ||
     text.includes("bsav-") ||
     text.includes("bsa-")
   ) {
