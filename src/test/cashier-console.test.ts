@@ -26,6 +26,7 @@ const authLookupMigration = readMigration("auth_user_lookup_for_student_claim");
 const loginLinkMigration = readMigration("issue_student_login_link");
 const accountantPermsMigration = readMigration("accountant_drop_attendance_exams");
 const studentPortal = read("src/pages/StudentPortal.tsx");
+const sendOnDemandMigration = readMigration("login_link_send_on_demand");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -437,8 +438,33 @@ describe("direct student login link", () => {
     expect(loginLinkMigration).toContain("claimed_at IS NULL");
   });
 
-  it("refuses to mint a link that could never be delivered", () => {
-    expect(loginLinkMigration).toContain("has no phone number on file");
+  it("generates without sending — delivery is a separate, deliberate call", () => {
+    // Minting used to fire WhatsApp from the insert trigger, so a cashier who
+    // only wanted to read the URL out had already messaged the parent.
+    expect(sendOnDemandMigration).toContain("auto_send boolean NOT NULL DEFAULT true");
+    expect(sendOnDemandMigration).toContain("IF NEW.auto_send IS FALSE THEN");
+    expect(sendOnDemandMigration).toContain("now() + interval '7 days', false)");
+    expect(studentFeePanel).toContain("Generate Login Link");
+    expect(studentFeePanel).toContain("Send on WhatsApp to");
+  });
+
+  it("defaults auto_send true so every existing insert site is untouched", () => {
+    expect(sendOnDemandMigration).toContain("DEFAULT true");
+  });
+
+  it("keeps one delivery implementation shared by the trigger and the RPC", () => {
+    expect(sendOnDemandMigration).toContain("PERFORM public.send_student_claim_link(NEW.id)");
+    expect(sendOnDemandMigration).toContain("RETURN public.send_student_claim_link(_token_id)");
+  });
+
+  it("refuses to send a used, expired or undeliverable link", () => {
+    expect(sendOnDemandMigration).toContain("has already been used");
+    expect(sendOnDemandMigration).toContain("has expired");
+    expect(sendOnDemandMigration).toContain("has no phone number on file");
+  });
+
+  it("keeps the internal sender off browser sessions", () => {
+    expect(sendOnDemandMigration).toContain("REVOKE ALL ON FUNCTION public.send_student_claim_link(uuid) FROM PUBLIC, anon, authenticated");
   });
 
   // The claim path had never once succeeded in production: 31 tokens issued,
@@ -472,7 +498,7 @@ describe("direct student login link", () => {
 
 describe("ledger header stays a counter, not a control panel", () => {
   it("keeps the cashier's four actions in reach", () => {
-    for (const label of ["Collect Payment", "Add Charge", "Send Payment Link", "Send Login Link"]) {
+    for (const label of ["Collect Payment", "Add Charge", "Send Payment Link", "Generate Login Link"]) {
       expect(studentFeePanel).toContain(label);
     }
   });

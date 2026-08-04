@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Loader2, Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
   Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy,
+  MessageCircle, X,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -61,8 +62,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // payment). One receipt is then issued across every ticked row.
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [collectAllocations, setCollectAllocations] = useState<FeeAllocation[] | null>(null);
-  const [loginLink, setLoginLink] = useState<{ url: string; phone: string } | null>(null);
+  const [loginLink, setLoginLink] = useState<
+    { tokenId: string; url: string; phone: string | null; sent: boolean } | null
+  >(null);
   const [issuingLink, setIssuingLink] = useState(false);
+  const [sendingLink, setSendingLink] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
@@ -284,6 +288,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     setCollectOpen(true);
   };
 
+  // Generate only. Sending is a second, deliberate click — a cashier who just
+  // wants to read the URL out at the counter shouldn't have already messaged
+  // the parent by the time the button finishes.
   const handleIssueLoginLink = async () => {
     setIssuingLink(true);
     const { data, error } = await (supabase.rpc as any)("issue_student_login_link", {
@@ -294,11 +301,30 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       toast({ title: "Could not create the login link", description: error.message, variant: "destructive" });
       return;
     }
-    setLoginLink({ url: data?.url, phone: data?.phone });
+    setLoginLink({ tokenId: data?.token_id, url: data?.url, phone: data?.phone || null, sent: false });
     toast({
-      title: "Login link sent",
-      description: `WhatsApp sent to ${data?.phone}. The link signs the student straight in — no OTP — and expires in 7 days.`,
+      title: "Login link ready",
+      description: "Signs the student straight in — no OTP — and expires in 7 days. Copy it, or send it on WhatsApp.",
     });
+  };
+
+  const handleSendLoginLink = async () => {
+    if (!loginLink) return;
+    setSendingLink(true);
+    const { data, error } = await (supabase.rpc as any)("send_student_login_link", {
+      _token_id: loginLink.tokenId,
+    });
+    setSendingLink(false);
+    if (error) {
+      toast({ title: "Could not send the link", description: error.message, variant: "destructive" });
+      return;
+    }
+    if (data?.sent === false) {
+      toast({ title: "Not sent", description: data?.reason || "WhatsApp delivery is not configured.", variant: "destructive" });
+      return;
+    }
+    setLoginLink({ ...loginLink, sent: true });
+    toast({ title: "Sent on WhatsApp", description: `Delivered to ${loginLink.phone}.` });
   };
 
   const totalFee = fees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
@@ -392,7 +418,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {isFinanceRole && student?.id && (
           <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
             {issuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
-            Send Login Link
+            Generate Login Link
           </Button>
         )}
 
@@ -439,12 +465,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         )}
       </div>
 
-      {/* The freshly minted login link, so the cashier can also read it out or
-          paste it elsewhere when WhatsApp doesn't land. */}
+      {/* The minted link. Nothing has been messaged yet — the cashier decides
+          whether to read it out, copy it, or send it on WhatsApp. */}
       {loginLink && (
-        <div className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
           <LogIn className="h-3.5 w-3.5 shrink-0 text-success" />
-          <span className="text-[11px] text-muted-foreground">Sent to {loginLink.phone} ·</span>
           <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{loginLink.url}</code>
           <button
             onClick={() => {
@@ -456,8 +481,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
+          {loginLink.sent ? (
+            <span className="shrink-0 text-[11px] font-medium text-success">
+              Sent to {loginLink.phone}
+            </span>
+          ) : loginLink.phone ? (
+            <Button size="sm" variant="outline" className="h-7 shrink-0 gap-1.5" onClick={handleSendLoginLink} disabled={sendingLink}>
+              {sendingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              Send on WhatsApp to {loginLink.phone}
+            </Button>
+          ) : (
+            <span className="shrink-0 text-[11px] text-muted-foreground">No phone on file — copy the link instead</span>
+          )}
           <button onClick={() => setLoginLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
-            <Trash2 className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
