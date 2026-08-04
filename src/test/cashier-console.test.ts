@@ -400,10 +400,22 @@ describe("counter collection: many heads, one receipt", () => {
     expect(studentFeePanel).toContain("Math.min(Math.max(0, raw), rowBalance(f))");
   });
 
-  it("the per-row Collect shortcut goes through the same path, not a second one", () => {
-    expect(studentFeePanel).toContain("openCollect([f], one)");
-    // The old single-target prop is gone.
+  it("collects only from the bar — no per-row Collect duplicating it", () => {
+    // Collection happens once, against every ticked row. A per-row link offered
+    // a second way to do the same thing one head at a time.
+    expect(studentFeePanel).toContain("onClick={() => openCollect(fees)}");
+    expect(studentFeePanel).not.toContain('title="Collect against this head"');
+    // The old single-target prop is gone too.
     expect(studentFeePanel).not.toContain("collectTarget");
+  });
+
+  it("puts Paying last, after the row actions", () => {
+    const header = studentFeePanel.slice(
+      studentFeePanel.indexOf("Fee Head</th>"),
+      studentFeePanel.indexOf("</tr>", studentFeePanel.indexOf("Fee Head</th>")),
+    );
+    expect(header.indexOf("Balance</th>")).toBeLessThan(header.indexOf("Due Date</th>"));
+    expect(header.indexOf("Status</th>")).toBeLessThan(header.indexOf("Paying</th>"));
   });
 
   it("a seeded breakup locks the amount so the table and the receipt agree", () => {

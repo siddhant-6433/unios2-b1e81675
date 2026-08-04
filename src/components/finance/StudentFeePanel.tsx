@@ -282,13 +282,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // entry carries fee_ledger_id so provision_student_fees credits that exact
   // row — without it the money spills onto the earliest-due row of the same
   // fee code, which is wrong when the cashier deliberately skipped a quarter.
-  const openCollect = (rows: any[], amounts: Record<string, number> = picked) => {
+  const openCollect = (rows: any[]) => {
     const allocs: FeeAllocation[] = rows
-      .filter((f) => Number(amounts[f.id]) > 0)
+      .filter((f) => Number(picked[f.id]) > 0)
       .map((f) => ({
         fee_code_id: f.fee_code_id,
         fee_ledger_id: f.id,
-        amount: Number(amounts[f.id]),
+        amount: Number(picked[f.id]),
         label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
           defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
       }));
@@ -300,13 +300,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // Same ticked rows, but hand them to the payer instead of taking cash. The
   // link's breakup carries fee_ledger_id, so when it is paid the money lands on
   // exactly these rows.
-  const openLinkForSelection = (rows: any[], amounts: Record<string, number> = picked) => {
+  const openLinkForSelection = (rows: any[]) => {
     const allocs: FeeAllocation[] = rows
-      .filter((f) => Number(amounts[f.id]) > 0)
+      .filter((f) => Number(picked[f.id]) > 0)
       .map((f) => ({
         fee_code_id: f.fee_code_id,
         fee_ledger_id: f.id,
-        amount: Number(amounts[f.id]),
+        amount: Number(picked[f.id]),
         label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
           defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
       }));
@@ -580,10 +580,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Balance</th>
-              {canPick && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Due Date</th>
               <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
               {isFinanceRole && <th className="px-4 py-3 font-medium text-muted-foreground w-10"></th>}
+              {/* Paying sits last, next to the running total and Collect button
+                  in the bar below — the amounts and the action read together. */}
+              {canPick && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
             </tr>
           </thead>
           <tbody>
@@ -689,21 +691,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     </td>
                     <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                     <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
-                    {canPick && (
-                      <td className="px-4 py-3 text-right">
-                        {picked[f.id] !== undefined ? (
-                          <input
-                            type="number" min={0} max={rowBalance(f)} step={1} inputMode="numeric"
-                            value={picked[f.id] || ""}
-                            onChange={(e) => setPickAmount(f, Math.round(Number(e.target.value) || 0))}
-                            className="w-24 rounded-lg border border-input bg-background px-2 py-1 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                            title="Part payments are allowed — capped at the balance"
-                          />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    )}
                     <td className="px-4 py-3 text-muted-foreground">
                       {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
                     </td>
@@ -715,33 +702,36 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         {f.status}
                       </span>
                     </td>
+                    {/* No per-row Collect. Collection happens once, from the
+                        bar at the foot of the table, against every ticked row —
+                        a link here just offered a second way to do the same
+                        thing one head at a time. */}
                     {isFinanceRole && (
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {canCollect && Number(f.balance) > 0 && (
-                            <button
-                              onClick={() => {
-                                // Same path as the tick-boxes — just this one row.
-                                const one = { [f.id]: rowBalance(f) };
-                                setPicked(one);
-                                openCollect([f], one);
-                              }}
-                              className="text-primary hover:underline text-[11px] font-medium whitespace-nowrap"
-                              title="Collect against this head"
-                            >
-                              Collect
-                            </button>
-                          )}
-                          {canRemoveRow(f) && (
-                            <button
-                              onClick={() => handleRemoveUnpaid(f)}
-                              className="text-muted-foreground hover:text-destructive transition-colors"
-                              title="Remove from this candidate's ledger"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
+                        {canRemoveRow(f) && (
+                          <button
+                            onClick={() => handleRemoveUnpaid(f)}
+                            className="text-muted-foreground transition-colors hover:text-destructive"
+                            title="Remove from this candidate's ledger"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                    {canPick && (
+                      <td className="px-4 py-3 text-right">
+                        {picked[f.id] !== undefined ? (
+                          <input
+                            type="number" min={0} max={rowBalance(f)} step={1} inputMode="numeric"
+                            value={picked[f.id] || ""}
+                            onChange={(e) => setPickAmount(f, Math.round(Number(e.target.value) || 0))}
+                            className="w-24 rounded-lg border border-input bg-background px-2 py-1 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                            title="Part payments are allowed — capped at the balance"
+                          />
+                        ) : (
+                          <span className="text-muted-foreground/40">—</span>
+                        )}
                       </td>
                     )}
                   </tr>
