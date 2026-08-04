@@ -60,7 +60,7 @@ export function OfferWaiverApprovalPanel() {
         offer_letters!offer_letter_id (
           lead_id, course_id, session_id,
           leads!lead_id ( name ),
-          offer_letter_courses:applications!lead_id ( courses!course_id ( name ) )
+          courses!course_id ( name )
         )
       `)
       .order("created_at", { ascending: false });
@@ -136,8 +136,11 @@ export function OfferWaiverApprovalPanel() {
         created_at: w.created_at,
         lead_name: w.offer_letters?.leads?.name || "—",
         lead_id: w.offer_letters?.lead_id || "",
-        course_name:
-          w.offer_letters?.offer_letter_courses?.[0]?.courses?.name || null,
+        // offer_letters.course_id already points at courses. The old path went
+        // offer_letters → applications → courses, but nothing joins those two
+        // tables, so PostgREST rejected the whole query and the panel showed
+        // "no pending waiver requests" while 49 sat waiting.
+        course_name: w.offer_letters?.courses?.name || null,
         year_amount: yearAmount,
       };
     }));
