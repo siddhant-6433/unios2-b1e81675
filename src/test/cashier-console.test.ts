@@ -550,6 +550,32 @@ describe("student portal fee ledger", () => {
     expect(studentPortal).toContain("balance, concession, status");
   });
 
+  it("makes every outstanding head individually payable", () => {
+    // Was upcoming-only, which left a one-off charge like a meal add-on with no
+    // way to settle on its own — only the whole due total or the whole year.
+    expect(studentPortal).toContain("{!paid && fee.balance > 0 && (");
+    expect(studentPortal).toContain('openPayment("fee", fee.id)');
+  });
+
+  it("can settle a whole term in one go, upcoming heads included", () => {
+    expect(studentPortal).toContain('openPayment("set", undefined, gPayable.map((r) => r.id))');
+    expect(studentPortal).toContain("Pay ₹{gOutstanding.toLocaleString");
+  });
+
+  it("charges exactly what the term button says", () => {
+    // Header total and the paid set must select on the same predicate.
+    expect(studentPortal).toContain("const gPayable = g.rows.filter((r) => r.balance > 0);");
+    expect(studentPortal).toContain("const gOutstanding = gPayable.reduce((s, r) => s + r.balance, 0);");
+  });
+
+  it("never names a price — the gateway resolves it from the ids", () => {
+    // feeSelectionFromBody honours a non-empty fee_ids over the scope, and
+    // expectedStudentFeeAmount sums those rows' balances server-side.
+    const rzp = read("supabase/functions/razorpay-payment/index.ts");
+    expect(rzp).toContain("if (ids.length > 0) return ids.join(\",\");");
+    expect(rzp).toContain("const expected = await expectedStudentFeeAmount(");
+  });
+
   it("lists every paid receipt with its PDF", () => {
     expect(studentPortal).toContain("Paid Fee Receipts");
     expect(studentPortal).toContain("Download PDF");

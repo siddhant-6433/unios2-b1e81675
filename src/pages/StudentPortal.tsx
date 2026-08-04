@@ -240,13 +240,19 @@ export default function StudentPortal() {
     setLoading(false);
   };
 
-  const openPayment = (scope: "due" | "all" | "fee", feeId?: string) => {
+  // `ids` pays an explicit set of ledger rows — one custom head, or a whole
+  // quarter. The gateways resolve the amount from the ids server-side
+  // (feeSelectionFromBody honours a non-empty fee_ids over the scope), so the
+  // client never names a price.
+  const openPayment = (scope: "due" | "all" | "fee" | "set", feeId?: string, ids?: string[]) => {
     if (!student) return;
     const todayKey = new Date().toLocaleDateString("en-CA");
+    const idSet = new Set(ids || []);
     const selectedFees = fees
       .filter((fee) => fee.balance > 0)
       .filter((fee) => {
         if (scope === "all") return true;
+        if (scope === "set") return idSet.has(fee.id);
         if (scope === "fee") return fee.id === feeId;
         return fee.due_date <= todayKey;
       })
@@ -493,11 +499,14 @@ export default function StudentPortal() {
               <div className="p-8 text-center text-sm text-gray-400">No fees due right now</div>
             ) : (
               feeGroups.map((g) => {
-                const gOutstanding = g.rows.reduce((s, r) => s + (r.status === "paid" ? 0 : r.balance), 0);
+                // Same predicate the Pay button selects on, so the amount on the
+                // button is always exactly what it charges.
+                const gPayable = g.rows.filter((r) => r.balance > 0);
+                const gOutstanding = gPayable.reduce((s, r) => s + r.balance, 0);
                 const gWaived = g.rows.reduce((s, r) => s + r.concession, 0);
                 return (
                 <Fragment key={g.term}>
-                  <div className="flex items-baseline gap-2 bg-gray-50 px-4 py-2">
+                  <div className="flex items-center gap-2 bg-gray-50 px-4 py-2">
                     <span className="text-xs font-semibold text-gray-700">
                       {g.term === ONE_TIME_GROUP ? "One-time Fees" : defaultFeeTermLabel(g.term)}
                     </span>
@@ -509,6 +518,17 @@ export default function StudentPortal() {
                     <span className="ml-auto text-[11px] font-semibold text-gray-500">
                       {gOutstanding > 0 ? `₹${gOutstanding.toLocaleString("en-IN")} due` : "Cleared"}
                     </span>
+                    {/* Settle the whole quarter at once, including the ones not
+                        due yet — otherwise paying a term ahead means tapping
+                        every head in it one at a time. */}
+                    {gOutstanding > 0 && (
+                      <button
+                        onClick={() => openPayment("set", undefined, gPayable.map((r) => r.id))}
+                        className="shrink-0 rounded-lg bg-primary px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-primary/90"
+                      >
+                        Pay ₹{gOutstanding.toLocaleString("en-IN")}
+                      </button>
+                    )}
                   </div>
                   {g.rows.map((fee) => {
                 const futureDue = isFutureDue(fee);
@@ -546,7 +566,11 @@ export default function StudentPortal() {
                     <p className={`text-[10px] font-medium capitalize ${
                       paid ? "text-success" : overdue ? "text-destructive" : futureDue ? "text-info-foreground" : "text-yellow-600"
                     }`}>{futureDue ? "upcoming" : fee.status}</p>
-                    {futureDue && (
+                    {/* Every outstanding head is individually payable. This used
+                        to be upcoming-only, which left a one-off charge like a
+                        meal add-on with no way to settle it on its own — the
+                        only options were the whole due total or the whole year. */}
+                    {!paid && fee.balance > 0 && (
                       <button
                         onClick={() => openPayment("fee", fee.id)}
                         className="mt-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-primary/40 hover:text-primary"
