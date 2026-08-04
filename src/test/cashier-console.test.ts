@@ -37,6 +37,7 @@ const receiptFn = read("supabase/functions/generate-payment-receipt/index.ts");
 const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
 const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
 const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
+const searchMigration = readMigration("cashier_search_course");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -330,5 +331,29 @@ describe("removing a fee row", () => {
   it("confirms before dropping a row, naming the amount", () => {
     expect(studentFeePanel).toContain("window.confirm(");
     expect(studentFeePanel).toContain("This affects only this candidate. The fee structure is unchanged.");
+  });
+});
+
+describe("counter search disambiguates same-name candidates", () => {
+  // "anjali kumari" returned seven visually identical rows separated only by a
+  // phone number. The cashier has the candidate in front of them and knows the
+  // course — that is the field that actually tells them apart.
+  it("returns the course and campus", () => {
+    expect(searchMigration).toContain("co.name AS course");
+    expect(searchMigration).toContain("ca.name AS campus");
+    expect(searchMigration).toContain("LEFT JOIN public.courses  co ON co.id = st.course_id");
+    expect(searchMigration).toContain("LEFT JOIN public.courses  co ON co.id = ld.course_id");
+  });
+
+  it("shows the course above the phone line", () => {
+    expect(cashierConsole).toContain("{h.course && (");
+    expect(cashierConsole).toContain("course: r.course");
+  });
+
+  it("still matches on mobile number", () => {
+    // Typing a bare 10-digit number matches a stored +91… via the ilike.
+    expect(searchMigration).toContain("st.phone ilike v_like");
+    expect(searchMigration).toContain("ld.phone ilike v_like");
+    expect(cashierConsole).toContain("Search by name, mobile no., admission no., PAN or application ID");
   });
 });
