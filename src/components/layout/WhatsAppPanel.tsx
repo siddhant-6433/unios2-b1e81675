@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
+import { fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { CheckCheck, Loader2, X } from "lucide-react";
@@ -73,24 +73,32 @@ export function WhatsAppPanel() {
     setLoading(false);
   }, [user?.id, role]);
 
-  // Reuse the badge RPC instead of doing a PostgREST head-count from every
-  // mounted header. It scopes counsellors server-side and avoids materializing
-  // their lead IDs in the client.
+  // Conversations still waiting on us — the same number, computed the same way,
+  // as the inbox's "Needs Reply" chip.
+  //
+  // This used to read action_badge_counts.wa_unread, which counts unread
+  // MESSAGES under RLS while the inbox lists CONVERSATIONS through an
+  // RLS-bypassing view. That is why the header said 10 and the inbox said 30.
+  // whatsapp_reply_state_counts scopes exactly like the list query, and keys on
+  // reply state rather than read state, so opening a thread without replying no
+  // longer silently drops the count.
   const fetchUnreplied = useCallback(async () => {
     if (!role || (isCounsellor && !profile?.id)) return;
     if (isAcademicPartnerPortalRole(role)) {
       setUnrepliedCount(0);
       return;
     }
-    const { data, error } = await fetchActionBadgeCounts({
-      p_scope_counsellor_id: isCounsellor ? profile?.id : null,
-      p_include_unassigned: true,
+    const { data, error } = await fetchWhatsAppReplyStateCounts({
+      p_counsellor_id: isCounsellor ? profile?.id ?? null : null,
+      p_business_key: null,
+      p_include_outbound_only: false,
     });
     if (error) {
-      console.error("[WhatsAppPanel] unread count fetch failed:", error);
+      console.error("[WhatsAppPanel] needs-reply count fetch failed:", error);
       return;
     }
-    setUnrepliedCount(Number(data?.wa_unread || 0));
+    const row = Array.isArray(data) ? data[0] : data;
+    setUnrepliedCount(Number(row?.needs_reply || 0));
   }, [role, isCounsellor, profile?.id]);
 
   useEffect(() => {
@@ -225,12 +233,12 @@ export function WhatsAppPanel() {
               className="hidden md:flex items-center gap-1.5 rounded-xl border border-success/30/60 bg-success/5 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/10 transition-colors cursor-pointer select-none"
             >
               <WhatsAppIcon className="h-3.5 w-3.5 shrink-0" />
-              <span>{unrepliedCount} unreplied</span>
+              <span>{unrepliedCount} need reply</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs max-w-[220px]">
-            <p className="font-semibold mb-1">🟢 {unrepliedCount} WhatsApp {unrepliedCount === 1 ? "message" : "messages"} waiting</p>
-            <p className="leading-snug text-muted-foreground">Leads are waiting for a reply. Respond quickly — fast replies significantly improve conversion rates.</p>
+            <p className="font-semibold mb-1">🟢 {unrepliedCount} {unrepliedCount === 1 ? "conversation" : "conversations"} waiting on you</p>
+            <p className="leading-snug text-muted-foreground">These leads sent the last message and nobody has replied. Respond quickly — fast replies significantly improve conversion rates.</p>
             <p className="mt-1.5 font-medium text-success">Click to open WhatsApp Inbox →</p>
           </TooltipContent>
         </Tooltip>

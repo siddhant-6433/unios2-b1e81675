@@ -21,10 +21,17 @@ export interface WhatsAppTemplateComponent {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const BOARDING_PARENT_INTERACTION_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/boarding_school_parent_interaction_header.png";
 
+// Keep in sync with KNOWN_TEMPLATE_MEDIA in
+// supabase/functions/whatsapp-campaign-send/index.ts. Meta's own
+// scontent.whatsapp.net header_handle is not usable as a send-time link
+// (131053), so media templates need a publicly reachable URL registered here.
 const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
   cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
   cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
+  parent_interaction_boarding_july18: BOARDING_PARENT_INTERACTION_IMAGE_URL,
 };
 
 const normalizeType = (value?: string | null) => String(value || "").toUpperCase();

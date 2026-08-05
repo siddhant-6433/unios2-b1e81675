@@ -1,0 +1,204 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+  buildTemplateParams,
+  paramSlotsFromComponents,
+} from "@/lib/whatsappTemplateCatalog";
+
+const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
+const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "utf8");
+const sendDialog = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
+const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
+const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
+const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
+const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index.ts", "utf8");
+const badgeCounts = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
+const replyStateMigration = readFileSync(
+  "supabase/migrations/20260805030442_whatsapp_reply_state_counts.sql",
+  "utf8",
+);
+const templatesRlsMigration = readFileSync(
+  "supabase/migrations/20260804180141_whatsapp_templates_staff_read_and_sync_cron.sql",
+  "utf8",
+);
+
+describe("template catalog", () => {
+  const components = [
+    {
+      type: "BODY",
+      text: "Hi {{1}}, your {{2}} fee of {{3}} is due.",
+      example: { body_text: [["Riya", "B.Sc Nursing", "Rs 25,000"]] },
+    },
+  ];
+
+  it("derives ordered slots with Meta's example values", () => {
+    const slots = paramSlotsFromComponents("fee_reminder", components, 3);
+    expect(slots.map((s) => s.index)).toEqual([1, 2, 3]);
+    expect(slots[0].name).toBe("student_name");
+    expect(slots[0].example).toBe("Riya");
+  });
+
+  it("trusts placeholder_count over the body scan, in both directions", () => {
+    // Meta is the authority: whatsapp-send validates the outgoing params against
+    // this exact count, so building a longer array would guarantee a 132000.
+    expect(paramSlotsFromComponents("unknown_tpl", components, 5)).toHaveLength(5);
+    expect(paramSlotsFromComponents("unknown_tpl", components, 2)).toHaveLength(2);
+  });
+
+  it("falls back to the body scan when no count was synced", () => {
+    expect(paramSlotsFromComponents("unknown_tpl", components, 0)).toHaveLength(3);
+  });
+
+  it("names unmapped slots positionally rather than guessing", () => {
+    const slots = paramSlotsFromComponents("unmapped_template", components, 2);
+    expect(slots.map((s) => s.name)).toEqual(["param_1", "param_2"]);
+  });
+
+  it("reports unfilled slots instead of inventing values", () => {
+    // The old buildParams closures substituted "the pending amount" / "the due
+    // date", which shipped to students verbatim.
+    // fee_reminder's slots are [student_name, amount, due_date].
+    const slots = paramSlotsFromComponents("fee_reminder", components, 3);
+    const built = buildTemplateParams({ paramSlots: slots }, { student_name: "Riya" });
+    expect(built.params[0]).toBe("Riya");
+    expect(built.missing.map((s) => s.name)).toEqual(["amount", "due_date"]);
+    expect(built.params.join(" ")).not.toContain("pending");
+  });
+
+  it("fills from overrides and strips characters Meta rejects", () => {
+    const slots = paramSlotsFromComponents("fee_reminder", components, 3);
+    const built = buildTemplateParams(
+      { paramSlots: slots },
+      { student_name: "Riya" },
+      { amount: "Rs 25,000\nplus tax", due_date: "30 Aug" },
+    );
+    expect(built.missing).toHaveLength(0);
+    // Newlines/tabs in a body parameter are Meta error 131009.
+    expect(built.params[1]).toBe("Rs 25,000 plus tax");
+  });
+});
+
+describe("send-time parameter guard", () => {
+  it("validates arity against Meta's placeholder_count before calling Graph", () => {
+    expect(whatsappSend).toContain("Template param mismatch");
+    expect(whatsappSend).toContain("placeholder_count");
+    expect(whatsappSend).toMatch(/expected !== suppliedParamCount/);
+  });
+
+  it("rejects media-header templates sent with no header", () => {
+    expect(whatsappSend).toContain("needs a ${headerFormat.toLowerCase()} header");
+  });
+
+  it("knows the consultant payout template zoho-books-poll sends", () => {
+    // Previously absent from TEMPLATES, so every payout notification 400'd.
+    expect(whatsappSend).toContain("consultant_payout_disbursed:");
+  });
+});
+
+describe("campaign template map reconciliation", () => {
+  it("uses Meta template names that actually exist", () => {
+    // visit_confirmation / visit_reminder_24hr / course_details are internal
+    // keys, not Meta names. Sending them verbatim failed with 132001.
+    expect(campaignSend).toContain('visit_confirmation: { name: "visit_confirmed"');
+    expect(campaignSend).toContain('visit_reminder_24hr: { name: "visit_reminder"');
+    expect(campaignSend).toContain('course_details: { name: "inquiry_course_update"');
+  });
+
+  it("matches whatsapp-send's arity for shared keys", () => {
+    expect(campaignSend).toContain(
+      'lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name", "lead_source"] }',
+    );
+  });
+});
+
+describe("AI outage visibility", () => {
+  it("writes a failed message row when a dispatch fails", () => {
+    // A failed AI send used to write nothing at all, so the Aug 2026 Gemini
+    // billing 403 was invisible in the inbox for three days.
+    expect(aiReply).toContain("recordAiFailureBubble");
+    expect(aiReply).toContain('status: "failed"');
+  });
+
+  it("only flags one failure per inbound turn", () => {
+    // The buffer worker retries every 2 minutes.
+    expect(aiReply).toContain('.eq("template_key", "ai_auto_reply")');
+    expect(aiReply).toContain('.gt("created_at", lastInbound.created_at)');
+  });
+
+  it("emails once per incident, not once per failure", () => {
+    expect(routeHealth).toContain("route_alert_sent");
+    expect(routeHealth).toContain("if (unhealthy === alerting) return verdict");
+    expect(routeHealth).toContain("siddhant@nimt.ac.in");
+  });
+
+  it("surfaces the outage in the inbox", () => {
+    expect(inbox).toContain("Auto-replies are not going out");
+  });
+});
+
+describe("reply-state counts", () => {
+  it("counts conversations by reply state, scoped like the list query", () => {
+    expect(replyStateMigration).toContain("s.direction = 'inbound'");
+    expect(replyStateMigration).toContain("cl.counsellor_id = p_counsellor_id");
+    expect(replyStateMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
+    expect(replyStateMigration).toContain(
+      "GRANT EXECUTE ON FUNCTION public.whatsapp_reply_state_counts(uuid, text, boolean) TO authenticated",
+    );
+  });
+
+  it("drives both the header pill and the inbox chips from that one RPC", () => {
+    expect(whatsAppPanel).toContain("fetchWhatsAppReplyStateCounts");
+    expect(whatsAppPanel).toContain("need reply");
+    expect(inbox).toContain("fetchWhatsAppReplyStateCounts");
+    expect(inbox).toContain("Needs Reply");
+    expect(inbox).toContain("Awaiting Them");
+  });
+
+  it("counts off whatsapp_messages, not the expensive conversations view", () => {
+    // Aggregating over whatsapp_conversations takes 7.3s in production — right
+    // on the 8s statement timeout — because the view builds a DISTINCT ON plus
+    // three LATERALs for every conversation before anything is counted.
+    expect(replyStateMigration).toContain("FROM public.whatsapp_messages wm");
+    expect(replyStateMigration).not.toContain("FROM public.whatsapp_conversations");
+    expect(replyStateMigration).toContain("idx_whatsapp_messages_conversation_key_created");
+  });
+
+  it("dedups the RPC behind the shared TTL wrapper", () => {
+    // The header mounts on every page; three layout components calling an
+    // ~1.2s aggregate simultaneously is what blew the timeout last time.
+    expect(badgeCounts).toContain("fetchWhatsAppReplyStateCounts");
+    expect(badgeCounts).toContain("replyStateInflight");
+    expect(inbox).toContain("invalidateWhatsAppReplyStateCounts()");
+  });
+
+  it("marks unreplied rows independently of read state", () => {
+    // Opening a thread clears unread_count for the whole conversation, so read
+    // state alone made unanswered leads look done.
+    expect(inbox).toContain("const isNeedsReply");
+    expect(inbox).toContain("isNeedsReply(c)");
+  });
+});
+
+describe("no fabricated template values", () => {
+  it("stops pre-filling placeholder sentences as if they were real context", () => {
+    expect(inbox).not.toMatch(/^\s*amount: "the pending amount"/m);
+    expect(inbox).not.toMatch(/^\s*due_date: "the due date"/m);
+    expect(inbox).not.toMatch(/^\s*visit_date: "the scheduled date"/m);
+    expect(inbox).not.toMatch(/^\s*application_id: "N\/A"/m);
+    // The per-key switch in handleSendTemplate that hardcoded those strings.
+    expect(inbox).not.toMatch(/case "fee_reminder": params = /);
+  });
+
+  it("blocks the lead dialog send while required values are missing", () => {
+    expect(sendDialog).toContain("missingSlots.length > 0");
+    expect(sendDialog).toContain("buildTemplateParams");
+  });
+
+  it("reads the real approved list rather than only hardcoded arrays", () => {
+    expect(inbox).toContain("loadWhatsAppTemplateCatalog");
+    expect(sendDialog).toContain("loadWhatsAppTemplateCatalog");
+    expect(templatesRlsMigration).toContain("Staff can read whatsapp_templates");
+    expect(templatesRlsMigration).toContain("'counsellor'::public.app_role");
+    expect(templatesRlsMigration).not.toContain("team_leader");
+  });
+});

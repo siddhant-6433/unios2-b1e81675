@@ -39,7 +39,13 @@ describe("CRM layout performance guardrails", () => {
   });
 
   it("keeps mounted WhatsApp and TAT banners off heavyweight REST view/count paths", () => {
-    expect(whatsAppPanel).toContain("fetchActionBadgeCounts(");
+    // The header pill counts CONVERSATIONS waiting on a reply, not unread
+    // messages, so it matches the inbox's "Needs Reply" chip. It still goes
+    // through the shared dedup helper — the aggregate costs ~1.2s, so a mounted
+    // header must not fire it raw on every render.
+    expect(whatsAppPanel).toContain("fetchWhatsAppReplyStateCounts(");
+    expect(whatsAppPanel).not.toContain('.from("whatsapp_conversations"');
+    expect(actionBadgeCountsHelper).toContain('rpc("whatsapp_reply_state_counts"');
     expect(useTatDefaults).toContain('rpc("my_tat_defaults"');
     expect(myTatDefaults).toMatch(/\bSECURITY\s+INVOKER\b/i);
     expect(myTatDefaults).toContain("public.get_user_role(auth.uid())");

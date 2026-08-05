@@ -33,6 +33,7 @@ import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -433,7 +434,31 @@ export default function CloudDialer() {
     display_name: "the admissions team",
     phone: null,
   };
-  const mostUsedTemplates = dialerBootstrap?.most_used_templates ?? [];
+  // These keys are scraped out of activity free-text by a regex in
+  // cloud_dialer_bootstrap, and the nudge buttons fire them with no params at
+  // all. A template needing 4 placeholders then failed with Meta 132000 every
+  // time. Only offer one-tap sends for templates Meta says take no parameters;
+  // anything else belongs in the full picker where the values can be filled.
+  const rawMostUsedTemplates = dialerBootstrap?.most_used_templates ?? [];
+  const [zeroParamTemplateKeys, setZeroParamTemplateKeys] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: false });
+      if (cancelled) return;
+      setZeroParamTemplateKeys(
+        new Set(loaded.templates.filter(t => t.paramSlots.length === 0).map(t => t.key)),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const mostUsedTemplates = useMemo(
+    // Until the catalog loads, show nothing rather than buttons that would fail.
+    () => (zeroParamTemplateKeys ? rawMostUsedTemplates.filter(t => zeroParamTemplateKeys.has(t.key)) : []),
+    [rawMostUsedTemplates, zeroParamTemplateKeys],
+  );
   const slaWindowHours = useMemo(
     () => dialerBootstrap?.source_sla_hours ?? {},
     [dialerBootstrap],

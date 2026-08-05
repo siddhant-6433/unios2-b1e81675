@@ -39,21 +39,33 @@ type MetaCampaignTemplate = {
   quality_score?: unknown;
 };
 
-// Same template definitions as whatsapp-send
+// Template definitions for bulk campaigns.
+//
+// This map used to claim it was "the same as whatsapp-send" and wasn't: the same
+// internal key resolved to a different Meta name and a different arity depending
+// on which function sent it. Reconciled 2026-08-04 against the live
+// whatsapp_templates mirror — `visit_confirmation`, `visit_reminder_24hr` and
+// `course_details` were not Meta template names at all, so every campaign using
+// them failed. Here `params` drives the actual send (see resolveParam below), so
+// a wrong count is a guaranteed Meta 132000.
 const TEMPLATES: Record<string, TemplateDef> = {
-  lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name"] },
-  visit_confirmation: { name: "visit_confirmation", params: ["student_name", "visit_date", "campus_name"] },
-  visit_reminder_24hr: { name: "visit_reminder_24hr", params: ["student_name", "visit_date"] },
+  lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name", "lead_source"] },
+  visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
+  visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
   // Internal key kept as `application_received`, but the Meta-approved
   // template is named `application_submitted` (see submit-wa-templates).
+  // Campaigns use the plain variant; whatsapp-send uses `application_submitted_v2`
+  // because it attaches the form PDF as a document header, which bulk has no room for.
   application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
+  // Not present in the Meta mirror — kept for existing campaign configs, but it
+  // will fail with 132001 until the template is submitted and approved.
   admission_payment_nudge: { name: "admission_payment_nudge", params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
   cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
-  course_details: { name: "course_details", params: ["student_name", "course_name"] },
+  course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
   counsellor_lead_reclaimed: { name: "counsellor_lead_reclaimed", params: ["lead_name", "course_name"] },

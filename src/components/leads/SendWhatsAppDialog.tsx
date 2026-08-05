@@ -15,6 +15,12 @@ import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
+import {
+  buildTemplateParams,
+  loadWhatsAppTemplateCatalog,
+  type CatalogTemplate,
+  type TemplateParamSlot,
+} from "@/lib/whatsappTemplateCatalog";
 
 // Course/institution → video URL mapping (matched against actual NIMT courses)
 const COURSE_VIDEO_MAP: { pattern: RegExp; url: string; label: string }[] = [
@@ -272,6 +278,9 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   const [dynamicTemplates, setDynamicTemplates] = useState<WhatsAppPickerTemplate[]>([]);
   const [metaTemplateOverrides, setMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>>>({});
   const [templateComponentsByKey, setTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  // Catalog rows keyed by Meta name — the authority for arity and body text.
+  const [catalog, setCatalog] = useState<Map<string, CatalogTemplate>>(new Map());
+  const [paramOverrides, setParamOverrides] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -341,38 +350,32 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       });
       setMetaTemplateOverrides(overrides);
       setTemplateComponentsByKey(componentsByKey);
-      const dynamic = ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-        placeholder_count?: number | null;
-        has_media?: boolean | null;
-        header_format?: string | null;
-      }>)
-        .filter((row) =>
-          row.name &&
-          keys.has(row.name) &&
-          !knownKeys.has(row.name) &&
-          row.placeholder_count === 0 &&
-          row.has_media !== true &&
-          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
-          !hasDynamicUrlButton(row.components)
-        )
-        .map((row) => {
-          const setting = settingsByKey.get(row.name);
-          const body = row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name;
-          return {
-            key: row.name,
-            label: setting?.display_name || row.name.replace(/_/g, " "),
-            description: setting?.description || "Approved Meta template",
-            badge: null,
-            followUpMsg: null,
-            buildParams: () => [],
-            preview: templateTextPreviewFromComponents(row.components) || body,
-          };
-        });
+      // Every curated Meta template becomes selectable, including the ones with
+      // placeholders and media headers. The old filter here required
+      // placeholder_count === 0 and no media, which excluded 20 of the 26
+      // curated templates — so counsellors only ever saw the hardcoded list.
+      // Missing values are now collected as inputs instead (see missingSlots).
+      const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: true });
+      setCatalog(loaded.byKey);
+
+      const dynamic: WhatsAppPickerTemplate[] = loaded.templates
+        .filter((entry) => !knownKeys.has(entry.key))
+        .map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          description: entry.description,
+          badge: null,
+          followUpMsg: null,
+          buildParams: () => [],
+          preview: entry.preview,
+        }));
       setDynamicTemplates(dynamic);
     })();
   }, [open]);
+
+  // Clear typed-in parameter values when switching templates so a value meant
+  // for one template never leaks into another.
+  useEffect(() => { setParamOverrides({}); }, [selectedTemplate]);
 
   const visibleTemplates = useMemo(() => {
     if (!allowedKeys) return [];
@@ -381,8 +384,48 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   }, [allowedKeys, dynamicTemplates, metaTemplateOverrides]);
 
   const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
-  const previewParams = selectedTmpl?.buildParams(lead, courseName, campusName, courseDuration, courseType) || [];
-  const previewText = selectedTmpl?.preview.replace(/\{\{(\d+)\}\}/g, (_, idx) => previewParams[parseInt(idx) - 1] || "…") || "";
+  const selectedCatalogEntry = selectedTemplate ? catalog.get(selectedTemplate) : undefined;
+
+  // Values we can fill without asking. Anything not here becomes an input rather
+  // than a fabricated string like "the pending amount", which used to ship to
+  // students verbatim.
+  const leadContext = useMemo(() => ({
+    student_name: lead.name,
+    course_name: courseName,
+    campus_name: campusName,
+    lead_source: lead.source,
+    application_id: lead.application_id,
+    duration: courseDuration ? `${courseDuration} years` : undefined,
+  }), [lead.name, lead.source, lead.application_id, courseName, campusName, courseDuration]);
+
+  /**
+   * Meta's placeholder_count is the authority. Use the hardcoded buildParams
+   * only when it produces exactly that many values; otherwise fill from lead
+   * context and let the counsellor type the rest.
+   */
+  const { params: sendParams, missingSlots } = useMemo(() => {
+    if (!selectedTmpl) return { params: [] as string[], missingSlots: [] as TemplateParamSlot[] };
+    if (!selectedCatalogEntry) {
+      // Local-only template (kb_*, or a key with no Meta mirror row).
+      return {
+        params: selectedTmpl.buildParams(lead, courseName, campusName, courseDuration, courseType),
+        missingSlots: [] as TemplateParamSlot[],
+      };
+    }
+    const built = buildTemplateParams(selectedCatalogEntry, leadContext, paramOverrides);
+    const legacy = selectedTmpl.buildParams(lead, courseName, campusName, courseDuration, courseType);
+    if (built.missing.length && legacy.length === selectedCatalogEntry.paramSlots.length) {
+      return { params: legacy, missingSlots: [] as TemplateParamSlot[] };
+    }
+    return { params: built.params, missingSlots: built.missing };
+  }, [selectedTmpl, selectedCatalogEntry, leadContext, paramOverrides, lead, courseName, campusName, courseDuration, courseType]);
+
+  const previewText = selectedCatalogEntry
+    ? selectedCatalogEntry.preview.replace(/\{\{(\w+)\}\}/g, (whole, name) => {
+        const slot = selectedCatalogEntry.paramSlots.find((s) => s.name === name);
+        return (slot && sendParams[slot.index - 1]) || whole;
+      })
+    : selectedTmpl?.preview.replace(/\{\{(\d+)\}\}/g, (_, idx) => sendParams[parseInt(idx) - 1] || "…") || "";
 
   const handleSend = async () => {
     if (!selectedTemplate || !selectedTmpl) return;
@@ -413,8 +456,9 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
           return;
         }
       } else {
-        // Template-based send
-        const params = selectedTmpl.buildParams(lead, courseName, campusName, courseDuration, courseType);
+        // Template-based send. sendParams is positional and already matches the
+        // arity Meta published, which whatsapp-send now validates server-side.
+        const params = sendParams;
         // Build button_urls for templates with dynamic URL buttons
         let button_urls: string[] | undefined;
         if (selectedTemplate === "course_info_video") {
@@ -539,6 +583,31 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
           </div>
         </div>
 
+        {/* Values Meta requires that we could not fill from the lead record. */}
+        {missingSlots.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              Fill in {missingSlots.length} detail{missingSlots.length !== 1 ? "s" : ""}
+            </p>
+            <div className="space-y-2">
+              {missingSlots.map((slot) => (
+                <div key={slot.name} className="space-y-1">
+                  <label className="text-[11px] text-muted-foreground" htmlFor={`wa-param-${slot.name}`}>
+                    {slot.label}
+                  </label>
+                  <input
+                    id={`wa-param-${slot.name}`}
+                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    placeholder={slot.example || slot.label}
+                    value={paramOverrides[slot.name] || ""}
+                    onChange={(e) => setParamOverrides((prev) => ({ ...prev, [slot.name]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Preview */}
         {selectedTemplate && (
           <div className="space-y-1.5">
@@ -559,7 +628,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
           </Button>
           <Button
             onClick={handleSend}
-            disabled={!selectedTemplate || sending || sent}
+            disabled={!selectedTemplate || sending || sent || missingSlots.length > 0}
             className="gap-2 bg-success hover:bg-success/60"
           >
             {sending ? (

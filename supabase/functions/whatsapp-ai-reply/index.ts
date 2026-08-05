@@ -22,6 +22,78 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ─── AI failure visibility ──────────────────────────────────────────────────
+// A failed AI dispatch used to write nothing at all, so a total outage (e.g. the
+// Gemini billing 403 of 2026-08-02) was invisible in the inbox for days. Write a
+// failed outbound row so the existing red "Message failed" bubble renders.
+//
+// ponytail: dedup is "one failed bubble per inbound turn" — the buffer worker
+// retries every 2 min, so without it a stuck conversation grows hundreds of
+// bubbles. Keyed off the newest inbound message rather than a new table.
+async function recordAiFailureBubble(
+  admin: { from: (table: string) => any },
+  args: {
+    phone: string;
+    leadId: string | null;
+    provider: "meta" | "plivo";
+    businessPhoneNumberId: string | null;
+    businessNumber: string | null;
+    reason: string;
+    detail?: unknown;
+    content?: string | null;
+  },
+): Promise<void> {
+  const waPhone = digits(args.phone);
+  if (!waPhone) return;
+
+  try {
+    const { data: lastInbound } = await admin
+      .from("whatsapp_messages")
+      .select("created_at")
+      .eq("phone", waPhone)
+      .eq("direction", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Already flagged this turn? Stay quiet.
+    if (lastInbound?.created_at) {
+      const { data: existingFailure } = await admin
+        .from("whatsapp_messages")
+        .select("id")
+        .eq("phone", waPhone)
+        .eq("direction", "outbound")
+        .eq("template_key", "ai_auto_reply")
+        .eq("status", "failed")
+        .gt("created_at", lastInbound.created_at)
+        .limit(1)
+        .maybeSingle();
+      if (existingFailure?.id) return;
+    }
+
+    await admin.from("whatsapp_messages").insert({
+      lead_id: args.leadId,
+      direction: "outbound",
+      phone: waPhone,
+      message_type: "text",
+      content: args.content || null,
+      template_key: "ai_auto_reply",
+      status: "failed",
+      is_read: true,
+      provider: args.provider,
+      business_phone_number_id: args.businessPhoneNumberId,
+      business_phone_number: args.businessNumber,
+      status_error: {
+        error: { code: "ai_reply_failed", message: args.reason },
+        ...(args.detail === undefined ? {} : { detail: args.detail }),
+      },
+    });
+  } catch (err) {
+    // Never let the failure recorder mask the original failure.
+    console.error("recordAiFailureBubble failed:", err);
+  }
+}
+
 // ─── NIMT Knowledge Base ────────────────────────────────────────────────────
 
 const KNOWLEDGE_BASE = `
@@ -878,9 +950,31 @@ Deno.serve(async (req) => {
       geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
     }
 
+    const aiFailureChannel = {
+      phone,
+      leadId,
+      provider: sendProvider,
+      businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+      businessNumber: channelKey,
+    };
+
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error("Gemini error:", errText);
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        reason: `AI generation failed (${geminiRes.status})`,
+        detail: errText.slice(0, 1000),
+      });
+      await logWhatsAppAutomationEvent(admin, {
+        phone,
+        businessNumber: channelKey,
+        provider: sendProvider,
+        leadId,
+        eventType: "send_failed",
+        decision: "ai_generation_failed",
+        reason: JSON.stringify({ error: "AI generation failed", detail: errText.slice(0, 1000) }),
+      });
       return new Response(JSON.stringify({ error: "AI generation failed", detail: errText }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -890,6 +984,10 @@ Deno.serve(async (req) => {
     const rawReply = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawReply) {
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        reason: "AI returned an empty response",
+      });
       return new Response(JSON.stringify({ error: "empty AI response" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1126,6 +1224,13 @@ Deno.serve(async (req) => {
 
     if (!sendResult.ok) {
       console.error("WhatsApp AI send failed:", sendResult.raw || sendResult.error);
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+        reason: sendResult.error || "WhatsApp send failed",
+        detail: sendResult.raw,
+        content: finalReply,
+      });
       await logWhatsAppAutomationEvent(admin, {
         phone,
         businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,

@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const json = (payload: Record<string, unknown>, status = 200) =>
@@ -143,38 +143,55 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const action = body.action || "list";
+
+    // The nightly sync cron has no user JWT. It may only run `sync`, which is a
+    // read from Meta plus an upsert into our own mirror — no Meta mutation.
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+    if (isCron && action !== "sync") {
+      return new Response(JSON.stringify({ error: "Cron may only run the sync action" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Auth — verify JWT with Supabase Auth, then verify template-manager role.
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
-    if (!authHeader) {
+    if (!isCron && !authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized: no auth header" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const jwt = authHeader.replace(/^Bearer\s+/i, "");
-    const { data: authData, error: authError } = await adminClient.auth.getUser(jwt);
-    const userId = authData.user?.id;
-    if (authError || !userId) {
-      return new Response(JSON.stringify({ error: "Unauthorized: invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    let userId: string | null = null;
+    let role: unknown = "cron";
 
-    const { data: role } = await adminClient.rpc("get_user_role", { _user_id: userId });
-    if (!TEMPLATE_MANAGER_ROLES.has(String(role || ""))) {
-      return new Response(JSON.stringify({ error: "Forbidden: super_admin or admission_head only" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!isCron) {
+      const jwt = (authHeader || "").replace(/^Bearer\s+/i, "");
+      const { data: authData, error: authError } = await adminClient.auth.getUser(jwt);
+      userId = authData.user?.id || null;
+      if (authError || !userId) {
+        return new Response(JSON.stringify({ error: "Unauthorized: invalid token" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: userRole } = await adminClient.rpc("get_user_role", { _user_id: userId });
+      role = userRole;
+      if (!TEMPLATE_MANAGER_ROLES.has(String(userRole || ""))) {
+        return new Response(JSON.stringify({ error: "Forbidden: super_admin or admission_head only" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const user = { id: userId };
 
     const metaUrl = `https://graph.facebook.com/v21.0/${wabaId}/message_templates`;
 
-    let body: any = {};
-    try { body = await req.json(); } catch { body = {}; }
-    const action = body.action || "list";
-    console.log("Action:", action, "User:", user.id, "Role:", role);
+    console.log("Action:", action, "User:", user.id ?? "cron", "Role:", role);
 
     // ── LIST: List all templates ──
     if (action === "list") {

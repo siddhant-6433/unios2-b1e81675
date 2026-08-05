@@ -44,3 +44,47 @@ export async function fetchActionBadgeCounts(args: BadgeArgs): Promise<RpcResult
   inflight.set(key, p);
   return p;
 }
+
+// whatsapp_reply_state_counts is the same shape of problem: a ~1.2s
+// conversation-level aggregate that the header calls on every page and the
+// inbox calls on every refresh. Same dedup, longer TTL — reply state moves on
+// the scale of someone typing a reply, not milliseconds.
+type ReplyStateArgs = {
+  p_counsellor_id: string | null;
+  p_business_key: string | null;
+  p_include_outbound_only: boolean;
+};
+
+const REPLY_STATE_TTL_MS = 15000;
+const replyStateInflight = new Map<string, Promise<RpcResult>>();
+const replyStateCache = new Map<string, { at: number; res: RpcResult }>();
+
+export async function fetchWhatsAppReplyStateCounts(args: ReplyStateArgs): Promise<RpcResult> {
+  const key = `${args.p_counsellor_id ?? "all"}|${args.p_business_key ?? "all"}|${args.p_include_outbound_only}`;
+
+  const hit = replyStateCache.get(key);
+  if (hit && Date.now() - hit.at < REPLY_STATE_TTL_MS) return hit.res;
+
+  const existing = replyStateInflight.get(key);
+  if (existing) return existing;
+
+  const p = (supabase as any)
+    .rpc("whatsapp_reply_state_counts", args)
+    .then((res: RpcResult) => {
+      replyStateInflight.delete(key);
+      if (!res.error) replyStateCache.set(key, { at: Date.now(), res });
+      return res;
+    })
+    .catch((err: any) => {
+      replyStateInflight.delete(key);
+      throw err;
+    });
+
+  replyStateInflight.set(key, p);
+  return p;
+}
+
+/** Drop the cache after an action that changes reply state (sending a reply). */
+export function invalidateWhatsAppReplyStateCounts(): void {
+  replyStateCache.clear();
+}
