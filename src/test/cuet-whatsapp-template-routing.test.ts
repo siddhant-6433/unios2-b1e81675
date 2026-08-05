@@ -1,7 +1,11 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 
-const leadPicker = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
+// The catalogue and the picker UI were split out of SendWhatsAppDialog so the
+// Cloud Dialer rail can reuse both; the dialog now composes them.
+const leadPicker = readFileSync("src/components/leads/whatsappTemplates.ts", "utf8")
+  + readFileSync("src/components/leads/WhatsAppTemplatePicker.tsx", "utf8")
+  + readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");

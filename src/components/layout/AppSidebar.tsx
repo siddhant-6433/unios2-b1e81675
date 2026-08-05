@@ -360,10 +360,15 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarContent className="bg-sidebar pt-4">
-        {/* Logo */}
-        <div className="px-3 pb-2">
-          <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-primary/5 to-transparent px-3 py-2.5">
-            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
+        {/* Logo. Collapsed the rail is only 3rem wide, so the px-3 + px-3 nesting
+            left the 2rem mark zero width — it has to lose the padding to show. */}
+        <div className={collapsed ? "pb-2" : "px-3 pb-2"}>
+          <div className={`flex items-center rounded-xl py-2.5 ${
+            collapsed
+              ? "justify-center"
+              : "gap-3 bg-gradient-to-r from-primary/5 to-transparent px-3"
+          }`}>
+            <img src={uniosLogo} alt="UniOs" className={`shrink-0 object-contain ${collapsed ? "h-7 w-7" : "h-8 w-8"}`} />
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
