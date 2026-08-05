@@ -231,3 +231,8 @@ verify_jwt = false
 
 [functions.zoho-books-poll]
 verify_jwt = false
+
+# Called by pg_cron ('counselling-watch') with the service-role key, which the
+# gateway can't validate as a JWT. The function checks the bearer itself.
+[functions.counselling-watch]
+verify_jwt = false
