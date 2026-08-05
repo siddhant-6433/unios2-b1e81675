@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTemplateParams,
   paramSlotsFromComponents,
+  templateUsesCourseFields,
 } from "@/lib/whatsappTemplateCatalog";
 
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
@@ -22,9 +23,12 @@ const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/ind
 const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
 const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index.ts", "utf8");
 const badgeCounts = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
+const templateManager = readFileSync("src/pages/TemplateManager.tsx", "utf8");
 const replyStateMigration = readMigration("whatsapp_reply_state_counts");
 const templatesRlsMigration = readMigration("whatsapp_templates_staff_read_and_sync_cron");
 const routeHealthCronMigration = readMigration("whatsapp_route_health_cron");
+const courseParamsMigration = readMigration("whatsapp_course_info_params_by_course");
+const mediaUrlMigration = readMigration("whatsapp_template_settings_media_url");
 
 describe("template catalog", () => {
   const components = [
@@ -93,6 +97,46 @@ describe("template catalog", () => {
     expect(built.missing).toHaveLength(0);
     // Newlines/tabs in a body parameter are Meta error 131009.
     expect(built.params[1]).toBe("Rs 25,000 plus tax");
+  });
+});
+
+describe("course-driven template fields", () => {
+  it("recognises the slots a course can fill", () => {
+    const slots = paramSlotsFromComponents("course_info_v4", [{ type: "BODY", text: "Hi {{1}} {{2}} {{3}} {{4}} {{5}} {{6}}" }], 6);
+    expect(templateUsesCourseFields({ paramSlots: slots })).toBe(true);
+    // A name-only template must not show a course dropdown.
+    const greeting = paramSlotsFromComponents("cahet_merit_list", [{ type: "BODY", text: "Hi {{1}}," }], 1);
+    expect(templateUsesCourseFields({ paramSlots: greeting })).toBe(false);
+  });
+
+  it("offers the course picker and resolver in the inbox", () => {
+    expect(inbox).toContain("templateUsesCourseFields");
+    expect(inbox).toContain("applyTemplateCourse");
+    // Defaults to whatever the lead enquired about.
+    expect(inbox).toContain("setTemplateCourseId((leadRow as any)?.course_id");
+    expect(courseParamsMigration).toContain("fn_resolve_course_info_params_by_course");
+    expect(courseParamsMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
+  });
+});
+
+describe("media-header templates", () => {
+  it("keeps the sendable URL on the settings row, not in a hardcoded map", () => {
+    // Meta's own header_handle is rejected as a send link (131053), which is why
+    // the Clinical Training / Placement Report looked unavailable.
+    expect(mediaUrlMigration).toContain("ADD COLUMN IF NOT EXISTS media_url");
+    expect(mediaUrlMigration).toContain("placement_report_download");
+    expect(mediaUrlMigration).toContain("show_in_lead_picker = true");
+  });
+
+  it("sends the header from the catalog and refuses when it is missing", () => {
+    expect(inbox).toContain("header_document_url");
+    expect(inbox).toContain("Template needs a file");
+    expect(whatsappSend).toContain("settingsMediaUrl");
+    expect(whatsappSend).toContain("resolvedHeaderDocumentUrl");
+  });
+
+  it("rejects a Meta header handle pasted as the media URL", () => {
+    expect(templateManager).toContain("scontent\\.whatsapp\\.net|lookaside\\.fbsbx\\.com");
   });
 });
 

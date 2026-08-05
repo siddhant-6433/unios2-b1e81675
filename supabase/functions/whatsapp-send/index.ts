@@ -639,7 +639,23 @@ Deno.serve(async (req) => {
 
     const phoneRoute = getRouteForTemplate(template_key);
     const channelRoute: WhatsAppChannelRoute = phoneRoute === "default" ? "admissions" : phoneRoute;
-    const effectiveHeaderImageUrl = header_image_url || templateDef.headerImageUrl;
+
+    // Header media falls back to whatsapp_template_settings.media_url so a
+    // caller that doesn't know about a template's header still sends a valid
+    // one. Meta's own header_handle is not usable as a send link (131053), so
+    // this is the only place a sendable URL lives for catalog templates.
+    const { data: templateSettings } = await admin
+      .from("whatsapp_template_settings")
+      .select("media_url")
+      .eq("template_key", template_key)
+      .maybeSingle();
+    const settingsMediaUrl = (templateSettings as any)?.media_url?.trim() || null;
+
+    // Mutable so the settings fallback below can fill whichever header the
+    // template actually needs.
+    let resolvedHeaderImageUrl: string | null = header_image_url || templateDef.headerImageUrl || null;
+    let resolvedHeaderVideoUrl: string | null = header_video_url || null;
+    let resolvedHeaderDocumentUrl: string | null = header_document_url || null;
 
     // ── Parameter guard ───────────────────────────────────────────────────────
     // Until now nothing ever compared params.length against the template's real
@@ -679,11 +695,20 @@ Deno.serve(async (req) => {
       }
 
       const headerFormat = String((metaTemplate as any).header_format || "").toUpperCase();
-      const headerSupplied = !!(header_document_url || header_video_url || effectiveHeaderImageUrl);
+      // Fall back to the configured media before failing, so callers that know
+      // nothing about headers (dialer nudges, automation rules, crons) still
+      // send a valid message.
+      if (settingsMediaUrl && !resolvedHeaderDocumentUrl && !resolvedHeaderVideoUrl && !resolvedHeaderImageUrl) {
+        if (headerFormat === "DOCUMENT") resolvedHeaderDocumentUrl = settingsMediaUrl;
+        else if (headerFormat === "VIDEO") resolvedHeaderVideoUrl = settingsMediaUrl;
+        else if (headerFormat === "IMAGE") resolvedHeaderImageUrl = settingsMediaUrl;
+      }
+
+      const headerSupplied = !!(resolvedHeaderDocumentUrl || resolvedHeaderVideoUrl || resolvedHeaderImageUrl);
       if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) && !headerSupplied) {
         return new Response(
           JSON.stringify({
-            error: `Template "${template_key}" needs a ${headerFormat.toLowerCase()} header and none was supplied`,
+            error: `Template "${template_key}" needs a ${headerFormat.toLowerCase()} header. Add its URL in Template Manager → Picker.`,
             header_format: headerFormat,
           }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -703,26 +728,26 @@ Deno.serve(async (req) => {
 
     // Header component (media templates). Document headers are used for PDF
     // receipts; video is retained for existing callers.
-    if (header_document_url) {
+    if (resolvedHeaderDocumentUrl) {
       components.push({
         type: "header",
         parameters: [{
           type: "document",
           document: {
-            link: header_document_url,
+            link: resolvedHeaderDocumentUrl,
             ...(header_document_filename ? { filename: header_document_filename } : {}),
           },
         }],
       });
-    } else if (header_video_url) {
+    } else if (resolvedHeaderVideoUrl) {
       components.push({
         type: "header",
-        parameters: [{ type: "video", video: { link: header_video_url } }],
+        parameters: [{ type: "video", video: { link: resolvedHeaderVideoUrl } }],
       });
-    } else if (effectiveHeaderImageUrl) {
+    } else if (resolvedHeaderImageUrl) {
       components.push({
         type: "header",
-        parameters: [{ type: "image", image: { link: effectiveHeaderImageUrl } }],
+        parameters: [{ type: "image", image: { link: resolvedHeaderImageUrl } }],
       });
     }
 

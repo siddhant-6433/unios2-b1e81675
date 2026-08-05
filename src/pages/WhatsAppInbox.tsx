@@ -45,6 +45,8 @@ import {
 import {
   buildTemplateParams,
   loadWhatsAppTemplateCatalog,
+  resolveCourseTemplateFields,
+  templateUsesCourseFields,
   type CatalogTemplate,
 } from "@/lib/whatsappTemplateCatalog";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
@@ -826,6 +828,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // and empty means we fall back to INBOX_TEMPLATES rather than showing nothing.
   const [catalogTemplates, setCatalogTemplates] = useState<CatalogTemplate[]>([]);
   const [catalogByKey, setCatalogByKey] = useState<Map<string, CatalogTemplate>>(new Map());
+  const [courseOptions, setCourseOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [templateCourseId, setTemplateCourseId] = useState<string | null>(null);
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
@@ -1522,6 +1526,21 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     })();
     return () => { cancelled = true; };
   }, [demoMode, role, profile?.id, businessNumber, isOutboundMode, messages.length]);
+
+  // Course list for the template course picker.
+  useEffect(() => {
+    if (demoMode) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("courses")
+        .select("id, name")
+        .neq("is_active", false)
+        .order("name");
+      if (!cancelled && data) setCourseOptions(data as Array<{ id: string; name: string }>);
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode]);
 
   // Load the curated Meta template catalog once. Historical message bubbles also
   // read it, so it is not gated on the picker being open.
@@ -2297,6 +2316,30 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     // Meta rejects with 131008 "Required parameter is missing".
     if (selectedTemplate === "visit_confirmation") buttonUrls = ["1820424915210710582"];
 
+    // Header media. Meta requires it on every send of an IMAGE/VIDEO/DOCUMENT
+    // template, and its own header_handle is not a usable link (131053), so the
+    // sendable URL comes from whatsapp_template_settings.media_url.
+    const headerPayload: Record<string, string> = {};
+    if (catalogEntry?.needsMediaHeader) {
+      if (!catalogEntry.mediaUrl) {
+        toast({
+          title: "Template needs a file",
+          description: `"${catalogEntry.label}" sends a ${catalogEntry.headerFormat.toLowerCase()} header. Add its URL in Template Manager → Picker.`,
+          variant: "destructive",
+        });
+        setSendingTemplate(false);
+        return;
+      }
+      if (catalogEntry.headerFormat === "DOCUMENT") {
+        headerPayload.header_document_url = catalogEntry.mediaUrl;
+        headerPayload.header_document_filename = `${catalogEntry.label}.pdf`;
+      } else if (catalogEntry.headerFormat === "VIDEO") {
+        headerPayload.header_video_url = catalogEntry.mediaUrl;
+      } else {
+        headerPayload.header_image_url = catalogEntry.mediaUrl;
+      }
+    }
+
     const { data, error } = await invokeEdge<any>("whatsapp-send", {
       body: {
         template_key: selectedTemplate,
@@ -2305,6 +2348,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         lead_id: conv?.lead_id || null,
         clear_unread_after_send: true,
         rendered_template: render,
+        ...headerPayload,
         ...(buttonUrls ? { button_urls: buttonUrls } : {}),
       },
     });
@@ -2390,6 +2434,24 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     ? renderWhatsAppTemplate(selectedTemplateDef, templateRenderContext, templateParamOverrides)
     : null;
 
+  const selectedTemplateCatalogEntry = selectedTemplate ? catalogByKey.get(selectedTemplate) : undefined;
+
+  const applyTemplateCourse = async (courseId: string) => {
+    setTemplateCourseId(courseId || null);
+    if (!courseId) return;
+    const resolved = await resolveCourseTemplateFields(
+      courseId,
+      selectedCourseInfo?.student_name || selectedConv?.lead_name || null,
+    );
+    if (!Object.keys(resolved).length) {
+      toast({ title: "Could not load course details", description: "Fill the fields manually.", variant: "destructive" });
+      return;
+    }
+    // Overrides win over context in renderWhatsAppTemplate, so this both fills
+    // the inputs and updates the preview bubble.
+    setTemplateParamOverrides(prev => ({ ...prev, ...resolved }));
+  };
+
   const visibleTemplates = availableTemplates
     .filter(t => {
       if (!templateSearch.trim()) return true;
@@ -2452,13 +2514,20 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       });
       return;
     }
-    if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); return; }
+    if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); setTemplateCourseId(null); return; }
     let cancelled = false;
     (async () => {
       const { data } = await (supabase.rpc as any)("fn_resolve_course_info_params", {
         p_lead_id: selectedConv.lead_id,
       });
       if (!cancelled) setSelectedCourseInfo(data && typeof data === "object" ? data as Record<string, string> : null);
+
+      // Preselect the course the lead actually enquired about, so the dropdown
+      // is a correction rather than a chore. Leads with no course get an empty
+      // picker instead of blank variables.
+      const { data: leadRow } = await supabase
+        .from("leads").select("course_id").eq("id", selectedConv.lead_id).maybeSingle();
+      if (!cancelled) setTemplateCourseId((leadRow as any)?.course_id || null);
     })();
     return () => { cancelled = true; };
   }, [selectedConv?.lead_id]);
@@ -3931,6 +4000,31 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           </div>
 
                           <div className="border-l bg-white p-3">
+                            {/* Course-driven templates (course_info_v1..v4) need
+                                duration, eligibility, approval, course URL and
+                                video URL — five fields we already hold on the
+                                course. Pick a course and they fill themselves;
+                                it defaults to whatever the lead enquired about. */}
+                            {selectedTemplateCatalogEntry && templateUsesCourseFields(selectedTemplateCatalogEntry) && (
+                              <div className="mb-3">
+                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Course
+                                </p>
+                                <select
+                                  value={templateCourseId || ""}
+                                  onChange={e => applyTemplateCourse(e.target.value)}
+                                  className="h-8 w-full rounded-md border border-input px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                >
+                                  <option value="">Select a course…</option>
+                                  {courseOptions.map(course => (
+                                    <option key={course.id} value={course.id}>{course.name}</option>
+                                  ))}
+                                </select>
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  Fills duration, eligibility, approval and links from the course record.
+                                </p>
+                              </div>
+                            )}
                             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Template variables
                             </p>

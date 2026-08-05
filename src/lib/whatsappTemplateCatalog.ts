@@ -43,6 +43,12 @@ export interface CatalogTemplate extends WhatsAppTemplateDefinition {
   headerFormat: "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
   /** True when Meta requires a media header we must supply at send time. */
   needsMediaHeader: boolean;
+  /**
+   * Sendable header media, from whatsapp_template_settings.media_url. Null on a
+   * media template means the send will fail — Meta's own header_handle cannot be
+   * reused as a link (131053), so an admin has to attach a public URL.
+   */
+  mediaUrl: string | null;
   /** True when this template is not mirrored from Meta (free-text / kb_* helpers). */
   localOnly: boolean;
   curated: boolean;
@@ -202,6 +208,7 @@ interface TemplateSettingsRow {
   category?: string | null;
   show_in_lead_picker?: boolean | null;
   allowed_user_ids?: string[] | null;
+  media_url?: string | null;
 }
 
 interface MetaTemplateRow {
@@ -238,7 +245,7 @@ export async function loadWhatsAppTemplateCatalog(
   const [{ data: userData }, settingsResult, metaResult] = await Promise.all([
     supabase.auth.getUser(),
     (supabase as any).from("whatsapp_template_settings").select(
-      "template_key, display_name, description, category, show_in_lead_picker, allowed_user_ids",
+      "template_key, display_name, description, category, show_in_lead_picker, allowed_user_ids, media_url",
     ),
     (supabase as any)
       .from("whatsapp_templates")
@@ -292,6 +299,7 @@ export async function loadWhatsAppTemplateCatalog(
       footer: footerTextFromComponents(components) || undefined,
       headerFormat,
       needsMediaHeader: row.has_media === true || ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
+      mediaUrl: setting?.media_url?.trim() || null,
       localOnly: false,
       curated,
     });
@@ -309,6 +317,46 @@ export async function loadWhatsAppTemplateCatalog(
     byKey: new Map(templates.map((t) => [t.key, t])),
     degraded: !metaRows.length,
   };
+}
+
+/**
+ * Slots that describe a course rather than a person. When a template uses any of
+ * these, the picker offers a course dropdown and fills them from the course
+ * record instead of making the counsellor type five fields (course_info_v1..v4
+ * need duration, eligibility, approval, course_url and video_url — all of which
+ * we already hold on the course).
+ */
+export const COURSE_DRIVEN_SLOTS = new Set([
+  "course_name",
+  "course_label",
+  "duration",
+  "eligibility",
+  "approval",
+  "video_url",
+  "course_url",
+]);
+
+export const templateUsesCourseFields = (template: Pick<CatalogTemplate, "paramSlots">): boolean =>
+  template.paramSlots.some((slot) => COURSE_DRIVEN_SLOTS.has(slot.name));
+
+/**
+ * Resolve a course's template variables. Returns {} on any failure so a picker
+ * degrades to manual entry rather than blocking the send.
+ */
+export async function resolveCourseTemplateFields(
+  courseId: string,
+  studentName?: string | null,
+): Promise<Record<string, string>> {
+  const { data, error } = await (supabase.rpc as any)("fn_resolve_course_info_params_by_course", {
+    p_course_id: courseId,
+    p_student_name: studentName || null,
+  });
+  if (error || !data || typeof data !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(data as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "string" && value.trim())
+      .map(([key, value]) => [key, String(value)]),
+  );
 }
 
 export interface BuiltTemplateParams {

@@ -150,8 +150,9 @@ Buttons:
   useEffect(() => { fetchCourses(); }, []);
 
   // ── Template Visibility tab state ────────────────────────────────────────
-  // whatsapp_template_settings.show_in_lead_picker drives the visible list
-  // in the lead-page SendWhatsAppDialog. Admin toggles each here.
+  // whatsapp_template_settings.show_in_lead_picker is the curated list for every
+  // counsellor-facing picker: lead page, cloud dialer and WhatsApp inbox replies
+  // all read it through src/lib/whatsappTemplateCatalog.
   type WaSetting = {
     template_key: string;
     display_name: string;
@@ -161,6 +162,9 @@ Buttons:
     created_at: string | null;
     updated_at: string | null;
     last_used_at?: string | null;
+    /** Sendable header media URL; required when header_format is IMAGE/VIDEO/DOCUMENT. */
+    media_url?: string | null;
+    header_format?: string | null;
   };
   type WaVisibilitySort = "date_added_desc" | "date_added_asc" | "date_used_desc" | "date_used_asc" | "name_asc" | "name_desc";
   const [waSettings, setWaSettings] = useState<WaSetting[]>([]);
@@ -173,16 +177,22 @@ Buttons:
     setWaSettingsLoading(true);
     const { data, error } = await (supabase as any)
       .from("whatsapp_template_settings")
-      .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at")
+      .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at, media_url")
       .order("created_at", { ascending: false });
     if (!error && data) {
       const settingsRows = (data as WaSetting[]);
       const settingsByKey = new Map(settingsRows.map((setting) => [setting.template_key, setting]));
       const { data: approvedTemplates } = await (supabase as any)
         .from("whatsapp_templates")
-        .select("name, category, created_at, status_updated_at")
+        .select("name, category, created_at, status_updated_at, header_format")
         .eq("status", "APPROVED")
         .order("created_at", { ascending: false });
+      // header_format decides whether a row needs a media URL at all.
+      const headerFormatByName = new Map<string, string>(
+        ((approvedTemplates || []) as Array<{ name: string; header_format?: string | null }>)
+          .filter((t) => t.name)
+          .map((t) => [t.name, String(t.header_format || "NONE").toUpperCase()]),
+      );
       const { data: usedRows } = await (supabase as any)
         .from("whatsapp_messages")
         .select("template_key, created_at")
@@ -212,13 +222,49 @@ Buttons:
           updated_at: template.status_updated_at || template.created_at || null,
         } satisfies WaSetting));
       const mergedSettings = [...settingsRows, ...missingApprovedSettings];
-      setWaSettings(mergedSettings.map((setting) => (
-        setting.template_key === "bpt_bmrit_cahet_deadline"
-          ? { ...setting, description: cahetDeadlineDescription(), last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
-          : { ...setting, last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
-      )));
+      setWaSettings(mergedSettings.map((setting) => ({
+        ...setting,
+        ...(setting.template_key === "bpt_bmrit_cahet_deadline" ? { description: cahetDeadlineDescription() } : {}),
+        last_used_at: lastUsedByTemplate.get(setting.template_key) || null,
+        header_format: headerFormatByName.get(setting.template_key) || "NONE",
+      })));
     }
     setWaSettingsLoading(false);
+  };
+
+  /**
+   * Attach the sendable header file for a media template. Meta's own
+   * header_handle can't be reused as a send link (131053), so without this the
+   * template is approved but unsendable — which is how the Clinical Training &
+   * Placement Report ended up looking "unavailable".
+   */
+  const saveWaMediaUrl = async (templateKey: string, mediaUrl: string) => {
+    const current = waSettings.find((setting) => setting.template_key === templateKey);
+    if (mediaUrl && /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/.test(mediaUrl)) {
+      toast({
+        title: "That URL won't work",
+        description: "Meta's own header link is rejected at send time (131053). Upload the file somewhere public and paste that URL.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .upsert({
+        template_key: templateKey,
+        display_name: current?.display_name || displayNameForWaTemplate(templateKey),
+        description: current?.description || null,
+        category: current?.category || "general",
+        show_in_lead_picker: current?.show_in_lead_picker ?? false,
+        media_url: mediaUrl || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "template_key" });
+    if (error) {
+      toast({ title: "Could not save file URL", description: error.message, variant: "destructive" });
+      return;
+    }
+    setWaSettings(prev => prev.map(s => s.template_key === templateKey ? { ...s, media_url: mediaUrl || null } : s));
+    toast({ title: mediaUrl ? "Header file saved" : "Header file cleared" });
   };
 
   const toggleWaSetting = async (templateKey: string, next: boolean) => {
@@ -232,6 +278,7 @@ Buttons:
         description: current?.description || null,
         category: current?.category || "general",
         show_in_lead_picker: next,
+        media_url: current?.media_url || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: "template_key" });
     if (error) {
@@ -565,9 +612,13 @@ Buttons:
                   Template Visibility
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-                  Toggle which templates counsellors see when they tap <span className="font-mono">Send WhatsApp</span> on a lead.
+                  This is the curated list: every approved Meta template is listed here, and the ones you switch on are
+                  exactly what counsellors can pick on the <span className="font-medium text-foreground">lead page</span>,
+                  the <span className="font-medium text-foreground">cloud dialer</span> and
+                  {" "}<span className="font-medium text-foreground">WhatsApp inbox replies</span>.
                   Auto-fired templates (missed_call, nimt_followup_v1, offer_letter_acceptance) are off by default — they're sent
                   by the system on disposition / offer issuance, not by hand.
+                  Templates with an image, video or PDF header also need a file URL below, or the send is rejected.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -610,6 +661,7 @@ Buttons:
                     <th className="text-left px-3 py-2 font-medium">Description</th>
                     <th className="text-left px-3 py-2 font-medium">Date added</th>
                     <th className="text-left px-3 py-2 font-medium">Date used</th>
+                    <th className="text-left px-3 py-2 font-medium">Header file</th>
                     <th className="text-center px-3 py-2 font-medium">Show in picker</th>
                   </tr>
                 </thead>
@@ -623,7 +675,31 @@ Buttons:
                       </td>
                       <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.created_at)}</td>
-                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.last_used_at)}</td>
+                      <td className="px-3 py-2">
+                        {s.header_format && s.header_format !== "NONE" && s.header_format !== "TEXT" ? (
+                          <div className="min-w-[220px]">
+                            <input
+                              type="url"
+                              defaultValue={s.media_url || ""}
+                              onBlur={(e) => {
+                                const next = e.target.value.trim();
+                                if (next !== (s.media_url || "")) void saveWaMediaUrl(s.template_key, next);
+                              }}
+                              placeholder={`Public ${s.header_format.toLowerCase()} URL`}
+                              className={`h-8 w-full rounded-md border px-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-ring/20 ${
+                                s.media_url ? "border-input" : "border-destructive/40 bg-destructive/5"
+                              }`}
+                            />
+                            {!s.media_url && (
+                              <p className="mt-0.5 text-[10px] text-destructive">
+                                Required — this template sends a {s.header_format.toLowerCase()}.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-center">
                         <button
                           role="switch"
@@ -644,7 +720,7 @@ Buttons:
                     </tr>
                   ))}
                   {visibleWaSettings.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
+                    <tr><td colSpan={8} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
                   )}
                 </tbody>
               </table>
