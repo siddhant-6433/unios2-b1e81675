@@ -54,8 +54,22 @@ describe("template catalog", () => {
   });
 
   it("names unmapped slots positionally rather than guessing", () => {
-    const slots = paramSlotsFromComponents("unmapped_template", components, 2);
+    const noGreeting = [{ type: "BODY", text: "Seat for {{1}} confirmed at {{2}}." }];
+    const slots = paramSlotsFromComponents("unmapped_template", noGreeting, 2);
     expect(slots.map((s) => s.name)).toEqual(["param_1", "param_2"]);
+  });
+
+  it("auto-names a greeting's first slot so the lead name fills itself", () => {
+    const greeting = [{ type: "BODY", text: "Hi {{1}},\n\nYour merit list is out. Call {{2}}." }];
+    const slots = paramSlotsFromComponents("cahet_merit_list", greeting, 2);
+    expect(slots.map((s) => s.name)).toEqual(["student_name", "param_2"]);
+    expect(buildTemplateParams({ paramSlots: slots }, { student_name: "Priyanshi" }).params[0])
+      .toBe("Priyanshi");
+  });
+
+  it("does not guess when the placeholder is not a greeting", () => {
+    const midSentence = [{ type: "BODY", text: "Your seat for {{1}} is confirmed." }];
+    expect(paramSlotsFromComponents("x", midSentence, 1)[0].name).toBe("param_1");
   });
 
   it("reports unfilled slots instead of inventing values", () => {

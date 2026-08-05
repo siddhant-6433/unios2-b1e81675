@@ -229,7 +229,8 @@ export function WhatsAppPanel() {
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => navigate("/whatsapp-inbox")}
+              // The pill counts every WhatsApp number, so land on the same view.
+              onClick={() => navigate("/whatsapp-inbox?inbox=all")}
               className="hidden md:flex items-center gap-1.5 rounded-xl border border-success/30/60 bg-success/5 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/10 transition-colors cursor-pointer select-none"
             >
               <WhatsAppIcon className="h-3.5 w-3.5 shrink-0" />

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -838,7 +838,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // Multi-number inbox: which business number's conversations to show.
   // "primary" = the most-used phone_number_id + legacy NULL rows; any other
   // distinct phone_number_id is shown as its own inbox.
-  const [businessNumber, setBusinessNumber] = useState<string>("primary");
+  // ?inbox=all lets the header's "N need reply" pill land on the same population
+  // it counted. Without it the pill spans every WhatsApp number while the inbox
+  // opens on one — which is exactly the "10 unreplied vs 30 shown" confusion.
+  const [businessNumber, setBusinessNumber] = useState<string>(
+    () => (searchParams.get("inbox") === "all" ? "all" : "primary"),
+  );
   const [detectedInboxChannels, setDetectedInboxChannels] = useState<{ id: string; label: string; n: number }[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
@@ -1390,6 +1395,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 .join(","),
             );
           }
+        } else if (!isHrScope && businessNumber === "primary") {
+          // The "primary" tab means UNATTRIBUTED conversations — every named
+          // channel (9667641872, 9599675267, 9555192192, 8130107839) is its own
+          // inbox in the dropdown, and matchesInbox rejects them here via
+          // isKnownAdmissionsPhoneConversation.
+          //
+          // No server filter was applied for this tab, so the query pulled the
+          // newest 120 rows across every channel and the client then threw away
+          // ~80% of them. Harmless while the list was unfiltered; fatal once
+          // "Needs Reply" narrowed it, because the named channels dominate
+          // recent inbound and the page came back with nothing to show.
+          q = q.is("business_phone_number_id", null);
+        }
+
+        // Reply state has to be filtered server-side. Filtering it client-side
+        // over the loaded page meant "Needs Reply" could show an empty list
+        // while its own count said 1325 — page one is ordered by recency, and
+        // recent traffic is mostly outbound marketing, so none of the waiting
+        // conversations were in it.
+        if (!isOutboundMode && replyStateFilter === "needs_reply") {
+          q = q.eq("last_direction", "inbound");
+        } else if (!isOutboundMode && replyStateFilter === "awaiting") {
+          q = q.eq("last_direction", "outbound");
         }
 
         if (role === "counsellor" && profile?.id) {
@@ -1463,7 +1491,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     setConversationCursor(null);
     setHasMoreConversations(true);
     void fetchConversationPage(true, null);
-  }, [role, profile?.id, counsellorFilter, businessNumber]);
+  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter]);
 
   // Server-side reply-state totals. The list only holds the first 120 rows, so
   // any count derived from it is a count of page one — which is how the inbox
@@ -1475,7 +1503,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     (async () => {
       const { data, error } = await fetchWhatsAppReplyStateCounts({
         p_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
-        p_business_key: businessNumber && businessNumber !== "primary" ? businessNumber : null,
+        // "primary" is the unattributed inbox (no business_phone_number_id), so
+        // the counts must be scoped the same way the list is — otherwise the
+        // chips advertise conversations that live on a different tab.
+        p_business_key: isHrScope || businessNumber === "all"
+          ? null
+          : businessNumber === "primary" ? "unattributed" : businessNumber,
         p_include_outbound_only: isOutboundMode,
       });
       if (cancelled || error) return;

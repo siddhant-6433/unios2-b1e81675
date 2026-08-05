@@ -164,9 +164,16 @@ export function paramSlotsFromComponents(
   }
   const total = placeholderCount > 0 ? placeholderCount : seen.size;
 
+  // Most campaign templates open with "Hi {{1}}," / "Dear {{1}}" and are not
+  // worth a hand-written mapping each. Naming that slot student_name lets it
+  // fill from the lead automatically instead of asking the counsellor to retype
+  // a name we already know. Deliberately narrow: greeting immediately before
+  // the placeholder, slot 1 only.
+  const greetsFirstSlot = /(?:^|\n)\s*(?:hi|hello|dear|namaste)[\s,]*\{\{\s*1\s*\}\}/i.test(body);
+
   return Array.from({ length: total }, (_, i) => {
     const index = i + 1;
-    const name = names[i] || `param_${index}`;
+    const name = names[i] || (index === 1 && greetsFirstSlot ? "student_name" : `param_${index}`);
     return {
       index,
       name,

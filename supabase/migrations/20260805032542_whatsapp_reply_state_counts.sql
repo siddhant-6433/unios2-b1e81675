@@ -53,9 +53,15 @@ AS $fn$
       wm.direction,
       wm.lead_id
     FROM public.whatsapp_messages wm
+    -- 'unattributed' is the inbox UI's "primary" tab: conversations with no
+    -- business_phone_number_id. Every named number is its own inbox there, so
+    -- the counts have to be scoped the same way or the chips advertise
+    -- conversations that live on a different tab.
     WHERE p_business_key IS NULL
-       OR wm.business_phone_number_id = p_business_key
-       OR wm.business_phone_number = p_business_key
+       OR (p_business_key = 'unattributed' AND wm.business_phone_number_id IS NULL)
+       OR (p_business_key <> 'unattributed' AND (
+             wm.business_phone_number_id = p_business_key
+          OR wm.business_phone_number = p_business_key))
     ORDER BY wm.phone,
       public.whatsapp_conversation_key(wm.provider, wm.business_phone_number_id, wm.business_phone_number),
       wm.created_at DESC
