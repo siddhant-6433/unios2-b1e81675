@@ -1,7 +1,7 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
@@ -373,6 +373,14 @@ const StudentProfile = () => {
   const [photoInputKey, setPhotoInputKey] = useState(0);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
+  // The tab lives in the URL, not in Radix's internal state: a non-silent
+  // fetchStudent() flips the page into <PageLoader/>, which unmounts the tab
+  // subtree — an uncontrolled Tabs would snap back to Details every time.
+  // Also makes /students/<an>?tab=fees shareable and reload-proof.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "details";
+  const setActiveTab = (tab: string) =>
+    setSearchParams((prev) => { prev.set("tab", tab); return prev; }, { replace: true });
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
@@ -709,7 +717,7 @@ const StudentProfile = () => {
       setSyncMsg(`Nothing synced: ${syncData.reason}`);
     } else {
       setSyncMsg(`Synced from application (${syncData?.app_status ?? "unknown"} status).`);
-      await fetchStudent();
+      await fetchStudent(true);
     }
     setSyncing(false);
   };
@@ -778,7 +786,7 @@ const StudentProfile = () => {
       setDocumentName("");
       setDocumentFile(null);
       setDocumentInputKey((key) => key + 1);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Upload failed", description: message, variant: "destructive" });
@@ -826,7 +834,7 @@ const StudentProfile = () => {
 
       toast({ title: "Photo uploaded" });
       setPhotoInputKey((key) => key + 1);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Photo upload failed", description: message, variant: "destructive" });
@@ -900,7 +908,7 @@ const StudentProfile = () => {
       await logStudentAudit(auditEvents);
       toast({ title: "Student information updated" });
       setEditDialogOpen(false);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Update failed", description: message, variant: "destructive" });
@@ -1105,7 +1113,7 @@ const StudentProfile = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="details" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
           <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">

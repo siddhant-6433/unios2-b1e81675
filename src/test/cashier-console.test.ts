@@ -51,6 +51,7 @@ const studentFeePanel = read("src/components/finance/StudentFeePanel.tsx");
 const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
 const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
 const searchMigration = readMigration("cashier_search_course");
+const phoneNormalizeMigration = readMigration("cashier_search_phone_normalize");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -381,8 +382,27 @@ describe("counter search disambiguates same-name candidates", () => {
     expect(searchMigration).toContain("ld.phone ilike v_like");
     // The placeholder is now scope-dependent; both variants still advertise
     // that a mobile number works.
-    expect(cashierConsole).toContain("Search students by name, mobile no., admission no. or PAN");
+    expect(cashierConsole).toContain("Search students by name, mobile no., email, admission no. or PAN");
     expect(cashierConsole).toContain("Search students, leads and applications — name, mobile,");
+  });
+
+  it("matches a mobile number whatever its formatting, and a parent's number", () => {
+    // A raw ilike only found a number typed exactly as stored, so "+91 98717
+    // 63193" or "919871763193" missed a student stored as "9871763193".
+    // Both sides trimmed to the last 10 digits, or a query carrying +91 stays a
+    // superstring of a stored bare number and never matches.
+    expect(phoneNormalizeMigration).toContain("v_digits := right(regexp_replace(v_q, '\\D', '', 'g'), 10);");
+    expect(phoneNormalizeMigration).toContain("length(v_digits) >= 4");
+    for (const column of ["st.phone", "st.father_phone", "st.mother_phone", "st.guardian_phone", "ld.phone", "ld.guardian_phone"]) {
+      expect(phoneNormalizeMigration).toContain(`right(regexp_replace(COALESCE(${column}, ''), '\\D', '', 'g'), 10) like v_dlike`);
+    }
+    // Name/email/AN/PAN search must be untouched by the phone work.
+    expect(phoneNormalizeMigration).toContain("st.email ilike v_like");
+    expect(phoneNormalizeMigration).toContain("ld.application_id ilike v_like");
+    // Same signature, or PostgREST sees two overloads and errors.
+    expect(phoneNormalizeMigration).toContain(
+      "CREATE OR REPLACE FUNCTION public.cashier_search(_q text, _include_leads boolean DEFAULT true, _active_only boolean DEFAULT true)",
+    );
   });
 });
 
