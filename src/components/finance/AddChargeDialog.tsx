@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
+import { SelectField, TextAreaField, FieldShell, DatePickerField } from "@/components/ui/state-fields";
 import { Loader2, PlusCircle } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
@@ -73,8 +73,22 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
     setDueDate(new Date().toISOString().slice(0, 10));
   };
 
-  const toggleTerm = (t: string) =>
-    setSelectedTerms((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
+  const toggleTerm = (t: string) => {
+    setSelectedTerms((prev) => {
+      const next = prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t];
+      // When exactly one term is selected we expose an editable due date,
+      // prefilled to that term's own collection date. The cashier can then
+      // shift it — e.g. bill a monthly add-on on 01 Aug under Q2 — while the
+      // charge still groups under the quarter instead of "Other Charges".
+      if (next.length === 1) {
+        const only = terms.find((x) => x.term === next[0]);
+        if (only?.due_date) setDueDate(only.due_date.slice(0, 10));
+      } else if (next.length === 0) {
+        setDueDate(new Date().toISOString().slice(0, 10));
+      }
+      return next;
+    });
+  };
 
   const handleSubmit = async () => {
     if (!headId) {
@@ -85,7 +99,10 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
     const { error } = await (supabase.rpc as any)("levy_fee_charge", {
       _student_id: studentId,
       _head_id: headId,
-      _due_date: dueDate || null,
+      // 0 or 1 term → the visible date is the intended one, send it. 2+ terms →
+      // let each quarter inherit its own native date (a single date can't apply
+      // to several), so send null.
+      _due_date: selectedTerms.length <= 1 ? (dueDate || null) : null,
       _note: note.trim() || null,
       _terms: selectedTerms.length ? selectedTerms : null,
     });
@@ -155,8 +172,9 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
                     Apply to collection terms
                   </p>
                   <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    Each ticked term gets its own charge, due on that term&rsquo;s existing date.
-                    Leave all unticked for a one-off charge with the date below.
+                    Tick one term to bill under it on the date below (editable — e.g. a
+                    monthly instalment). Tick several to add one charge per term on each
+                    term&rsquo;s own date. Leave all unticked for a one-off charge.
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
                     {terms.map((t) => (
@@ -190,10 +208,13 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
                 </div>
               )}
 
-              {selectedTerms.length === 0 && (
-                <FieldShell label="Due Date">
-                  <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
-                </FieldShell>
+              {selectedTerms.length <= 1 && (
+                <DatePickerField
+                  label={selectedTerms.length === 1 ? "Due Date (under this term)" : "Due Date"}
+                  value={dueDate}
+                  onValueChange={setDueDate}
+                  allowManualInput
+                />
               )}
 
               <TextAreaField
