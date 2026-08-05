@@ -47,6 +47,15 @@ const PURPOSE_OPTIONS: { value: Purpose; label: string }[] = [
   { value: "pre_admission_token", label: "Token Fee (prior to admission)" },
 ];
 
+// Default is payer-choice: no hosted Razorpay link is minted, so the /pay page
+// offers the cheaper gateway too. Razorpay-hosted is still there for the one
+// thing it buys — Razorpay's own SMS/email reminders.
+const GATEWAY_OPTIONS = [
+  { value: "choice", label: "Let the payer choose (lowest charges)" },
+  { value: "easebuzz", label: "Easebuzz only" },
+  { value: "razorpay", label: "Razorpay hosted link (auto reminders)" },
+];
+
 const CHANNEL_OPTIONS = [
   { value: "none", label: "Don't send — just create the link" },
   { value: "whatsapp", label: "WhatsApp" },
@@ -69,6 +78,7 @@ export function SendPaymentLinkDialog({
   const [note, setNote] = useState<string>("");
   const [expiryDays, setExpiryDays] = useState<string>("7");
   const [channel, setChannel] = useState<string>("whatsapp");
+  const [gateway, setGateway] = useState<string>("choice");
   const [submitting, setSubmitting] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -92,6 +102,7 @@ export function SendPaymentLinkDialog({
     setNote("");
     setExpiryDays("7");
     setChannel("whatsapp");
+    setGateway("choice");
     setCreatedUrl(null);
     setCopied(false);
   };
@@ -118,6 +129,7 @@ export function SendPaymentLinkDialog({
         note: note.trim() || undefined,
         expires_days: parseInt(expiryDays, 10) || 7,
         send_channel: channel,
+        gateway,
       },
     });
     setSubmitting(false);
@@ -252,6 +264,13 @@ export function SendPaymentLinkDialog({
                 onChange={(e) => setExpiryDays(e.target.value)}
               />
             </FieldShell>
+            <SelectField
+              value={gateway}
+              onValueChange={setGateway}
+              options={GATEWAY_OPTIONS}
+              label="Payment gateway"
+              allowEmpty={false}
+            />
             <SelectField
               value={channel}
               onValueChange={setChannel}
