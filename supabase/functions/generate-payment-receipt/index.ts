@@ -463,7 +463,7 @@ Deno.serve(async (req) => {
     const { data: lh } = await admin.rpc("lead_letterhead" as any, { _lead_id: lead?.id });
     const letterhead = Array.isArray(lh) ? lh[0] : lh;
     const institutionName: string | null = letterhead?.institution_name ?? null;
-    const letterheadAddress: string | null = letterhead?.address ?? null;
+    let letterheadAddress: string | null = letterhead?.address ?? null;
 
     const { data: branding } = await admin.rpc("lead_branding" as any, {
       _lead_id: lead?.id, _doc_type: "receipt",
@@ -475,6 +475,17 @@ Deno.serve(async (req) => {
       website:        branding?.website || null,
       address:        branding?.address || null,
     };
+    // Mirai Experiential School shares campuses with NIMT schools, so
+    // lead_branding returns the campus's NIMT slug and the logo/brand colour
+    // fall back to NIMT. The institution name + address already resolve via
+    // lead_letterhead (course → dept → institution); force the slug so the
+    // mirai logo + brand colour line up too.
+    const miraiHaystack = `${institutionName || ""} ${campusName || ""} ${JSON.stringify(app?.course_selections || [])}`.toLowerCase();
+    if (/mirai|experiential/.test(miraiHaystack)) {
+      brandingResolved.slug = "mirai";
+      letterheadAddress = "D00/BLK, Ansal Avantika, Ghaziabad, 201002, Uttar Pradesh";
+    }
+
     const brandHex = (brandingResolved.slug && BRAND_BY_SLUG[brandingResolved.slug]) || "#0035C5";
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 
