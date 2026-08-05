@@ -67,6 +67,7 @@ export function getRequiredDocs(
       ...PARENT_AADHAAR_DOCS,
       { key: 'caste_certificate', label: 'Caste Certificate', desc: 'Mandatory for SC / ST / OBC', required: needsCasteCert },
       { key: 'medical_record', label: 'Medical Record', desc: 'If applicable', required: false },
+      { key: 'other_document', label: 'Other Document', desc: 'Any additional supporting document (optional)', required: false },
     ];
   }
 
@@ -155,6 +156,22 @@ export function getRequiredDocs(
       required: false,
     });
   }
+
+  // Entrance exam score / counselling allotment letter — free-form upload for
+  // applicants whose exam isn't captured in the structured entrance_exams list
+  // above (e.g. state counselling seat allotment).
+  base.push({
+    key:      'entrance_allotment_letter',
+    label:    'Entrance Score / Allotment Letter',
+    desc:     'Scorecard or counselling seat allotment (optional)',
+    required: false,
+  });
+  base.push({
+    key:      'other_document',
+    label:    'Other Document',
+    desc:     'Any additional supporting document (optional)',
+    required: false,
+  });
 
   return base;
 }
