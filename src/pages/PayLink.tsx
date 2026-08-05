@@ -20,6 +20,7 @@ interface Resolved {
   status: string;
   gateway: string | null;
   short_url: string | null;
+  gateways?: { gateway: string; display_name: string }[];
 }
 
 declare global {
@@ -52,6 +53,7 @@ export default function PayLink() {
   const [step, setStep] = useState<Step>("loading");
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<Resolved | null>(null);
+  const [chosenGateway, setChosenGateway] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const popupRef = useRef<Window | null>(null);
 
@@ -233,14 +235,16 @@ export default function PayLink() {
       window.location.href = link.short_url;
       return;
     }
-    const gw = (link?.gateway || "razorpay").toLowerCase();
-    if (gw === "easebuzz") return handlePayEasebuzz();
+    if (activeGateway === "easebuzz") return handlePayEasebuzz();
     return handlePayRazorpay();
   };
 
-  const gatewayLabel = (link?.gateway || "razorpay").toLowerCase() === "easebuzz"
-    ? "Easebuzz"
-    : "Razorpay";
+  // No hosted link (gateway='choice') → the payer picks; otherwise the link's
+  // own gateway stands.
+  const options = link?.short_url ? [] : link?.gateways || [];
+  const activeGateway = (chosenGateway || link?.gateway || options[0]?.gateway || "razorpay").toLowerCase();
+  const gatewayLabel = options.find((o) => o.gateway === activeGateway)?.display_name
+    || (activeGateway === "easebuzz" ? "Easebuzz" : "Razorpay");
 
   return (
     <div className="min-h-screen bg-muted/30 flex flex-col items-center justify-center p-4 animate-fade-in">
@@ -284,6 +288,27 @@ export default function PayLink() {
               <span className="text-muted-foreground">Payer: </span>
               <span className="font-medium text-foreground">{link.payer_name}</span>
             </div>
+            {options.length > 1 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pay using</p>
+                <div className="flex flex-wrap gap-2">
+                  {options.map((o) => (
+                    <button
+                      key={o.gateway}
+                      onClick={() => setChosenGateway(o.gateway)}
+                      disabled={step === "paying"}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                        activeGateway === o.gateway
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/40"
+                      }`}
+                    >
+                      {o.display_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {error && <p className="text-sm text-destructive">{error}</p>}
             <button
               onClick={handlePay}

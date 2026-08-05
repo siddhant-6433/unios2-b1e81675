@@ -159,6 +159,40 @@ describe("PayLink public page", () => {
     });
   });
 
+  it("lets the payer pick a gateway when the link has no hosted checkout", async () => {
+    mocks.invoke.mockImplementation((_fn: string, opts: any) =>
+      opts.body.action === "resolve"
+        ? Promise.resolve({
+            data: {
+              payer_name: "Asha Verma", amount: 5000, purpose: "fee_due",
+              purpose_label: "Fee due", note: null, status: "active",
+              gateway: null, short_url: null,
+              gateways: [
+                { gateway: "easebuzz", display_name: "UPI / Card (Easebuzz)" },
+                { gateway: "razorpay", display_name: "Razorpay" },
+              ],
+            },
+            error: null,
+          })
+        : Promise.resolve({ data: { order_id: "order_1", key_id: "rzp_test", amount: 500000 }, error: null }));
+
+    // Stub the checkout SDK so the Razorpay path doesn't wait on a real script.
+    (window as any).Razorpay = function () { return { open: () => {} }; };
+
+    renderPayLink();
+
+    // Cheapest gateway is the default; the payer can switch to Razorpay.
+    expect(await screen.findByRole("button", { name: "UPI / Card (Easebuzz)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Razorpay" }));
+    fireEvent.click(screen.getByRole("button", { name: /pay ₹5,000/i }));
+
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("pay-link", {
+        body: expect.objectContaining({ action: "create-order", gateway: "razorpay", token: "tok123" }),
+      });
+    });
+  });
+
   it("shows the done state for an already-paid link instead of a pay button", async () => {
     mocks.invoke.mockResolvedValue({
       data: { payer_name: "Asha", amount: 5000, purpose: "custom", purpose_label: "Payment", note: null, status: "paid", gateway: null, short_url: null },

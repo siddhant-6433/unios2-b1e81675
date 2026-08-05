@@ -166,7 +166,17 @@ Deno.serve(async (req) => {
     }
 
     if (action === "resolve") {
+      // Gateways this function can actually start a checkout on. A link created
+      // with gateway='choice' has no short_url, so the payer picks one here —
+      // cheapest first (Easebuzz) instead of being locked into Razorpay's MDR.
+      const easebuzzReady = !!(Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY"))
+        && !!(Deno.env.get("EASEBUZZ_SALT") || Deno.env.get("EASEBUZZ_MERCHANT_SALT"));
+      const gateways = [
+        ...(easebuzzReady ? [{ gateway: "easebuzz", display_name: "UPI / Card (Easebuzz)" }] : []),
+        ...(keyId && keySecret ? [{ gateway: "razorpay", display_name: "Razorpay" }] : []),
+      ];
       return json({
+        gateways,
         payer_name: payerName,
         amount: Number(link.amount),
         purpose: link.purpose,

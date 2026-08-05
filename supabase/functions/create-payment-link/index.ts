@@ -185,7 +185,12 @@ Deno.serve(async (req) => {
     // longer handed to anyone — every channel gets our branded /pay/<token>,
     // and that page forwards to the hosted checkout when the payer clicks
     // Pay. One artifact, one settlement path, our branding on the way in.
+    //
+    // gateway='choice' skips both hosted links: gateway/short_url stay null and
+    // the public /pay/<token> page shows a gateway picker. That is the cheap
+    // path — Razorpay's hosted link locks the payer into Razorpay's MDR.
     const gatewayPref = String(parsed.gateway || "auto").toLowerCase();
+    const payerChoice = gatewayPref === "choice";
 
     if (!["pre_admission_token", "fee_due", "custom"].includes(purpose)) {
       return json({ error: "Invalid purpose" }, 400);
@@ -357,8 +362,8 @@ Deno.serve(async (req) => {
       : purpose === "fee_due" ? "Fee due" : "Payment";
 
     // --- Gateway: Razorpay hosted, Easebuzz EasyCollect, or UniOs /pay page --
-    const wantRazorpay = gatewayPref === "razorpay" || gatewayPref === "auto";
-    const wantEasebuzz = gatewayPref === "easebuzz" || gatewayPref === "auto";
+    const wantRazorpay = !payerChoice && (gatewayPref === "razorpay" || gatewayPref === "auto");
+    const wantEasebuzz = !payerChoice && (gatewayPref === "easebuzz" || gatewayPref === "auto");
 
     if (wantRazorpay && keyId && keySecret && gatewayPref !== "easebuzz") {
       const rp = await razorpayCreatePaymentLink(keyId, keySecret, {
@@ -409,8 +414,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Final fallback if nothing selected
-    if (!gateway) {
+    // Final fallback if nothing selected (payer-choice links stay unset)
+    if (!gateway && !payerChoice) {
       gateway = keyId && keySecret ? "razorpay" : "easebuzz";
     }
 
