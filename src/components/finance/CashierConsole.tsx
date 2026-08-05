@@ -162,8 +162,8 @@ export function CashierConsole() {
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder={includeLeads
-            ? "Search students, leads and applications — name, mobile, admission no., PAN or application ID"
-            : "Search students by name, mobile no., admission no. or PAN"}
+            ? "Search students, leads and applications — name, mobile, email, admission no., PAN or application ID"
+            : "Search students by name, mobile no., email, admission no. or PAN"}
           className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           autoFocus
         />
