@@ -45,6 +45,9 @@ interface CardPerson {
   type: CardMode;
   name: string;
   primaryNo: string;
+  /** For students who carry both: the PAN, so a card printed at pre-admission
+   *  reconciles to the AN now shown as primaryNo. Empty otherwise. */
+  secondaryNo: string;
   subtitle: string;
   group: string;
   campus: string;
@@ -171,11 +174,11 @@ function photoStatus(row: CardPerson): string {
 
 /** Download the given rows as a CSV (opens in Excel). Filename reflects the active photo filter. */
 function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
-  const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
+  const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", ...(mode === "students" ? ["PAN (Pre-Adm. No.)"] : []), "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
   const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [
     headers.map(esc).join(","),
-    ...rows.map((r) => [r.name, r.primaryNo, r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
+    ...rows.map((r) => [r.name, r.primaryNo, ...(mode === "students" ? [r.secondaryNo] : []), r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
   ];
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -270,6 +273,7 @@ const IdCardCenter = () => {
       return (
         row.name.toLowerCase().includes(q) ||
         row.primaryNo.toLowerCase().includes(q) ||
+        row.secondaryNo.toLowerCase().includes(q) ||
         row.subtitle.toLowerCase().includes(q) ||
         row.group.toLowerCase().includes(q)
       );
@@ -335,6 +339,7 @@ const IdCardCenter = () => {
         type: "students",
         name: student.name || "Unnamed student",
         primaryNo: displayNo(student.admission_no, student.pre_admission_no),
+        secondaryNo: student.admission_no && student.pre_admission_no ? student.pre_admission_no : "",
         subtitle: `${grade}${section}`,
         group: grade,
         campus: campusName,
@@ -415,6 +420,7 @@ const IdCardCenter = () => {
         type: "employees",
         name: ep.display_name || profile.display_name || "Unnamed employee",
         primaryNo: ep.employee_number || profile.employee_id || "-",
+        secondaryNo: "",
         subtitle: ep.job_title || roleLabel,
         group: profile.department || roleLabel,
         campus: profile.campus || profile.institution || "-",
@@ -808,7 +814,9 @@ const IdCardCenter = () => {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">{row.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {row.primaryNo} - {row.subtitle} - {row.group}
+                      {row.primaryNo}
+                      {row.secondaryNo && <span className="text-muted-foreground/70"> (PAN {row.secondaryNo})</span>}
+                      {" "}- {row.subtitle} - {row.group}
                     </p>
                   </div>
                   <GenerateMenu

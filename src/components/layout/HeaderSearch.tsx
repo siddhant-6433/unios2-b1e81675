@@ -11,6 +11,11 @@ interface SearchResult {
   phone: string;
   identifier?: string;
   identifierLabel?: string;
+  // When a row carries both an AN and a PAN, the primary badge shows the AN and
+  // this shows the PAN too — so a physical ID card printed with a PAN reconciles
+  // to the student's AN at a glance.
+  secondaryIdentifier?: string;
+  secondaryLabel?: string;
   stage?: string;
   status?: string;
   leadId?: string;
@@ -82,6 +87,8 @@ export function HeaderSearch() {
         type: "lead", id: l.id, name: l.name, phone: l.phone,
         identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
         identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
+        secondaryIdentifier: l.admission_no && l.pre_admission_no ? l.pre_admission_no : undefined,
+        secondaryLabel: l.admission_no && l.pre_admission_no ? "PAN" : undefined,
         stage: l.stage,
         ownerName: l.counsellor_profile?.display_name || undefined,
       });
@@ -102,6 +109,8 @@ export function HeaderSearch() {
         type: "student", id: s.id, name: s.name, phone: s.phone || "",
         identifier: s.admission_no || s.pre_admission_no || undefined,
         identifierLabel: s.admission_no ? "AN" : s.pre_admission_no ? "PAN" : undefined,
+        secondaryIdentifier: s.admission_no && s.pre_admission_no ? s.pre_admission_no : undefined,
+        secondaryLabel: s.admission_no && s.pre_admission_no ? "PAN" : undefined,
         status: s.status,
       });
     });
@@ -189,6 +198,9 @@ export function HeaderSearch() {
                       <p className="text-sm font-medium text-foreground truncate">{r.name}</p>
                       {r.identifierLabel && (
                         <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
+                      )}
+                      {r.secondaryLabel && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.secondaryLabel}: {r.secondaryIdentifier}</Badge>
                       )}
                     </div>
                     <p className="text-[11px] text-muted-foreground truncate">
