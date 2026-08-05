@@ -1,23 +1,14 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { TextField } from "@/components/ui/state-fields";
 import { Mail, Send, Loader2, Check } from "lucide-react";
-
-interface Template {
-  id: string;
-  name: string;
-  slug: string;
-  subject: string;
-  body_html: string;
-  variables: string[];
-  category: string;
-}
+import {
+  EmailTemplatePicker, useEmailTemplates, fillEmailVars, sendEmailTemplate,
+} from "@/components/leads/EmailTemplatePicker";
 
 interface Props {
   open: boolean;
@@ -30,7 +21,7 @@ interface Props {
 
 export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, defaultTemplate, onSuccess }: Props) {
   const { toast } = useToast();
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const templates = useEmailTemplates(open);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(defaultTemplate || null);
   const [toEmail, setToEmail] = useState(lead.email || "");
   const [sending, setSending] = useState(false);
@@ -40,52 +31,30 @@ export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, de
     if (!open) { setSent(false); return; }
     setToEmail(lead.email || "");
     setSelectedSlug(defaultTemplate || null);
-
-    supabase
-      .from("email_templates" as any)
-      .select("*")
-      .eq("is_active", true)
-      .order("name")
-      .then(({ data }) => {
-        if (data) setTemplates(data as any);
-      });
   }, [open, lead.email, defaultTemplate]);
 
   const selectedTemplate = templates.find((t) => t.slug === selectedSlug);
-
-  const previewSubject = () => {
-    if (!selectedTemplate) return "";
-    let s = selectedTemplate.subject;
-    const vars = { student_name: lead.name, ...defaultVariables };
-    for (const [k, v] of Object.entries(vars)) {
-      s = s.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
-    }
-    return s;
-  };
+  const previewSubject = selectedTemplate
+    ? fillEmailVars(selectedTemplate.subject, { student_name: lead.name, ...defaultVariables })
+    : "";
 
   const handleSend = async () => {
     if (!selectedSlug || !toEmail) return;
     setSending(true);
-
-    const variables = { student_name: lead.name, ...defaultVariables };
-
-    const { error } = await supabase.functions.invoke("send-email", {
-      body: {
-        template_slug: selectedSlug,
-        to_email: toEmail,
-        variables,
-        lead_id: lead.id,
-      },
+    const result = await sendEmailTemplate({
+      templateSlug: selectedSlug,
+      toEmail,
+      variables: { student_name: lead.name, ...defaultVariables },
+      leadId: lead.id,
     });
-
     setSending(false);
-    if (error) {
-      toast({ title: "Email failed", description: error.message, variant: "destructive" });
-    } else {
-      setSent(true);
-      toast({ title: "Email sent", description: `Sent to ${toEmail}` });
-      onSuccess?.();
+    if (!result.ok) {
+      toast({ title: "Email failed", description: result.error, variant: "destructive" });
+      return;
     }
+    setSent(true);
+    toast({ title: "Email sent", description: `Sent to ${toEmail}` });
+    onSuccess?.();
   };
 
   return (
@@ -117,35 +86,12 @@ export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, de
               placeholder="email@example.com"
             />
 
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-2">Select Template</label>
-              <div className="space-y-1.5">
-                {templates.map((t) => (
-                  <button
-                    key={t.slug}
-                    onClick={() => setSelectedSlug(t.slug)}
-                    className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${
-                      selectedSlug === t.slug
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/40 hover:bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{t.name}</span>
-                      <Badge variant="outline" className="text-[9px]">{t.category}</Badge>
-                    </div>
-                  </button>
-                ))}
-                {templates.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No email templates configured</p>
-                )}
-              </div>
-            </div>
+            <EmailTemplatePicker templates={templates} selectedSlug={selectedSlug} onSelect={setSelectedSlug} />
 
             {selectedTemplate && (
               <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">Preview Subject</p>
-                <p className="text-sm text-foreground">{previewSubject()}</p>
+                <p className="text-sm text-foreground">{previewSubject}</p>
               </div>
             )}
 
