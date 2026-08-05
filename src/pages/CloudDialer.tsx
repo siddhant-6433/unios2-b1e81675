@@ -15,7 +15,14 @@ import {
   MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks, RefreshCw,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { DialerQueuePane } from "@/components/dialer/DialerQueuePane";
+import { DialerLeadHeader } from "@/components/dialer/DialerLeadHeader";
+import { DialerActionRow, type DialerAction } from "@/components/dialer/DialerActionRow";
+import { DialerContextRail, type RailTab } from "@/components/dialer/DialerContextRail";
+import { type QueueLead } from "@/lib/dialerQueue";
+import { getCourseScript, getCourseHighlights, getCourseNudges } from "@/lib/dialerScript";
 import {
   Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -52,29 +59,6 @@ const PriorityInterestedCard = lazy(() =>
   import("@/components/leads/PriorityInterestedCard").then((m) => ({ default: m.PriorityInterestedCard })));
 
 // ── Types ───────────────────────────────────────────────────────────────────
-
-interface QueueLead {
-  id: string;
-  name: string;
-  phone: string;
-  stage: string;
-  source: string;
-  course_id: string | null;
-  course_name: string;
-  campus_name: string;
-  bucket: string; // bucket label in smart queue
-  attempt_count: number;
-  course_fee?: string;
-  // Type of follow-up that placed this lead in the queue: call (default), whatsapp, email, visit.
-  // Drives quick-action button next to the call bar for non-call follow-ups.
-  followup_type?: "call" | "whatsapp" | "email" | "visit";
-  followup_id?: string;
-  // SLA fields — used to compute "will reclaim soon" badges. assigned_at +
-  // source_sla_hours is when the cron will unassign this lead if first_contact_at
-  // is still null.
-  assigned_at?: string | null;
-  first_contact_at?: string | null;
-}
 
 interface CallState {
   status: "idle" | "calling" | "connected" | "ended" | "auto-disposed";
@@ -151,83 +135,6 @@ const indiaDayBoundsUtc = (date = new Date()) => {
   };
 };
 
-// ── Course-specific script helpers ──────────────────────────────────────────
-
-const getCourseScript = (courseName: string): string => {
-  const c = courseName.toLowerCase();
-  if (c.includes("nursing") || c.includes("gnm"))
-    return " We have our own 500-bed hospital on campus for clinical training. Students get paid internships of ₹10,000/month. Our nursing graduates are placed in top hospitals across India and abroad.";
-  if (c.includes("bpt") || c.includes("dpt") || c.includes("mpt") || c.includes("physiotherapy"))
-    return " Our physiotherapy programs include hands-on clinical training at our campus hospital. Students get paid internships of ₹10,000/month and excellent placement opportunities in hospitals and sports medicine.";
-  if (c.includes("bmrit") || c.includes("mmrit") || c.includes("radiology") || c.includes("imaging"))
-    return " Our radiology & imaging technology program offers hands-on training with advanced diagnostic equipment at our campus hospital. Graduates are in high demand at hospitals and diagnostic centres.";
-  if (c.includes("ott") || c.includes("operation theat"))
-    return " Our OTT diploma trains you in operation theatre management and surgical assistance. Clinical training at our own hospital with direct placement support.";
-  if (c.includes("d.pharm") || c.includes("d pharm") || c.includes("pharma"))
-    return " Our D.Pharma program is PCI approved with modern labs and industry tie-ups. Students get placed in pharma companies, hospitals, and research labs.";
-  if (c.includes("mba") || c.includes("pgdm"))
-    return " Our MBA/PGDM program is AICTE approved and NIRF ranked. We have 1,200+ recruiters with packages up to ₹18.75 LPA. The program includes industry internships and live projects.";
-  if (c.includes("bba"))
-    return " Our BBA program gives you a strong foundation for management careers. Graduates go on to top MBA programs or get placed directly. Industry visits and internships are part of the curriculum.";
-  if (c.includes("bca"))
-    return " Our BCA program builds strong computing and programming skills. Graduates are placed in IT companies or pursue MCA for advanced careers. Modern computer labs and industry projects included.";
-  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
-    return " Our law program is BCI approved with moot court facilities and legal aid clinics. Students participate in national moot court competitions and get placed at top law firms and corporate legal teams.";
-  if (c.includes("b.ed") || c.includes("bed") || c.includes("education"))
-    return " Our B.Ed program is NCTE recognised. Graduates are eligible for government teaching positions and CTET/UPTET exams. We include school internship experience.";
-  if (c.includes("d.el.ed") || c.includes("deled") || c.includes("elementary"))
-    return " Our D.El.Ed program prepares you for primary school teaching. NCTE recognised with school internship placements.";
-  return " It's a well-established program with strong placement support, experienced faculty, and modern infrastructure.";
-};
-
-const getCourseHighlights = (courseName: string): string[] => {
-  const c = courseName.toLowerCase();
-  if (c.includes("nursing") || c.includes("gnm"))
-    return ["Own 500-bed hospital for clinical training", "Paid internships: ₹10K/month", "INC/UP Medical Faculty approved"];
-  if (c.includes("bpt") || c.includes("dpt") || c.includes("mpt") || c.includes("physiotherapy"))
-    return ["Own hospital for clinical training", "Paid internships: ₹10K/month", "Sports medicine & rehabilitation focus"];
-  if (c.includes("bmrit") || c.includes("mmrit") || c.includes("radiology"))
-    return ["Advanced diagnostic equipment on campus", "Hospital-based clinical training", "High demand in healthcare sector"];
-  if (c.includes("ott") || c.includes("operation theat"))
-    return ["Hands-on OT training at campus hospital", "Surgical assistance skills", "Direct hospital placement"];
-  if (c.includes("d.pharm") || c.includes("pharma"))
-    return ["PCI approved with modern labs", "Pharma industry tie-ups for placements", "Hospital pharmacy training"];
-  if (c.includes("mba") || c.includes("pgdm") || c.includes("bba") || c.includes("bca"))
-    return ["NIRF ranked management institution", "₹18.75 LPA highest package", "Industry internships + live projects"];
-  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
-    return ["BCI approved with moot court facilities", "National moot court competitions", "Legal aid clinic on campus"];
-  if (c.includes("b.ed") || c.includes("bed") || c.includes("d.el.ed") || c.includes("deled") || c.includes("education"))
-    return ["NCTE recognised", "Eligible for govt teaching + CTET/UPTET", "School internship included"];
-  return [];
-};
-
-const getCourseNudges = (courseName: string): string[] => {
-  const c = courseName.toLowerCase();
-  if (c.includes("nursing") || c.includes("gnm"))
-    return ["Paid internship: ₹10K/month", "Own hospital for clinical training", "International placement opportunities"];
-  if (c.includes("bpt") || c.includes("dpt") || c.includes("mpt") || c.includes("physiotherapy"))
-    return ["Paid internship: ₹10K/month", "Own hospital for clinical training", "Sports medicine career path"];
-  if (c.includes("bmrit") || c.includes("mmrit") || c.includes("radiology"))
-    return ["High-demand healthcare career", "Modern diagnostic equipment", "Hospital placement support"];
-  if (c.includes("ott") || c.includes("operation theat"))
-    return ["Hospital OT training", "Quick career start (diploma)", "Direct placement support"];
-  if (c.includes("d.pharm") || c.includes("pharma"))
-    return ["Modern pharma labs on campus", "Industry placement tie-ups", "Hospital pharmacy exposure"];
-  if (c.includes("mba") || c.includes("pgdm"))
-    return ["₹18.75 LPA highest package", "1,200+ recruiters on campus", "Industry internship included"];
-  if (c.includes("bba"))
-    return ["Strong foundation for MBA", "Industry visits + internships", "Direct placement support"];
-  if (c.includes("bca"))
-    return ["IT industry placements", "Modern computer labs", "MCA pathway available"];
-  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
-    return ["Moot court + legal aid clinic", "National competition participation", "Law firm placement support"];
-  if (c.includes("b.ed") || c.includes("bed") || c.includes("education"))
-    return ["Govt teaching eligibility", "CTET/UPTET preparation support", "School internship experience"];
-  if (c.includes("d.el.ed") || c.includes("deled") || c.includes("elementary"))
-    return ["Primary school teaching career", "NCTE recognised", "School internship included"];
-  return ["Strong placement support", "Experienced faculty"];
-};
-
 // Bucket label (as returned by cloud_dialer_queue RPC) → UI metadata.
 const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string }> = {
   "Pinned":              { key: "pinned",        color: "bg-foreground", uiLabel: "Pinned" },
@@ -253,6 +160,27 @@ export default function CloudDialer() {
   const isCounsellor = role === "counsellor";
   const counsellorDisplayName = profile?.display_name || "Counsellor";
   const isMobile = useIsMobile();
+
+  // The console needs the width: collapse the app sidebar to its icon rail on
+  // arrival and give it back on the way out. Mobile drives its own offcanvas
+  // state (openMobile), so leave that alone.
+  const { setOpen: setSidebarOpen } = useSidebar();
+  useEffect(() => {
+    if (isMobile) return;
+    setSidebarOpen(false);
+    return () => setSidebarOpen(true);
+  }, [isMobile, setSidebarOpen]);
+
+  // Context rail (script / course / WhatsApp / email). Persisted so a
+  // counsellor who works collapsed stays collapsed across reloads.
+  const [railOpen, setRailOpen] = useState(() => {
+    try { return localStorage.getItem("dialer:rail") !== "0"; } catch { return true; }
+  });
+  const [railTab, setRailTab] = useState<RailTab>(() => {
+    try { return (localStorage.getItem("dialer:railTab") as RailTab) || "script"; } catch { return "script"; }
+  });
+  useEffect(() => { try { localStorage.setItem("dialer:rail", railOpen ? "1" : "0"); } catch { /* storage blocked */ } }, [railOpen]);
+  useEffect(() => { try { localStorage.setItem("dialer:railTab", railTab); } catch { /* storage blocked */ } }, [railTab]);
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
@@ -2003,7 +1931,9 @@ export default function CloudDialer() {
   }
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col">
+    // AppLayout drops <main>'s padding and locks the shell height for this
+    // route, so the console just fills what it's given.
+    <div className="h-full flex flex-col min-h-0">
       {/* ── Single toolbar ────────────────────────────────────────────────
           Was four stacked strips (~224px) before any lead content: a missed-call
           banner, a "Dial a number" card, this header, and the call-list progress
@@ -2224,108 +2154,35 @@ export default function CloudDialer() {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left: Queue */}
-        <div className="w-72 border-r border-border bg-muted/20 flex flex-col">
-          <div className="px-4 py-3 border-b border-border">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Queue</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">{currentIdx + 1} of {queue.length}</p>
-            {/* Bucket chips double as the work-mode filter. Clicking one narrows
-                the queue in place — this is what replaces /pending-followups,
-                /fresh-leads, /missed-calls and the visit tabs for counsellors. */}
-            {queueBuckets.length > 1 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {bucketFilter && (
-                  <button onClick={() => setBucketFilter(null)} disabled={dialerActive}
-                    className="inline-flex items-center gap-1 rounded-full border border-input px-1.5 py-0.5 text-[9px] font-medium hover:bg-muted disabled:opacity-50">
-                    <X className="h-2.5 w-2.5" />All
-                  </button>
-                )}
-                {queueBuckets.map(b => (
-                  <button key={b.key} onClick={() => setBucketFilter(prev => prev === b.key ? null : b.key)}
-                    disabled={dialerActive}
-                    className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium transition-colors disabled:opacity-50 ${
-                      bucketFilter === b.key
-                        ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                        : "text-muted-foreground hover:bg-muted"
-                    }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${b.color}`} />{b.label}: {b.count}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="relative mt-2">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <input type="text" value={queueSearch} onChange={e => setQueueSearch(e.target.value)}
-                placeholder="Search name, phone, course..."
-                className="w-full rounded-md border border-input bg-background pl-7 pr-2 py-1.5 text-xs placeholder:text-muted-foreground/60 outline-none focus:ring-1 focus:ring-primary" />
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {queue.map((lead, idx) => {
-              if (queueSearch) {
-                const q = queueSearch.toLowerCase();
-                const matches = lead.name.toLowerCase().includes(q) || lead.phone.includes(q) || lead.course_name.toLowerCase().includes(q);
-                if (!matches) return null;
-              }
-              return (
-              <div key={lead.id}
-                className={`px-4 py-2.5 border-b border-border/40 cursor-pointer transition-colors ${
-                  idx === currentIdx ? "bg-cyan-50 dark:bg-cyan-950/20 border-l-2 border-l-cyan-500" :
-                  idx < currentIdx ? "opacity-50" : "hover:bg-muted/50"
-                }`}
-                onClick={() => !dialerActive && setCurrentIdx(idx)}
-              >
-                <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
-                <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <Badge className={`text-[9px] border-0 ${
-                    lead.bucket === "Post-Visit" ? "bg-warning/15 text-warning-foreground animate-pulse" :
-                    lead.bucket === "Visit Checkin" ? "bg-primary/10 text-primary" :
-                    lead.bucket === "Overdue" ? "bg-destructive/10 text-destructive" :
-                    lead.bucket === "Today" ? "bg-info/10 text-info-foreground" :
-                    lead.bucket === "New Lead" ? "bg-warning/10 text-warning-foreground" :
-                    "bg-gray-100 text-gray-600"
-                  }`}>{lead.bucket}</Badge>
-                  {lead.followup_type && lead.followup_type !== "call" && (
-                    <Badge className={`text-[9px] border-0 ${
-                      lead.followup_type === "whatsapp" ? "bg-success/10 text-success" :
-                      lead.followup_type === "email" ? "bg-sky-100 text-sky-700" :
-                      "bg-primary/10 text-primary"
-                    }`}>{lead.followup_type === "whatsapp" ? "WA" : lead.followup_type === "email" ? "Email" : "Visit"}</Badge>
-                  )}
-                  {(() => {
-                    const mins = minutesToReclaim(lead);
-                    if (mins === null) return null;
-                    if (mins <= 0) {
-                      return <Badge className="text-[9px] border-0 bg-destructive text-white animate-pulse">Reclaim now</Badge>;
-                    }
-                    if (mins <= 30) {
-                      return <Badge className="text-[9px] border-0 bg-destructive/10 text-destructive">⚠ {mins}m to reclaim</Badge>;
-                    }
-                    return null;
-                  })()}
-                  {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">{lead.attempt_count}x</Badge>}
-                  {idx < currentIdx && <CheckCircle className="h-3 w-3 text-success ml-auto" />}
-                </div>
-              </div>
-              );
-            })}
-            {queue.length === 0 && (
-              <div className="px-4 py-12 text-center text-muted-foreground">
-                <Phone className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No leads in queue</p>
-                <p className="text-[10px] mt-1">Try a different queue source</p>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Main content — navigator | workspace | context rail */}
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        <DialerQueuePane
+          queue={queue}
+          currentIdx={currentIdx}
+          onSelect={setCurrentIdx}
+          buckets={queueBuckets}
+          bucketFilter={bucketFilter}
+          setBucketFilter={setBucketFilter}
+          search={queueSearch}
+          setSearch={setQueueSearch}
+          disabled={dialerActive}
+          minutesToReclaim={minutesToReclaim}
+        />
 
-        {/* Right: Current lead + dialer */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Centre: the active lead — the only column the counsellor acts in */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {currentLead ? (
             <>
+            <DialerLeadHeader
+              lead={currentLead}
+              stageLabel={STAGE_LABELS[currentLead.stage] || currentLead.stage}
+              editing={editing}
+              setEditing={setEditing}
+              editValue={editValue}
+              setEditValue={setEditValue}
+              saveLeadEdit={saveLeadEdit}
+              courseOptions={courseOptions}
+            />
             {/* Non-call follow-up callout — routes counsellor to the native action.
                 Shown only when this queue entry came from a whatsapp / email / visit
                 follow-up and a call isn't already in progress. */}
@@ -2348,14 +2205,16 @@ export default function CloudDialer() {
                     This lead's next action isn't a call — open the channel, complete the action, then mark done to move on. You can still call if needed.
                   </p>
                 </div>
+                {/* The rail already composes both channels, so a non-call
+                    follow-up no longer means leaving the dialer. */}
                 {currentLead.followup_type === "whatsapp" && (
-                  <Button size="sm" variant="outline" onClick={() => navigate(`/whatsapp-inbox?lead=${currentLead.id}`)} className="h-8 text-xs">
+                  <Button size="sm" variant="outline" onClick={() => { setRailTab("whatsapp"); setRailOpen(true); }} className="h-8 text-xs">
                     Open WhatsApp
                   </Button>
                 )}
                 {currentLead.followup_type === "email" && (
-                  <Button size="sm" variant="outline" onClick={() => navigate(`/admissions/${currentLead.id}`)} className="h-8 text-xs">
-                    Open lead
+                  <Button size="sm" variant="outline" onClick={() => { setRailTab("email"); setRailOpen(true); }} className="h-8 text-xs">
+                    Open Email
                   </Button>
                 )}
                 {currentLead.followup_type === "visit" && (
@@ -2777,131 +2636,22 @@ export default function CloudDialer() {
               )}
             </div>
 
-            {/* ── Scrollable content: lead info + script ──────────────── */}
+            {/* ── Scrollable content: actions + call history ──────────── */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                {/* Lead actions — available before, during and after a call, not
-                    only once a disposition is chosen. A lead who asks for the
-                    payment link mid-call shouldn't force the counsellor to hang
-                    up first. holdCountdown() stops the auto-next timer so the
-                    queue can't advance out from under an open dialog. */}
-                <div className="flex flex-wrap gap-1.5">
-                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                    onClick={() => holdCountdown(() => setShowPaymentLink(true))}>
-                    <IndianRupee className="h-3 w-3 mr-1" />Payment link
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                    onClick={() => holdCountdown(() => setShowWhatsApp(true))}>
-                    <MessageCircle className="h-3 w-3 mr-1" />WhatsApp
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                    onClick={() => holdCountdown(() => setShowApplyLink(true))}>
-                    <FileText className="h-3 w-3 mr-1" />Login link
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                    onClick={() => holdCountdown(() => setShowScheduleVisit(true))}>
-                    <Calendar className="h-3 w-3 mr-1" />Schedule visit
-                  </Button>
-                  {canCreateProposal && (
-                    <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                      onClick={() => holdCountdown(() => setShowFeeProposal(true))}>
-                      <FileText className="h-3 w-3 mr-1" />Fee proposal
-                    </Button>
-                  )}
-                  <Button size="sm" variant="outline" className="h-7 text-[11px]"
-                    onClick={() => holdCountdown(() => setShowWalkin(true))}>
-                    <Footprints className="h-3 w-3 mr-1" />Log walk-in
-                  </Button>
-                  <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
-                    className="inline-flex h-7 items-center rounded-md border border-input px-2 text-[11px] font-medium hover:bg-muted">
-                    Open lead →
-                  </a>
-                </div>
-
-                {/* Lead info */}
-                <Card className="border-border/60 shadow-none">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center shrink-0">
-                          <span className="text-base font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
-                        </div>
-                        <div>
-                          {editing === "name" ? (
-                            <div className="flex items-center gap-1">
-                              <input type="text" value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
-                                className="text-base font-bold text-foreground leading-tight border border-input rounded-md px-1.5 py-0.5 w-40 outline-none focus:ring-1 focus:ring-primary"
-                                onKeyDown={e => { if (e.key === "Enter") saveLeadEdit("name", editValue); if (e.key === "Escape") setEditing(null); }} />
-                              <button onClick={() => saveLeadEdit("name", editValue)} className="text-success hover:text-success"><Check className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                            </div>
-                          ) : (
-                            <h2 className="text-base font-bold text-foreground leading-tight flex items-center gap-1.5 group">
-                              {currentLead.name}
-                              <button onClick={() => { setEditing("name"); setEditValue(currentLead.name); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
-                            </h2>
-                          )}
-                          <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
-                          <div className="mt-1">
-                            <CahetPendingBadge
-                              leadId={currentLead.id}
-                              leadName={currentLead.name}
-                              phone={currentLead.phone}
-                              courseName={currentLead.course_name}
-                            />
-                            <UpdeledPendingBadge
-                              leadId={currentLead.id}
-                              leadName={currentLead.name}
-                              phone={currentLead.phone}
-                              courseName={currentLead.course_name}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
-                        className="text-[10px] text-primary hover:underline shrink-0">Open Lead →</a>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div className="col-span-2">
-                        <span className="text-muted-foreground">Course & Campus</span>
-                        {editing === "course" ? (
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <select value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
-                              className="text-xs border border-input rounded-md px-1.5 py-1 flex-1 outline-none focus:ring-1 focus:ring-primary bg-background">
-                              <option value="">Select course...</option>
-                              {courseOptions.map(c => <option key={c.id} value={c.id}>{c.name} — {c.campus}</option>)}
-                            </select>
-                            <button onClick={() => saveLeadEdit("course", editValue)} className="text-success hover:text-success"><Check className="h-3.5 w-3.5" /></button>
-                            <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                          </div>
-                        ) : (
-                          <p className="font-medium text-foreground flex items-center gap-1.5 group">
-                            {currentLead.course_name} · {currentLead.campus_name}
-                            <button onClick={() => { setEditing("course"); setEditValue(currentLead.course_id || ""); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Stage</span>
-                        <p className="font-medium text-foreground">{STAGE_LABELS[currentLead.stage] || currentLead.stage}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Source</span>
-                        <p className="font-medium text-foreground capitalize">{currentLead.source}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Bucket</span>
-                        <p className="font-medium text-foreground">{currentLead.bucket}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Attempts</span>
-                        <p className={`font-medium ${currentLead.attempt_count > 0 ? "text-warning-foreground" : "text-success"}`}>
-                          {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} previous` : "First call"}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* holdCountdown() stops the auto-next timer so the queue can't
+                    advance out from under an open dialog. */}
+                <DialerActionRow
+                  leadId={currentLead.id}
+                  canCreateProposal={canCreateProposal}
+                  onAction={(action: DialerAction) => holdCountdown(() => {
+                    if (action === "payment") setShowPaymentLink(true);
+                    else if (action === "whatsapp") setShowWhatsApp(true);
+                    else if (action === "apply") setShowApplyLink(true);
+                    else if (action === "visit") setShowScheduleVisit(true);
+                    else if (action === "proposal") setShowFeeProposal(true);
+                    else if (action === "walkin") setShowWalkin(true);
+                  })}
+                />
 
                 {/* Priority Interested reason — shown before the counsellor calls */}
                 {currentLead.stage === "priority_interested" && (
@@ -2962,80 +2712,6 @@ export default function CloudDialer() {
                   </Collapsible>
                 )}
 
-                {/* Course Info Panel (same component as lead page) + Script */}
-                <div className="space-y-3">
-                  {currentLead.course_id && (
-                    <Card className="border-border/60 shadow-none max-h-[300px] overflow-y-auto">
-                      <CardContent className="p-3">
-                        <Suspense fallback={null}>
-                          <CourseInfoPanel courseId={currentLead.course_id} />
-                        </Suspense>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-
-              {/* Talking Points + NIMT Highlights + WhatsApp */}
-              <Card className="border-border/60 shadow-none bg-info/5/30 dark:bg-info/90/10">
-                <CardContent className="p-4">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
-                    <div>
-                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">💬 Call Script</p>
-                      <div className="text-muted-foreground leading-relaxed space-y-2">
-                        <p className="italic">
-                          "Hello, am I speaking with <b>{currentLead.name.split(" ")[0]}</b>?
-                          This is {counsellorDisplayName} from NIMT Educational Institutions.
-                          {currentLead.course_name !== "—"
-                            ? <> I see you've enquired about <b>{currentLead.course_name}</b>. Can you confirm this is the course you're interested in?</>
-                            : " I'm calling regarding your enquiry. Could you tell me which course you're interested in?"}
-                          "
-                        </p>
-                        <p className="text-[9px] text-warning-foreground font-semibold">⚠️ Confirm name and course before proceeding</p>
-                        {currentLead.course_name !== "—" && (
-                          <p className="italic">
-                            "Great! Let me tell you about {currentLead.course_name} at our {currentLead.campus_name}.
-                            {getCourseScript(currentLead.course_name)}"
-                          </p>
-                        )}
-                      </div>
-                      <p className="text-[9px] text-muted-foreground/60 mt-2">💡 Refer to the fee structure above for accurate fees</p>
-                      <div className="mt-3">
-                        <Button size="sm" variant="outline" className="text-[10px] h-7 gap-1"
-                          onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}?text=${encodeURIComponent(`Hi ${currentLead.name.split(" ")[0]}, this is ${counsellorDisplayName} from NIMT. I tried calling you regarding ${currentLead.course_name !== "—" ? currentLead.course_name : "your enquiry"}. Would you like to discuss?`)}`, "_blank")}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
-                          WhatsApp Lead
-                        </Button>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">🏛️ About NIMT</p>
-                      <ul className="text-muted-foreground leading-relaxed space-y-1">
-                        <li>• Est. 1987 — <b>37+ years</b> in education</li>
-                        <li>• 5 campuses, 36+ programmes, 21 colleges</li>
-                        <li>• AICTE, UGC, BCI, NCTE, INC, PCI approved</li>
-                        <li>• Placements: <b>₹18.75 LPA highest</b>, ₹5.40 LPA avg</li>
-                        <li>• 1,200+ recruiters: KPMG, Wipro, Deloitte, TCS</li>
-                        <li>• 6 NIRF ranked institutions (2025)</li>
-                        {getCourseHighlights(currentLead.course_name).map((h, i) => <li key={i}>• {h}</li>)}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold text-info-foreground uppercase tracking-wide mb-2">🎯 Nudge Checklist</p>
-                      <ul className="text-muted-foreground leading-relaxed space-y-1">
-                        {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
-                        <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
-                        <li>☐ Apply online: <b>apply.nimt.ac.in</b></li>
-                        <li>☐ Invite for campus visit</li>
-                        <li>☐ Hostel: 600+ beds, AC/non-AC</li>
-                        <li>☐ Transport facility available</li>
-                        <li>☐ Send WhatsApp with course details</li>
-                      </ul>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-
             </div>
             </>
           ) : (
@@ -3047,6 +2723,18 @@ export default function CloudDialer() {
             </div>
           )}
         </div>
+
+        {/* Right: reference material — stays put while the centre scrolls */}
+        {currentLead && (
+          <DialerContextRail
+            lead={currentLead}
+            counsellorDisplayName={counsellorDisplayName}
+            open={railOpen}
+            setOpen={setRailOpen}
+            tab={railTab}
+            setTab={setRailTab}
+          />
+        )}
       </div>
 
       {/* Bottom stats bar */}

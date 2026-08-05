@@ -51,6 +51,8 @@ const includeTerminalMigration = readFileSync(
 );
 const dynamicFilters = readFileSync("src/lib/dynamicListFilters.ts", "utf8");
 const dialer = readFileSync("src/pages/CloudDialer.tsx", "utf8");
+const dialerActionRow = readFileSync("src/components/dialer/DialerActionRow.tsx", "utf8");
+const dialerQueuePane = readFileSync("src/components/dialer/DialerQueuePane.tsx", "utf8");
 const progressPanel = readFileSync("src/components/dashboard/CallListProgressPanel.tsx", "utf8");
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
@@ -130,11 +132,14 @@ describe("assigned call lists", () => {
   });
 
   it("keeps inline post-call actions from being raced by auto-next", () => {
+    // Every DialerActionRow action opens through one holdCountdown wrapper,
+    // so the auto-next timer can't advance the queue under an open dialog.
     expect(dialer).toContain("const holdCountdown");
-    expect(dialer).toContain("holdCountdown(() => setShowPaymentLink(true))");
-    expect(dialer).toContain("holdCountdown(() => setShowWhatsApp(true))");
-    expect(dialer).toContain("holdCountdown(() => setShowWalkin(true))");
-    expect(dialer).toContain("holdCountdown(() => setShowApplyLink(true))");
+    expect(dialer).toContain("holdCountdown(() => {");
+    expect(dialer).toContain("setShowPaymentLink(true)");
+    expect(dialer).toContain("setShowWhatsApp(true)");
+    expect(dialer).toContain("setShowWalkin(true)");
+    expect(dialer).toContain("setShowApplyLink(true)");
   });
 
   it("uses one retry ladder across the client and the voice agent", () => {
@@ -287,7 +292,8 @@ describe("assigned call lists", () => {
     expect(dialer).toContain("Single toolbar");
     expect(dialer).toContain("dialPadOpen");
     // Actions must not be gated on a disposition being chosen.
-    expect(dialer).toContain("Lead actions — available before, during and after a call");
+    expect(dialerActionRow).toContain("before, during and after a call");
+    expect(dialer).toContain("<DialerActionRow");
     // Pause is reachable whenever there is a queue, not only mid-session.
     expect(dialer).toContain("const pauseDialer");
     expect(dialer).toContain("onClick={pauseDialer} disabled={queue.length === 0}");
@@ -309,8 +315,8 @@ describe("assigned call lists", () => {
   });
 
   it("offers schedule-visit and fee-proposal from the dialer", () => {
-    expect(dialer).toContain("Schedule visit");
-    expect(dialer).toContain("Fee proposal");
+    expect(dialerActionRow).toContain("Schedule visit");
+    expect(dialerActionRow).toContain("Fee proposal");
     expect(dialer).toContain("ScheduleVisitDialog");
     expect(dialer).toContain("SchoolFeeProposalDialog");
     // Same role gate the lead page uses for proposals.
