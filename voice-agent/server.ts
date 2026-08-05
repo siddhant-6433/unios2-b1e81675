@@ -70,10 +70,10 @@ function normalizePlivoCallerId(value: string | null | undefined, defaultCountry
 }
 
 function firstPlivoCallerIdFromEnv(): string {
+  // ponytail: dedicated cloud-dialer number; AI number is PLIVO_AI_PHONE_NUMBER
   const raws = [
-    Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS"),
     Deno.env.get("PLIVO_DIALER_PHONE_NUMBER"),
-    Deno.env.get("PLIVO_PHONE_NUMBER"),
+    Deno.env.get("PLIVO_AI_PHONE_NUMBER"),
   ];
   for (const raw of raws) {
     for (const part of String(raw || "").split(/[,;\n]+/)) {
