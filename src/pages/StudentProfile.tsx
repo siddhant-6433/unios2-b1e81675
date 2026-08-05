@@ -449,14 +449,20 @@ const StudentProfile = () => {
     if (error) console.error("[student-profile] audit log insert failed", error);
   };
 
-  const fetchStudent = async () => {
-    setLoading(true);
-    setLeadDocs([]);
-    setAppDocs([]);
-    setApplicationPhotoUrl(null);
-    setInferredBatch(null);
-    setStudentDocs([]);
-    setAuditRows([]);
+  // silent: refresh data in place without flipping the whole page into its
+  // loading spinner. A full reload unmounts the tab subtree, which scrolls to
+  // top and (uncontrolled Tabs) snaps back to the Details tab — jarring after
+  // an in-panel action like adding/removing a fee charge or waiver.
+  const fetchStudent = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setLeadDocs([]);
+      setAppDocs([]);
+      setApplicationPhotoUrl(null);
+      setInferredBatch(null);
+      setStudentDocs([]);
+      setAuditRows([]);
+    }
     let { data } = await supabase.from("students")
       .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
@@ -630,7 +636,7 @@ const StudentProfile = () => {
         }
       }
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   if (loading) return <PageLoader />;
@@ -1500,7 +1506,7 @@ const StudentProfile = () => {
 
         <TabsContent value="fees">
           <div className="mt-4">
-            <StudentFeePanel student={student} onRefresh={fetchStudent} />
+            <StudentFeePanel student={student} onRefresh={() => fetchStudent(true)} />
           </div>
         </TabsContent>
 

@@ -677,10 +677,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           )}
                         </div>
                         {canRequestConcession ? (
-                          Number(f.balance || 0) > 0 ? (
+                          Number(f.balance || 0) > 0 || Number(f.concession) > 0 ? (
                             <RowConcessionPopover
                               fee={f}
-                              onDone={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
+                              // Only refresh the ledger table in place — NOT the
+                              // parent onRefresh, which on StudentProfile flips the
+                              // whole page into its loading state and scrolls to top.
+                              onDone={() => { fetchFees(); fetchPendingWaivers(); }}
                             />
                           ) : (
                             // Keeps the amounts right-aligned down the column.
