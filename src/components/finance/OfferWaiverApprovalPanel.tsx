@@ -225,23 +225,25 @@ export function OfferWaiverApprovalPanel() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="border-border/60 shadow-none overflow-hidden">
-          <CardContent className="p-0">
+        // 11 columns: scroll rather than clip, and pin Actions to the right so a
+        // super admin can always approve without hunting for the buttons.
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="overflow-x-auto p-0">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicant</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Particulars</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Waiver/Scholarship</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicable Fee</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Requested By</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicant</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Term</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Amount</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Waiver</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Payable</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Requested</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Date</th>
                   {isSuperAdmin && (
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
+                    <th className="sticky right-0 z-10 border-l border-border bg-muted px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
                   )}
                 </tr>
               </thead>
@@ -252,25 +254,27 @@ export function OfferWaiverApprovalPanel() {
                     : null;
                   return (
                   <tr key={w.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-medium text-foreground">{w.lead_name}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[160px] truncate" title={w.course_name || undefined}>
+                    <td className="px-3 py-3 font-medium text-foreground">{w.lead_name}</td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground max-w-[140px] truncate" title={w.course_name || undefined}>
                       {w.course_name || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      <Badge className="bg-pastel-blue text-foreground/70 border-0 text-[10px]">
+                    <td className="px-3 py-3">
+                      <Badge className="bg-pastel-blue text-foreground/70 border-0 text-[10px] whitespace-nowrap">
                         {w.term_label}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-foreground">
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground whitespace-nowrap">
                       {w.year_amount != null ? `₹${w.year_amount.toLocaleString("en-IN")}` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">
+                    <td className="px-3 py-3 text-right font-semibold text-foreground tabular-nums whitespace-nowrap">
                       −₹{w.amount.toLocaleString("en-IN")}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-success">
+                    <td className="px-3 py-3 text-right tabular-nums font-semibold text-success whitespace-nowrap">
                       {applicable != null ? `₹${applicable.toLocaleString("en-IN")}` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={w.reason || undefined}>
+                    {/* Wraps instead of truncating — the reason is the whole basis
+                        for approving, so it has to be readable without a hover. */}
+                    <td className="px-3 py-3 text-xs text-muted-foreground min-w-[220px] max-w-[320px] whitespace-pre-wrap break-words">
                       {w.reason || "—"}
                       {w.status === "rejected" && w.rejection_reason && (
                         <span className="block text-destructive/80 mt-0.5">
@@ -278,7 +282,7 @@ export function OfferWaiverApprovalPanel() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
                       <span>{w.requested_by_name || "—"}</span>
                       {w.requested_by_role && (
                         <span className="block capitalize text-[10px] text-muted-foreground/60">
@@ -286,7 +290,7 @@ export function OfferWaiverApprovalPanel() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Badge className={`text-[10px] font-medium border-0 capitalize ${statusBadge[w.status] || "bg-muted"}`}>
                         {w.status}
                       </Badge>
@@ -296,11 +300,11 @@ export function OfferWaiverApprovalPanel() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(w.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                     </td>
                     {isSuperAdmin && (
-                      <td className="px-4 py-3">
+                      <td className="sticky right-0 z-10 border-l border-border bg-card px-3 py-3">
                         {w.status === "pending" ? (
                           <div className="flex items-center gap-1">
                             <Button
