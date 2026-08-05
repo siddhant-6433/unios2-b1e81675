@@ -209,6 +209,36 @@ async function loadEligibilityContext(
   return formatEligibility((data || null) as EligibilityRow | null, course, knowledge);
 }
 
+// Live counselling rounds/deadlines scraped by the counselling-watch cron.
+// Stale briefs are worse than none — round dates expire — so drop anything
+// older than the window even if the scrape kept the last good summary.
+const COUNSELLING_FRESHNESS_DAYS = 7;
+
+async function loadCounsellingUpdates(admin: SupabaseLike): Promise<string> {
+  const cutoff = new Date(Date.now() - COUNSELLING_FRESHNESS_DAYS * 86_400_000).toISOString();
+  const { data } = await admin
+    .from("counselling_sources")
+    .select("label,url,scope,summary,fetched_at")
+    .eq("is_active", true)
+    .not("summary", "is", null)
+    .gte("fetched_at", cutoff);
+
+  const blocks = (data || []).map((row: any) =>
+    [
+      `Source: ${row.label} (${row.url}) — checked ${String(row.fetched_at).slice(0, 10)}`,
+      row.scope ? `Covers: ${row.scope}` : "",
+      row.summary,
+    ].filter(Boolean).join("\n")
+  );
+  if (!blocks.length) return "";
+
+  return [
+    "LIVE COUNSELLING UPDATES (official portals, scraped — highest priority for round/date questions):",
+    "Use these dates verbatim for counselling round, registration, seat allocation, and reporting deadlines. Never state a round date that is not listed here; if the student asks about a date not covered, say the team will confirm.",
+    ...blocks,
+  ].join("\n");
+}
+
 export async function loadVerifiedAdmissionsContext(
   admin: SupabaseLike,
   courseId: string | null,
@@ -219,6 +249,7 @@ export async function loadVerifiedAdmissionsContext(
   const knowledge = knowledgeEntry?.[1] || null;
   const feeContext = await loadFeeContext(admin, course?.id || courseId, knowledge);
   const eligibilityContext = await loadEligibilityContext(admin, course, knowledge);
+  const counsellingContext = await loadCounsellingUpdates(admin);
 
   const lines = [
     "VERIFIED ADMISSIONS CONTEXT",
@@ -237,6 +268,7 @@ export async function loadVerifiedAdmissionsContext(
     knowledge?.placementHighlights ? `Placements: ${knowledge.placementHighlights}` : "",
     `Institution overview from knowledge.ts: ${NIMT_OVERVIEW}`,
     `Campus reference from knowledge.ts: ${Object.entries(CAMPUS_INFO).map(([name, info]) => `${name}: ${info}`).join(" | ")}`,
+    counsellingContext,
   ].filter(Boolean);
 
   return lines.join("\n");
