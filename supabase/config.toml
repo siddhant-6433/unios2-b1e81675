@@ -1,5 +1,14 @@
 project_id = "deylhigsisuexszsmypq"
 
+# Meta lead ingestion: auth is internal (cron sends x-cron-secret; Meta signs
+# webhooks with x-hub-signature-256). Gateway JWT verification must stay OFF or
+# it 401s both the pg_cron poller and Meta's webhook before the function runs.
+[functions.meta-leads-poll]
+verify_jwt = false
+
+[functions.meta-leads-webhook]
+verify_jwt = false
+
 [functions.invite-user]
 verify_jwt = false
 
