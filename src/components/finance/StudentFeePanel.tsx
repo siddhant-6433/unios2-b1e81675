@@ -21,6 +21,7 @@ import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { RowConcessionPopover } from "./RowConcessionPopover";
+import { PaidBreakdownPopover } from "./PaidBreakdownPopover";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
@@ -692,7 +693,14 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         ) : null}
                       </div>
                     </td>
-                    <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        ₹{Number(f.paid_amount).toLocaleString("en-IN")}
+                        {Number(f.paid_amount) > 0 && (
+                          <PaidBreakdownPopover feeLedgerId={f.id} paidAmount={Number(f.paid_amount)} />
+                        )}
+                      </span>
+                    </td>
                     <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
