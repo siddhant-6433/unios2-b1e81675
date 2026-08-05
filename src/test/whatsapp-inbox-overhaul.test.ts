@@ -1,4 +1,13 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+// The pre-commit hook restamps new migrations with the real commit time, so
+// resolve by name suffix instead of pinning a timestamp that will change.
+function readMigration(suffix: string): string {
+  const dir = "supabase/migrations";
+  const file = readdirSync(dir).find((f) => f.endsWith(`_${suffix}.sql`));
+  if (!file) throw new Error(`migration *_${suffix}.sql not found`);
+  return readFileSync(`${dir}/${file}`, "utf8");
+}
 import { describe, expect, it } from "vitest";
 import {
   buildTemplateParams,
@@ -13,14 +22,9 @@ const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/ind
 const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
 const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index.ts", "utf8");
 const badgeCounts = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
-const replyStateMigration = readFileSync(
-  "supabase/migrations/20260805030442_whatsapp_reply_state_counts.sql",
-  "utf8",
-);
-const templatesRlsMigration = readFileSync(
-  "supabase/migrations/20260804180141_whatsapp_templates_staff_read_and_sync_cron.sql",
-  "utf8",
-);
+const replyStateMigration = readMigration("whatsapp_reply_state_counts");
+const templatesRlsMigration = readMigration("whatsapp_templates_staff_read_and_sync_cron");
+const routeHealthCronMigration = readMigration("whatsapp_route_health_cron");
 
 describe("template catalog", () => {
   const components = [
@@ -133,6 +137,11 @@ describe("AI outage visibility", () => {
 
   it("surfaces the outage in the inbox", () => {
     expect(inbox).toContain("Auto-replies are not going out");
+  });
+
+  it("runs the watchdog on a schedule", () => {
+    expect(routeHealthCronMigration).toContain("cron.schedule(");
+    expect(routeHealthCronMigration).toContain("whatsapp-route-health");
   });
 });
 
