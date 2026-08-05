@@ -5,6 +5,7 @@ import { ReceiptDialog, type FeeLineItem, type ReceiptData } from "@/components/
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { useAuth } from "@/contexts/AuthContext";
+import { StudentAvatar } from "@/components/ui/student-avatar";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
@@ -26,6 +27,7 @@ interface StudentFee {
 interface StudentInfo {
   id: string;
   name: string;
+  photo_url: string | null;
   admission_no: string;
   course_id: string | null;
   campus_id: string | null;
@@ -203,7 +205,7 @@ export default function PaymentPortal() {
     setError(null);
     const { data, error: err } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("id", studentParam!)
       .single();
     if (err || !data) { setError("Invalid link. Contact the institution."); setLoading(false); return; }
@@ -217,7 +219,7 @@ export default function PaymentPortal() {
     setError(null);
     const { data, error: err } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("id", studentParam!)
       .maybeSingle();
 
@@ -248,6 +250,7 @@ export default function PaymentPortal() {
     return {
       id: data.id,
       name: data.name,
+      photo_url: data.photo_url || null,
       admission_no: data.admission_no || data.pre_admission_no || "",
       course_id: data.course_id || null,
       campus_id: data.campus_id || null,
@@ -272,7 +275,7 @@ export default function PaymentPortal() {
 
     const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .or([
         `phone.eq.${phone}`, `phone.eq.+91${phone}`,
         `father_phone.eq.${phone}`, `father_phone.eq.+91${phone}`,
@@ -651,9 +654,11 @@ export default function PaymentPortal() {
 
               <div className="rounded-2xl bg-white border border-gray-200 p-5">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-bold shrink-0">
-                    {student.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </div>
+                  <StudentAvatar
+                    src={student.photo_url}
+                    name={student.name}
+                    className="h-12 w-12 rounded-full text-sm"
+                  />
                   <div className="min-w-0">
                     <h2 className="text-lg font-bold text-gray-900 truncate">{student.name}</h2>
                     <div className="flex flex-wrap items-center gap-x-3 text-xs text-gray-500 mt-0.5">

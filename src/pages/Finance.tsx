@@ -102,6 +102,11 @@ const Finance = () => {
       // below stays unchanged.
       supabase.from("v_all_payments" as any).select("*").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
+      // Counts stay count:"planned" — a cheap planner estimate. src/test/
+      // hot-list-database-load.test.ts bans exact counts on this page because
+      // they force a full scan under RLS. The badge is therefore approximate
+      // (~45 against 49 actual); the panels themselves show real, RLS-filtered
+      // lists, which is where the precision has to be.
       supabase.from("offer_waivers").select("id", { count: "planned", head: true }).eq("status", "pending"),
       supabase.from("concessions").select("id", { count: "planned", head: true }).in("status", ["pending_principal", "pending_super_admin"]),
       // Header totals come from the server. Summing the .limit(200) ledger slice

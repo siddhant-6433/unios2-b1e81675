@@ -24,6 +24,13 @@ const claimFn = read("supabase/functions/student-portal-claim/index.ts");
 const allocRowMigration = readMigration("payment_allocations_by_ledger_row");
 const authLookupMigration = readMigration("auth_user_lookup_for_student_claim");
 const loginLinkMigration = readMigration("issue_student_login_link");
+const accountantPermsMigration = readMigration("accountant_drop_attendance_exams");
+const studentPortal = read("src/pages/StudentPortal.tsx");
+const sendOnDemandMigration = readMigration("login_link_send_on_demand");
+const gatewaySettlement = read("supabase/functions/_shared/gateway-settlement.ts");
+const counsellorMigration = readMigration("counsellor_fee_ledger_and_login_link");
+const searchScopeMigration = readMigration("cashier_search_scope_and_active");
+const adhocWaiverMigration = readMigration("offer_waiver_skips_adhoc_heads");
 const concessionPanel = read("src/components/finance/ConcessionApprovalPanel.tsx");
 const offlineDialog = read("src/components/finance/OfflinePaymentDialog.tsx");
 const cashierConsole = read("src/components/finance/CashierConsole.tsx");
@@ -241,7 +248,9 @@ describe("payment link: Collect Fee vs Token Fee", () => {
 
   it("shows the fee structure only for Collect Fee, and clears it on switch", () => {
     expect(sendLinkDialog).toContain('variant="all"');
-    expect(sendLinkDialog).toContain("{collectingFee && (");
+    // The picker is now the not-seeded branch: a breakup handed down from the
+    // fee table is rendered read-only instead.
+    expect(sendLinkDialog).toContain("{collectingFee && !seeded && (");
     expect(sendLinkDialog).toContain('if (v !== "fee_due") setAllocations([]);');
   });
 
@@ -370,7 +379,10 @@ describe("counter search disambiguates same-name candidates", () => {
     // Typing a bare 10-digit number matches a stored +91… via the ilike.
     expect(searchMigration).toContain("st.phone ilike v_like");
     expect(searchMigration).toContain("ld.phone ilike v_like");
-    expect(cashierConsole).toContain("Search by name, mobile no., admission no., PAN or application ID");
+    // The placeholder is now scope-dependent; both variants still advertise
+    // that a mobile number works.
+    expect(cashierConsole).toContain("Search students by name, mobile no., admission no. or PAN");
+    expect(cashierConsole).toContain("Search students, leads and applications — name, mobile,");
   });
 });
 
@@ -388,10 +400,22 @@ describe("counter collection: many heads, one receipt", () => {
     expect(studentFeePanel).toContain("Math.min(Math.max(0, raw), rowBalance(f))");
   });
 
-  it("the per-row Collect shortcut goes through the same path, not a second one", () => {
-    expect(studentFeePanel).toContain("openCollect([f], one)");
-    // The old single-target prop is gone.
+  it("collects only from the bar — no per-row Collect duplicating it", () => {
+    // Collection happens once, against every ticked row. A per-row link offered
+    // a second way to do the same thing one head at a time.
+    expect(studentFeePanel).toContain("onClick={() => openCollect(fees)}");
+    expect(studentFeePanel).not.toContain('title="Collect against this head"');
+    // The old single-target prop is gone too.
     expect(studentFeePanel).not.toContain("collectTarget");
+  });
+
+  it("puts Paying last, after the row actions", () => {
+    const header = studentFeePanel.slice(
+      studentFeePanel.indexOf("Fee Head</th>"),
+      studentFeePanel.indexOf("</tr>", studentFeePanel.indexOf("Fee Head</th>")),
+    );
+    expect(header.indexOf("Balance</th>")).toBeLessThan(header.indexOf("Due Date</th>"));
+    expect(header.indexOf("Status</th>")).toBeLessThan(header.indexOf("Paying</th>"));
   });
 
   it("a seeded breakup locks the amount so the table and the receipt agree", () => {
@@ -435,8 +459,33 @@ describe("direct student login link", () => {
     expect(loginLinkMigration).toContain("claimed_at IS NULL");
   });
 
-  it("refuses to mint a link that could never be delivered", () => {
-    expect(loginLinkMigration).toContain("has no phone number on file");
+  it("generates without sending — delivery is a separate, deliberate call", () => {
+    // Minting used to fire WhatsApp from the insert trigger, so a cashier who
+    // only wanted to read the URL out had already messaged the parent.
+    expect(sendOnDemandMigration).toContain("auto_send boolean NOT NULL DEFAULT true");
+    expect(sendOnDemandMigration).toContain("IF NEW.auto_send IS FALSE THEN");
+    expect(sendOnDemandMigration).toContain("now() + interval '7 days', false)");
+    expect(studentFeePanel).toContain("Generate Login Link");
+    expect(studentFeePanel).toContain("Send on WhatsApp to");
+  });
+
+  it("defaults auto_send true so every existing insert site is untouched", () => {
+    expect(sendOnDemandMigration).toContain("DEFAULT true");
+  });
+
+  it("keeps one delivery implementation shared by the trigger and the RPC", () => {
+    expect(sendOnDemandMigration).toContain("PERFORM public.send_student_claim_link(NEW.id)");
+    expect(sendOnDemandMigration).toContain("RETURN public.send_student_claim_link(_token_id)");
+  });
+
+  it("refuses to send a used, expired or undeliverable link", () => {
+    expect(sendOnDemandMigration).toContain("has already been used");
+    expect(sendOnDemandMigration).toContain("has expired");
+    expect(sendOnDemandMigration).toContain("has no phone number on file");
+  });
+
+  it("keeps the internal sender off browser sessions", () => {
+    expect(sendOnDemandMigration).toContain("REVOKE ALL ON FUNCTION public.send_student_claim_link(uuid) FROM PUBLIC, anon, authenticated");
   });
 
   // The claim path had never once succeeded in production: 31 tokens issued,
@@ -470,7 +519,7 @@ describe("direct student login link", () => {
 
 describe("ledger header stays a counter, not a control panel", () => {
   it("keeps the cashier's four actions in reach", () => {
-    for (const label of ["Collect Payment", "Add Charge", "Send Payment Link", "Send Login Link"]) {
+    for (const label of ["Collect Payment", "Add Charge", "Send Payment Link", "Generate Login Link"]) {
       expect(studentFeePanel).toContain(label);
     }
   });
@@ -480,5 +529,242 @@ describe("ledger header stays a counter, not a control panel", () => {
     for (const label of ["Auto-Assign Fees", "Re-provision (clear unpaid)", "Transfer", "Reallocation History"]) {
       expect(studentFeePanel).toContain(label);
     }
+  });
+});
+
+describe("the accountant sidebar is a cash counter", () => {
+  it("drops attendance and exams from the role rather than hiding them in the nav", () => {
+    // The sidebar gates those two items on exactly these permissions, so the
+    // grants also let the role open /attendance and /exams directly — hiding
+    // the links would have left the pages reachable.
+    expect(accountantPermsMigration).toContain("rp.role = 'accountant'");
+    expect(accountantPermsMigration).toContain("p.module IN ('attendance', 'exams')");
+    expect(accountantPermsMigration).toContain("DELETE FROM public.role_permissions");
+  });
+
+  it("leaves the nav itself permission-driven", () => {
+    const sidebar = read("src/components/layout/AppSidebar.tsx");
+    expect(sidebar).toContain('permission: "attendance:view"');
+    expect(sidebar).toContain('permission: "exams:view"');
+  });
+});
+
+describe("student portal fee ledger", () => {
+  it("groups by term with the same helpers as the staff ledger", () => {
+    // A flat due-date sort put the security deposit above the application fee
+    // and scattered a quarter's heads across the list.
+    expect(studentPortal).toContain("ONE_TIME_TERMS");
+    expect(studentPortal).toContain("ONE_TIME_GROUP");
+    expect(studentPortal).toContain("oneTimeRank");
+    expect(studentPortal).toContain("One-time Fees");
+  });
+
+  it("shows the waiver on the head it was applied to", () => {
+    expect(studentPortal).toContain("concession");
+    expect(studentPortal).toContain("waiver applied");
+    // And what the head cost before it, so a waived row doesn't just read as a
+    // smaller bill.
+    expect(studentPortal).toContain("before waiver");
+  });
+
+  it("selects concession from the ledger, since the row can't show what it never fetched", () => {
+    expect(studentPortal).toContain("balance, concession, status");
+  });
+
+  it("makes every outstanding head individually payable", () => {
+    // Was upcoming-only, which left a one-off charge like a meal add-on with no
+    // way to settle on its own — only the whole due total or the whole year.
+    expect(studentPortal).toContain("{!paid && fee.balance > 0 && (");
+    expect(studentPortal).toContain('openPayment("fee", fee.id)');
+  });
+
+  it("can settle a whole term in one go, upcoming heads included", () => {
+    expect(studentPortal).toContain('openPayment("set", undefined, gPayable.map((r) => r.id))');
+    expect(studentPortal).toContain("Pay ₹{gOutstanding.toLocaleString");
+  });
+
+  it("charges exactly what the term button says", () => {
+    // Header total and the paid set must select on the same predicate.
+    expect(studentPortal).toContain("const gPayable = g.rows.filter((r) => r.balance > 0);");
+    expect(studentPortal).toContain("const gOutstanding = gPayable.reduce((s, r) => s + r.balance, 0);");
+  });
+
+  it("never names a price — the gateway resolves it from the ids", () => {
+    // feeSelectionFromBody honours a non-empty fee_ids over the scope, and
+    // expectedStudentFeeAmount sums those rows' balances server-side.
+    const rzp = read("supabase/functions/razorpay-payment/index.ts");
+    expect(rzp).toContain("if (ids.length > 0) return ids.join(\",\");");
+    expect(rzp).toContain("const expected = await expectedStudentFeeAmount(");
+  });
+
+  it("lists every paid receipt with its PDF", () => {
+    expect(studentPortal).toContain("Paid Fee Receipts");
+    expect(studentPortal).toContain("Download PDF");
+  });
+
+  it("fetches receipts for every student, not just consultant-managed ones", () => {
+    // student_fee_due_summary is SECURITY DEFINER and self-scoped, and it is the
+    // only path to lead_payments for a student login — so it must not stay
+    // behind the zero-ledger-rows branch it used to sit in.
+    const call = studentPortal.indexOf('"student_fee_due_summary"');
+    const hiddenBranch = studentPortal.indexOf("feeRes.data.length === 0 &&");
+    expect(call).toBeGreaterThan(-1);
+    expect(call).toBeLessThan(hiddenBranch);
+  });
+});
+
+describe("shareable link for specific fee rows", () => {
+  it("keeps fee_ledger_id on the link instead of flattening it to the head", () => {
+    // Dropping it turned "pay this quarter's meal charge" into "pay the
+    // earliest unpaid meal charge".
+    expect(createLinkFn).toContain("isUuid(a.fee_ledger_id)");
+    expect(createLinkFn).toContain("fee_ledger_id: String(a.fee_ledger_id)");
+  });
+
+  it("refuses a row that isn't this student's, or is filed under the wrong head", () => {
+    expect(createLinkFn).toContain("does not belong to this student");
+    expect(createLinkFn).toContain("does not match its fee head");
+    expect(createLinkFn).toContain('.eq("student_id", ownerId).in("id", ledgerIds)');
+  });
+
+  it("carries the breakup through settlement onto the receipt", () => {
+    expect(gatewaySettlement).toContain("fee_ledger_id?: string");
+    expect(gatewaySettlement).toContain("allocations: hasAllocations ? link.allocations : null");
+  });
+
+  it("lets staff raise the link from the ticked rows", () => {
+    expect(studentFeePanel).toContain("openLinkForSelection");
+    expect(studentFeePanel).toContain("defaultAllocations={linkAllocations}");
+    expect(studentFeePanel).toContain("Send Link");
+  });
+
+  it("shows a seeded breakup read-only rather than a second editor", () => {
+    expect(sendLinkDialog).toContain("defaultAllocations");
+    expect(sendLinkDialog).toContain("{collectingFee && seeded && (");
+    expect(sendLinkDialog).toContain("{collectingFee && !seeded && (");
+  });
+
+  it("still validates that the breakup equals the amount", () => {
+    expect(createLinkFn).toContain("must equal the amount");
+  });
+});
+
+describe("counsellors: ask for payment, never take it", () => {
+  it("can see the ledger of their own students only", () => {
+    // The tab was already reachable but empty — fee_ledger's finance policy
+    // covers super_admin/campus_admin/accountant/principal, not counsellors.
+    expect(counsellorMigration).toContain('CREATE POLICY "Counsellors can view assigned student ledger"');
+    expect(counsellorMigration).toContain("FOR SELECT");
+    // Reuses the exact predicate behind the students policy they already have,
+    // rather than inventing a second notion of "assigned".
+    expect(counsellorMigration).toContain("public.can_view_student_via_lead(auth.uid(), student_id)");
+  });
+
+  it("checks the cheap role test first so finance scans never pay for can_view_lead", () => {
+    const policy = counsellorMigration.slice(counsellorMigration.indexOf("USING ("));
+    expect(policy.indexOf("has_role")).toBeLessThan(policy.indexOf("can_view_student_via_lead"));
+  });
+
+  it("gets read access only — no insert, update or delete policy", () => {
+    expect(counsellorMigration).not.toContain("FOR INSERT");
+    expect(counsellorMigration).not.toContain("FOR UPDATE");
+    expect(counsellorMigration).not.toContain("FOR DELETE");
+    expect(counsellorMigration).not.toContain("FOR ALL");
+  });
+
+  it("can issue and send a login link, scoped to their own candidate", () => {
+    expect(counsellorMigration).toContain("OR public.can_view_student_via_lead(auth.uid(), _student_id)");
+    // The send path authorises against the token's student, not a caller-supplied one.
+    expect(counsellorMigration).toContain("public.can_view_student_via_lead(auth.uid(), v_tok.student_id)");
+  });
+
+  it("can select rows and raise a link, but the Collect button stays cashier-only", () => {
+    expect(studentFeePanel).toContain('const canSendLink = isFinanceRole || ["counsellor", "admission_head"].includes(role || "");');
+    expect(studentFeePanel).toContain("const canPick = canCollect || canSendLink;");
+    expect(studentFeePanel).toContain("const isPickable = (f: any) => canPick && rowBalance(f) > 0;");
+    expect(studentFeePanel).toContain("{canCollect && (\n              <Button size=\"sm\" className=\"gap-1.5\" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>");
+  });
+
+  it("keeps provisioning, transfers and row deletion out of their reach", () => {
+    // Manage and the row-actions column remain isFinanceRole, which excludes them.
+    expect(studentFeePanel).toContain("{(canProvision || canReallocate || isFinanceRole) && (");
+    expect(studentFeePanel).toContain('const canRemoveRow = (f: any) =>');
+    expect(studentFeePanel).toContain('["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage")');
+  });
+
+  it("is already accepted by the payment-link edge function", () => {
+    expect(createLinkFn).toContain('"counsellor"');
+  });
+});
+
+describe("counter search scope", () => {
+  it("defaults to students only, with leads behind a switch", () => {
+    expect(searchScopeMigration).toContain("_include_leads boolean DEFAULT true");
+    expect(searchScopeMigration).toContain("WHERE _include_leads");
+    // The counter opens on students; enquiries are opt-in.
+    expect(cashierConsole).toContain("useState(false);");
+    expect(cashierConsole).toContain("_include_leads: includeLeads");
+  });
+
+  it("hides inactive students by default but keeps pre_admitted", () => {
+    expect(searchScopeMigration).toContain("NOT _active_only OR st.status IS DISTINCT FROM 'inactive'");
+    // A pre_admitted candidate is exactly who pays at a counter, so the filter
+    // must be "not inactive", never "= active".
+    expect(searchScopeMigration).not.toContain("st.status = 'active'");
+    expect(cashierConsole).toContain("_active_only: activeOnly");
+    expect(cashierConsole).toContain("Active students only");
+  });
+
+  it("re-runs the search when a switch flips, not on the next keystroke", () => {
+    expect(cashierConsole).toContain("}, [query, includeLeads, activeOnly]);");
+  });
+
+  it("replaces the old signature instead of overloading it", () => {
+    // Two signatures would make cashier_search(_q) ambiguous to PostgREST.
+    expect(searchScopeMigration).toContain("DROP FUNCTION IF EXISTS public.cashier_search(text);");
+  });
+
+  it("badges a surfaced inactive student instead of calling it just 'Student'", () => {
+    expect(cashierConsole).toContain('h.stage !== "active"');
+  });
+});
+
+describe("offer waivers stay on the structure they were granted against", () => {
+  it("skips ad-hoc heads when spreading a term waiver", () => {
+    // A Q4 offer waiver was landing 5,767 on a meal add-on nobody discounted,
+    // and diluting the tuition heads it was actually granted against.
+    const marker = "NOT EXISTS (SELECT 1 FROM optional_fee_heads o WHERE o.fee_code_id = fl.fee_code_id)";
+    // Both the cap-sum and the distribution loop must exclude them, or the
+    // shares stop summing to the waiver.
+    expect(adhocWaiverMigration.split(marker).length - 1).toBe(2);
+  });
+
+  it("still honours a waiver requested ON an ad-hoc row", () => {
+    // The per-row concessions block is untouched: asking for a waiver on the
+    // meal charge means the meal charge.
+    const perRow = adhocWaiverMigration.slice(
+      adhocWaiverMigration.indexOf("UPDATE fee_ledger fl"),
+      adhocWaiverMigration.indexOf("SELECT id INTO v_offer"),
+    );
+    expect(perRow).toContain("WHERE c.fee_ledger_id = fl.id");
+    expect(perRow).not.toContain("optional_fee_heads");
+  });
+
+  it("recomputes the students already carrying a leaked share", () => {
+    expect(adhocWaiverMigration).toContain("PERFORM public.sync_fee_ledger_concessions(r.student_id);");
+  });
+});
+
+describe("a created payment link stays on screen", () => {
+  it("is handed back to the caller instead of dying with the dialog", () => {
+    expect(sendLinkDialog).toContain("onCreated?: (payUrl?: string) => void;");
+    expect(sendLinkDialog).toContain("onCreated?.(data.pay_url);");
+  });
+
+  it("is shown with a copy control on both the counter and the student page", () => {
+    expect(studentFeePanel).toContain("setPayLink(payUrl)");
+    expect(studentFeePanel).toContain("Payment link copied");
+    expect(cashierConsole).toContain("setPayLink(payUrl)");
+    expect(cashierConsole).toContain("Payment link copied");
   });
 });
