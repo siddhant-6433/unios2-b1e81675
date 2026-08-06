@@ -191,6 +191,14 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                       <span className="ml-1 text-[10px] text-muted-foreground">
                         {c.type === "percentage" ? `${c.value}%` : "flat"}{pending ? " · pending" : ""}
                       </span>
+                      {/* Staff-only. The student ledger renders fee_ledger.concession
+                          (the amount) and never reads this table, so the reason
+                          stays internal. */}
+                      {c.reason && (
+                        <p className="truncate text-[10px] text-muted-foreground" title={c.reason}>
+                          {c.reason}
+                        </p>
+                      )}
                     </div>
                     {canEdit && (
                       <div className="flex shrink-0 gap-0.5">
