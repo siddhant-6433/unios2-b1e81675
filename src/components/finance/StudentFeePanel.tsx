@@ -79,7 +79,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
-  const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "") && !!student?.lead_id;
+  // Works for both lead-based candidates and lead-less (school) students — the
+  // receipt books against lead_id or student_id respectively.
+  const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "") && !!student?.id;
   // Counsellors can ask their own candidate to pay — a payment link or a portal
   // login — but never take money. RLS scopes what they can even see here to
   // students on their assigned leads (can_view_student_via_lead).
@@ -151,12 +153,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   };
 
   const fetchPayments = async () => {
-    if (!student?.lead_id) return;
-    const { data } = await supabase
+    if (!student?.id) return;
+    // Lead-based receipts key on lead_id; a lead-less (school) student's
+    // receipts key on student_id — both live in lead_payments.
+    const q = supabase
       .from("lead_payments")
       .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, status, payment_date, created_at, concession_amount")
-      .eq("lead_id", student.lead_id)
       .order("created_at", { ascending: false });
+    const { data } = student.lead_id
+      ? await q.eq("lead_id", student.lead_id)
+      : await q.eq("student_id", student.id);
     if (data) setPayments(data);
   };
 
@@ -888,11 +894,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         );
       })()}
 
-      {student?.lead_id && (
+      {student?.id && (
         <OfflinePaymentDialog
           open={collectOpen}
           onOpenChange={(v) => { setCollectOpen(v); if (!v) setCollectAllocations(null); }}
-          leadId={student.lead_id}
+          leadId={student.lead_id || undefined}
+          studentId={student.id}
           defaultType="other"
           defaultAmount={collectAllocations
             ? collectAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
