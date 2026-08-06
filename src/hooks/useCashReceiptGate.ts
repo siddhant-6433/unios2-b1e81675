@@ -9,17 +9,21 @@ export function useCashReceiptGate(
   open: boolean,
   leadId: string | null | undefined,
   mode: string,
+  studentId?: string | null,
 ): { blocked: boolean; reason: string | null } {
   const [reason, setReason] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || mode !== "cash" || !leadId) { setReason(null); return; }
+    if (!open || mode !== "cash" || (!leadId && !studentId)) { setReason(null); return; }
     let cancelled = false;
     (async () => {
-      const { data: lead } = await supabase
-        .from("leads").select("campus_id").eq("id", leadId).maybeSingle();
+      // Resolve the campus from the lead, or from the student for a lead-less
+      // (post-admission school) receipt — mirrors enforce_cash_receipt_window.
+      const { data: row } = leadId
+        ? await supabase.from("leads").select("campus_id").eq("id", leadId).maybeSingle()
+        : await supabase.from("students").select("campus_id").eq("id", studentId!).maybeSingle();
       const { data, error } = await supabase.rpc("can_create_cash_receipt" as any, {
-        _campus_id: (lead as { campus_id?: string | null } | null)?.campus_id ?? null,
+        _campus_id: (row as { campus_id?: string | null } | null)?.campus_id ?? null,
       });
       if (cancelled) return;
       if (error) { setReason(null); return; }
@@ -27,7 +31,7 @@ export function useCashReceiptGate(
       setReason(r && !r.allowed ? (r.reason || "Cash receipts are currently disabled.") : null);
     })();
     return () => { cancelled = true; };
-  }, [open, leadId, mode]);
+  }, [open, leadId, mode, studentId]);
 
   return { blocked: !!reason, reason };
 }

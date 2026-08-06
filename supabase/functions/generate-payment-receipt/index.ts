@@ -413,10 +413,15 @@ Deno.serve(async (req) => {
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
         payment_date, status, receipt_url, created_at, recorded_by, notes, application_id,
-        allocations,
+        allocations, student_id,
         fee_codes:fee_code_id ( name ),
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
+          courses:course_id ( name ),
+          campuses:campus_id ( name )
+        ),
+        students:student_id (
+          id, name, phone, email, admission_no,
           courses:course_id ( name ),
           campuses:campus_id ( name )
         )
@@ -436,6 +441,10 @@ Deno.serve(async (req) => {
     }
 
     const lead: any = lp.leads;
+    const stu: any = lp.students;
+    // Lead-less (post-admission school) receipt: identity + branding come from
+    // the student's own record and its course→institution chain, not a lead.
+    const isStudentReceipt = !lead && !!stu;
     const isApp = lp.type === "application_fee";
     const resolvedApplicationId =
       isApp
@@ -452,22 +461,29 @@ Deno.serve(async (req) => {
       app = data || null;
     }
     const firstChoice = (app?.course_selections || [])[0] || {};
-    const courseName = isApp ? firstChoice.course_name ?? lead?.courses?.name ?? null : lead?.courses?.name ?? null;
-    const campusName = lead?.campuses?.name ?? null;
+    const courseName = isApp
+      ? firstChoice.course_name ?? lead?.courses?.name ?? null
+      : lead?.courses?.name ?? stu?.courses?.name ?? null;
+    const campusName = lead?.campuses?.name ?? stu?.campuses?.name ?? null;
 
-    // Institution name (from the lead's course → dept → institution) and the
-    // address of that institution's campus. This is what the header prints, so
-    // a Greater Noida nursing receipt shows its nursing institute + Greater
-    // Noida address, a Kotputli B.Ed shows the Mahila B.Ed College + Kotputli
+    // Institution name (from the course → dept → institution) and the address
+    // of that institution's campus. This is what the header prints, so a
+    // Greater Noida nursing receipt shows its nursing institute + Greater Noida
     // address, etc. Falls back to campus name / branding address when absent.
-    const { data: lh } = await admin.rpc("lead_letterhead" as any, { _lead_id: lead?.id });
+    // A lead-less student resolves the identical chain off its own course.
+    const { data: lh } = isStudentReceipt
+      ? await admin.rpc("student_letterhead" as any, { _student_id: stu.id })
+      : await admin.rpc("lead_letterhead" as any, { _lead_id: lead?.id });
     const letterhead = Array.isArray(lh) ? lh[0] : lh;
     const institutionName: string | null = letterhead?.institution_name ?? null;
     let letterheadAddress: string | null = letterhead?.address ?? null;
 
-    const { data: branding } = await admin.rpc("lead_branding" as any, {
-      _lead_id: lead?.id, _doc_type: "receipt",
-    });
+    // student_branding returns a full institution_branding row (campus slug →
+    // default fallback); lead_branding returns the receipt-scoped shape. Map
+    // either onto the Branding the PDF expects.
+    const { data: branding } = isStudentReceipt
+      ? await admin.rpc("student_branding" as any, { _student_id: stu.id })
+      : await admin.rpc("lead_branding" as any, { _lead_id: lead?.id, _doc_type: "receipt" });
     const brandingResolved: Branding = {
       slug:           branding?.slug ?? null,
       name:           branding?.name || "NIMT Educational Institutions",
@@ -500,13 +516,13 @@ Deno.serve(async (req) => {
     }
 
     const rows: [string, string][] = [
-      ["Name",  app?.full_name || lead?.name || "—"],
-      ["Phone", app?.phone || lead?.phone || "—"],
+      ["Name",  app?.full_name || lead?.name || stu?.name || "—"],
+      ["Phone", app?.phone || lead?.phone || stu?.phone || "—"],
     ];
-    if (app?.email || lead?.email) rows.push(["Email", app?.email || lead?.email]);
+    if (app?.email || lead?.email || stu?.email) rows.push(["Email", app?.email || lead?.email || stu?.email]);
     if (isApp && resolvedApplicationId) rows.push(["Application ID", resolvedApplicationId]);
     if (!isApp) {
-      if (lead?.admission_no) rows.push(["Admission No", lead.admission_no]);
+      if (lead?.admission_no || stu?.admission_no) rows.push(["Admission No", lead?.admission_no || stu?.admission_no]);
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
       if (courseName) rows.push(["Course", courseName]);
     }
@@ -572,7 +588,7 @@ Deno.serve(async (req) => {
       branding:      brandingResolved,
     });
 
-    const path = `receipts/${lead?.id || "unassigned"}/${lp.receipt_no}.pdf`;
+    const path = `receipts/${lead?.id || stu?.id || "unassigned"}/${lp.receipt_no}.pdf`;
     const { error: upErr } = await admin.storage
       .from("application-documents")
       .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true });
