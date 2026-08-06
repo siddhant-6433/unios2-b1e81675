@@ -1100,11 +1100,18 @@ export default function LeadLists() {
     }
   };
 
+  // Bucket a report row for the follow-up picker. A lead that was never called
+  // (no call since assignment) gets its own "not_called" segment instead of
+  // hiding under "unrecorded" — the latter means called but no outcome logged.
+  // This is what lets an assigner rebuild a fresh list from the uncalled leads.
+  const reportBucket = (r: LeadListAssignmentReportRow) =>
+    !r.latest_call_at ? "not_called" : (r.latest_call_disposition || "unrecorded");
+
   // Dispositions actually present in the loaded report — the follow-up picker.
   const reportDispositionsPresent = useMemo(() => {
     const counts = new Map<string, number>();
     assignmentReport.forEach((r) => {
-      const d = r.latest_call_disposition || "unrecorded";
+      const d = reportBucket(r);
       counts.set(d, (counts.get(d) ?? 0) + 1);
     });
     return [...counts].sort((a, b) => b[1] - a[1]);
@@ -1114,7 +1121,7 @@ export default function LeadLists() {
     const set = new Set(followupDispositions);
     return Array.from(new Set(
       assignmentReport
-        .filter((r) => set.has(r.latest_call_disposition || "unrecorded"))
+        .filter((r) => set.has(reportBucket(r)))
         .map((r) => r.lead_id),
     ));
   }, [assignmentReport, followupDispositions]);
@@ -1138,7 +1145,7 @@ export default function LeadLists() {
     setFollowupCreating(true);
     try {
       const set = new Set(followupDispositions);
-      const rows = assignmentReport.filter((r) => set.has(r.latest_call_disposition || "unrecorded"));
+      const rows = assignmentReport.filter((r) => set.has(reportBucket(r)));
       const course = dominantCourse(rows.map((r) => r.course_name));
       const name = buildListName({
         course,
