@@ -695,7 +695,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                     <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
+                      {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>
