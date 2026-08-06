@@ -11,6 +11,7 @@ import {
   conversationBusinessKey,
 } from "../_shared/whatsapp-conversation-state.ts";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { logGeminiUsage } from "../_shared/geminiUsage.ts";
 import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 import {
   FEE_STRUCTURE_URL,
@@ -865,7 +866,15 @@ Deno.serve(async (req) => {
     const geminiBody = JSON.stringify({
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents: contextParts,
-      generationConfig: { temperature: 0.55, maxOutputTokens: 1000, topP: 0.9 },
+      // thinkingBudget 0: 2.5-flash bills thinking at the output rate and
+      // spends it out of maxOutputTokens before emitting a word — on a
+      // conversational reply that is pure cost. ~1.9k inbound msgs/week.
+      generationConfig: {
+        temperature: 0.55,
+        maxOutputTokens: 1000,
+        topP: 0.9,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     });
     const geminiHeaders = { "Content-Type": "application/json" };
 
@@ -887,6 +896,7 @@ Deno.serve(async (req) => {
     }
 
     const geminiData = await geminiRes.json();
+    logGeminiUsage("whatsapp-ai-reply", "gemini-2.5-flash", geminiData);
     const rawReply = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawReply) {
