@@ -372,7 +372,7 @@ const App = () => (
                       {/* Analytics & reporting */}
                       <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />
                       <Route path="/counsellor-dashboard" element={<RequirePermission module="performance" action="view"><CounsellorDashboard /></RequirePermission>} />
-                      <Route path="/incentive-approvals" element={<RequireRole roles={["super_admin", "accountant"]}><IncentiveApprovalPage /></RequireRole>} />
+                      <Route path="/incentive-approvals" element={<RequireRole roles={["super_admin", "accountant", "office_admin"]}><IncentiveApprovalPage /></RequireRole>} />
                       <Route path="/reports" element={<RequirePermission module="reports" action="view"><Reports /></RequirePermission>} />
 
                       {/* Portals */}

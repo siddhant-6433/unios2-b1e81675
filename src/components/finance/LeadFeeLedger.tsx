@@ -100,7 +100,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
   const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
   const [auditPayment, setAuditPayment] = useState<LeadPayment | null>(null);
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
-  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
   const [resending, setResending] = useState<string | null>(null);

@@ -59,7 +59,7 @@ export function CashierConsole() {
   const [linkOpen, setLinkOpen] = useState(false);
   const [payLink, setPayLink] = useState<string | null>(null);
 
-  const canCollect = ["super_admin", "accountant"].includes(role || "");
+  const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "");
   const debounce = useRef<number | null>(null);
 
   useEffect(() => {

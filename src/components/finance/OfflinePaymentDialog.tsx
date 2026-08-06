@@ -173,8 +173,9 @@ export function OfflinePaymentDialog({
   const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode);
 
   // Owner decision: offline cash recording is cashier (accountant) + super_admin
-  // only — no counsellors, no campus admins, no consultants.
-  const allowedRole = ["super_admin", "accountant"].includes(role || "");
+  // only — no counsellors, no campus admins, no consultants. office_admin has
+  // full accountant-level access (see has_role inheritance).
+  const allowedRole = ["super_admin", "accountant", "office_admin"].includes(role || "");
 
   if (!allowedRole) return null;
 

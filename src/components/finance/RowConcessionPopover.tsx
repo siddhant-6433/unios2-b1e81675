@@ -50,7 +50,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
 
   const isSuperAdmin = role === "super_admin";
   // Reduce / remove is open to the cashier and counsellor; increase is not.
-  const canEdit = ["super_admin", "accountant", "counsellor"].includes(role || "");
+  const canEdit = ["super_admin", "accountant", "counsellor", "office_admin"].includes(role || "");
   const total = Number(fee.total_amount || 0);
   const amount = !value ? 0 : effectiveAmount(type, Number(value), total);
 

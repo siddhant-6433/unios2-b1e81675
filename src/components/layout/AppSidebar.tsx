@@ -87,7 +87,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: WhatsAppIcon, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
-  { title: "Incentives", url: "/incentive-approvals", icon: IndianRupee, roles: ["super_admin", "accountant"] },
+  { title: "Incentives", url: "/incentive-approvals", icon: IndianRupee, roles: ["super_admin", "accountant", "office_admin"] },
   { title: "Lead Assignments", url: "/lead-assignments", icon: UserCheck, permission: "leads:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },

@@ -74,12 +74,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
 
-  const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
+  const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
-  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
-  const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
+  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
-  const canCollect = ["super_admin", "accountant"].includes(role || "") && !!student?.lead_id;
+  const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "") && !!student?.lead_id;
   // Counsellors can ask their own candidate to pay — a payment link or a portal
   // login — but never take money. RLS scopes what they can even see here to
   // students on their assigned leads (can_view_student_via_lead).
@@ -122,7 +122,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // cashier may correct any row that has no money against it.
   const canRemoveRow = (f: any) =>
     Number(f.paid_amount) === 0 &&
-    (["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage"));
+    (["super_admin", "accountant", "office_admin"].includes(role || "") || hasPermission("fee_structure:manage"));
 
   const fetchCredit = async () => {
     const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
@@ -433,7 +433,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <Receipt className="h-3.5 w-3.5" /> Collect Payment
           </Button>
         )}
-        {["super_admin", "accountant"].includes(role || "") && (
+        {["super_admin", "accountant", "office_admin"].includes(role || "") && (
           <Button size="sm" variant="outline" onClick={() => setChargeOpen(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Charge
           </Button>

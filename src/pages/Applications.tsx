@@ -370,7 +370,7 @@ export default function Applications() {
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
   // offline cash recording is cashier (accountant) + super_admin (matches OfflinePaymentDialog gate)
-  const canRecordOffline = ["super_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "accountant", "office_admin"].includes(role || "");
   const canManageApplicationLists = role === "super_admin" || role === "admission_head";
   const canViewCourseBreakup = canManageApplicationLists;
   const canExportApplications = isSuperAdmin || role === "principal";

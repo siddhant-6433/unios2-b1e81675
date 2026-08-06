@@ -60,7 +60,7 @@ const Finance = () => {
   const canCreateFinance = can("finance", "create");
   const isSuperAdmin = role === "super_admin";
   const canManageSetup = isSuperAdmin || hasPermission("fee_structure:manage");
-  const canCloseDay = isSuperAdmin || role === "accountant";
+  const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
 
   const tabs = useMemo(() => {
@@ -76,7 +76,7 @@ const Finance = () => {
   }, [pendingWaiverCount, pendingConcessionCount, canManageSetup]);
 
   // The cashier lives in Collect; everyone else opens on Receipts.
-  const defaultTab: TabId = role === "accountant" ? "collect" : "receipts";
+  const defaultTab: TabId = role === "accountant" || role === "office_admin" ? "collect" : "receipts";
   const urlTab = searchParams.get("tab") as TabId | null;
   const tab: TabId = tabs.some(t => t.id === urlTab) ? (urlTab as TabId) : defaultTab;
   const setTab = useCallback((next: TabId) => {

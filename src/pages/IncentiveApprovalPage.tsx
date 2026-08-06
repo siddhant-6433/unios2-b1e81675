@@ -99,7 +99,7 @@ function monthLabel(iso: string): string {
 export default function IncentiveApprovalPage() {
   const { user, role } = useAuth();
   const isSuperAdmin = role === "super_admin";
-  const isAccountant = role === "accountant";
+  const isAccountant = role === "accountant" || role === "office_admin";
   const months = useMemo(monthOptions, []);
   const [month, setMonth] = useState(months[1]); // default: previous month
   const [statements, setStatements] = useState<Statement[]>([]);
