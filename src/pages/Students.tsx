@@ -551,7 +551,11 @@ const Students = () => {
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          <span>{loading ? "Loading students..." : `Showing ${filtered.length} of ${students.length} students`}</span>
+          <span>{loading ? "Loading students..." : `Showing ${filtered.length} of ${students.length} students${
+            students.filter((s) => s.status === "inactive").length
+              ? ` (${students.filter((s) => s.status === "inactive").length} inactive)`
+              : ""
+          }`}</span>
         </div>
       </div>
 
