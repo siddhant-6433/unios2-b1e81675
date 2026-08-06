@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Loader2, Edit, Save, X, Plus, Trash2, Search } from "lucide-react";
 
@@ -243,7 +244,7 @@ export function LeadCommissions({ consultantId }: Props) {
               Cancel
             </Button>
             <Button size="sm" className="h-6 text-[10px]" onClick={handleAdd} disabled={!newLeadId || !newValue || saving}>
-              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Set Override"}
+              {saving ? <ButtonOrb state="working" onFilled /> : "Set Override"}
             </Button>
           </div>
         </div>
@@ -317,7 +318,7 @@ export function LeadCommissions({ consultantId }: Props) {
                       {isEditing ? (
                         <div className="flex items-center gap-1 justify-end">
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleSave(o)} disabled={saving}>
-                            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 text-success" />}
+                            {saving ? <ButtonOrb state="working" /> : <Save className="h-3 w-3 text-success" />}
                           </Button>
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setEditingId(null)}>
                             <X className="h-3 w-3 text-muted-foreground" />

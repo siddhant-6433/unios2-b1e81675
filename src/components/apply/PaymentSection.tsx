@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
+import { ArrowRight, ArrowLeft, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { ApplicationData } from "./types";
@@ -535,7 +536,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
 
           {gwLoading && (
             <div className="flex justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="connecting" />
             </div>
           )}
 
@@ -561,7 +562,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
                 className="gap-2 px-8"
               >
                 {loading ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />
+                  <><ButtonOrb state="connecting" onFilled />
                     {selectedGateway === "easebuzz" || selectedGateway === "icici" ? "Opening payment window…" : "Processing…"}
                   </>
                 ) : (
@@ -601,7 +602,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehal
 
           {import.meta.env.DEV && (
             <Button onClick={handleMarkPaid} disabled={saving} variant="outline" size="sm" className="gap-2 opacity-60">
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {saving && <ButtonOrb state="connecting" />}
               <Shield className="h-4 w-4" /> Mark as Paid (Dev)
             </Button>
           )}

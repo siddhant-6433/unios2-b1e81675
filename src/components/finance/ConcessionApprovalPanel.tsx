@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, CheckCircle, XCircle, Clock, HandCoins } from "lucide-react";
+import { CheckCircle, XCircle, Clock, HandCoins } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
@@ -196,7 +197,7 @@ export function ConcessionApprovalPanel() {
                               disabled={processing === c.id}
                               onClick={() => handleApprove(c)}
                             >
-                              {processing === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                              {processing === c.id ? <ButtonOrb state="solving" /> : <CheckCircle className="h-3.5 w-3.5" />}
                             </Button>
                             <Button
                               size="sm"

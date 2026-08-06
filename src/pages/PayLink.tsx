@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import uniosLogo from "@/assets/unios-logo.png";
-import { Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle, CreditCard, ShieldCheck } from "lucide-react";
 
 // Public payment-link landing page.
 // - Razorpay hosted: branded page first, forward to short_url on Pay click
@@ -253,7 +254,7 @@ export default function PayLink() {
 
         {step === "loading" && (
           <div className="flex flex-col items-center py-10 text-muted-foreground">
-            <Loader2 className="h-6 w-6 animate-spin mb-2" />
+            <OrbLoader state="working" />
             <p className="text-sm">Loading payment details…</p>
           </div>
         )}
@@ -315,7 +316,7 @@ export default function PayLink() {
               disabled={step === "paying"}
               className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
             >
-              {step === "paying" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+              {step === "paying" ? <ButtonOrb state="connecting" onFilled /> : <CreditCard className="h-4 w-4" />}
               {step === "paying" ? "Processing…" : `Pay ₹${Number(link.amount).toLocaleString("en-IN")}`}
             </button>
             <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">

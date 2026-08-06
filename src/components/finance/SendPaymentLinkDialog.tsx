@@ -10,11 +10,12 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
-import { Loader2, LinkIcon, Copy, Check } from "lucide-react";
+import { LinkIcon, Copy, Check } from "lucide-react";
 
 type Purpose = "pre_admission_token" | "fee_due" | "custom";
 
@@ -294,7 +295,7 @@ export function SendPaymentLinkDialog({
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
               <Button onClick={handleSubmit} disabled={submitting}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
                 {submitting ? "Creating…" : "Create Link"}
               </Button>
             </>

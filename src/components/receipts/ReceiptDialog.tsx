@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { X, Download, Loader2, Printer } from "lucide-react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { X, Download, Printer } from "lucide-react";
 
 // ── Shared branding defaults ──────────────────────────────────────────────────
 // Callers don't need to pass logo/primaryColor — these defaults make the
@@ -376,7 +377,7 @@ export function ReceiptDialog({ data, onClose }: Props) {
               disabled={generating}
               className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors disabled:opacity-60"
             >
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {generating ? <ButtonOrb state="composing" onFilled /> : <Download className="h-4 w-4" />}
               {generating ? "Generating…" : "Download PDF"}
             </button>
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100">

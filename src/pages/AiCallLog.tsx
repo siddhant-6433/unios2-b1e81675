@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import {
-  Bot, Search, Loader2, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar, PhoneIncoming, PhoneOutgoing, Phone,
-} from "lucide-react";
+import { Bot, Search, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar, PhoneIncoming, PhoneOutgoing, Phone } from "lucide-react";
 import { AiCallQueueStatus } from "@/components/admissions/AiCallQueueStatus";
 import { VoiceQualityDashboard } from "@/components/admissions/VoiceQualityDashboard";
 import { CallQualityRating, CallQualityMetricsChip } from "@/components/admissions/CallQualityRating";
@@ -365,7 +364,7 @@ const AiCallLog = () => {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <OrbLoader state="connecting" />
             </div>
           ) : (
             <table className="w-full text-sm">

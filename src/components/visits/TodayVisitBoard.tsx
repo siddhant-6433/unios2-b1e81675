@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 // TodayVisitBoard — today's and upcoming visits for the Visit Center, with
 // inline Check-in / Complete / No-show actions. Reads campus_visits directly
 // (staff RLS allows manage); writes go through the visit_check_in RPC and a
@@ -12,10 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { VisitCompleteDialog } from "./VisitCompleteDialog";
-import {
-  Loader2, Calendar, MapPin, UserCheck, CheckCircle2, XCircle,
-  Footprints, ChevronRight, RefreshCw,
-} from "lucide-react";
+import { Calendar, MapPin, UserCheck, CheckCircle2, XCircle, Footprints, ChevronRight, RefreshCw } from "lucide-react";
 
 interface VisitRow {
   id: string;
@@ -159,7 +157,7 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
                 <div className="flex items-center gap-1.5">
                   {!v.checked_in_at && (
                     <Button size="sm" variant="outline" className="gap-1.5" onClick={() => checkIn(v)} disabled={busyId === v.id}>
-                      {busyId === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
+                      {busyId === v.id ? <ButtonOrb state="working" /> : <UserCheck className="h-3.5 w-3.5" />}
                       Check in
                     </Button>
                   )}

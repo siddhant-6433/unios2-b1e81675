@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, AlertTriangle, RefreshCw, MessageSquare, ShieldAlert, Phone, FileText, ArrowUp, ArrowDown, ChevronRight, ChevronDown } from "lucide-react";
+import { AlertTriangle, RefreshCw, MessageSquare, ShieldAlert, Phone, FileText, ArrowUp, ArrowDown, ChevronRight, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -348,7 +349,7 @@ const WhatsAppHealth = () => {
 
       {loading && !data && (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
-          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+          <ButtonOrb state="connecting" />
           Loading…
         </div>
       )}

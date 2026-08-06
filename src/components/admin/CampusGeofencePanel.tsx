@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import {
-  MapPin, Save, Loader2, Building2, Navigation, Radius,
-} from "lucide-react";
+import { MapPin, Save, Building2, Navigation, Radius } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -75,7 +74,7 @@ export default function CampusGeofencePanel() {
   if (loading) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -160,7 +159,7 @@ export default function CampusGeofencePanel() {
               {hasChanges && (
                 <div className="flex justify-end">
                   <Button onClick={() => saveCampus(campus)} disabled={saving === campus.id} className="gap-2">
-                    {saving === campus.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {saving === campus.id ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                     Save Geofence
                   </Button>
                 </div>

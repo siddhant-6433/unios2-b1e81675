@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, CheckCircle, XCircle, Tag } from "lucide-react";
+import { CheckCircle, XCircle, Tag } from "lucide-react";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
@@ -314,7 +315,7 @@ export function OfferWaiverApprovalPanel() {
                               onClick={() => handleDecide(w, "approved")}
                             >
                               {processing === w.id
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ? <ButtonOrb state="solving" />
                                 : <CheckCircle className="h-3.5 w-3.5" />}
                             </Button>
                             <Button

@@ -1,10 +1,11 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Check, X, Search, Shield } from "lucide-react";
+import { Check, X, Search, Shield } from "lucide-react";
 
 interface Permission {
   id: string;
@@ -226,7 +227,7 @@ export function PermissionMatrixPanel() {
                               granted ? "bg-success/50 border-success/35 text-white" : "border-border/60 hover:border-success/30"
                             }`}
                           >
-                            {saving === key ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : granted ? <Check className="h-2.5 w-2.5" /> : null}
+                            {saving === key ? <ButtonOrb state="working" onFilled /> : granted ? <Check className="h-2.5 w-2.5" /> : null}
                           </button>
                         </td>
                       );

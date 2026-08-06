@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,11 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Loader2, Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
-  Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy,
-  MessageCircle, X,
-} from "lucide-react";
+import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -451,7 +448,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         )}
         {canSendLink && student?.id && (
           <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
-            {issuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+            {issuingLink ? <ButtonOrb state="working" /> : <LogIn className="h-3.5 w-3.5" />}
             Generate Login Link
           </Button>
         )}
@@ -544,7 +541,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             </span>
           ) : loginLink.phone ? (
             <Button size="sm" variant="outline" className="h-7 shrink-0 gap-1.5" onClick={handleSendLoginLink} disabled={sendingLink}>
-              {sendingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              {sendingLink ? <ButtonOrb state="working" /> : <MessageCircle className="h-3.5 w-3.5" />}
               Send on WhatsApp to {loginLink.phone}
             </Button>
           ) : (

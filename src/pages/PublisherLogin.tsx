@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Lock, Mail } from "lucide-react";
+import { Lock, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import uniosLogo from "@/assets/unios-logo.png";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
@@ -126,7 +127,7 @@ const PublisherLogin = () => {
               disabled={submitting || !email.trim() || !password.trim()}
               className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-white hover:bg-primary/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}
+              {submitting ? <ButtonOrb state="connecting" onFilled /> : "Sign In"}
             </button>
           </form>
 

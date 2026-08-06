@@ -3,12 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import {
-  IndianRupee, ClipboardCheck, Megaphone, Loader2,
-  AlertCircle, CheckCircle, Clock, ChevronRight, Receipt, CreditCard,
-} from "lucide-react";
+import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, ChevronRight, Receipt, CreditCard } from "lucide-react";
 
 const tabs = [
   { id: "fees", label: "Fees", icon: IndianRupee },
@@ -130,7 +128,7 @@ export default function ParentPortal() {
     return (
       <PortalLayout>
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <OrbLoader state="working" />
         </div>
       </PortalLayout>
     );

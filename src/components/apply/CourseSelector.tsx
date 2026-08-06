@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, Loader2, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info, Calendar } from "lucide-react";
+import { ArrowRight, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { DatePickerField, SelectField } from "@/components/ui/state-fields";
 import { supabase } from "@/integrations/supabase/client";
@@ -421,7 +422,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           <Button variant="outline" onClick={onCancel}>Cancel</Button>
         )}
         <Button onClick={handleContinue} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           {isEditing ? "Update Selections" : "Continue to Application"}
         </Button>
       </div>

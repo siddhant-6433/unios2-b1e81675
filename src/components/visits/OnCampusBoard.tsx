@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 // OnCampusBoard — everyone currently checked in (today, not yet checked out).
 // Check-out goes through the visit_check_out RPC. While the visitor is at the
 // desk, staff can send a payment link, build a fee proposal, or record a
@@ -10,10 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Loader2, MapPin, Footprints, LogOut, IndianRupee, FileText,
-  Banknote, ChevronRight, RefreshCw, DoorOpen,
-} from "lucide-react";
+import { MapPin, Footprints, LogOut, IndianRupee, FileText, Banknote, ChevronRight, RefreshCw, DoorOpen } from "lucide-react";
 
 const SendPaymentLinkDialog = lazy(() =>
   import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
@@ -150,7 +148,7 @@ export function OnCampusBoard({ campusId, refreshKey, onChanged }: Props) {
                     <Banknote className="h-3.5 w-3.5" /> Record payment
                   </Button>
                   <Button size="sm" className="gap-1.5" onClick={() => checkOut(v)} disabled={busyId === v.id}>
-                    {busyId === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}
+                    {busyId === v.id ? <ButtonOrb state="working" onFilled /> : <LogOut className="h-3.5 w-3.5" />}
                     Check out
                   </Button>
                   <Link to={`/admissions/${v.lead_id}`} className="text-muted-foreground hover:text-foreground">

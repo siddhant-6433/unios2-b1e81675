@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -8,10 +9,7 @@ import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SelectField } from "@/components/ui/state-fields";
-import {
-  Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Loader2, Search,
-  ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock,
-} from "lucide-react";
+import { Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Search, ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -608,7 +606,7 @@ const PendingFollowups = () => {
           </select>
           <button onClick={handleReassign} disabled={!reassignTo || reassigning}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
-            {reassigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {reassigning ? <ButtonOrb state="working" onFilled /> : <Check className="h-3.5 w-3.5" />}
             Reassign
           </button>
           <button onClick={() => setSelected(new Set())}
@@ -780,7 +778,7 @@ const PendingFollowups = () => {
                               disabled={cloudCallingId === r.lead_id}
                               className="rounded-lg bg-cyan-100 p-1.5 text-cyan-700 hover:bg-cyan-200 transition-colors disabled:opacity-60"
                               title="Cloud call lead">
-                              {cloudCallingId === r.lead_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Phone className="h-3.5 w-3.5" />}
+                              {cloudCallingId === r.lead_id ? <ButtonOrb state="working" /> : <Phone className="h-3.5 w-3.5" />}
                             </button>
                           </>
                         )}
@@ -841,7 +839,7 @@ const PendingFollowups = () => {
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
             <Button onClick={handleCompleteVisit} disabled={saving || !followupDate} className="w-full">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {saving ? <ButtonOrb state="working" onFilled /> : null}
               Mark Completed & Schedule Follow-up
             </Button>
           </div>
@@ -880,7 +878,7 @@ const PendingFollowups = () => {
               </div>
             )}
             <Button onClick={handleNoShowVisit} disabled={saving} variant="destructive" className="w-full">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {saving ? <ButtonOrb state="working" onFilled /> : null}
               {followupAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
             </Button>
           </div>
@@ -901,7 +899,7 @@ const PendingFollowups = () => {
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
             <Button onClick={handleRescheduleVisit} disabled={saving || !newVisitDate} className="w-full">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarClock className="h-4 w-4 mr-2" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <CalendarClock className="h-4 w-4 mr-2" />}
               Reschedule Visit
             </Button>
           </div>

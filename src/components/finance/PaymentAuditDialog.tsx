@@ -11,7 +11,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ShieldCheck, ShieldAlert, Plus, Pencil, Trash2 } from "lucide-react";
+import { OrbLoader } from "@/components/ui/thinking-orb";
+import { ShieldCheck, ShieldAlert, Plus, Pencil, Trash2 } from "lucide-react";
 
 interface AuditRow {
   id: string;
@@ -114,7 +115,7 @@ export function PaymentAuditDialog({ open, onOpenChange, paymentId, receiptNo }:
 
         {loading && (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
+            <OrbLoader state="solving" />
           </div>
         )}
 

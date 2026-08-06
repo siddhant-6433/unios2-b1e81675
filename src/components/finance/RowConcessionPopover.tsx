@@ -18,8 +18,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 
 interface Props {
   fee: any;
@@ -279,7 +280,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                 {editingConcession ? "Cancel" : "Close"}
               </Button>
               <Button size="sm" onClick={() => (editingConcession ? submitEdit(editingConcession) : submitAdd())} disabled={saving}>
-                {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                {saving ? <ButtonOrb state="working" onFilled /> : null}
                 {editingConcession ? "Save" : isSuperAdmin ? "Apply" : "Request"}
               </Button>
             </div>

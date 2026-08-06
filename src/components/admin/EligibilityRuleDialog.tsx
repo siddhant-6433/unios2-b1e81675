@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Loader2 } from "lucide-react";
+import {  } from "lucide-react";
 
 export interface EligibilityRuleRow {
   id: string;
@@ -215,7 +216,7 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {saving && <ButtonOrb state="working" onFilled />}
             Save Rules
           </Button>
         </div>

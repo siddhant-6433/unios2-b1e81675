@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Camera, Upload, Loader2, CheckCircle, Info, RotateCcw } from "lucide-react";
+import { Camera, Upload, CheckCircle, Info, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -153,7 +154,7 @@ export function PhotoUpload({ applicationId, phone, onUploaded, existingUrl, sto
 
         {processing && (
           <div className="flex flex-col items-center gap-2 py-6">
-            <Loader2 className="h-8 w-8 text-primary animate-spin" />
+            <OrbLoader state="working" />
             <p className="text-xs text-muted-foreground">Processing photo & removing background…</p>
           </div>
         )}

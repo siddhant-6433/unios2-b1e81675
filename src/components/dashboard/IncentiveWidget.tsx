@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { IndianRupee, TrendingUp, CheckCircle2, XCircle, CircleDashed, Loader2 } from "lucide-react";
+import { IndianRupee, TrendingUp, CheckCircle2, XCircle, CircleDashed } from "lucide-react";
 
 interface Gate {
   value: number | null;
@@ -97,7 +98,7 @@ export function IncentiveWidget() {
     return (
       <Card className="rounded-2xl border-border/40">
         <CardContent className="p-5 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading incentives…
+          <ButtonOrb state="solving" /> Loading incentives…
         </CardContent>
       </Card>
     );

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 // PostVisitQueue — pending post-visit follow-ups (lead_followups where
 // visit_id IS NOT NULL). Complete or reschedule inline. Mirrors the
 // PendingFollowups complete/reschedule writes (direct lead_followups updates).
@@ -9,9 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Loader2, Clock, CheckCircle2, CalendarClock, ChevronRight, RefreshCw,
-} from "lucide-react";
+import { Clock, CheckCircle2, CalendarClock, ChevronRight, RefreshCw } from "lucide-react";
 
 interface FollowupRow {
   id: string;
@@ -136,7 +135,7 @@ export function PostVisitQueue({ refreshKey, onChanged }: Props) {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => complete(r)} disabled={busyId === r.id}>
-                    {busyId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                    {busyId === r.id ? <ButtonOrb state="working" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                     Done
                   </Button>
                   <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => { setRescheduleId(r.id); setRescheduleAt(""); }}>

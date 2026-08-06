@@ -2,11 +2,10 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-  Shield, Search, Loader2, GraduationCap, Building2, Pencil, Filter
-} from "lucide-react";
+import { Shield, Search, GraduationCap, Building2, Pencil, Filter } from "lucide-react";
 import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
 
 interface CourseWithInfo {
@@ -102,7 +101,7 @@ export default function EligibilityConfigPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }

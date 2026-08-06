@@ -2,14 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Plus, Search, ChevronDown, ChevronUp, Save, Globe, Users,
-  BookOpen,
-} from "lucide-react";
+import { Plus, Search, ChevronDown, ChevronUp, Save, Globe, Users, BookOpen } from "lucide-react";
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -349,7 +347,7 @@ const InterdisciplinaryUnits = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -392,7 +390,7 @@ const InterdisciplinaryUnits = () => {
                   <div className="border-t border-border p-4 space-y-5">
                     {expandLoading ? (
                       <div className="flex h-20 items-center justify-center">
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        <OrbLoader state="working" />
                       </div>
                     ) : (
                       <>
@@ -493,7 +491,7 @@ const InterdisciplinaryUnits = () => {
                               className="gap-1.5 text-xs h-8"
                             >
                               {resultsSaving ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <ButtonOrb state="working" />
                               ) : (
                                 <Save className="h-3.5 w-3.5" />
                               )}
@@ -708,7 +706,7 @@ const InterdisciplinaryUnits = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={creating || !newTitle.trim()}>
-              {creating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {creating && <ButtonOrb state="working" onFilled />}
               Create IDU
             </Button>
           </DialogFooter>

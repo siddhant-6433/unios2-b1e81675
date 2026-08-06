@@ -2,12 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
-import {
-  Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
-  ScrollText, Award, BookOpen,
-} from "lucide-react";
+import { Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users, ScrollText, Award, BookOpen } from "lucide-react";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import alumniHero from "@/assets/alumni-hero.jpg";
 
@@ -151,7 +149,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
           <label className="text-sm font-medium text-foreground">Your WhatsApp Number</label>
           <PhoneInput value={phone} onChange={setPhone} isdCode={isdCode} onIsdChange={setIsdCode} />
           <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || (isdCode === "+91" ? phone.length !== 10 : phone.length < 7)}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+            {loading ? <ButtonOrb state="working" onFilled /> : <Phone className="h-4 w-4" />}
             Send OTP via WhatsApp
           </Button>
         </div>
@@ -162,7 +160,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
             placeholder="Enter 6-digit OTP" maxLength={6}
             className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-lg tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary/20" />
           <Button className="w-full gap-2" onClick={handleVerifyOtp} disabled={loading || otp.length < 4}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+            {loading ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
             Verify OTP
           </Button>
           <button onClick={() => { setOtpSent(false); setOtp(""); }} className="w-full text-xs text-muted-foreground hover:text-foreground">Change number</button>
@@ -907,7 +905,7 @@ export default function AlumniVerification() {
                 </div>
 
                 <Button className="w-full gap-2" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  {submitting ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                   Submit & Proceed to Payment (&#8377; {currentService.fee})
                 </Button>
               </div>
@@ -952,7 +950,7 @@ export default function AlumniVerification() {
                     </div>
                   )}
                   <Button className="w-full gap-2 py-3 text-sm" onClick={handlePayNow} disabled={paymentLoading}>
-                    {paymentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                    {paymentLoading ? <ButtonOrb state="working" onFilled /> : <Shield className="h-4 w-4" />}
                     Pay &#8377; {currentService.fee.toLocaleString("en-IN")} via Secure Gateway
                   </Button>
                   <p className="text-[10px] text-muted-foreground">

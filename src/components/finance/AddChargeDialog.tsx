@@ -10,10 +10,11 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell, DatePickerField } from "@/components/ui/state-fields";
-import { Loader2, PlusCircle } from "lucide-react";
+import { PlusCircle } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 type TermOption = { term: string; due_date: string | null; rows: number };
@@ -137,7 +138,7 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
         <div className="space-y-3 py-2">
           {loading ? (
             <div className="flex h-24 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <OrbLoader state="solving" />
             </div>
           ) : heads.length === 0 ? (
             <p className="rounded-lg border border-input bg-muted/30 px-3 py-6 text-center text-xs text-muted-foreground">
@@ -230,7 +231,7 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={saving || !headId}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {saving ? <ButtonOrb state="solving" onFilled /> : null}
             {saving ? "Adding…" : "Add Charge"}
           </Button>
         </DialogFooter>

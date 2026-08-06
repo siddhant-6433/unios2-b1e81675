@@ -3,18 +3,15 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import {
   defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
 } from "@/lib/feeTermLabels";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
-import {
-  IndianRupee, ClipboardCheck, Megaphone, Loader2,
-  AlertCircle, CheckCircle, Clock, CreditCard, FileText,
-  // Aliased: `Receipt` is the payment-row type in this file.
-  Receipt as ReceiptIcon, ChevronDown,
-} from "lucide-react";
+import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
+  Receipt as ReceiptIcon, ChevronDown } from "lucide-react";
 
 const tabs = [
   { id: "fees", label: "Fees", icon: IndianRupee },
@@ -317,7 +314,7 @@ export default function StudentPortal() {
       <PortalLayout {...studentLayoutProps}>
         <div className="flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-3 text-center">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <OrbLoader state="searching" />
             {claimToken && <p className="text-sm text-gray-500">Claiming your student portal access...</p>}
           </div>
         </div>

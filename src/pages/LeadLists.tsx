@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCallListOverview, type CallListOverviewRow } from "@/components/dashboard/CallListProgressPanel";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { describeFilterDefinition, type DynamicListFilterDefinition } from "@/lib/dynamicListFilters";
 import { buildListName, dominantCourse } from "@/lib/leadListName";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -1562,7 +1563,7 @@ export default function LeadLists() {
 
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="searching" />
         </div>
       ) : lists.length === 0 ? (
         <Card>
@@ -1952,7 +1953,7 @@ export default function LeadLists() {
                   disabled={waSenderLoading}
                   className="h-6 gap-1 px-1.5 text-[11px]"
                 >
-                  {waSenderLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  {waSenderLoading ? <ButtonOrb state="working" /> : <RefreshCw className="h-3 w-3" />}
                   Refresh
                 </Button>
               </div>
@@ -2120,7 +2121,7 @@ export default function LeadLists() {
           <DialogFooter className="border-t border-border bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setWaOpen(false)}>Cancel</Button>
             <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic || !waTemplateQuality.allowBulk} className="gap-2">
-              {waSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {waSending ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
               Send
             </Button>
           </DialogFooter>
@@ -2233,7 +2234,7 @@ export default function LeadLists() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEmailOpen(false)}>Cancel</Button>
             <Button onClick={handleSendEmail} disabled={emailSending} className="gap-2">
-              {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {emailSending ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
               Send
             </Button>
           </DialogFooter>
@@ -2248,7 +2249,7 @@ export default function LeadLists() {
           </DialogHeader>
           {previewLoading ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : (
             <div className="rounded-xl border border-border overflow-hidden">
@@ -2395,7 +2396,7 @@ export default function LeadLists() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignOpen(false)}>Close</Button>
             <Button onClick={assignListRoundRobin} disabled={assigning || selectedCounsellorIds.length === 0} className="gap-2">
-              {assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {assigning ? <ButtonOrb state="working" onFilled /> : <Check className="h-4 w-4" />}
               Assign Round Robin
             </Button>
           </DialogFooter>
@@ -2415,7 +2416,7 @@ export default function LeadLists() {
                 )}
                 <Button size="sm" variant="outline" className="gap-1.5 h-8"
                   onClick={downloadCallingReportCsv} disabled={reportExporting || assignmentReport.length === 0}>
-                  {reportExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  {reportExporting ? <ButtonOrb state="working" /> : <Download className="h-3.5 w-3.5" />}
                   Download CSV
                 </Button>
               </div>
@@ -2484,7 +2485,7 @@ export default function LeadLists() {
           )}
           {reportLoading ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : assignmentReport.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">No list assignment activity found.</div>
@@ -2622,7 +2623,7 @@ export default function LeadLists() {
               onClick={createFollowupList}
               disabled={followupCreating || followupLeadIds.length === 0 || followupCounsellorIds.length === 0}
             >
-              {followupCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {followupCreating && <ButtonOrb state="working" onFilled />}
               Create &amp; assign
             </Button>
           </DialogFooter>
@@ -2641,7 +2642,7 @@ export default function LeadLists() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteList(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting} className="gap-2">
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {deleting ? <ButtonOrb state="working" onFilled /> : <Trash2 className="h-4 w-4" />}
               Delete
             </Button>
           </DialogFooter>

@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Sparkles, Save } from "lucide-react";
+import { Sparkles, Save } from "lucide-react";
 import {
   getScholarshipsForCourse,
   findMeritRow,
@@ -234,7 +235,7 @@ export function ScholarshipCalculator({
     return (
       <Card className="border-border/60">
         <CardContent className="p-4 flex h-16 items-center justify-center">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <ButtonOrb state="solving" />
         </CardContent>
       </Card>
     );
@@ -403,7 +404,7 @@ export function ScholarshipCalculator({
             className="h-7 text-[11px] gap-1 shrink-0"
           >
             {saving ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <ButtonOrb state="working" />
             ) : (
               <Save className="h-3 w-3" />
             )}

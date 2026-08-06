@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Trophy, Flame, TrendingUp } from "lucide-react";
+import { Trophy, Flame, TrendingUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -207,7 +208,7 @@ export function ActionCenterView({
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }

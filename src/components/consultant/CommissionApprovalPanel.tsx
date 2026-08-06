@@ -1,11 +1,12 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Check, X, Clock } from "lucide-react";
+import { Check, X, Clock } from "lucide-react";
 
 interface Request {
   id: string;
@@ -175,7 +176,7 @@ export function CommissionApprovalPanel() {
                           onClick={() => handleApprove(req)}
                           disabled={processing === req.id}
                         >
-                          {processing === req.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                          {processing === req.id ? <ButtonOrb state="solving" /> : <Check className="h-3.5 w-3.5" />}
                         </Button>
                         <Button
                           size="sm"

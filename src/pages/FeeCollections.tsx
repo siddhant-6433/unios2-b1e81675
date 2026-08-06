@@ -2,12 +2,10 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import { Input } from "@/components/ui/input";
-import {
-  Search, IndianRupee, Plus, Loader2, Receipt, CheckCircle,
-  Clock, AlertTriangle, Filter, Calendar,
-} from "lucide-react";
+import { Search, IndianRupee, Plus, Receipt, CheckCircle, Clock, AlertTriangle, Filter, Calendar } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -213,7 +211,7 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
         {/* Table */}
         {loading ? (
           <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <OrbLoader state="searching" />
           </div>
         ) : (
           <Card className="border-border/60 shadow-none overflow-hidden">

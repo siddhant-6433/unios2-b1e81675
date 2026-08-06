@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, X, FileSpreadsheet, CheckCircle2, AlertCircle, Download } from "lucide-react";
+import { Upload, X, FileSpreadsheet, CheckCircle2, AlertCircle, Download } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -264,7 +265,7 @@ const BulkImportDialog = ({ open, onClose, onSuccess }: BulkImportDialogProps) =
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <ButtonOrb state="solving" onFilled />
                     Inviting {validCount} users…
                   </>
                 ) : (

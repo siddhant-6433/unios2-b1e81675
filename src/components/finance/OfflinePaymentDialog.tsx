@@ -12,11 +12,12 @@ import { useToast } from "@/hooks/use-toast";
 import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
-import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
+import { IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
   { value: "application_fee",     label: "Application Fee" },
@@ -640,7 +641,7 @@ export function OfflinePaymentDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting || cashBlocked}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
             {submitting ? "Recording…" : "Mark as Paid"}
           </Button>
         </DialogFooter>

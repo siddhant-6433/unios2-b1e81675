@@ -9,9 +9,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/state-fields";
-import { Loader2, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -140,7 +141,7 @@ export function DayCloserDialog({ open, onOpenChange, onClosed }: Props) {
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
           <Button onClick={handleClose} disabled={submitting}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
+            {submitting ? <ButtonOrb state="solving" onFilled /> : <Lock className="h-4 w-4 mr-2" />}
             {submitting ? "Closing…" : "Close Day"}
           </Button>
         </DialogFooter>

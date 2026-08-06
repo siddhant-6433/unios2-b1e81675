@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,26 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Download,
-  ListPlus,
-  Loader2,
-  Mail,
-  Megaphone,
-  MessageSquare,
-  MousePointerClick,
-  PauseCircle,
-  PhoneCall,
-  PlayCircle,
-  RefreshCw,
-  Reply,
-  Send,
-  StopCircle,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, XCircle } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
@@ -1519,7 +1501,7 @@ export default function Marketing() {
                 || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
               }
             >
-              {launching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+              {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
               Queue Campaign
             </Button>
           </div>
@@ -1582,7 +1564,7 @@ export default function Marketing() {
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="connecting" />
             </div>
           ) : campaigns.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">No campaigns yet.</div>
@@ -1663,7 +1645,7 @@ export default function Marketing() {
                             onClick={() => resumeCampaign(campaign)}
                             disabled={queueingId === campaign.id}
                           >
-                            {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                            {queueingId === campaign.id ? <ButtonOrb state="connecting" /> : null}
                             {campaignDisplayStatus(campaign) === "scheduled" ? "Queue now" : "Queue"}
                           </Button>
                         )}
@@ -1674,7 +1656,7 @@ export default function Marketing() {
                             onClick={() => resumeCampaign(campaign)}
                             disabled={queueingId === campaign.id}
                           >
-                            {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1 h-3.5 w-3.5" />}
+                            {queueingId === campaign.id ? <ButtonOrb state="connecting" /> : <PlayCircle className="mr-1 h-3.5 w-3.5" />}
                             Resume
                           </Button>
                         )}
@@ -1745,7 +1727,7 @@ export default function Marketing() {
           </DialogHeader>
           {recipientsLoading ? (
             <div className="flex items-center justify-center py-10">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="connecting" />
             </div>
           ) : recipients.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">No recipients found.</div>
@@ -1854,7 +1836,7 @@ export default function Marketing() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setResendCampaign(null)}>Cancel</Button>
             <Button onClick={handleResendFailed} disabled={resending} className="gap-2">
-              {resending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {resending ? <ButtonOrb state="connecting" onFilled /> : <RefreshCw className="h-4 w-4" />}
               {resendMode === "scheduled" ? "Schedule resend" : "Resend now"}
             </Button>
           </DialogFooter>
@@ -1872,7 +1854,7 @@ export default function Marketing() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteList(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteList} disabled={deletingList} className="gap-2">
-              {deletingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {deletingList ? <ButtonOrb state="connecting" onFilled /> : <Trash2 className="h-4 w-4" />}
               Delete
             </Button>
           </DialogFooter>

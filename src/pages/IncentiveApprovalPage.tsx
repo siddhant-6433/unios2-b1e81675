@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import {
-  IndianRupee, Loader2, ChevronDown, ChevronUp, Download, RefreshCw,
-  CheckCircle2, XCircle, CircleDashed, AlertTriangle, BadgeCheck, Banknote,
-} from "lucide-react";
+import { IndianRupee, ChevronDown, ChevronUp, Download, RefreshCw, CheckCircle2, XCircle, CircleDashed, AlertTriangle, BadgeCheck, Banknote } from "lucide-react";
 
 interface Statement {
   id: string;
@@ -227,7 +225,7 @@ export default function IncentiveApprovalPage() {
           </select>
           {isSuperAdmin && (
             <Button variant="outline" size="sm" onClick={recompute} disabled={busy}>
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {busy ? <ButtonOrb state="solving" /> : <RefreshCw className="h-3.5 w-3.5" />}
               <span className="ml-1.5">Recompute</span>
             </Button>
           )}
@@ -238,7 +236,7 @@ export default function IncentiveApprovalPage() {
       </div>
 
       {loading ? (
-        <Card className="rounded-2xl"><CardContent className="p-8 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></CardContent></Card>
+        <Card className="rounded-2xl"><CardContent className="p-8 flex justify-center"><OrbLoader state="solving" /></CardContent></Card>
       ) : statements.length === 0 ? (
         <Card className="rounded-2xl">
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
@@ -294,7 +292,7 @@ export default function IncentiveApprovalPage() {
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Line items</p>
                         {!ledger[s.id] ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <ButtonOrb state="solving" />
                         ) : ledger[s.id].length === 0 ? (
                           <p className="text-xs text-muted-foreground">No ledger entries.</p>
                         ) : (

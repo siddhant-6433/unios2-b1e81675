@@ -12,11 +12,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Loader2, FileSearch, ChevronDown, ChevronRight, Filter,
-  PlusCircle, Pencil, Trash2,
-} from "lucide-react";
+import { FileSearch, ChevronDown, ChevronRight, Filter, PlusCircle, Pencil, Trash2 } from "lucide-react";
 
 interface AuditRow {
   id: string;
@@ -187,7 +185,7 @@ export function PaymentAuditLog() {
         {/* Table */}
         {loading ? (
           <div className="flex h-32 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <OrbLoader state="solving" />
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="py-12 text-center">

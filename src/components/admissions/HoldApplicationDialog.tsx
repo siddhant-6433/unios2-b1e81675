@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Loader2, PauseCircle, PlayCircle, MessageCircle } from "lucide-react";
+import { PauseCircle, PlayCircle, MessageCircle } from "lucide-react";
 import { type ExamCode, EXAM_DISPLAY_NAMES } from "@/lib/examRegistration";
 
 export interface HoldApplicationTarget {
@@ -206,12 +207,12 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           {isRelease ? (
             <Button onClick={releaseHold} disabled={saving} className="bg-success hover:bg-success/90">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <PlayCircle className="h-4 w-4 mr-1.5" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <PlayCircle className="h-4 w-4 mr-1.5" />}
               Release hold
             </Button>
           ) : (
             <Button onClick={putOnHold} disabled={saving} className="bg-warning hover:bg-warning/60">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <PauseCircle className="h-4 w-4 mr-1.5" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <PauseCircle className="h-4 w-4 mr-1.5" />}
               Put on hold
             </Button>
           )}

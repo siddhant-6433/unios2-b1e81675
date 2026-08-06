@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ExternalLink, Loader2, Phone, X } from "lucide-react";
+import { ExternalLink, Phone, X } from "lucide-react";
 import { PhoneInput, parsePhone, formatFullPhone, COUNTRY_CODES } from "@/components/ui/phone-input";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 
 interface EditPhoneDialogProps {
   open: boolean;
@@ -389,7 +390,7 @@ const EditPhoneDialog = ({
               disabled={saving || !isValid}
               className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Phone className="h-4 w-4" />}
               {saving ? "Saving…" : "Save"}
             </button>
           </div>

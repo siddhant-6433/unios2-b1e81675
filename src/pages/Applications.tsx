@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1426,14 +1427,14 @@ export default function Applications() {
               className="gap-1.5 text-xs font-medium text-muted-foreground"
               title="Export applications matching the current filters"
             >
-              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-3 w-3" />}
               Download CSV
             </Button>
           )}
           {!isCounsellor && (
             <Button variant="pill-outline" size="sm" onClick={regenerateAll} disabled={!!bulkRegen}
               className="gap-1.5 text-xs font-medium text-muted-foreground">
-              {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {bulkRegen ? <ButtonOrb state="working" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
                 : selectedPdfApps.length > 0
@@ -1808,7 +1809,7 @@ export default function Applications() {
               ? "Select a course first to export in-progress and paid/other CSV files"
               : "Download two CSV files for the selected course: in-progress and paid/other states"}
           >
-            {exportingCourseSplit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {exportingCourseSplit ? <ButtonOrb state="working" /> : <Download className="h-3.5 w-3.5" />}
             Course CSVs
           </Button>
         )}
@@ -2194,14 +2195,14 @@ export default function Applications() {
                                   <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
                                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
                                     title="Regenerate Application Form PDF">
-                                    {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                    {generatingPdfFor === app.id ? <ButtonOrb state="working" onFilled /> : <RefreshCw className="h-3.5 w-3.5" />}
                                     Regenerate
                                   </button>
                                 </>
                               ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
                                 <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
                                   className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                                  {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                                  {generatingPdfFor === app.id ? <ButtonOrb state="working" onFilled /> : <FileText className="h-3.5 w-3.5" />}
                                   Generate Form PDF
                                 </button>
                               )}
@@ -2439,7 +2440,7 @@ export default function Applications() {
               disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
               className="gap-2"
             >
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <ListPlus className="h-4 w-4" />}
               {listMode === "new" ? "Create List" : "Add to List"}
             </Button>
           </DialogFooter>

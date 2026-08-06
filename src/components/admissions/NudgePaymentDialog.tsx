@@ -25,7 +25,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageCircle, CalendarDays, ExternalLink } from "lucide-react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { MessageCircle, CalendarDays, ExternalLink } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -208,7 +209,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
             disabled={sending || !candidate.phone || loadingDate}
             className="gap-1.5 bg-success hover:bg-success/90"
           >
-            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+            {sending ? <ButtonOrb state="connecting" onFilled /> : <MessageCircle className="h-3.5 w-3.5" />}
             Send via WhatsApp
           </Button>
         </div>

@@ -4,12 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
-import {
-  Users, IndianRupee, GraduationCap,
-  ClipboardCheck, BookOpen, CalendarDays, Bell,
-  ArrowUpRight, ChevronRight, Loader2, FileText,
-} from "lucide-react";
+import { Users, IndianRupee, GraduationCap, ClipboardCheck, BookOpen, CalendarDays, Bell, ArrowUpRight, ChevronRight, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageLoader } from "@/components/ui/page-loader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link, Navigate } from "react-router-dom";
@@ -76,17 +73,17 @@ type DashboardOverviewPayload = {
 
 function AnalyticsFallback() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 load-delayed">
       <div className="flex items-center gap-3">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest whitespace-nowrap">Analytics</p>
         <div className="flex-1 border-t border-border/50" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 flutes" />
-        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 flutes" />
+        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 blade-skeleton" />
+        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 blade-skeleton" />
       </div>
-      <div className="h-72 rounded-lg border border-border/60 flutes" />
-      <div className="h-48 rounded-lg border border-border/60 flutes" />
+      <div className="h-72 rounded-lg border border-border/60 blade-skeleton" />
+      <div className="h-48 rounded-lg border border-border/60 blade-skeleton" />
     </div>
   );
 }
@@ -150,11 +147,7 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
 
   useEffect(() => { fetchDashboard(); }, [selectedCampusId]);
 
-  if (loading) return (
-    <div className="flex h-64 items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-primary" />
-    </div>
-  );
+  if (loading) return <PageLoader />;
 
   const funnelMax       = Math.max(...funnel.map(s => s.count), 1);
   const conversionRate  = leadCount > 0 ? Math.round((admittedCount / leadCount) * 100) : 0;
@@ -390,11 +383,7 @@ const ParentDashboard = () => {
     fetchChildren();
   }, [user?.id]);
 
-  if (loading) return (
-    <div className="flex h-64 items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-primary" />
-    </div>
-  );
+  if (loading) return <PageLoader />;
 
   const statusColor: Record<string, string> = {
     active: "bg-success/10 text-success",

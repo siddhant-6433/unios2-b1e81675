@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText, AlertCircle } from "lucide-react";
+import { ArrowRight, ArrowLeft, Upload, CheckCircle, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -206,7 +207,7 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, re
         ) : isUploaded ? (
           <CheckCircle className="h-5 w-5 text-success mx-auto mb-1.5" />
         ) : isUploading ? (
-          <Loader2 className="h-5 w-5 text-primary animate-spin mx-auto mb-1.5" />
+          <ButtonOrb state="working" className="mx-auto mb-1.5" />
         ) : (
           <Upload className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
         )}
@@ -424,7 +425,7 @@ export function DocumentUpload({
           </Button>
         ) : <div />}
         <Button onClick={handleContinue} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           {nextLabel}
         </Button>
       </div>

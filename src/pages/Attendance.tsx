@@ -1,9 +1,10 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Check, X, Clock, Users, CalendarDays, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, X, Clock, Users, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface AttendanceRow {
@@ -299,7 +300,7 @@ const Attendance = () => {
 
                 <div className="flex justify-end">
                   <Button onClick={saveAttendance} disabled={saving} className="gap-2 rounded-lg">
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <Check className="h-4 w-4" />}
                     Save Attendance
                   </Button>
                 </div>

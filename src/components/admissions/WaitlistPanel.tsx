@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowUp, Clock, Check } from "lucide-react";
+import { ArrowUp, Clock, Check } from "lucide-react";
 
 interface WaitlistEntry {
   id: string;
@@ -87,7 +88,7 @@ export function WaitlistPanel({ courseId, campusId, courseName }: Props) {
           Waitlist — {courseName} ({entries.length})
         </h4>
         <Button size="sm" variant="outline" className="gap-1.5 text-xs h-7" onClick={handlePromote} disabled={promoting}>
-          {promoting ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUp className="h-3 w-3" />}
+          {promoting ? <ButtonOrb state="working" /> : <ArrowUp className="h-3 w-3" />}
           Promote Next
         </Button>
       </div>

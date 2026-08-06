@@ -4,12 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
-  Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
-  Video, Mic, Play, Pause, CheckCheck,
-} from "lucide-react";
+import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
@@ -1471,7 +1468,7 @@ export default function Inbox() {
                 disabled={!isSuperAdmin || processing === c.id}
                 onClick={() => decideAbvmuDeposit(c, "approved")}
               >
-                {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+                {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
               </Button>
               <Button
                 size="sm"
@@ -1565,7 +1562,7 @@ export default function Inbox() {
               onClick={() => decideAllWaivers(g)}
             >
               {processing != null ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <CheckCheck className="h-4 w-4 mr-1.5" />
               )}
@@ -1615,7 +1612,7 @@ export default function Inbox() {
               onClick={() => decideOfferApproval(o, "approved")}
             >
               {processing === o.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -1683,7 +1680,7 @@ export default function Inbox() {
               disabled={!isSuperAdmin || processing === c.id}
               onClick={() => decideConcession(c, true)}
             >
-              {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+              {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
             </Button>
             <Button
               size="sm"
@@ -1733,7 +1730,7 @@ export default function Inbox() {
             disabled={!isSuperAdmin || processing === c.id}
             onClick={() => approveCertificate(c)}
           >
-            {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve Certificate</>}
+            {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve Certificate</>}
           </Button>
 
           <Button
@@ -1781,7 +1778,7 @@ export default function Inbox() {
               onClick={() => decideContactChange(c, "approved")}
             >
               {processing === c.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -1905,7 +1902,7 @@ export default function Inbox() {
               onClick={() => markWhatsAppRead(w)}
             >
               {processing === w.phone ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                <ButtonOrb state="working" />
               ) : (
                 <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
               )}
@@ -2002,7 +1999,7 @@ export default function Inbox() {
               onClick={() => decideVideo(v, "approved")}
             >
               {processing === v.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -2129,13 +2126,13 @@ export default function Inbox() {
                 {items.length} item{items.length !== 1 ? "s" : ""}
               </p>
             </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {loading && <ButtonOrb state="working" />}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
           {loading && items.length === 0 ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">

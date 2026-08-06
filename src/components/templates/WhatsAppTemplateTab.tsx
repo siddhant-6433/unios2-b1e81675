@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -7,10 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Loader2, Plus, Trash2, MessageSquare, RefreshCw, Send, Search,
-  CheckCircle, Clock, XCircle, AlertTriangle,
-} from "lucide-react";
+import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle } from "lucide-react";
 import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
@@ -203,7 +201,7 @@ function TemplateCard({
               onClick={() => onDelete(template)}
               title="Delete template from Meta"
             >
-              {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {deleting === template.name ? <ButtonOrb state="connecting" /> : <Trash2 className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>
@@ -282,7 +280,7 @@ function TemplatePreviewPanel({
           onClick={() => onDelete(template)}
           title="Delete template from Meta"
         >
-          {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          {deleting === template.name ? <ButtonOrb state="connecting" /> : <Trash2 className="h-3.5 w-3.5" />}
           Delete
         </Button>
       </div>

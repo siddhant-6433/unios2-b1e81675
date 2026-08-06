@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { GraduationCap, CheckCircle, Send, User, Phone, Mail, BookOpen, MapPin, MessageSquare, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
@@ -412,7 +413,7 @@ const EnquiryForm = () => {
 
               <Button type="submit" className="w-full gap-2" disabled={submitting}>
                 {submitting ? (
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                  <ButtonOrb onFilled />
                 ) : (
                   <Send className="h-4 w-4" />
                 )}

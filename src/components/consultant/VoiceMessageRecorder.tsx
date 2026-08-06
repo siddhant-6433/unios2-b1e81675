@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
-import { Mic, Square, Play, Pause, Trash2, Send, Loader2 } from "lucide-react";
+import { Mic, Square, Play, Pause, Trash2, Send } from "lucide-react";
 
 interface VoiceMessageRecorderProps {
   consultantId: string;
@@ -215,7 +216,7 @@ export function VoiceMessageRecorder({ consultantId, onSent }: VoiceMessageRecor
             </div>
 
             <Button onClick={sendMessage} disabled={sending} className="w-full gap-2">
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {sending ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
               Send to Admission Team
             </Button>
           </div>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextField } from "@/components/ui/state-fields";
@@ -10,9 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Plus, Search, FolderOpen, Users, Globe,
-} from "lucide-react";
+import { Plus, Search, FolderOpen, Users, Globe } from "lucide-react";
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -252,7 +251,7 @@ const MYPProjects = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -388,7 +387,7 @@ const MYPProjects = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={creating || !newStudentId || !newTitle.trim()}>
-              {creating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {creating && <ButtonOrb state="working" onFilled />}
               Create Project
             </Button>
           </DialogFooter>

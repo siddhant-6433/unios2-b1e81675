@@ -3,10 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
+import { School, GraduationCap, Search, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { buildListName } from "@/lib/leadListName";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
@@ -876,7 +877,7 @@ export default function LeadBuckets() {
             >
               {selectingAllFiltered ? (
                 <span className="inline-flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Selecting…
+                  <ButtonOrb state="working" /> Selecting…
                 </span>
               ) : (
                 `Select all ${filteredCountLabel} matching filter`
@@ -1056,7 +1057,7 @@ export default function LeadBuckets() {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="searching" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -1197,7 +1198,7 @@ export default function LeadBuckets() {
         <div className="flex items-center justify-center gap-3 py-2 text-xs text-muted-foreground">
           {loadingMore ? (
             <span className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading more…
+              <ButtonOrb state="searching" /> Loading more…
             </span>
           ) : hasMore ? (
             <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => fetchPage(false)}>
@@ -1241,7 +1242,7 @@ export default function LeadBuckets() {
               disabled={assigning || !selectedCounsellor}
               className="gap-2"
             >
-              {assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              {assigning ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />}
               Assign
             </Button>
           </DialogFooter>
@@ -1282,7 +1283,7 @@ export default function LeadBuckets() {
               disabled={savingList || !newListName.trim()}
               className="gap-2"
             >
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <ListPlus className="h-4 w-4" />}
               Save List
             </Button>
           </DialogFooter>

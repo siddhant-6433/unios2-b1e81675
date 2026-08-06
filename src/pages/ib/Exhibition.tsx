@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,10 +12,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Loader2, Plus, GripVertical, Users, Calendar, Lightbulb,
-  BookOpen, ChevronDown, ChevronUp,
-} from "lucide-react";
+import { Plus, GripVertical, Users, Calendar, Lightbulb, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -376,7 +374,7 @@ const Exhibition = () => {
 
       {loading ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : (
         /* Kanban board */
@@ -595,7 +593,7 @@ const Exhibition = () => {
           <DialogFooter className="mt-4">
             <Button variant="outline" className="rounded-xl" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button className="rounded-xl gap-2" onClick={handleCreate} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />} Create Group
+              {saving && <ButtonOrb state="working" onFilled />} Create Group
             </Button>
           </DialogFooter>
         </DialogContent>

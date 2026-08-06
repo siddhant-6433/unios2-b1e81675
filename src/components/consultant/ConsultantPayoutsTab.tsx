@@ -3,9 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Printer, AlertTriangle, Download, CheckCircle2, RotateCcw } from "lucide-react";
+import { Printer, AlertTriangle, Download, CheckCircle2, RotateCcw } from "lucide-react";
 import {
   PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, inr, modeLabel, CAN_MANAGE_PAYOUT_ROLES, ZohoSyncButton,
 } from "@/components/consultant/payoutActions";
@@ -123,7 +124,7 @@ export const ConsultantPayoutsTab = () => {
     w.document.close();
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex justify-center py-12"><OrbLoader state="searching" /></div>;
 
   return (
     <div className="space-y-4">
@@ -205,7 +206,7 @@ export const ConsultantPayoutsTab = () => {
                           )}
                           {canManage && r.status === "paid" && (
                             <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px] text-muted-foreground" disabled={busyId === r.payout_id} onClick={() => unmark(r)}>
-                              {busyId === r.payout_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Revert
+                              {busyId === r.payout_id ? <ButtonOrb state="working" /> : <RotateCcw className="h-3.5 w-3.5" />}Revert
                             </Button>
                           )}
                         </td>

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -2077,7 +2078,7 @@ export default function CloudDialer() {
                       </p>
                     )}
                     <Button size="sm" className="w-full bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
-                      {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                      {dialPlacing ? <ButtonOrb state="connecting" onFilled /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
                       Call now
                     </Button>
                   </div>
@@ -2090,7 +2091,7 @@ export default function CloudDialer() {
                       className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm disabled:opacity-50" />
                     <div className="flex gap-1.5">
                       <Button size="sm" className="flex-1 bg-cyan-600 hover:bg-cyan-700" onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing}>
-                        {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                        {dialPlacing ? <ButtonOrb state="connecting" onFilled /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
                         Create & Call
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => { setDialNoMatch(false); setDialPhone(""); setDialNewName(""); }}>
@@ -2110,7 +2111,7 @@ export default function CloudDialer() {
                     onKeyDown={e => { if (e.key === "Enter") lookupByPhone(); }}
                     className="flex-1 rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs" />
                   <Button size="sm" variant="outline" onClick={lookupByPhone} disabled={lookupLoading}>
-                    {lookupLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Find"}
+                    {lookupLoading ? <ButtonOrb state="connecting" /> : "Find"}
                   </Button>
                 </div>
                 {lookupResult && (
@@ -2241,7 +2242,7 @@ export default function CloudDialer() {
                 }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      {callState.status === "calling" && <Loader2 className="h-5 w-5 animate-spin text-cyan-600" />}
+                      {callState.status === "calling" && <OrbLoader state="connecting" />}
                       {callState.status === "connected" && <Volume2 className="h-5 w-5 text-success animate-pulse" />}
                       {callState.status === "ended" && <Phone className="h-5 w-5 text-primary" />}
                       {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-warning-foreground" />}
@@ -2521,7 +2522,7 @@ export default function CloudDialer() {
                                   })}
                                 >
                                   {nudgeSendingKey === "missed_call" ? (
-                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    <ButtonOrb state="connecting" />
                                   ) : nudgeSentKeys.has("missed_call") ? (
                                     <Check className="h-3 w-3 mr-1" />
                                   ) : null}
@@ -2536,7 +2537,7 @@ export default function CloudDialer() {
                                   title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
                                 >
                                   {nudgeSendingKey === "course_info_v4" ? (
-                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    <ButtonOrb state="connecting" />
                                   ) : nudgeSentKeys.has("course_info_v4") ? (
                                     <Check className="h-3 w-3 mr-1" />
                                   ) : null}
@@ -2559,7 +2560,7 @@ export default function CloudDialer() {
                                 })}
                               >
                                 {nudgeSendingKey === "nimt_not_interested_ack" ? (
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  <ButtonOrb state="connecting" />
                                 ) : nudgeSentKeys.has("nimt_not_interested_ack") ? (
                                   <Check className="h-3 w-3 mr-1" />
                                 ) : null}
@@ -2576,7 +2577,7 @@ export default function CloudDialer() {
                                   title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
                                 >
                                   {nudgeSendingKey === "course_info_v4" ? (
-                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    <ButtonOrb state="connecting" />
                                   ) : nudgeSentKeys.has("course_info_v4") ? (
                                     <Check className="h-3 w-3 mr-1" />
                                   ) : null}
@@ -2592,7 +2593,7 @@ export default function CloudDialer() {
                                     onClick={() => sendDispositionNudge(t.key)}
                                   >
                                     {nudgeSendingKey === t.key ? (
-                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                      <ButtonOrb state="connecting" />
                                     ) : nudgeSentKeys.has(t.key) ? (
                                       <Check className="h-3 w-3 mr-1" />
                                     ) : null}
@@ -2836,7 +2837,7 @@ export default function CloudDialer() {
                 className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs" />
             </div>
             <Button size="sm" className="w-full h-8 text-xs" onClick={saveWalkin} disabled={walkinSaving || !walkinFollowupDate}>
-              {walkinSaving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Footprints className="h-3 w-3 mr-1" />}
+              {walkinSaving ? <ButtonOrb state="connecting" onFilled /> : <Footprints className="h-3 w-3 mr-1" />}
               Record walk-in
             </Button>
           </div>
