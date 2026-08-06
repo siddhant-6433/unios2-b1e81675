@@ -102,6 +102,9 @@ type FollowupQueueState = {
   returnUrl: string;
 };
 
+// sessionStorage key for the per-counsellor urgent-list guard snooze.
+const dialGuardSnoozeKey = (profileId: string) => `dialGuardSnoozeUntil:${profileId}`;
+
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -186,6 +189,13 @@ const LeadDetail = () => {
   const [lastDisposition, setLastDisposition] = useState<string>("");
   // Soft direct-dial guard: pending priority counts gating non-priority calls.
   const [dialGuardCounts, setDialGuardCounts] = useState<{ paid_pending: number; overdue_pending: number } | null>(null);
+  const isDialGuardSnoozed = () => {
+    if (!profileId) return false;
+    try {
+      const until = Number(sessionStorage.getItem(dialGuardSnoozeKey(profileId)) || 0);
+      return until > Date.now();
+    } catch (_) { return false; }
+  };
   const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
   // When the lead_detail RPC returns nothing (RLS blocked because the lead is
   // assigned to someone else), we still want to tell the user *who* it is
@@ -870,6 +880,9 @@ const LeadDetail = () => {
 
   const triggerManualCall = async () => {
     if (!id || !profileId) { await placeManualCall(); return; }
+    // Urgent-list bypass: counsellor snoozed the guard for this session
+    // (e.g. TL told them to work a specific list first). Skip straight to dial.
+    if (isDialGuardSnoozed()) { await placeManualCall(); return; }
     // Soft guard: counsellor must clear paid (meta/google <24h) + overdue
     // (>2h) priority work before direct-dialing a non-priority lead.
     // The RPC excludes the current lead from counts and flags exempt cases
@@ -889,6 +902,29 @@ const LeadDetail = () => {
       }
     } catch (_) {
       // Guard failures should never block calling — fall through and dial.
+    }
+    await placeManualCall();
+  };
+
+  // Snooze the guard for 2 hours (per counsellor, this tab/session) so an
+  // urgent list can be worked without a modal on every lead. Logs one
+  // override row for the TL audit trail, then dials.
+  const handleDialGuardSnooze = async () => {
+    if (profileId) {
+      try { sessionStorage.setItem(dialGuardSnoozeKey(profileId), String(Date.now() + 2 * 60 * 60 * 1000)); } catch (_) {}
+    }
+    if (id && profileId && dialGuardCounts) {
+      try {
+        await supabase.from("direct_dial_overrides" as any).insert({
+          counsellor_id: profileId,
+          lead_id: id,
+          reason: "Urgent list — guard snoozed for 2h",
+          paid_pending_count: dialGuardCounts.paid_pending,
+          overdue_pending_count: dialGuardCounts.overdue_pending,
+        });
+      } catch (e) {
+        console.error("Failed to log dial snooze:", e);
+      }
     }
     await placeManualCall();
   };
@@ -1757,6 +1793,7 @@ const LeadDetail = () => {
             leadName={lead.name}
             onOpenChange={(o) => { if (!o) setDialGuardCounts(null); }}
             onCallAnyway={handleDialGuardOverride}
+            onSnooze={handleDialGuardSnooze}
           />
         </Suspense>
       )}
