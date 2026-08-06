@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/state-fields";
-import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
 import { whiteBgCutout } from "@/lib/whiteBgCutout";
 import { QRCodeSVG } from "qrcode.react";
 import { brandForStudentOwner, MIRAI_BRAND, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
@@ -192,7 +191,7 @@ function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
 /** Tiny list avatar: lazy-load a storage thumb; fall back to initials on error. */
 function PersonAvatar({ name, photoUrl, className }: { name: string; photoUrl: string | null; className?: string }) {
   const [failed, setFailed] = useState(false);
-  const src = avatarThumbUrl(photoUrl);
+  const src = photoUrl;
   const showImage = !!src && !failed;
 
   return (
@@ -1130,7 +1129,7 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
           <img src={cutoutUrl} alt="" decoding="async" style={{ position: "relative", zIndex: 1, width: 252, height: 288, objectFit: "contain", objectPosition: "center bottom" }} />
         ) : person.photoUrl ? (
           <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <img src={idCardPhotoUrl(person.photoUrl) || person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
         ) : (
           <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center", color: accent, fontSize: 56, fontWeight: 700 }}>

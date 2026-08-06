@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { downscaleForDisplay } from "../_shared/resizeImage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -223,11 +224,12 @@ Deno.serve(async (req) => {
       const inputBytes = new Uint8Array(await download.data.arrayBuffer());
       const mimeType = source.file?.metadata?.mimetype || download.data.type || "image/png";
       const processed = await processPhoto(apiKey, mimeType, inputBytes);
-      const extension = extForMime(processed.mimeType);
+      const display = await downscaleForDisplay(processed.bytes, processed.mimeType);
+      const extension = extForMime(display.mimeType);
       const path = `${student.id}/backfilled-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}.${extension}`;
       const upload = await admin.storage
         .from("student-profile-photos")
-        .upload(path, processed.bytes, { contentType: processed.mimeType, upsert: true });
+        .upload(path, display.bytes, { contentType: display.mimeType, upsert: true });
       if (upload.error) {
         results.push({ student_id: student.id, name: student.name, application_id: application.application_id, status: "failed", reason: upload.error.message });
         continue;
