@@ -57,7 +57,7 @@ export function LateFeeConfigPanel() {
   const [search, setSearch] = useState("");
   const [overdueStats, setOverdueStats] = useState<{ total: number; amount: number }>({ total: 0, amount: 0 });
 
-  const canEdit = ["super_admin", "campus_admin", "accountant", "principal"].includes(role || "");
+  const canEdit = ["super_admin", "campus_admin", "accountant", "principal", "office_admin"].includes(role || "");
 
   useEffect(() => { fetchAll(); }, []);
 

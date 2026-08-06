@@ -149,7 +149,7 @@ describe("ad-hoc fee heads", () => {
 
 describe("cashier console", () => {
   it("keeps the accountant-only gate on offline recording", () => {
-    expect(offlineDialog).toContain('["super_admin", "accountant"].includes(role || "")');
+    expect(offlineDialog).toContain('["super_admin", "accountant", "office_admin"].includes(role || "")');
   });
 
   it("reuses the existing ledger panels rather than re-implementing them", () => {
@@ -709,7 +709,7 @@ describe("counsellors: ask for payment, never take it", () => {
     // Manage and the row-actions column remain isFinanceRole, which excludes them.
     expect(studentFeePanel).toContain("{(canProvision || canReallocate || isFinanceRole) && (");
     expect(studentFeePanel).toContain('const canRemoveRow = (f: any) =>');
-    expect(studentFeePanel).toContain('["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage")');
+    expect(studentFeePanel).toContain('["super_admin", "accountant", "office_admin"].includes(role || "") || hasPermission("fee_structure:manage")');
   });
 
   it("is already accepted by the payment-link edge function", () => {

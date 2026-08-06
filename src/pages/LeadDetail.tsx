@@ -172,7 +172,7 @@ const LeadDetail = () => {
   // "Record Offline Payment" trigger in the quick-action bar instead.
   const [feeLedgerEmpty, setFeeLedgerEmpty] = useState(false);
   const [showOfflinePayment, setShowOfflinePayment] = useState(false);
-  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const [deletingLead, setDeletingLead] = useState(false);
   const [showNotInterested, setShowNotInterested] = useState(false);
   const [notInterestedReason, setNotInterestedReason] = useState("");

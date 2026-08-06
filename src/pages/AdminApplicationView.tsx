@@ -1221,7 +1221,7 @@ export default function AdminApplicationView() {
                 {leadPayments.length}
               </span>
             </div>
-            {["super_admin", "accountant"].includes(role || "") && (
+            {["super_admin", "accountant", "office_admin"].includes(role || "") && (
               <button
                 onClick={() => setOfflinePaymentOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
@@ -1307,7 +1307,7 @@ export default function AdminApplicationView() {
       )}
 
       {/* Empty-state: no payments yet but superadmin can add one */}
-      {lead?.id && leadPayments.length === 0 && ["super_admin", "accountant"].includes(role || "") && (
+      {lead?.id && leadPayments.length === 0 && ["super_admin", "accountant", "office_admin"].includes(role || "") && (
         <div className="rounded-xl border border-dashed border-border bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
