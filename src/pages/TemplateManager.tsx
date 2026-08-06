@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useMemo, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -9,10 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle,
-  GraduationCap, Save, Filter,
-} from "lucide-react";
+import { Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle, GraduationCap, Save, Filter } from "lucide-react";
 import { cahetDeadlineDescription } from "@/lib/deadlineRollover";
 import { WhatsAppTemplateTab } from "@/components/templates/WhatsAppTemplateTab";
 
@@ -535,7 +533,7 @@ Buttons:
                               onClick={() => saveCourse(c.id)}
                             >
                               {savingCourseId === c.id ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                <ButtonOrb state="working" onFilled />
                               ) : (
                                 <Save className="h-3 w-3 mr-1" />
                               )}
@@ -715,7 +713,7 @@ Buttons:
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEdit(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={!formName.trim() || !formSlug.trim() || !formSubject.trim() || saving} className="gap-2">
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {saving && <ButtonOrb state="working" onFilled />}
               {editing ? "Update" : "Create"}
             </Button>
           </DialogFooter>

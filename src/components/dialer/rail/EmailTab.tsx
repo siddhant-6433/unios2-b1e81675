@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check } from "lucide-react";
+import { Send, Check } from "lucide-react";
 import {
   EmailTemplatePicker, useEmailTemplates, fillEmailVars, sendEmailTemplate,
 } from "@/components/leads/EmailTemplatePicker";
@@ -96,7 +97,7 @@ export function EmailTab({ leadId, leadName, active }: Props) {
       )}
 
       <Button onClick={handleSend} disabled={!selectedSlug || !toEmail || sending || sent} className="w-full gap-2">
-        {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
+        {sending ? <><ButtonOrb state="connecting" onFilled /> Sending…</>
           : sent ? <><Check className="h-4 w-4" /> Sent!</>
           : <><Send className="h-4 w-4" /> Send Email</>}
       </Button>

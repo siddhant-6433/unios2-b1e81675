@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -10,9 +11,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Loader2, Plus, Save, CheckCircle, Archive, Calendar, X, BookOpen,
-} from "lucide-react";
+import { Plus, Save, CheckCircle, Archive, Calendar, X, BookOpen } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -363,7 +362,7 @@ const ProgrammeOfInquiry = () => {
               onClick={handlePublish}
               disabled={publishing}
             >
-              {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+              {publishing ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4 mr-1" />}
               Publish
             </Button>
           )}
@@ -375,7 +374,7 @@ const ProgrammeOfInquiry = () => {
               onClick={handleCreate}
               disabled={creating}
             >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
+              {creating ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4 mr-1" />}
               Create POI
             </Button>
           )}
@@ -385,7 +384,7 @@ const ProgrammeOfInquiry = () => {
       {/* Loading */}
       {loading && (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       )}
 
@@ -646,7 +645,7 @@ const ProgrammeOfInquiry = () => {
               onClick={handleSaveEntry}
               disabled={saving}
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4 mr-1" />}
               Save
             </Button>
           </DialogFooter>

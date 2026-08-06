@@ -3,10 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SelectField, DatePickerField } from "@/components/ui/state-fields";
-import { Loader2, UserCheck, ArrowRight } from "lucide-react";
+import { UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -245,7 +246,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleConvert} disabled={saving || !form.session_id || (isSchoolCourse ? !form.admission_date || !form.joining_academic_year : !form.batch_id || !form.semester)} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
               {conversionType === "pre_admit" ? "Pre-Admit" : "Admit"} Student
             </Button>
           </div>

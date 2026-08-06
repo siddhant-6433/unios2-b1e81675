@@ -6,10 +6,11 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
-import { Loader2, ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 const TO_CREDIT = "__credit__";
@@ -120,7 +121,7 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess }: Props
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={saving || !canSubmit}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {saving ? <ButtonOrb state="working" onFilled /> : null}
             Transfer
           </Button>
         </DialogFooter>

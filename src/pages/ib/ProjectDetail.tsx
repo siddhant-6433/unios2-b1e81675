@@ -3,11 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Loader2, ArrowLeft, Save, Plus, Globe, Calendar, User, BookOpen,
-} from "lucide-react";
+import { ArrowLeft, Save, Plus, Globe, Calendar, User, BookOpen } from "lucide-react";
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -224,7 +223,7 @@ const ProjectDetail = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -344,7 +343,7 @@ const ProjectDetail = () => {
             </div>
             <div className="flex justify-end">
               <Button onClick={saveOverview} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                 Save
               </Button>
             </div>
@@ -413,7 +412,7 @@ const ProjectDetail = () => {
 
             <div className="flex justify-end">
               <Button onClick={saveJournal} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                 Save Journal
               </Button>
             </div>
@@ -498,7 +497,7 @@ const ProjectDetail = () => {
 
             <div className="flex justify-end">
               <Button onClick={saveAssessment} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                 Save Assessment
               </Button>
             </div>
@@ -547,7 +546,7 @@ const ProjectDetail = () => {
 
             <div className="flex justify-end">
               <Button onClick={savePresentation} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                 Save
               </Button>
             </div>

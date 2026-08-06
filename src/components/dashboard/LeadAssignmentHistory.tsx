@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Bot, Check, ChevronDown, Filter, History, Loader2, RefreshCw, UserCheck, X } from "lucide-react";
+import { Bot, Check, ChevronDown, Filter, History, RefreshCw, UserCheck, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -488,7 +489,7 @@ export function LeadAssignmentHistory({
               </div>
             )}
             <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchRows} disabled={loading}>
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {loading ? <ButtonOrb state="working" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Refresh
             </Button>
           </div>
@@ -637,7 +638,7 @@ export function LeadAssignmentHistory({
       <CardContent className="p-0">
         {loading ? (
           <div className="flex h-36 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <OrbLoader state="searching" />
           </div>
         ) : error ? (
           <div className="px-4 py-10 text-center text-sm text-destructive">{error}</div>

@@ -4,7 +4,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Send, Loader2, Check } from "lucide-react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { MessageSquare, Send, Check } from "lucide-react";
 import { WhatsAppTemplatePicker } from "@/components/leads/WhatsAppTemplatePicker";
 import {
   TEMPLATES,
@@ -108,7 +109,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
             className="gap-2 bg-success hover:bg-success/60"
           >
             {sending ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Sending...</>
+              <><ButtonOrb state="connecting" onFilled /> Sending...</>
             ) : sent ? (
               <><Check className="h-4 w-4" /> Sent!</>
             ) : (

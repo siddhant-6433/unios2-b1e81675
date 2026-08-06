@@ -1,6 +1,7 @@
 import { useState, type ComponentType } from "react";
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, User, Users, UserPlus } from "lucide-react";
+import { ArrowRight, ArrowLeft, AlertTriangle, User, Users, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Switch } from "@/components/ui/switch";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
@@ -648,7 +649,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
           </Button>
         ) : <div />}
         <Button onClick={handleContinue} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>
       </div>

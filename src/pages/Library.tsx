@@ -1,30 +1,9 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  AlertTriangle,
-  Barcode,
-  BookOpen,
-  Building2,
-  CheckCircle2,
-  Clock,
-  Download,
-  FileSpreadsheet,
-  FileSearch,
-  Library as LibraryIcon,
-  Loader2,
-  Plus,
-  Printer,
-  RefreshCw,
-  RotateCcw,
-  Search,
-  Settings,
-  ShieldCheck,
-  Trash2,
-  UserPlus,
-  Users,
-} from "lucide-react";
+import { AlertTriangle, Barcode, BookOpen, Building2, CheckCircle2, Clock, Download, FileSpreadsheet, FileSearch, Library as LibraryIcon, Plus, Printer, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { format, isBefore, startOfToday } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1326,7 +1305,7 @@ const Library = () => {
                   <Input label="Code" value={newLibrary.code} placeholder="LIB-A" onChange={(code) => setNewLibrary((p) => ({ ...p, code }))} />
                 </div>
                 <Button type="submit" disabled={!newLibraryInstitutionId || saving === "library"} className="w-full">
-                  {saving === "library" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                  {saving === "library" ? <ButtonOrb state="working" onFilled /> : <Plus className="mr-2 h-4 w-4" />}
                   Add Library
                 </Button>
               </form>
@@ -1384,7 +1363,7 @@ const Library = () => {
                     <Input label="Rack" value={bookForm.rack} onChange={(rack) => setBookForm((p) => ({ ...p, rack }))} />
                   </div>
                   <Button type="submit" disabled={!scopeReady || saving === "catalog"} className="w-full">
-                    {saving === "catalog" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                    {saving === "catalog" ? <ButtonOrb state="working" onFilled /> : <Plus className="mr-2 h-4 w-4" />}
                     Save Catalog Record
                   </Button>
                 </form>
@@ -1412,7 +1391,7 @@ const Library = () => {
                   </p>
                 </div>
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "issue"} className="w-full">
-                  {saving === "issue" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookOpen className="mr-2 h-4 w-4" />}
+                  {saving === "issue" ? <ButtonOrb state="working" onFilled /> : <BookOpen className="mr-2 h-4 w-4" />}
                   Issue
                 </Button>
               </form>
@@ -1424,7 +1403,7 @@ const Library = () => {
               <form onSubmit={handleReturn} className="flex gap-2">
                 <input value={returnAccession} disabled={!canCirculate || !scopeReady} onChange={(e) => setReturnAccession(e.target.value)} placeholder="Accession or barcode" className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm" />
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "return"}>
-                  {saving === "return" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                  {saving === "return" ? <ButtonOrb state="working" onFilled /> : <RotateCcw className="mr-2 h-4 w-4" />}
                   Return
                 </Button>
               </form>
@@ -1443,7 +1422,7 @@ const Library = () => {
                 <Input label="Shelf" value={inventoryForm.shelf_location} disabled={!canInventory || !scopeReady} onChange={(shelf_location) => setInventoryForm((p) => ({ ...p, shelf_location }))} />
                 <Input label="Rack" value={inventoryForm.rack} disabled={!canInventory || !scopeReady} onChange={(rack) => setInventoryForm((p) => ({ ...p, rack }))} />
                 <Button type="submit" disabled={!canInventory || !scopeReady || saving === "inventory"} className="self-end">
-                  {saving === "inventory" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  {saving === "inventory" ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                   Update
                 </Button>
               </form>
@@ -1466,7 +1445,7 @@ const Library = () => {
                     <textarea value={digitizeForm.raw_ocr_text} disabled={!canDigitize || !scopeReady} onChange={(e) => setDigitizeForm((p) => ({ ...p, raw_ocr_text: e.target.value }))} className="mt-1.5 min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
                   </label>
                   <Button type="submit" disabled={!canDigitize || !scopeReady || saving === "digitize"} className="w-full">
-                    {saving === "digitize" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Barcode className="mr-2 h-4 w-4" />}
+                    {saving === "digitize" ? <ButtonOrb state="working" onFilled /> : <Barcode className="mr-2 h-4 w-4" />}
                     Capture
                   </Button>
                 </form>
@@ -1494,7 +1473,7 @@ const Library = () => {
                       e.currentTarget.value = "";
                     }}
                   />
-                  {saving === "library-import" ? <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" /> : <FileSpreadsheet className="mx-auto mb-2 h-5 w-5" />}
+                  {saving === "library-import" ? <ButtonOrb state="composing" className="mx-auto mb-2" /> : <FileSpreadsheet className="mx-auto mb-2 h-5 w-5" />}
                   Select Excel or CSV file
                 </label>
               </CardContent>
@@ -1561,11 +1540,11 @@ const Library = () => {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button type="button" variant="outline" size="sm" disabled={!canApproveRecord || saving === `accession-${record.id}`} onClick={() => handleGenerateAccession(record)}>
-                          {saving === `accession-${record.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Barcode className="mr-2 h-4 w-4" />}
+                          {saving === `accession-${record.id}` ? <ButtonOrb state="working" /> : <Barcode className="mr-2 h-4 w-4" />}
                           Generate Accession
                         </Button>
                         <Button type="button" size="sm" disabled={!canApproveRecord || !values.title.trim() || saving === `approve-${record.id}`} onClick={() => handleApproveDigitization(record)}>
-                          {saving === `approve-${record.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                          {saving === `approve-${record.id}` ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                           Approve to Catalog
                         </Button>
                         <Button type="button" variant="outline" size="sm" disabled={!canDigitize || !canApproveRecord || saving === `duplicate-${record.id}`} onClick={() => handleMarkDuplicate(record)}>
@@ -1707,7 +1686,7 @@ const Library = () => {
                   <Input label="Renewals" name="renewals_allowed" type="number" min={0} defaultValue={selectedLibrarySetting?.renewals_allowed || 1} disabled={!canManageSelectedLibrary} />
                   <div className="flex items-end">
                     <Button type="submit" disabled={!canManageSelectedLibrary || saving === "library-rules"} className="w-full">
-                      {saving === "library-rules" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                      {saving === "library-rules" ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                       Save Rules
                     </Button>
                   </div>
@@ -1817,7 +1796,7 @@ const Library = () => {
                     ))}
                   </div>
                   <Button type="submit" disabled={!staffForm.user_id || saving === "staff"} className="self-end">
-                    {saving === "staff" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                    {saving === "staff" ? <ButtonOrb state="working" onFilled /> : <UserPlus className="mr-2 h-4 w-4" />}
                     Assign
                   </Button>
                 </form>
@@ -1851,7 +1830,7 @@ const Library = () => {
                           disabled={saving === `staff-${assignment.id}`}
                           onClick={() => handleRemoveStaff(assignment)}
                         >
-                          {saving === `staff-${assignment.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          {saving === `staff-${assignment.id}` ? <ButtonOrb state="working" /> : <Trash2 className="mr-2 h-4 w-4" />}
                           Remove
                         </Button>
                       )}

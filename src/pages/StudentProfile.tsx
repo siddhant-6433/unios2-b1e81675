@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
@@ -1020,7 +1021,7 @@ const StudentProfile = () => {
         <div className="flex items-center gap-2">
           {syncMsg && <span className="text-xs text-muted-foreground">{syncMsg}</span>}
           <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={syncFromApplication} disabled={syncing}>
-            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {syncing ? <ButtonOrb state="working" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Sync from Application
           </Button>
           {canCorrectProfile && (
@@ -1403,7 +1404,7 @@ const StudentProfile = () => {
                     />
                   </div>
                   <Button className="gap-2" onClick={uploadStudentDocument} disabled={!documentFile || uploadingDocument}>
-                    {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {uploadingDocument ? <ButtonOrb state="working" onFilled /> : <Upload className="h-4 w-4" />}
                     Upload
                   </Button>
                 </div>
@@ -1634,7 +1635,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setRemovalAction(null); setRemovalReason(""); }} disabled={removalBusy}>Cancel</Button>
             <Button variant={removalAction === "delete" ? "destructive" : "default"} onClick={submitRemoval} disabled={removalBusy || !removalReason.trim()}>
-              {removalBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removalBusy ? <ButtonOrb state="working" onFilled /> : null}
               {removalAction === "delete" ? "Delete" : "Archive"}
             </Button>
           </DialogFooter>
@@ -1696,7 +1697,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={editSaving}>Cancel</Button>
             <Button type="button" onClick={submitProfileCorrections} disabled={editSaving}>
-              {editSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              {editSaving && <ButtonOrb state="working" onFilled />}
               Save Corrections
             </Button>
           </DialogFooter>
@@ -1761,7 +1762,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setContactDialogOpen(false)}>Cancel</Button>
             <Button type="button" onClick={submitContactChange} disabled={contactSaving}>
-              {contactSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              {contactSaving && <ButtonOrb state="working" onFilled />}
               Submit Request
             </Button>
           </DialogFooter>

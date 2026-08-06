@@ -3,6 +3,7 @@ import { Link as LinkIcon, Copy, Check, MessageCircle, Loader2, LogIn, ExternalL
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
@@ -256,7 +257,7 @@ export function ApplyMagicLinkButton({
             </div>
 
             <Button onClick={generate} disabled={generating || !leadPhone} className="w-full">
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate Link"}
+              {generating ? <ButtonOrb state="composing" onFilled /> : "Generate Link"}
             </Button>
           </div>
         ) : (
@@ -327,11 +328,11 @@ export function ApplyMagicLinkButton({
         className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         title={leadPhone ? "View as Student (opens portal in new tab)" : "No phone number on lead"}
       >
-        {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+        {opening ? <ButtonOrb state="composing" /> : <LogIn className="h-3.5 w-3.5" />}
       </button>
     ) : (
       <Button size="sm" variant="outline" className="gap-2" onClick={openAsStudent} disabled={!leadPhone || opening}>
-        {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
+        {opening ? <ButtonOrb state="composing" /> : <LogIn className="h-3.5 w-3.5" />}
         {label || (mode === "academic_partner_on_behalf" ? "Complete Application" : "View as Student")}
       </Button>
     );

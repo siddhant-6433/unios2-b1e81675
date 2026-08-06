@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -1368,11 +1369,11 @@ export default function AcademicPartnerPortal() {
               <div className="flex flex-wrap gap-2">
                 {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
                   <Button onClick={() => goToOnboardingStep(onboardingStep + 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving && <Loader2 className="h-4 w-4 animate-spin" />} Save & Continue
+                    {onboardingSaving && <ButtonOrb state="working" onFilled />} Save & Continue
                   </Button>
                 ) : (
                   <Button onClick={() => saveOnboarding("completed", ONBOARDING_STEPS.length - 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
+                    {onboardingSaving ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
                   </Button>
                 )}
               </div>
@@ -1409,7 +1410,7 @@ export default function AcademicPartnerPortal() {
             <span>In call with <span className="font-semibold">{activeCall.name}</span> — pick up your phone to connect.</span>
           </div>
           <Button size="sm" variant="destructive" className="gap-2" onClick={endActiveCall} disabled={endingCall}>
-            {endingCall ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneOff className="h-3.5 w-3.5" />}
+            {endingCall ? <ButtonOrb state="working" onFilled /> : <PhoneOff className="h-3.5 w-3.5" />}
             End Call
           </Button>
         </div>
@@ -1462,7 +1463,7 @@ export default function AcademicPartnerPortal() {
                         directOpen
                       />
                       <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
-                        {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                        {callingLeadId === lead.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-3.5 w-3.5" />}
                         Call
                       </Button>
                       <Button size="sm" variant="outline" className="gap-2" onClick={() => setPayLinkLead({ id: lead.id, name: lead.name })}>
@@ -1529,7 +1530,7 @@ export default function AcademicPartnerPortal() {
                         )}
                         {isPartnerAttributed && (
                           <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
-                            {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                            {callingLeadId === lead.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-3.5 w-3.5" />}
                             Call
                           </Button>
                         )}
@@ -1858,7 +1859,7 @@ export default function AcademicPartnerPortal() {
                   </p>
                 </div>
                 <Button onClick={saveCallingAgentPhone} disabled={profileLoading || savingAgentPhone} className="gap-2">
-                  {savingAgentPhone ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+                  {savingAgentPhone ? <ButtonOrb state="working" onFilled /> : <PhoneCall className="h-4 w-4" />}
                   Save Calling Number
                 </Button>
                 </div>
@@ -1939,7 +1940,7 @@ export default function AcademicPartnerPortal() {
               {detailsLead.academic_partner_id === partner.id && (
                 <>
                   <Button variant="outline" className="gap-2" onClick={() => placeCloudCall(detailsLead)} disabled={callingLeadId === detailsLead.id}>
-                    {callingLeadId === detailsLead.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+                    {callingLeadId === detailsLead.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-4 w-4" />}
                     Cloud Call
                   </Button>
                   <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} directOpen />
@@ -2195,7 +2196,7 @@ export default function AcademicPartnerPortal() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddLead(false)}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={saving || !leadForm.name.trim() || !leadForm.phone.trim() || !leadForm.course_id} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Add Lead
+              {saving ? <ButtonOrb state="working" onFilled /> : <CalendarCheck className="h-4 w-4" />} Add Lead
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,9 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextField, FieldShell } from "@/components/ui/state-fields";
-import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw, IndianRupee,
-} from "lucide-react";
+import { Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, X, Mail, Trash2, UserCheck, Download, Send, Printer, RotateCcw, IndianRupee } from "lucide-react";
 
 // Offline payment modes — mirror the finance OfflinePaymentDialog labels so the
 // experience is consistent across the app.
@@ -1113,7 +1112,7 @@ registrar@nimt.ac.in`,
                 </div>
                 <div className="md:col-span-5 flex justify-end">
                   <Button size="sm" onClick={handleCreateRule} disabled={ruleSaving} className="gap-1.5">
-                    {ruleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    {ruleSaving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                     Save Rule
                   </Button>
                 </div>
@@ -1270,7 +1269,7 @@ registrar@nimt.ac.in`,
                                 onClick={(e) => { e.stopPropagation(); handleDelete(req); }}
                                 disabled={deleting}
                               >
-                                {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                                {deleting ? <ButtonOrb state="working" /> : <Trash2 className="h-3 w-3" />}
                                 Delete
                               </Button>
                             )}
@@ -1405,7 +1404,7 @@ registrar@nimt.ac.in`,
                         <option key={h.user_id} value={h.user_id}>{h.display_name} {(h.work_number || h.personal_mobile) ? "" : "(no phone on file)"}</option>
                       ))}
                     </select>
-                    {assigningHandler && <Loader2 className="h-4 w-4 animate-spin mt-3 text-muted-foreground" />}
+                    {assigningHandler && <ButtonOrb state="working" />}
                   </div>
                 )}
               </div>
@@ -1457,31 +1456,31 @@ registrar@nimt.ac.in`,
                       <div className="flex flex-wrap gap-2">
                         {!["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
                           <Button onClick={handleSubmitPgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
-                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            {pgdmCertificateSaving ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
                             Generate &amp; Submit for Approval
                           </Button>
                         )}
                         {isSuperAdmin && selectedReq.pgdm_certificate_status === "pending_approval" && (
                           <Button onClick={handleApprovePgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                            {pgdmCertificateSaving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                             Approve Certificate
                           </Button>
                         )}
                         {["approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
                           <Button variant="outline" onClick={handleDownloadPgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
-                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            {pgdmCertificateSaving ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
                             Download for Print
                           </Button>
                         )}
                         {["approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && selectedReq.pgdm_certificate_downloaded_at && (
                           <Button onClick={handleNotifyPgdmReady} disabled={pgdmCertificateSaving || selectedReq.pgdm_certificate_status === "ready_notified"} className="gap-2">
-                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                            {pgdmCertificateSaving ? <ButtonOrb state="working" onFilled /> : <Printer className="h-4 w-4" />}
                             {selectedReq.pgdm_certificate_status === "ready_notified" ? "Student Notified" : "Notify Student to Collect Diploma"}
                           </Button>
                         )}
                         {["pending_approval", "approved", "ready_notified"].includes(selectedReq.pgdm_certificate_status) && (
                           <Button variant="outline" onClick={handleRegeneratePgdmCertificate} disabled={pgdmCertificateSaving} className="gap-2">
-                            {pgdmCertificateSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                            {pgdmCertificateSaving ? <ButtonOrb state="working" /> : <RotateCcw className="h-4 w-4" />}
                             Regenerate
                           </Button>
                         )}
@@ -1656,7 +1655,7 @@ registrar@nimt.ac.in`,
                         <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Add internal record note..." className={inputCls + " resize-none"} />
                       </div>
                       <Button className="w-full gap-2" onClick={handleDetailsVerifiedForGeneration} disabled={saving}>
-                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                         {issuanceActionLabel(selectedReq)}
                       </Button>
                     </>
@@ -1684,7 +1683,7 @@ registrar@nimt.ac.in`,
                         <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
                       </div>
                       <Button className="w-full gap-2" onClick={handleEmployeeReview} disabled={saving}>
-                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                         Submit Review for Approval
                       </Button>
                     </>
@@ -1753,7 +1752,7 @@ registrar@nimt.ac.in`,
                     onClick={isIssuanceRequest(selectedReq) ? handleDetailsVerifiedForGeneration : () => handlePrepareResult(verificationResult === "confirmed")}
                     disabled={saving}
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                     {isIssuanceRequest(selectedReq) ? issuanceActionLabel(selectedReq) : "Preview & Edit Email"}
                   </Button>
                 </div>
@@ -1764,7 +1763,7 @@ registrar@nimt.ac.in`,
                 <div className="pt-3 border-t border-border">
                   <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 w-full"
                     onClick={() => handleDelete()} disabled={deleting}>
-                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                    {deleting ? <ButtonOrb state="working" /> : <XCircle className="h-3.5 w-3.5" />}
                     Delete Request
                   </Button>
                 </div>
@@ -1817,7 +1816,7 @@ registrar@nimt.ac.in`,
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Cancel</Button>
             <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-success hover:bg-success/90">
-              {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              {emailSending ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
               {sendEmailEnabled ? "Approve & Send Email" : "Approve (don't send email)"}
             </Button>
           </DialogFooter>
@@ -1884,7 +1883,7 @@ registrar@nimt.ac.in`,
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowManualEntry(false)}>Cancel</Button>
             <Button onClick={handleManualEntry} disabled={manualSaving} className="gap-2">
-              {manualSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {manualSaving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />}
               Create Request
             </Button>
           </DialogFooter>
@@ -1933,7 +1932,7 @@ registrar@nimt.ac.in`,
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOfflinePay(false)} disabled={markingPaid}>Cancel</Button>
             <Button onClick={submitOfflinePayment} disabled={markingPaid} className="gap-2">
-              {markingPaid ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              {markingPaid ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
               Mark as Paid
             </Button>
           </DialogFooter>

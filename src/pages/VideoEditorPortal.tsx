@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,9 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube, RotateCcw,
-} from "lucide-react";
+import { Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube, RotateCcw } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPES, CONTENT_TYPE_LABEL,
   STATUS_BADGE, type VideoBrand, type VideoContentType, type VideoStatus,
@@ -524,7 +523,7 @@ export default function VideoEditorPortal() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSubmit(false)}>Cancel</Button>
             <Button onClick={handleSubmitVideo} disabled={submitting} className="gap-2">
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : (form.id ? <RotateCcw className="h-4 w-4" /> : <Plus className="h-4 w-4" />)} {form.id ? "Resubmit for Approval" : "Submit for Approval"}
+              {submitting ? <ButtonOrb state="working" onFilled /> : (form.id ? <RotateCcw className="h-4 w-4" /> : <Plus className="h-4 w-4" />)} {form.id ? "Resubmit for Approval" : "Submit for Approval"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -586,7 +585,7 @@ export default function VideoEditorPortal() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelected(null)}>Cancel</Button>
             <Button onClick={handleSaveSocial} disabled={savingSocial} className="gap-2">
-              {savingSocial ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} Save
+              {savingSocial ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />} Save
             </Button>
           </DialogFooter>
         </DialogContent>

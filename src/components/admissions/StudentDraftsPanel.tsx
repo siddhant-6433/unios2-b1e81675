@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Trash2, Play, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, Trash2, Play, ChevronDown, ChevronUp } from "lucide-react";
 
 interface StudentDraft {
   id: string;
@@ -119,7 +120,7 @@ export function StudentDraftsPanel({ refreshKey, onResume, adminRoles = ["super_
                       disabled={deletingId === d.id}
                       title="Delete draft"
                     >
-                      {deletingId === d.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {deletingId === d.id ? <ButtonOrb state="working" /> : <Trash2 className="h-3.5 w-3.5" />}
                     </Button>
                   )}
                 </div>

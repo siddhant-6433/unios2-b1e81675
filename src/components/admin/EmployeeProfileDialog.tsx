@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, User, Briefcase, GraduationCap, MapPin, Save, FileText } from "lucide-react";
+import { X, User, Briefcase, GraduationCap, MapPin, Save, FileText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 
 interface EmployeeProfileDialogProps {
   open: boolean;
@@ -251,7 +252,7 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
               disabled={saving}
               className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
               {saving ? "Saving…" : "Save"}
             </button>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1">
@@ -263,7 +264,7 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
         {/* Body */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <OrbLoader state="working" />
           </div>
         ) : (
           <div className="overflow-y-auto flex-1 p-6">

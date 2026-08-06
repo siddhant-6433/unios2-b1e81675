@@ -2,6 +2,7 @@ import { Component, ReactNode, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -915,7 +916,7 @@ export default function AdminApplicationView() {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="searching" />
       </div>
     );
   }
@@ -1099,7 +1100,7 @@ export default function AdminApplicationView() {
               onClick={() => createLinkedLead()}
               disabled={repairingLead}
             >
-              {repairingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              {repairingLead ? <ButtonOrb state="working" /> : <UserPlus className="h-3.5 w-3.5" />}
               Create Linked Lead
             </Button>
           )}
@@ -1153,7 +1154,7 @@ export default function AdminApplicationView() {
               onClick={generateFormPdf}
               disabled={generatingFormPdf}
             >
-              {generatingFormPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+              {generatingFormPdf ? <ButtonOrb state="working" /> : <FileText className="h-3.5 w-3.5" />}
               Generate Form PDF
             </Button>
           )}
@@ -1185,7 +1186,7 @@ export default function AdminApplicationView() {
               onClick={openProgramEditor}
               disabled={courseOptionsLoading || savingProgram}
             >
-              {savingProgram ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              {savingProgram ? <ButtonOrb state="working" /> : <Pencil className="h-3.5 w-3.5" />}
               Edit Program
             </Button>
           )}
@@ -1386,7 +1387,7 @@ export default function AdminApplicationView() {
                   title={hasOffer ? undefined : reason}
                   className={hasOffer ? "bg-info hover:bg-info/60 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
                 >
-                  {repairingLead ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
+                  {repairingLead ? <ButtonOrb state="working" onFilled /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
                   {hasOffer ? "View Offer Letter" : lead?.id ? "Issue Offer Letter" : "Create Lead & Issue Offer"}
                 </Button>
               );
@@ -1452,7 +1453,7 @@ export default function AdminApplicationView() {
           />
           <div className="flex justify-end">
             <Button size="sm" onClick={addComment} disabled={!newComment.trim() || savingComment}>
-              {savingComment ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+              {savingComment ? <ButtonOrb state="working" onFilled /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
               Add comment
             </Button>
           </div>
@@ -1574,7 +1575,7 @@ export default function AdminApplicationView() {
               onClick={saveProgramChange}
               disabled={savingProgram || !editCourseId || editCourseId === currentCourseOption?.id}
             >
-              {savingProgram && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              {savingProgram && <ButtonOrb state="working" onFilled />}
               Save Program
             </Button>
           </DialogFooter>

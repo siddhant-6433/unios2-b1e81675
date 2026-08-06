@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -12,10 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Loader2, Plus, Search, Filter, BookOpen, Calendar, GraduationCap,
-  ArrowRight, Clock,
-} from "lucide-react";
+import { Plus, Search, Filter, BookOpen, Calendar, GraduationCap, ArrowRight, Clock } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -305,7 +303,7 @@ const UnitPlanner = () => {
       {/* Loading */}
       {loading && (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       )}
 
@@ -501,7 +499,7 @@ const UnitPlanner = () => {
               onClick={handleCreate}
               disabled={creating || !createForm.title.trim()}
             >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
+              {creating ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4 mr-1" />}
               Create
             </Button>
           </DialogFooter>

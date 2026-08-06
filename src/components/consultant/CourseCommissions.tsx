@@ -1,11 +1,12 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Edit, Save, X, Clock } from "lucide-react";
+import { Edit, Save, X, Clock } from "lucide-react";
 
 interface Commission {
   id: string;
@@ -224,7 +225,7 @@ export function CourseCommissions({ consultantId }: Props) {
                       {isEditing ? (
                         <div className="flex items-center gap-1 justify-end">
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleSave(c)} disabled={saving}>
-                            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 text-success" />}
+                            {saving ? <ButtonOrb state="working" /> : <Save className="h-3 w-3 text-success" />}
                           </Button>
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={cancelEdit}>
                             <X className="h-3 w-3 text-muted-foreground" />

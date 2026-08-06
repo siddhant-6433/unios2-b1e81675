@@ -3,9 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { TextField, SelectField, TextAreaField } from "@/components/ui/state-fields";
-import { Loader2, Plus, CloudUpload, CheckCircle2 } from "lucide-react";
+import { Plus, CloudUpload, CheckCircle2 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { DuplicateLeadWarning } from "@/components/admissions/DuplicateLeadWarning";
@@ -383,7 +384,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add Lead
+              {saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />} Add Lead
             </Button>
           </div>
         </div>

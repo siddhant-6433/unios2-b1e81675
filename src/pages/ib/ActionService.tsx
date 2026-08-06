@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,10 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Loader2, Plus, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp,
-  Heart, Megaphone, Scale, Rocket, Leaf, Users, ClipboardList,
-} from "lucide-react";
+import { Plus, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Heart, Megaphone, Scale, Rocket, Leaf, Users, ClipboardList } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,7 +361,7 @@ const ActionService = () => {
 
             {loadingActions ? (
               <div className="flex justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <OrbLoader state="working" />
               </div>
             ) : actions.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
@@ -458,7 +456,7 @@ const ActionService = () => {
 
             {loadingServices ? (
               <div className="flex justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <OrbLoader state="working" />
               </div>
             ) : services.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
@@ -627,7 +625,7 @@ const ActionService = () => {
           <DialogFooter className="mt-4">
             <Button variant="outline" className="rounded-xl" onClick={() => setShowAddAction(false)}>Cancel</Button>
             <Button className="rounded-xl gap-2" onClick={handleAddAction} disabled={savingAction}>
-              {savingAction && <Loader2 className="h-4 w-4 animate-spin" />} Save Action
+              {savingAction && <ButtonOrb state="working" onFilled />} Save Action
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -675,7 +673,7 @@ const ActionService = () => {
           <DialogFooter className="mt-4">
             <Button variant="outline" className="rounded-xl" onClick={() => setShowAddService(false)}>Cancel</Button>
             <Button className="rounded-xl gap-2" onClick={handleAddService} disabled={savingService}>
-              {savingService && <Loader2 className="h-4 w-4 animate-spin" />} Save Service
+              {savingService && <ButtonOrb state="working" onFilled />} Save Service
             </Button>
           </DialogFooter>
         </DialogContent>

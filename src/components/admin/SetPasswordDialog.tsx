@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { KeyRound, Loader2, X, Eye, EyeOff } from "lucide-react";
+import { KeyRound, X, Eye, EyeOff } from "lucide-react";
 
 interface SetPasswordDialogProps {
   open: boolean;
@@ -120,7 +121,7 @@ const SetPasswordDialog = ({ open, onClose, userId, userName }: SetPasswordDialo
               disabled={submitting || !password || !confirm}
               className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {submitting ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : <><KeyRound className="h-4 w-4" />Set Password</>}
+              {submitting ? <><ButtonOrb state="working" onFilled />Saving…</> : <><KeyRound className="h-4 w-4" />Set Password</>}
             </button>
           </div>
         </form>

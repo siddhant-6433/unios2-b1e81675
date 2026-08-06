@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,12 +15,7 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
-import {
-  Loader2, Plus, Users, TrendingUp, IndianRupee, ArrowUpRight,
-  Download, Clock, CreditCard, Eye,
-  Building2, CheckCircle2, EyeOff, RotateCcw,
-  Link as LinkIcon, Info,
-} from "lucide-react";
+import { Plus, Users, TrendingUp, IndianRupee, ArrowUpRight, Download, Clock, CreditCard, Eye, Building2, CheckCircle2, EyeOff, RotateCcw, Link as LinkIcon, Info } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { useNavigate } from "react-router-dom";
 import { ConsultantTour } from "@/components/consultant/ConsultantTour";
@@ -681,11 +677,11 @@ const ConsultantPortal = () => {
               <div className="flex flex-wrap gap-2">
                 {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
                   <Button onClick={() => goToOnboardingStep(onboardingStep + 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving && <Loader2 className="h-4 w-4 animate-spin" />} Save & Continue
+                    {onboardingSaving && <ButtonOrb state="working" onFilled />} Save & Continue
                   </Button>
                 ) : (
                   <Button onClick={() => saveOnboarding("completed", ONBOARDING_STEPS.length - 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
+                    {onboardingSaving ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
                   </Button>
                 )}
               </div>
@@ -981,7 +977,7 @@ const ConsultantPortal = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={!form.name.trim() || !form.phone.trim() || saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add Lead
+              {saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />} Add Lead
             </Button>
           </DialogFooter>
         </DialogContent>

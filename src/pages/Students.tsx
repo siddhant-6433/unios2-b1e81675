@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload, Filter, BookOpen, Layers, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -518,7 +519,7 @@ const Students = () => {
 
           {canExportStudents && (
             <Button type="button" variant="outline" onClick={exportStudents} disabled={exporting || filtered.length === 0} className="h-10 rounded-xl gap-1.5 sm:ml-auto">
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
               Download CSV
             </Button>
           )}
@@ -624,7 +625,7 @@ const Students = () => {
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         {loading ? (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <OrbLoader state="searching" />
           </div>
         ) : loadError ? (
           <div className="p-12 text-center">

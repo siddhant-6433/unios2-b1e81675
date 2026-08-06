@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { Loader2, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 interface FeeCodeOption {
   id: string;
@@ -151,7 +152,7 @@ export function FeeStructureEditDialog({ open, onOpenChange, feeStructureId, fee
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
+              {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />} Save
             </Button>
           </div>
         </div>

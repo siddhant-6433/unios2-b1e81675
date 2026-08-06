@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StudentFeePanel } from "./StudentFeePanel";
@@ -167,7 +168,7 @@ export function CashierConsole() {
           className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           autoFocus
         />
-          {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          {searching && <ButtonOrb state="searching" className="absolute right-3 top-1/2 -translate-y-1/2" />}
         </div>
 
         {/* Search scope */}
@@ -251,7 +252,7 @@ export function CashierConsole() {
 
       {loadingTarget && (
         <div className="flex h-32 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       )}
 

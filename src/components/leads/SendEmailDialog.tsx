@@ -4,8 +4,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { TextField } from "@/components/ui/state-fields";
-import { Mail, Send, Loader2, Check } from "lucide-react";
+import { Mail, Send, Check } from "lucide-react";
 import {
   EmailTemplatePicker, useEmailTemplates, fillEmailVars, sendEmailTemplate,
 } from "@/components/leads/EmailTemplatePicker";
@@ -98,7 +99,7 @@ export function SendEmailDialog({ open, onOpenChange, lead, defaultVariables, de
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button onClick={handleSend} disabled={!selectedSlug || !toEmail || sending} className="gap-2">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {sending ? <ButtonOrb state="connecting" onFilled /> : <Send className="h-4 w-4" />}
                 Send Email
               </Button>
             </DialogFooter>

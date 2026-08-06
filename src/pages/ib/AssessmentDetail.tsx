@@ -3,11 +3,9 @@ import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Loader2, Save, CheckCircle, ArrowLeft, Calendar, Users,
-  BookOpen, MessageSquare, Tag,
-} from "lucide-react";
+import { Save, CheckCircle, ArrowLeft, Calendar, Users, BookOpen, MessageSquare, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
@@ -339,7 +337,7 @@ export default function AssessmentDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -406,7 +404,7 @@ export default function AssessmentDetail() {
             </Button>
           )}
           <Button size="sm" onClick={saveAll} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
             Save All
           </Button>
         </div>

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
@@ -9,12 +10,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
-  Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
-  Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download,
-} from "lucide-react";
+import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -241,7 +237,14 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 }
 
 function DeferredBlock({ className = "h-24" }: { className?: string }) {
-  return <div className={`rounded-2xl border border-border/40 bg-muted/20 flutes ${className}`} />;
+  // load-delayed goes on the wrapper: it owns `animation`, and an element can
+  // only run one animation shorthand — putting it on the blade-skeleton div
+  // would silently kill the skeleton's pulse.
+  return (
+    <div className="load-delayed">
+      <div className={`rounded-2xl border border-border/40 blade-skeleton ${className}`} />
+    </div>
+  );
 }
 
 const Admissions = () => {
@@ -1731,7 +1734,7 @@ const Admissions = () => {
           <h1 className="text-lg font-semibold text-foreground">Admissions CRM could not load</h1>
           <p className="mt-2 text-sm text-muted-foreground">{loadError}</p>
           <Button className="mt-5" onClick={() => fetchLeads()} disabled={loading}>
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {loading && <ButtonOrb state="working" onFilled />}
             Retry
           </Button>
         </div>
@@ -1813,7 +1816,7 @@ const Admissions = () => {
               className="gap-2"
               title="Export leads matching the current filters"
             >
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
               Download CSV
             </Button>
           )}
@@ -2283,7 +2286,7 @@ const Admissions = () => {
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
-              <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
+              <ButtonOrb state="searching" className="absolute left-3 top-1/2 -translate-y-1/2" />
             ) : (
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             )}
@@ -2494,7 +2497,7 @@ const Admissions = () => {
                 className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 hover:bg-muted/40"
               >
                 {applicationStageResolving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <ButtonOrb state="working" />
                 ) : (
                   <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
@@ -3129,7 +3132,7 @@ const Admissions = () => {
               }
               className="gap-2"
             >
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <ListPlus className="h-4 w-4" />}
               {assignAfterCreate
                 ? "Create & assign"
                 : listMode === "new" ? "Create List" : "Add to List"}
@@ -3209,7 +3212,7 @@ const Admissions = () => {
               disabled={submittingRequest || (deleteReason === "other" && !deleteCustomMsg.trim())}
               className="gap-2"
             >
-              {submittingRequest && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submittingRequest && <ButtonOrb state="working" onFilled />}
               Submit Request
             </Button>
           </DialogFooter>
@@ -3228,7 +3231,7 @@ const Admissions = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleBulkDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {deleting && <ButtonOrb state="working" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

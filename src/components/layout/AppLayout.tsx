@@ -1,4 +1,5 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { PageLoader } from "@/components/ui/page-loader";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
@@ -189,22 +190,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {deferredShellReady && role !== "counsellor" && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : "overflow-auto p-6"}`}>
-              <Suspense fallback={
-                <div className="animate-rs-slide-up space-y-6">
-                  <div className="blade-indeterminate h-0.5 w-full rounded-full bg-primary/20" />
-                  <div className="space-y-2">
-                    <div className="h-7 w-48 rounded-lg blade-skeleton" />
-                    <div className="h-4 w-80 rounded-md blade-skeleton" />
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="h-28 rounded-xl flutes" />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '80ms' }} />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '160ms' }} />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '240ms' }} />
-                  </div>
-                  <div className="h-64 rounded-xl flutes" />
-                </div>
-              }>
+              {/* Same surface the RequirePermission gate and the page's own
+                  loading branch render, so the three handoffs read as one. */}
+              <Suspense fallback={<PageLoader className={isConsole ? "p-6" : undefined} />}>
                 {children}
               </Suspense>
             </main>

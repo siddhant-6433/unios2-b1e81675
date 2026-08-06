@@ -7,11 +7,12 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
-import { Loader2, Footprints, IndianRupee, ArrowRight } from "lucide-react";
+import { Footprints, IndianRupee, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface Course { id: string; name: string }
@@ -140,7 +141,7 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
               <>
                 <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
                 <Button onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {submitting ? <ButtonOrb state="working" onFilled /> : null}
                   {submitting ? "Recording…" : "Check in"}
                 </Button>
               </>

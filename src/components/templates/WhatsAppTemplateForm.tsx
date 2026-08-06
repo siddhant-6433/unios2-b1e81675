@@ -3,11 +3,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/state-fields";
-import { Loader2, Send, Upload, X, Plus, Image as ImageIcon } from "lucide-react";
+import { Send, Upload, X, Plus, Image as ImageIcon } from "lucide-react";
 
 type HeaderType = "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
 type ButtonType = "URL" | "QUICK_REPLY" | "PHONE_NUMBER";
@@ -354,7 +355,7 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
                   </div>
                 ) : (
                   <Button variant="outline" size="sm" className="gap-2 w-full" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {uploading ? <ButtonOrb state="connecting" /> : <Upload className="h-4 w-4" />}
                     Upload {headerType.toLowerCase()} sample
                   </Button>
                 )}
@@ -487,7 +488,7 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={!canSubmit} className="gap-2">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {submitting ? <ButtonOrb state="connecting" onFilled /> : <Send className="h-4 w-4" />}
             Submit to Meta
           </Button>
         </DialogFooter>

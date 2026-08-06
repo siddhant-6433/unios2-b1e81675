@@ -3,8 +3,9 @@ import jsPDF from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, CheckCircle2, Building2 } from "lucide-react";
+import { CheckCircle2, Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 // Shared row shape from the consultant_payout_sheet view (select "*").
@@ -166,7 +167,7 @@ export function MarkPaidDialog({ payout, onClose, onDone }: { payout: PayoutShee
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button onClick={submit} disabled={saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Mark paid
+              {saving ? <ButtonOrb state="solving" onFilled /> : <CheckCircle2 className="h-4 w-4" />}Mark paid
             </Button>
           </div>
         </div>
@@ -201,7 +202,7 @@ export function ZohoSyncButton({ row, onDone }: { row: PayoutSheetRow; onDone: (
   }
   return (
     <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px]" disabled={busy} onClick={send} title={row.zoho_sync_error || "Create a bill in Zoho Books"}>
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Building2 className="h-3.5 w-3.5" />}Send to Zoho
+      {busy ? <ButtonOrb state="solving" /> : <Building2 className="h-3.5 w-3.5" />}Send to Zoho
     </Button>
   );
 }

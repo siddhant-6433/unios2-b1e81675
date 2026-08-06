@@ -2,16 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ReceiptDialog, type FeeLineItem, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { useAuth } from "@/contexts/AuthContext";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 import uniosLogo from "@/assets/unios-logo.png";
-import {
-  Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
-  ArrowRight, Download, Home,
-} from "lucide-react";
+import { AlertCircle, CheckCircle, CreditCard, ShieldCheck, ArrowRight, Download, Home } from "lucide-react";
 
 type Step = "verify" | "fees" | "paying" | "receipt";
 
@@ -561,7 +559,7 @@ export default function PaymentPortal() {
         <main className="flex-1 max-w-lg mx-auto w-full px-4 py-8 space-y-6">
           {loading && (
             <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              <OrbLoader state="working" />
             </div>
           )}
 
@@ -745,7 +743,7 @@ export default function PaymentPortal() {
           {/* Step 3: Waiting for popup */}
           {step === "paying" && (
             <div className="flex flex-col items-center justify-center py-20 space-y-4">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <OrbLoader state="working" />
               <p className="text-sm font-medium text-gray-600">Complete payment in the popup window</p>
               <p className="text-xs text-gray-400">Do not close this page</p>
             </div>

@@ -1,13 +1,10 @@
 import { useState, useRef, useEffect, type ReactNode, type ReactElement } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
-import {
-  Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
-  BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion,
-} from "lucide-react";
+import { Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3, BanIcon, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock, AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
@@ -538,7 +535,7 @@ export function CallDispositionDialog({
 
             {/* Waiting spinner */}
             <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
-              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              <OrbLoader state="connecting" />
               <p className="text-sm font-medium text-foreground">
                 {callStarting ? "Starting Cloud Call..." : `Waiting for ${leadName} to pick up...`}
               </p>
@@ -582,7 +579,7 @@ export function CallDispositionDialog({
                 disabled={callStarting || cancelling}
                 className="text-xs"
               >
-                {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}
+                {cancelling ? <ButtonOrb state="working" /> : "Cancel"}
               </Button>
             </div>
           </div>,
@@ -627,7 +624,7 @@ export function CallDispositionDialog({
                   finally { setRetrying(false); }
                 }}
               >
-                {retrying ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
+                {retrying ? <ButtonOrb state="working" onFilled /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
                 Redial
               </Button>
               <Button
@@ -1087,7 +1084,7 @@ export function CallDispositionDialog({
                     disabled={!disposition || !visitCampusId || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2 bg-success hover:bg-success/90"
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <MapPin className="h-4 w-4" />}
                     Save & Schedule Visit
                   </Button>
                 )}
@@ -1097,7 +1094,7 @@ export function CallDispositionDialog({
                     disabled={!disposition || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2"
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <Clock className="h-4 w-4" />}
                     Save & Schedule Follow-up
                   </Button>
                 )}

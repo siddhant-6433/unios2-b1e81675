@@ -1,5 +1,6 @@
-import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowRight, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { TextAreaField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 
@@ -56,7 +57,7 @@ export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving,
           </Button>
         ) : <div />}
         <Button onClick={onNext} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>
       </div>

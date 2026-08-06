@@ -1,5 +1,6 @@
-import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowRight, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { SelectField, TextAreaField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 
@@ -153,7 +154,7 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, re
           </Button>
         ) : <div />}
         <Button onClick={onNext} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>
       </div>

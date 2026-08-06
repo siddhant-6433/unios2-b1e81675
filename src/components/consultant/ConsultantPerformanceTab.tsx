@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, Search } from "lucide-react";
+import { OrbLoader } from "@/components/ui/thinking-orb";
+import { Search } from "lucide-react";
 
 type Row = {
   consultant_id: string;
@@ -48,7 +49,7 @@ export const ConsultantPerformanceTab = () => {
     payout_pending: t.payout_pending + Number(r.payout_pending),
   }), { leads_entered: 0, applications: 0, token_paid: 0, admissions: 0, payout_pending: 0 }), [filtered]);
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex justify-center py-12"><OrbLoader state="searching" /></div>;
 
   return (
     <div className="space-y-4">

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,23 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  BookOpen,
-  CheckCircle2,
-  FileText,
-  GraduationCap,
-  Image as ImageIcon,
-  IndianRupee,
-  Link2,
-  Loader2,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Search,
-  Upload,
-  UserPlus,
-  Users,
-} from "lucide-react";
+import { BookOpen, CheckCircle2, FileText, GraduationCap, Image as ImageIcon, IndianRupee, Link2, Pencil, Plus, RotateCcw, Search, Upload, UserPlus, Users } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 
 type Partner = {
@@ -1137,7 +1122,7 @@ export default function AcademicPartners() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={resetForm}>Cancel</Button>
-              <Button onClick={() => handleSave()} disabled={saving || !form.name.trim()} className="gap-2">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Save</Button>
+              <Button onClick={() => handleSave()} disabled={saving || !form.name.trim()} className="gap-2">{saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />} Save</Button>
             </div>
           </div>
         </DialogContent>
@@ -1264,15 +1249,15 @@ export default function AcademicPartners() {
                   Skip
                 </Button>
                 <Button variant="outline" onClick={() => saveAdminOnboarding("in_progress", false)} disabled={saving} className="gap-2">
-                  {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save Draft
+                  {saving && <ButtonOrb state="working" />} Save Draft
                 </Button>
                 {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
                   <Button onClick={() => goToOnboardingStep(onboardingStep + 1)} disabled={saving} className="gap-2">
-                    {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save & Continue
+                    {saving && <ButtonOrb state="working" onFilled />} Save & Continue
                   </Button>
                 ) : (
                   <Button onClick={() => saveAdminOnboarding("completed", true, ONBOARDING_STEPS.length - 1)} disabled={saving} className="gap-2">
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
+                    {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
                   </Button>
                 )}
               </div>
@@ -1312,7 +1297,7 @@ export default function AcademicPartners() {
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowAssignment(false)}>Cancel</Button>
-              <Button onClick={() => handleAddAssignment()} disabled={saving || !assignmentForm.course_id} className="gap-2">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Add Assignment</Button>
+              <Button onClick={() => handleAddAssignment()} disabled={saving || !assignmentForm.course_id} className="gap-2">{saving ? <ButtonOrb state="working" onFilled /> : <Link2 className="h-4 w-4" />} Add Assignment</Button>
             </div>
           </div>
         </DialogContent>
@@ -1349,7 +1334,7 @@ export default function AcademicPartners() {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowPayoutEdit(false)}>Cancel</Button>
               <Button onClick={() => handleUpdateAssignmentPayout()} disabled={saving || !payoutEditAssignment} className="gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Save Payout
+                {saving ? <ButtonOrb state="working" onFilled /> : <Pencil className="h-4 w-4" />} Save Payout
               </Button>
             </div>
           </div>
@@ -1389,7 +1374,7 @@ export default function AcademicPartners() {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowLeadAssignment(false)}>Cancel</Button>
               <Button onClick={handleAssignLead} disabled={saving || !leadAssignmentForm.lead_id} className="gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign Lead
+                {saving ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />} Assign Lead
               </Button>
             </div>
           </div>

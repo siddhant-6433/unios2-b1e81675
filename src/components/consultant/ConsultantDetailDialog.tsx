@@ -3,9 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw } from "lucide-react";
+import { Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw } from "lucide-react";
 import { PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, modeLabel, CAN_MANAGE_PAYOUT_ROLES, ZohoSyncButton } from "@/components/consultant/payoutActions";
 
 type ConsultantLite = {
@@ -207,7 +208,7 @@ export function ConsultantDetailDialog({
                 <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && runSearch()}
                   placeholder="Name, phone, or admission no…" className="w-full rounded-lg border border-input bg-background py-2 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
-              <Button size="sm" onClick={runSearch} disabled={searching} className="h-8">{searching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}</Button>
+              <Button size="sm" onClick={runSearch} disabled={searching} className="h-8">{searching ? <ButtonOrb state="working" onFilled /> : "Search"}</Button>
             </div>
             {linkResults.length > 0 && (
               <div className="max-h-52 space-y-1 overflow-y-auto">
@@ -223,11 +224,11 @@ export function ConsultantDetailDialog({
                         <Badge className="text-[9px] border-0 bg-success/10 text-success">Linked</Badge>
                       ) : r.consultant_id ? (
                         <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={linkingId === r.id} onClick={() => linkLead(r.id)}>
-                          {linkingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Reassign"}
+                          {linkingId === r.id ? <ButtonOrb state="working" /> : "Reassign"}
                         </Button>
                       ) : (
                         <Button size="sm" className="h-6 px-2 text-[10px]" disabled={linkingId === r.id} onClick={() => linkLead(r.id)}>
-                          {linkingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Link"}
+                          {linkingId === r.id ? <ButtonOrb state="working" onFilled /> : "Link"}
                         </Button>
                       )}
                     </div>
@@ -249,7 +250,7 @@ export function ConsultantDetailDialog({
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex justify-center py-10"><OrbLoader state="working" /></div>
         ) : (
           <div className="pt-1">
             {tab === "overview" && (
@@ -325,7 +326,7 @@ export function ConsultantDetailDialog({
                                 {editing ? (
                                   <span className="inline-flex gap-1">
                                     <Button size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={commSaving} onClick={() => saveComm(l.id)}>
-                                      {commSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5 text-success" />}
+                                      {commSaving ? <ButtonOrb state="working" /> : <Check className="h-3.5 w-3.5 text-success" />}
                                     </Button>
                                     <Button size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={commSaving} onClick={() => setEditCommId(null)}>
                                       <X className="h-3.5 w-3.5" />
@@ -420,7 +421,7 @@ export function ConsultantDetailDialog({
                               )}
                               {canManagePayout && p.status === "paid" && (
                                 <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[10px] text-muted-foreground" disabled={payoutBusyId === p.payout_id} onClick={() => unmarkPayout(p)}>
-                                  {payoutBusyId === p.payout_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Revert
+                                  {payoutBusyId === p.payout_id ? <ButtonOrb state="working" /> : <RotateCcw className="h-3.5 w-3.5" />}Revert
                                 </Button>
                               )}
                             </td>
@@ -454,7 +455,7 @@ export function ConsultantDetailDialog({
                   {/* Right: inline preview */}
                   <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-muted/10">
                     {previewLoading ? (
-                      <div className="flex h-[60vh] items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                      <div className="flex h-[60vh] items-center justify-center"><OrbLoader state="working" /></div>
                     ) : previewUrl && previewDoc ? (
                       <div className="flex h-[60vh] flex-col">
                         <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">

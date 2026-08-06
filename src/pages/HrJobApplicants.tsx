@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  UserPlus, Loader2, MessageSquare, ExternalLink, Sparkles,
-  Briefcase, CheckCircle2, XCircle, Clock, Search,
-} from "lucide-react";
+import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -222,7 +220,7 @@ const HrJobApplicants = () => {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">

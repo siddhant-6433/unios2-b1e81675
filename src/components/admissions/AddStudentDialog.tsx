@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TextField, SelectField, DatePickerField } from "@/components/ui/state-fields";
@@ -794,7 +795,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5"><ChevronLeft className="h-4 w-4" /> Back</Button>
               <Button onClick={handleSubmit} disabled={saving || !canSubmit} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />}
                 Add Student
               </Button>
             </div>

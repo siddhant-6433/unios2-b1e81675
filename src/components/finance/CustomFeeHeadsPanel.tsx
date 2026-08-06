@@ -11,13 +11,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, Plus, Tag, Power, Trash2, Search } from "lucide-react";
+import { Plus, Tag, Power, Trash2, Search } from "lucide-react";
 
 type Option = { id: string; name: string };
 type StudentHit = { id: string; name: string; admission_no: string | null };
@@ -382,7 +383,7 @@ export function CustomFeeHeadsPanel() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
             <Button onClick={handleCreate} disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {saving ? <ButtonOrb state="working" onFilled /> : null}
               {saving ? "Saving…" : "Enable"}
             </Button>
           </DialogFooter>

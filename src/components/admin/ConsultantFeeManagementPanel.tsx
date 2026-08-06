@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 // ConsultantFeeManagementPanel — admin enables/disables (per consultant +
 // course + session) the ability for a consultant to hide the fee structure
 // from their linked students' logins. Disabling instantly restores the normal
@@ -10,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/state-fields";
-import { Loader2, RefreshCw, ToggleLeft, ToggleRight, ShieldCheck, Plus } from "lucide-react";
+import { RefreshCw, ToggleLeft, ToggleRight, ShieldCheck, Plus } from "lucide-react";
 
 interface Option { id: string; name: string }
 interface ConfigRow {
@@ -131,7 +132,7 @@ export default function ConsultantFeeManagementPanel() {
           />
         </div>
         <Button className="mt-3 gap-2" onClick={addConfig} disabled={saving}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />}
           Enable
         </Button>
       </div>

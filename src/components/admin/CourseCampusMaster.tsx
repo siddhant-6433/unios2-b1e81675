@@ -2,12 +2,10 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Building2, GraduationCap, Pencil, Check, X, Plus, Loader2,
-  ChevronDown, ChevronRight, Shield, MapPin, Trash2, Power, Video,
-} from "lucide-react";
+import { Building2, GraduationCap, Pencil, Check, X, Plus, ChevronDown, ChevronRight, Shield, MapPin, Trash2, Power, Video } from "lucide-react";
 import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
 import GeofenceDialog from "./GeofenceDialog";
 
@@ -209,7 +207,7 @@ export default function CourseCampusMaster() {
 
   if (loading) return (
     <div className="flex items-center justify-center py-16">
-      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      <OrbLoader state="working" />
     </div>
   );
 
@@ -739,7 +737,7 @@ function CustomGeofenceForm({ initial, onSave, onCancel }: {
         </div>
         <div className="flex gap-2">
           <Button onClick={handleSubmit} size="sm" disabled={!isValid || saving} className="gap-1 h-8 rounded-lg">
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {saving ? <ButtonOrb state="working" onFilled /> : <Check className="h-3.5 w-3.5" />}
             {initial ? "Update" : "Add"}
           </Button>
           <Button onClick={onCancel} size="sm" variant="ghost" className="h-8 rounded-lg">

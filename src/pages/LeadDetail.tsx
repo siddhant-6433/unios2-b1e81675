@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,11 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
 import { useToast } from "@/hooks/use-toast";
-import {
-  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
-  Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet,
-} from "lucide-react";
+import { ArrowLeft, Trash2, ArrowRightLeft, Phone, Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints, ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1112,7 +1109,7 @@ const LeadDetail = () => {
   // can paint immediately while heavy children stream in)
   const lazyFallback = (
     <div className="flex h-24 items-center justify-center text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />
+      <ButtonOrb state="working" />
     </div>
   );
   const currentExternalOwner = lead.consultant_id
@@ -1358,7 +1355,7 @@ const LeadDetail = () => {
                 title={tooltip || label}
               >
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
-                  {disabled && (label === "AI Call" || label === "Cloud Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                  {disabled && (label === "AI Call" || label === "Cloud Call") ? <ButtonOrb state="working" /> : <Icon className="h-4 w-4" />}
                 </div>
                 <div className="flex min-h-4 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                   <span>{label}</span>
@@ -1381,7 +1378,7 @@ const LeadDetail = () => {
           phone) was removed on user request; "Call Now" still opens tel:. */}
       <Suspense fallback={showCallDisposition ? (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 dark:border-cyan-900/50 dark:bg-cyan-950/20 px-4 py-3 flex items-center gap-2 text-sm text-cyan-900 dark:text-cyan-100">
-          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          <ButtonOrb state="working" />
           Opening call disposition...
         </div>
       ) : null}>
@@ -1937,7 +1934,7 @@ const LeadDetail = () => {
               disabled={savingNotInterested || notInterestedReason.trim().split(/\s+/).filter(Boolean).length < 5}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {savingNotInterested && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {savingNotInterested && <ButtonOrb state="working" />}
               Mark Not Interested
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1956,7 +1953,7 @@ const LeadDetail = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingLead}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteLead} disabled={deletingLead} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deletingLead && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {deletingLead && <ButtonOrb state="working" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2211,7 +2208,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
           <DialogFooter>
             <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
             <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-success hover:bg-success/90">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
               {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
             </Button>
           </DialogFooter>
@@ -2243,7 +2240,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               toast({ title: "Visit rescheduled" });
               setSaving(false); setRescheduleDialog(null); onRefresh();
             }}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Calendar className="h-4 w-4 mr-2" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Calendar className="h-4 w-4 mr-2" />}
               Reschedule Visit
             </Button>
           </div>
@@ -2299,7 +2296,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               }
               setSaving(false); setNoShowDialog(null); onRefresh();
             }}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {saving ? <ButtonOrb state="working" onFilled /> : null}
               {noShowAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
             </Button>
           </div>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Loader2, User, GraduationCap, FileText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 
 interface SearchResult {
   type: "lead" | "student" | "application";
@@ -165,7 +166,7 @@ export function HeaderSearch() {
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               autoFocus
             />
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
+            {loading && <ButtonOrb state="searching" />}
             {query && !loading && (
               <button onClick={() => { setQuery(""); setResults([]); }} className="text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />

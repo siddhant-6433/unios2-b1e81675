@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 interface SeatRow {
   course_id: string;
@@ -54,7 +55,7 @@ export function SeatMatrix() {
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        <OrbLoader state="solving" />
       </div>
     );
   }

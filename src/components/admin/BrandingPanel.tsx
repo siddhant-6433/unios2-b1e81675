@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -327,7 +328,7 @@ export function BrandingPanel() {
             <div className="flex-1 bg-muted/40 relative">
               {previewLoading && (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <OrbLoader state="working" />
                 </div>
               )}
               {previewUrl && (

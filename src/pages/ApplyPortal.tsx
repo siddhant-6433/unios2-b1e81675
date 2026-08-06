@@ -1,9 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import {
-  GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
-  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound, AlertCircle,
-} from "lucide-react";
+import { GraduationCap, CheckCircle, LogOut, MapPin, Pencil, ChevronDown, ChevronUp, FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound, AlertCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -394,7 +392,7 @@ function OtpLogin({
   if (checkingSession) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -527,7 +525,7 @@ function OtpLogin({
                 </div>
               )}
               <Button className="w-full gap-2 h-11" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {loading && <ButtonOrb state="working" onFilled />}
                 {otpSent ? "Verify & Continue" : "Send OTP via WhatsApp"}
               </Button>
             </div>
@@ -566,7 +564,7 @@ function OtpLogin({
                 </div>
               )}
               <Button className="w-full gap-2 h-11" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {loading && <ButtonOrb state="working" onFilled />}
                 {otpSent ? "Verify & Continue" : "Get OTP on WhatsApp"}
               </Button>
               {!otpSent && (
@@ -602,7 +600,7 @@ function OtpLogin({
                 />
               </div>
               <Button className="w-full gap-2 h-11" disabled={loading} onClick={handleAppIdLookup}>
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {loading && <ButtonOrb state="working" onFilled />}
                 Find My Application
               </Button>
               <button
@@ -641,7 +639,7 @@ function OtpLogin({
                 />
               </div>
               <Button type="submit" className="w-full gap-2 h-11" disabled={loading}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                {loading ? <ButtonOrb state="working" onFilled /> : <KeyRound className="h-4 w-4" />}
                 Sign in
               </Button>
               <button
@@ -663,7 +661,7 @@ function OtpLogin({
               </div>
               <Button variant="outline" className="w-full gap-2 h-11" disabled={googleLoading} onClick={handleGoogleSignIn}>
                 {googleLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <ButtonOrb state="working" />
                 ) : (
                   <svg className="h-4 w-4" viewBox="0 0 24 24">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -1002,7 +1000,7 @@ function AllReceiptsDialog({
         <div className="flex-1 overflow-y-auto">
           {loading && (
             <div className="px-5 py-8 flex items-center justify-center text-xs text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading receipts…
+              <ButtonOrb state="searching" className="mr-2" /> Loading receipts…
             </div>
           )}
 
@@ -1574,7 +1572,7 @@ function ApplicationDashboardView({
                       disabled={generatingPdfFor === a.id}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all disabled:opacity-60"
                     >
-                      {generatingPdfFor === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                      {generatingPdfFor === a.id ? <ButtonOrb state="working" /> : <FileText className="h-3.5 w-3.5" />}
                       Generate PDF
                     </button>
                   )}
@@ -1596,7 +1594,7 @@ function ApplicationDashboardView({
                   )}
                   {hasApprovedOffer && !hasLetterPdf && (
                     <span className="inline-flex items-center gap-1.5 rounded-xl border border-gray-100 bg-gray-50 px-3.5 py-2 text-xs text-gray-400">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Letter preparing…
+                      <ButtonOrb state="composing" /> Letter preparing…
                     </span>
                   )}
                   {hasApprovedOffer && (
@@ -2410,7 +2408,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   if (restoringSession) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -2511,13 +2509,13 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
                   disabled={generatingApplicationPdf}
                   className="gap-1.5"
                 >
-                  {generatingApplicationPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  {generatingApplicationPdf ? <ButtonOrb state="working" /> : <FileText className="h-3.5 w-3.5" />}
                   Generate PDF
                 </Button>
               )}
               {!app.form_pdf_url && generatingApplicationPdf && (
                 <span className="inline-flex items-center gap-1.5 rounded-lg border border-muted bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />Preparing PDF
+                  <ButtonOrb state="composing" />Preparing PDF
                 </span>
               )}
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">

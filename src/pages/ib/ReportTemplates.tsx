@@ -2,13 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Plus, Edit, Star, Archive, Eye, ChevronUp, ChevronDown, GripVertical,
-} from "lucide-react";
+import { Plus, Edit, Star, Archive, Eye, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -189,7 +188,7 @@ const ReportTemplates = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="searching" />
       </div>
     );
   }
@@ -373,7 +372,7 @@ const ReportTemplates = () => {
                       Cancel
                     </Button>
                     <Button onClick={saveTemplate} disabled={saving}>
-                      {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                      {saving && <ButtonOrb state="working" onFilled />}
                       Save Template
                     </Button>
                   </div>
@@ -441,7 +440,7 @@ const ReportTemplates = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={creating || !newName.trim()}>
-              {creating && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {creating && <ButtonOrb state="working" onFilled />}
               Create
             </Button>
           </DialogFooter>

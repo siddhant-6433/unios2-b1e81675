@@ -3,12 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Bot, Play, Pause, Phone, Clock, ArrowUpRight,
-  ChevronDown, ChevronUp, Loader2, PhoneCall, PhoneIncoming,
-} from "lucide-react";
+import { Bot, Play, Pause, Phone, Clock, ArrowUpRight, ChevronDown, ChevronUp, PhoneCall, PhoneIncoming } from "lucide-react";
 
 interface AiCallLog {
   id: string;
@@ -105,7 +103,7 @@ export function AiCallLogsPanel() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="connecting" />
             </div>
           ) : logs.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">

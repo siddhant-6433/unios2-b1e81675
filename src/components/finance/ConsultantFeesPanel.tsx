@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 // ConsultantFeesPanel — the consultant portal "Fees" tab. Lists the
 // consultant's linked students whose course+session is enabled in
 // consultant_fee_management (via the consultant_fee_students RPC — no direct
@@ -15,7 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { openRazorpayCheckout, buildRazorpayReceipt } from "@/lib/razorpayCheckout";
-import { Loader2, RefreshCw, IndianRupee, Link as LinkIcon, EyeOff } from "lucide-react";
+import { RefreshCw, IndianRupee, Link as LinkIcon, EyeOff } from "lucide-react";
 
 interface FeeStudent {
   student_id: string;
@@ -154,7 +155,7 @@ export function ConsultantFeesPanel() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => payNow(s)} disabled={busyId === s.student_id}>
-                          {busyId === s.student_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <IndianRupee className="h-3.5 w-3.5" />}
+                          {busyId === s.student_id ? <ButtonOrb state="working" /> : <IndianRupee className="h-3.5 w-3.5" />}
                           Pay now
                         </Button>
                         <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setPayLinkStudent(s)}>

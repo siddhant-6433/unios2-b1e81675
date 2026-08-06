@@ -6,8 +6,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Send, Loader2, Check, AlertTriangle, Users } from "lucide-react";
+import { MessageSquare, Send, Check, AlertTriangle, Users } from "lucide-react";
 
 const TEMPLATES = [
   { key: "lead_welcome", label: "Lead Welcome", description: "Welcome message with course info" },
@@ -201,7 +202,7 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
               >
                 {sending ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <ButtonOrb state="connecting" onFilled />
                     Sending...
                   </>
                 ) : (

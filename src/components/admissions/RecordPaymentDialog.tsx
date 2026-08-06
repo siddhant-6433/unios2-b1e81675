@@ -6,9 +6,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
-import { IndianRupee, Loader2, Upload, FileImage, X } from "lucide-react";
+import { IndianRupee, Upload, FileImage, X } from "lucide-react";
 import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
 
 const PAYMENT_TYPES = [
@@ -417,7 +418,7 @@ export function RecordPaymentDialog({
             }
             className="gap-2"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />}
+            {saving ? <ButtonOrb state="connecting" onFilled /> : <IndianRupee className="h-4 w-4" />}
             Record Payment
           </Button>
         </DialogFooter>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import {
@@ -1256,7 +1257,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 onClick={generateLoanLetter}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2.5 text-xs font-bold text-white hover:bg-primary/60 transition-colors disabled:opacity-50"
               >
-                {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                {generatingLoanLetter ? <ButtonOrb state="composing" onFilled /> : <FileText className="h-3.5 w-3.5" />}
                 {useLocalLoanLetterPreview ? "Preview latest local" : offer.loan_letter_url ? "View Latest" : "Generate"}
               </button>
             </div>
@@ -1462,7 +1463,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           disabled={paying}
                           className="inline-flex items-center gap-2 rounded-xl bg-info px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-info/90 disabled:opacity-60 transition-colors"
                         >
-                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />}
+                          {paying ? <ButtonOrb state="composing" /> : <IndianRupee className="h-4 w-4" />}
                           Pay remaining course fee (₹{feeDue.due_total.toLocaleString("en-IN")})
                         </button>
                         {feeDue.heads.length > 0 && (
@@ -1760,7 +1761,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               >
                 {abvmuSubmitting ? (
                   <span className="inline-flex items-center gap-2 justify-center">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Submitting…
+                    <ButtonOrb state="composing" /> Submitting…
                   </span>
                 ) : (
                   "Submit for super-admin approval"
@@ -1810,7 +1811,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 onClick={sendOfferOtp}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-warning px-3.5 py-2.5 text-xs font-bold text-white hover:bg-warning/60 disabled:opacity-50"
               >
-                {offerOtpLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {offerOtpLoading ? <ButtonOrb state="composing" onFilled /> : null}
                 {offerOtpSent ? "Resend OTP" : "Send OTP"}
               </button>
               <input
@@ -1971,7 +1972,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     })}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
                   >
-                    {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                    {paying ? <ButtonOrb state="composing" onFilled /> : <CreditCard className="h-4 w-4" />}
                     Pay {fmtRupee(y1Due)} · Year 1 fee
                   </button>
                 )}
@@ -2099,7 +2100,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       }}
                       className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-success px-5 py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
                     >
-                      {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                      {paying ? <ButtonOrb state="composing" onFilled /> : <CreditCard className="h-4 w-4" />}
                       Pay {fmtRupee(fcDue)}
                     </button>
                   )}
@@ -2189,7 +2190,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 })}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3.5 text-sm font-bold text-white hover:bg-info/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
               >
-                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                {paying ? <ButtonOrb state="composing" /> : <CreditCard className="h-4 w-4" />}
                 Pay ₹{towardsAdmission.toLocaleString("en-IN")} · Confirm Admission
               </button>
             </div>
@@ -2241,7 +2242,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         onClick={() => startPayment(tokenOutstanding)}
                         className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-info px-4 py-2.5 text-sm font-bold text-white hover:bg-info/60 active:scale-95 transition-all disabled:opacity-50"
                       >
-                        {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                        {paying ? <ButtonOrb state="composing" /> : <CreditCard className="h-3.5 w-3.5" />}
                         Pay Now
                       </button>
                     </div>
@@ -2312,7 +2313,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           onClick={() => selectedAmt && startPayment(selectedAmt)}
                           className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-info py-3 text-sm font-bold text-white hover:bg-info/60 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
                         >
-                          {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                          {paying ? <ButtonOrb state="composing" /> : <CreditCard className="h-4 w-4" />}
                           {selectedAmt ? `Pay ₹${selectedAmt.toLocaleString("en-IN")} Now` : "Select an amount above"}
                         </button>
                       </div>

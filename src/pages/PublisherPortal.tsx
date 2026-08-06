@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,11 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/state-fields";
-import {
-  Loader2, Users, TrendingUp, CheckCircle, Clock,
-  Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
-  BookOpen, MapPin, BarChart3,
-} from "lucide-react";
+import { Users, TrendingUp, CheckCircle, Clock, Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff, BookOpen, MapPin, BarChart3 } from "lucide-react";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 
@@ -409,7 +406,7 @@ export default function PublisherPortal() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -481,7 +478,7 @@ export default function PublisherPortal() {
                   }}
                   className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  {impersonatingUser ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />}
+                  {impersonatingUser ? <ButtonOrb state="working" onFilled /> : <Users className="h-3.5 w-3.5" />}
                   Login as {pub.display_name}
                 </button>
               ) : (
@@ -1083,7 +1080,7 @@ export default function PublisherPortal() {
                   </h3>
                   {activitiesLoading ? (
                     <div className="flex justify-center py-4">
-                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <ButtonOrb state="working" />
                     </div>
                   ) : activities.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-4">No timeline events yet.</p>

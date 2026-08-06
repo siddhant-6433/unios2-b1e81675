@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, ShieldCheck, ShieldOff } from "lucide-react";
+import { X, ShieldCheck, ShieldOff } from "lucide-react";
 
 interface Permission {
   id: string;
@@ -201,7 +202,7 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : (
             Object.entries(grouped).map(([module, perms]) => (
@@ -249,7 +250,7 @@ export default function UserPermissionsDialog({ open, onClose, userId, userName,
                           }`}
                         >
                           {isSaving ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <ButtonOrb state="working" onFilled />
                           ) : effective ? (
                             <ShieldCheck className="h-3.5 w-3.5" />
                           ) : (

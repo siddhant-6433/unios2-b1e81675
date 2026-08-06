@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check } from "lucide-react";
+import { Send, Check } from "lucide-react";
 import { WhatsAppTemplatePicker } from "@/components/leads/WhatsAppTemplatePicker";
 import {
   TEMPLATES, useWhatsAppTemplates, renderTemplatePreview, sendWhatsAppTemplate,
@@ -68,7 +69,7 @@ export function WhatsAppTab({ lead, active }: Props) {
 
       <Button onClick={handleSend} disabled={!selectedTemplate || sending || sent}
         className="w-full gap-2 bg-success hover:bg-success/60">
-        {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
+        {sending ? <><ButtonOrb state="connecting" onFilled /> Sending…</>
           : sent ? <><Check className="h-4 w-4" /> Sent!</>
           : <><Send className="h-4 w-4" /> Send WhatsApp</>}
       </Button>

@@ -5,18 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useCampus } from "@/contexts/CampusContext";
-import {
-  ChevronDown,
-  CreditCard,
-  Download,
-  FileSpreadsheet,
-  Loader2,
-  Search,
-  ShieldAlert,
-  UserCheck,
-  Users,
-} from "lucide-react";
+import { ChevronDown, CreditCard, Download, FileSpreadsheet, Search, ShieldAlert, UserCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -793,7 +784,7 @@ const IdCardCenter = () => {
 
       {loading ? (
         <div className="print:hidden flex h-48 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : (
         <div className="print:hidden rounded-xl bg-card card-shadow overflow-hidden">
@@ -871,7 +862,7 @@ function GenerateMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button className="gap-2" size={size} disabled={disabled}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {busy ? <ButtonOrb state="composing" onFilled /> : <Download className="h-4 w-4" />}
           {label}
           {!busy && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
         </Button>

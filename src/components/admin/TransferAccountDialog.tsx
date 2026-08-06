@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Loader2, ArrowRightLeft, BookOpen, Users } from "lucide-react";
 
 interface StaffOption {
@@ -438,7 +439,7 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
             disabled={saving || selectedTargetIds.length === 0 || loadingCount}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
-            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {saving && <ButtonOrb state="working" onFilled />}
             {saving ? "Transferring…" : leadCount === 0 ? "Finish transfer" : "Transfer"}
           </button>
         </DialogFooter>

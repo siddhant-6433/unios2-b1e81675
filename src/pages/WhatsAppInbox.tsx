@@ -6,6 +6,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -13,12 +15,7 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
-  FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
-  ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
-  ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon,
-} from "lucide-react";
+import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -2624,16 +2621,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     );
   }
 
-  if (loading) return (
-    <div className="flex h-64 flex-col items-center justify-center gap-3">
-      <div className="flex gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
-      </div>
-      <span className="text-xs text-muted-foreground">Loading conversations...</span>
-    </div>
-  );
+  if (loading) return <PageLoader state="searching" label="Loading conversations…" />;
 
   return (
     <div className="animate-fade-in overflow-hidden">
@@ -2932,7 +2920,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         disabled={loadingMoreConversations}
                         onClick={() => void fetchConversationPage(false)}
                       >
-                        {loadingMoreConversations && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {loadingMoreConversations && <ButtonOrb state="connecting" />}
                         {loadingMoreConversations ? "Loading more..." : "Load more"}
                       </Button>
                     </div>
@@ -3051,7 +3039,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           : "border-input bg-background text-muted-foreground hover:bg-muted/50"
                       }`}
                     >
-                      {copilotLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
+                      {copilotLoading ? <ButtonOrb state="connecting" onFilled /> : <Bot className="h-3 w-3" />}
                       Copilot
                     </button>
                     {selectedConv?.lead_id && (
@@ -3229,7 +3217,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           disabled={copilotLoading}
                           onClick={() => void runCopilotAssist()}
                         >
-                          {copilotLoading && <div className="flex gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:100ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:200ms]" /></div>}
+                          {copilotLoading && <ButtonOrb state="breathing" />}
                           Refresh
                         </Button>
                         <Button
@@ -3247,12 +3235,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     <div className="px-4 py-3">
                       {copilotLoading ? (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground animate-rs-slide-up">
-                          <div className="flex gap-1">
-                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                            <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                          </div>
-                          Thinking...
+                          <ButtonOrb state="breathing" />
+                          Thinking…
                         </div>
                       ) : copilotError ? (
                         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive animate-rs-shake">
@@ -3493,7 +3477,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                 disabled={sendingCorrection || !correctionDraft.trim()}
                                 className="flex items-center gap-1 rounded-md bg-orange-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-orange-700 disabled:opacity-50 transition-colors"
                               >
-                                {sendingCorrection ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                                {sendingCorrection ? <ButtonOrb state="connecting" /> : <Send className="h-3 w-3" />}
                                 Send & Teach
                               </button>
                               <button
@@ -3696,7 +3680,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             disabled={!selectedTemplateRender || selectedTemplateRender.unresolved.length > 0 || sendingTemplate}
                             onClick={handleSendTemplate}
                           >
-                            {sendingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                            {sendingTemplate ? <ButtonOrb state="connecting" onFilled /> : <Send className="h-3.5 w-3.5" />}
                             Send Template
                           </Button>
                         </DialogFooter>
@@ -3845,7 +3829,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           />
                         </div>
                         <Button type="submit" disabled={!withinWindow || (!reply.trim() && !replyMedia) || sending} size="icon" className="h-10 w-10 rounded-full bg-success hover:bg-success/90">
-                          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                          {sending ? <ButtonOrb state="connecting" onFilled /> : <Send className="h-4 w-4" />}
                         </Button>
                       </form>
                       {withinWindow && !showTemplatePicker && !showQuickReplies && (
@@ -3914,7 +3898,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 }
               }}
             >
-              {followupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+              {followupSaving && <ButtonOrb state="connecting" onFilled />}Save
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3974,7 +3958,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setBackfillOpen(false)} disabled={bfRunning}>Close</Button>
             <Button onClick={runBackfill} disabled={bfRunning}>
-              {bfRunning && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Run Backfill
+              {bfRunning && <ButtonOrb state="connecting" onFilled />}Run Backfill
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4042,7 +4026,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 disabled={!qrEditLabel.trim() || !qrEditText.trim() || qrSaving}
                 onClick={saveQuickReply}
               >
-                {qrSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
+                {qrSaving ? <ButtonOrb state="connecting" onFilled /> : <Plus className="h-3 w-3 mr-1" />}
                 {qrEditId ? "Save" : "Add"}
               </Button>
               {qrEditId && (
