@@ -404,6 +404,7 @@ async function* streamGeminiResponse(
         generationConfig: {
           temperature: 0.3,
           maxOutputTokens: 500,
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
       signal: controller.signal,
@@ -467,7 +468,7 @@ async function transcribeVoice(base64Audio: string): Promise<string | null> {
             { inlineData: { mimeType: "audio/webm", data: base64Audio } },
           ],
         }],
-        generationConfig: { temperature: 0.1 },
+        generationConfig: { temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
 

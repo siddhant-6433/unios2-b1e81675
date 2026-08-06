@@ -223,6 +223,9 @@ ${transcript}`;
             temperature: 0.2,
             maxOutputTokens: 500,
             response_mime_type: "application/json",
+            // Extraction, not reasoning — and thinking is spent out of
+            // maxOutputTokens before any JSON is emitted.
+            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
       },
