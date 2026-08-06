@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { downscaleForDisplay } from "../_shared/resizeImage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -197,15 +198,16 @@ Deno.serve(async (req) => {
       return json({ error: `AI photo processing failed (${last.model}, ${last.status})`, attempts }, 502);
     }
 
-    const outputBytes = base64ToBytes(processed.base64);
-    if (outputBytes.byteLength > MAX_IMAGE_BYTES) return json({ error: "Processed image exceeds 5MB" }, 413);
+    const rawOutputBytes = base64ToBytes(processed.base64);
+    if (rawOutputBytes.byteLength > MAX_IMAGE_BYTES) return json({ error: "Processed image exceeds 5MB" }, 413);
+    const display = await downscaleForDisplay(rawOutputBytes, processed.mimeType);
 
-    const ext = extForMime(processed.mimeType);
+    const ext = extForMime(display.mimeType);
     const version = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
     const path = `${student.campus_id || "unassigned"}/${student.id}/profile-${version}.${ext}`;
     const { error: uploadError } = await admin.storage
       .from(BUCKET)
-      .upload(path, outputBytes, { contentType: processed.mimeType, upsert: true });
+      .upload(path, display.bytes, { contentType: display.mimeType, upsert: true });
     if (uploadError) {
       console.error("[student-profile-photo-upload] upload failed:", uploadError);
       return json({ error: uploadError.message }, 500);
