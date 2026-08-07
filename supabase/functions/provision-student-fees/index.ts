@@ -144,13 +144,36 @@ async function provisionStudent(
   // 1. Fetch student (incl. lead_id so we can look up approved offer waivers).
   const { data: student, error: sErr } = await db
     .from("students")
-    .select("id, lead_id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id")
+    .select("id, lead_id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id, admission_date")
     .eq("id", studentId)
     .single();
 
   if (sErr || !student) throw new Error(`Student not found: ${studentId}`);
   if (!student.course_id) throw new Error("Student has no course_id");
-  if (!student.session_id) throw new Error("Student has no session_id");
+
+  // Resolve a missing academic session instead of throwing. session_id is copied
+  // verbatim from leads.session_id, which stays null unless an offer letter was
+  // approved carrying a session — so higher-ed students reach PAN/AN with a null
+  // session and their ledger never provisions (and the 25% admission-number chain
+  // silently stalls). Fall back to the admission_session whose date range covers
+  // the student's admission date (today if unset), and persist it so downstream
+  // consumers (late-fee recompute joins, UI) also see a real session.
+  if (!student.session_id) {
+    const anchor = student.admission_date || new Date().toISOString().slice(0, 10);
+    const { data: sess } = await db
+      .from("admission_sessions")
+      .select("id")
+      .lte("start_date", anchor)
+      .gte("end_date", anchor)
+      .order("is_active", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!sess) {
+      throw new Error(`Student has no session_id and no admission_session covers ${anchor}`);
+    }
+    await db.from("students").update({ session_id: sess.id }).eq("id", studentId);
+    student.session_id = sess.id;
+  }
 
   const version = student.fee_structure_version || "new_admission";
 
