@@ -19,6 +19,7 @@ import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { RowConcessionPopover } from "./RowConcessionPopover";
 import { PaidBreakdownPopover } from "./PaidBreakdownPopover";
+import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
@@ -571,6 +572,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         <p className="text-[11px] text-muted-foreground -mt-2">
           Application fee paid: ₹{Number(credit?.application_fee_paid || 0).toLocaleString("en-IN")}
         </p>
+      )}
+
+      {/* ABVMU deposit challan — cashier can submit/track on the candidate's
+          behalf (BPT/BMRIT/B.Sc Nursing carry a seat-reservation deposit).
+          Self-hides when the course has no deposit or the student has no lead. */}
+      {student?.lead_id && (
+        <AbvmuDepositPanel leadId={student.lead_id} onChanged={onRefresh} />
       )}
 
       {/* Fee table */}
