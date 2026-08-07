@@ -41,6 +41,14 @@ Key routing rules:
 - Tune question sensitivity → invoke /plan-tune
 - Code quality dashboard → invoke /health
 
+## Taste skills (Leonxlnx/taste-skill)
+
+Installed in `.claude/skills/` (symlinked from `.agents/skills/`). Use for UI/design work:
+- brandkit, gpt-taste, design-taste-frontend, design-taste-frontend-v1
+- high-end-visual-design, minimalist-ui, industrial-brutalist-ui
+- image-to-code, imagegen-frontend-web, imagegen-frontend-mobile
+- redesign-existing-projects, stitch-design-taste, full-output-enforcement
+
 ## Database migrations — NEVER hand-name the timestamp
 
 Create every migration with the helper, which stamps the real UTC clock:
