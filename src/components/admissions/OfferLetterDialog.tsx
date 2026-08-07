@@ -38,6 +38,7 @@ import {
   type FeeProposalChildLike,
 } from "@/lib/feeProposalOfferMapping";
 import { collectOfferFeeTermTotals, firstOfferFeeTerm, hasSchoolFeeOptions, SECURITY_DEPOSIT_TERM, type OfferFeeItemLike, type SchoolFeeSelection, type SchoolStudentType, type SchoolHostelType, type SchoolTransportZone } from "@/lib/offerFeeTerms";
+import { AbvmuDepositPanel } from "@/components/finance/AbvmuDepositPanel";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -1347,6 +1348,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
           <CahetRegistrationDetails registration={cahetRegistration} />
           <UpdeledRegistrationDetails registration={updeledRegistration} />
+          {/* ABVMU deposit challan — staff submit/track on the candidate's
+              behalf; self-hides when the course has no seat-reservation deposit. */}
+          <AbvmuDepositPanel leadId={leadId} onChanged={onSuccess} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}

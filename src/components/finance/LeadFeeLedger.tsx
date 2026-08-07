@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 import { PaymentEditDialog } from "./PaymentEditDialog";
 import { PaymentAuditDialog } from "./PaymentAuditDialog";
+import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
@@ -291,6 +292,12 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
           <Stat label="Paid" value={fmt(totals.ledgerPaid)} tone="emerald" />
           <Stat label="Outstanding" value={fmt(totals.ledgerBalance)} tone={totals.ledgerBalance > 0 ? "red" : "emerald"} />
         </div>
+      )}
+
+      {/* ABVMU deposit challan — staff can submit/track on the candidate's
+          behalf; self-hides when the course has no seat-reservation deposit. */}
+      {resolvedLeadId && (
+        <AbvmuDepositPanel leadId={resolvedLeadId} onChanged={() => setInternalRefresh(n => n + 1)} />
       )}
 
       {/* Credit balance — informational, read-only pre-admission (or post-
