@@ -660,6 +660,11 @@ interface BuildOpts {
   // deduction rows in the fee table; the displayed Net Offer Fee is
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
+  // Super-admin-approved ABVMU/university seat-reservation deposit already
+  // paid by the candidate. Provisional credit against the first-year due
+  // (no receipt until the university remits). Rendered as a distinct
+  // deduction line below the fee table — it is a payment, not a waiver.
+  abvmuCredit?: number;
   cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
   updeledRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
 }
@@ -910,6 +915,22 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   drawFeeLedger(ctx, ledgerRows);
 
   ctx.y -= 8;
+
+  // ── ABVMU deposit already paid to university ───────────────────────────
+  // A payment the candidate made directly to ABVMU (seat-reservation
+  // deposit), approved by super-admin. It reduces the programme fee due but
+  // is NOT a waiver, so it renders as its own labelled line rather than a
+  // column in the fee table. Receipt is issued later on remittance.
+  const abvmuCredit = Math.max(0, Number(opts.abvmuCredit || 0));
+  if (abvmuCredit > 0) {
+    const netAfterAbvmu = Math.max(0, totalApplicable - abvmuCredit);
+    drawParagraph(ctx,
+      `Less: ABVMU deposit already paid to university (provisional — receipt on remittance): - ${fmtINR(abvmuCredit)}`,
+      { size: 9.5, bold: true, color: COLORS.accent });
+    drawParagraph(ctx,
+      `Net Programme Fee Due (after ABVMU deposit adjustment): ${fmtINR(netAfterAbvmu)}`,
+      { size: 9.5, bold: true, gapAfter: 8 });
+  }
 
   // ── Token + acceptance deadline ────────────────────────────────────────
   drawSection(ctx, "ADMISSION CONFIRMATION");
@@ -1246,6 +1267,17 @@ Deno.serve(async (req) => {
       amount: Number(w.amount || 0),
     }));
 
+    // Super-admin-approved ABVMU deposit already paid to the university.
+    // Provisional credit against the course due (matches
+    // lead_abvmu_approved_credit — only 'approved', not 'settled', claims).
+    const { data: abvmuRows } = await admin
+      .from("abvmu_deposit_claims")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .eq("status", "approved");
+    const abvmuCredit = ((abvmuRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
     const { data: cahetRegistrationRow } = await admin
       .from("cahet_registrations")
       .select("registration_no, document_url, notes, registered_at")
@@ -1338,6 +1370,7 @@ Deno.serve(async (req) => {
       sessionName,
       applicationId,
       waivers,
+      abvmuCredit,
       cahetRegistration: cahetRegistration || null,
       updeledRegistration: updeledRegistration || null,
     });
