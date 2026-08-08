@@ -8,6 +8,7 @@ import { Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3, BanIcon, Ar
 import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
+import { REFERRAL_PARTNER_LABEL } from "@/lib/leadReferral";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { useToast } from "@/hooks/use-toast";
 
@@ -40,6 +41,8 @@ export interface CallDispositionData {
   cnet_appeared?: boolean | null;
   /** BPT/BMRIT-only qualifier captured when the lead/course requires CAHET context */
   cahet_registered?: boolean | null;
+  /** BPT/BMRIT-only: also hand this lead to the referral partner (Stetho) */
+  refer_to_partner?: boolean;
   /** Free-text course name captured when disposition is "course_not_listed" —
    *  compiled later to see which unlisted courses prospective leads are asking for. */
   requested_course_text?: string | null;
@@ -257,6 +260,7 @@ export function CallDispositionDialog({
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
   const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
   const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
+  const [referToPartner, setReferToPartner] = useState(false);
   const [requestedCourseText, setRequestedCourseText] = useState("");
   // Live elapsed timer for the connected phase. Starts when the parent flips
   // callStatus → "connected" and stops when the dialog closes. Pure UI; the
@@ -337,6 +341,7 @@ export function CallDispositionDialog({
     setSendCourseInfo(false);
     setCnetAppeared(null);
     setCahetRegistered(null);
+    setReferToPartner(false);
     setRequestedCourseText("");
   };
 
@@ -365,6 +370,7 @@ export function CallDispositionDialog({
         send_course_info: sendCourseInfo,
         cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
         cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
+        refer_to_partner: asksCahetRegistered ? referToPartner : false,
         requested_course_text: disposition === "course_not_listed" ? requestedCourseText.trim() : null,
       });
       resetState();
@@ -967,6 +973,23 @@ export function CallDispositionDialog({
                 ))}
               </div>
             </div>
+          )}
+
+          {asksCahetRegistered && disposition && (
+            <label className="flex items-start gap-2 rounded-xl border border-border bg-muted/30 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={referToPartner}
+                onChange={(e) => setReferToPartner(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span className="text-xs text-foreground">
+                Refer to {REFERRAL_PARTNER_LABEL}
+                <span className="block text-[10px] text-muted-foreground">
+                  They get this lead in their Referrals tab and call it too. Your assignment doesn't change.
+                </span>
+              </span>
+            </label>
           )}
 
           {disposition === "course_not_listed" && (

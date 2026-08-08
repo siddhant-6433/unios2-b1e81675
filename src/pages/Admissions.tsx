@@ -10,7 +10,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download } from "lucide-react";
+import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download, Share2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,10 @@ import { type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
+import {
+  fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL,
+  REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow,
+} from "@/lib/leadReferral";
 import {
   isEmptyFilterDefinition, toFilterDefinition, unsupportedDynamicFilters,
 } from "@/lib/dynamicListFilters";
@@ -59,6 +63,10 @@ const TransferLeadDialog = lazy(() =>
   import("@/components/admissions/TransferLeadDialog").then((m) => ({ default: m.TransferLeadDialog })));
 const BulkWhatsAppDialog = lazy(() =>
   import("@/components/admissions/BulkWhatsAppDialog").then((m) => ({ default: m.BulkWhatsAppDialog })));
+const ReferToPartnerDialog = lazy(() =>
+  import("@/components/admissions/ReferToPartnerDialog").then((m) => ({ default: m.ReferToPartnerDialog })));
+const ReferralsOverview = lazy(() =>
+  import("@/components/admissions/ReferralsOverview").then((m) => ({ default: m.ReferralsOverview })));
 const SeatMatrix = lazy(() =>
   import("@/components/admissions/SeatMatrix").then((m) => ({ default: m.SeatMatrix })));
 const PaymentReconciliation = lazy(() =>
@@ -254,7 +262,7 @@ const Admissions = () => {
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
-  const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments">(
+  const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments" | "referrals">(
     "list"
   );
   const [actionCounsellorFilter, setActionCounsellorFilter] = useState<string>("all");
@@ -321,6 +329,9 @@ const Admissions = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  // Referral rows for the leads currently on screen, keyed by lead_id.
+  const [referrals, setReferrals] = useState<Map<string, LeadReferralRow>>(new Map());
   const [showAddToList, setShowAddToList] = useState(false);
   const [listMode, setListMode] = useState<"new" | "existing">("new");
   const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
@@ -1347,6 +1358,27 @@ const Admissions = () => {
     }
   };
 
+  // Only BPT/BMRIT leads can be referred, so only those need a referral lookup.
+  const referrableLeadKey = useMemo(
+    () => leads.filter((l) => isReferrableCourse(l.course_name)).map((l) => l.id).join(","),
+    [leads],
+  );
+
+  useEffect(() => {
+    const ids = referrableLeadKey ? referrableLeadKey.split(",") : [];
+    if (ids.length === 0) { setReferrals(new Map()); return; }
+    let cancelled = false;
+    fetchReferralsByLead(ids).then((m) => { if (!cancelled) setReferrals(m); });
+    return () => { cancelled = true; };
+  }, [referrableLeadKey]);
+
+  const selectedLeads = useMemo(
+    () => Array.from(selectedIds).map((id) => leads.find((l) => l.id === id)).filter(Boolean) as Lead[],
+    [selectedIds, leads],
+  );
+  const canReferSelected = selectedLeads.length > 0
+    && selectedLeads.every((l) => isReferrableCourse(l.course_name));
+
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase().trim();
     const digits = q.replace(/\D/g, "");
@@ -1743,6 +1775,13 @@ const Admissions = () => {
   }
 
   const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);
+  // Counsellors lose Action Center: it renders the same seven buckets the Cloud
+  // Dialer (their landing page) already works through, so /admissions is purely
+  // their searchable lead list. Referrals is a super-admin oversight view.
+  const viewTabs: typeof view[] = role === "counsellor" ? ["pipeline", "list"]
+    : isSuperAdmin ? ["action_center", "pipeline", "list", "seats", "payments", "referrals"]
+    : ["action_center", "pipeline", "list", "seats", "payments"];
+
   const bulkActionBar = selectedIds.size > 0 ? (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
       <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
@@ -1753,6 +1792,11 @@ const Admissions = () => {
         <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
           <Send className="h-4 w-4" /> WhatsApp
         </Button>
+        {canReferSelected && (
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowReferPartner(true)}>
+            <Share2 className="h-4 w-4" /> Refer to {REFERRAL_PARTNER_LABEL}
+          </Button>
+        )}
         {canTransfer && (
           <>
             <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
@@ -2270,10 +2314,7 @@ const Admissions = () => {
 
       {/* View tabs — always visible */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
-        {/* Counsellors lose Action Center: it renders the same seven buckets the
-            Cloud Dialer (their landing page) already works through, so /admissions
-            is purely their searchable lead list. */}
-        {((role === "counsellor" ? ["pipeline", "list"] : ["action_center", "pipeline", "list", "seats", "payments"]) as const).map((v) => (
+        {viewTabs.map((v) => (
           <button key={v} onClick={() => setView(v)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             {v === "action_center" ? "Action Center" : v.charAt(0).toUpperCase() + v.slice(1)}
@@ -2281,8 +2322,9 @@ const Admissions = () => {
         ))}
       </div>
 
-      {/* Search & filters — hidden on Action Center view */}
-      {view !== "action_center" && (
+      {/* Search & filters — hidden on Action Center and the referrals overview,
+          which carry their own filtering. */}
+      {view !== "action_center" && view !== "referrals" && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
@@ -2667,6 +2709,10 @@ const Admissions = () => {
             }}
           />
         </Suspense>
+      ) : view === "referrals" ? (
+        <Suspense fallback={<DeferredBlock className="h-64" />}>
+          <ReferralsOverview />
+        </Suspense>
       ) : view === "seats" ? (
         <Suspense fallback={<DeferredBlock className="h-64" />}>
           <SeatMatrix />
@@ -2712,6 +2758,11 @@ const Admissions = () => {
                                 {lead.shared_with_nimt === false && (
                                   <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
                                     Not shared with NIMT
+                                  </span>
+                                )}
+                                {referrals.get(lead.id) && (
+                                  <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${REFERRAL_STATUS_COLORS[referrals.get(lead.id)!.status] || "bg-muted text-muted-foreground"}`} title={`Referred to ${REFERRAL_PARTNER_LABEL} — ${REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}`}>
+                                    {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}
                                   </span>
                                 )}
                               </div>
@@ -2830,6 +2881,11 @@ const Admissions = () => {
                         {lead.shared_with_nimt === false && (
                           <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 shrink-0" title="Academic-partner lead not shared with the NIMT team">
                             Not shared with NIMT
+                          </span>
+                        )}
+                        {referrals.get(lead.id) && (
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 ${REFERRAL_STATUS_COLORS[referrals.get(lead.id)!.status] || "bg-muted text-muted-foreground"}`} title={`Referred to ${REFERRAL_PARTNER_LABEL} — ${REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}`}>
+                            {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}
                           </span>
                         )}
                         <span onClick={(e) => e.stopPropagation()}>
@@ -3149,6 +3205,18 @@ const Admissions = () => {
             onOpenChange={setShowBulkWhatsApp}
             leads={Array.from(selectedIds).map(id => leads.find(l => l.id === id)).filter(Boolean) as Lead[]}
             onSuccess={() => { fetchLeads(); setSelectedIds(new Set()); }}
+          />
+        </Suspense>
+      )}
+
+      {/* Refer to partner (BPT/BMRIT only) */}
+      {showReferPartner && (
+        <Suspense fallback={null}>
+          <ReferToPartnerDialog
+            open={showReferPartner}
+            onOpenChange={setShowReferPartner}
+            leadIds={Array.from(selectedIds)}
+            onSuccess={() => { setSelectedIds(new Set()); fetchLeads(); }}
           />
         </Suspense>
       )}

@@ -1,13 +1,14 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Trash2, ArrowRightLeft, Phone, Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints, ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet } from "lucide-react";
+import { Share2, ArrowLeft, Trash2, ArrowRightLeft, Phone, Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints, ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet } from "lucide-react";
+import { fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL, REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow } from "@/lib/leadReferral";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -44,6 +45,7 @@ const ScorePopup            = lazy(() => import("@/components/admissions/ScorePo
 // Lazy: dialogs — only loaded when the user opens them
 const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
 const OfferLetterDialog            = lazy(() => import("@/components/admissions/OfferLetterDialog").then(m => ({ default: m.OfferLetterDialog })));
+const ReferToPartnerDialog         = lazy(() => import("@/components/admissions/ReferToPartnerDialog").then(m => ({ default: m.ReferToPartnerDialog })));
 const SchoolFeeProposalDialog      = lazy(() => import("@/components/admissions/SchoolFeeProposalDialog").then(m => ({ default: m.SchoolFeeProposalDialog })));
 const ConvertToStudentDialog       = lazy(() => import("@/components/admissions/ConvertToStudentDialog").then(m => ({ default: m.ConvertToStudentDialog })));
 const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendWhatsAppDialog").then(m => ({ default: m.SendWhatsAppDialog })));
@@ -144,6 +146,8 @@ const LeadDetail = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showExternalOwner, setShowExternalOwner] = useState(false);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  const [referral, setReferral] = useState<LeadReferralRow | null>(null);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
@@ -409,6 +413,14 @@ const LeadDetail = () => {
     await queryClient.invalidateQueries({ queryKey: ["lead-detail", id] });
     await refetchDetail();
   };
+
+  // Referral to the academic partner (BPT/BMRIT only) — status badge + action gate.
+  const refreshReferral = useCallback(async () => {
+    if (!id) return;
+    const map = await fetchReferralsByLead([id]);
+    setReferral(map.get(id) || null);
+  }, [id]);
+  useEffect(() => { void refreshReferral(); }, [refreshReferral]);
 
   const addNote = async () => {
     if (!newNote.trim() || !id) return;
@@ -1243,6 +1255,20 @@ const LeadDetail = () => {
               <Handshake className="h-3.5 w-3.5" /> Assign Owner
             </Button>
           )}
+          {referral && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}
+              title={referral.partner_notes || undefined}
+            >
+              <Share2 className="h-3 w-3" />
+              {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+            </span>
+          )}
+          {!referral && isReferrableCourse(courseName) && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowReferPartner(true)}>
+              <Share2 className="h-3.5 w-3.5" /> Refer to {REFERRAL_PARTNER_LABEL}
+            </Button>
+          )}
           {lead.stage !== "dnc" && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive border-destructive/30/60 hover:bg-destructive/5 dark:hover:bg-destructive/90/20" onClick={markAsDnc}>
               <Ban className="h-3.5 w-3.5" /> Mark DNC
@@ -1684,6 +1710,17 @@ const LeadDetail = () => {
       {/* Dialogs */}
       <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
+      {showReferPartner && (
+        <Suspense fallback={null}>
+          <ReferToPartnerDialog
+            open={showReferPartner}
+            onOpenChange={setShowReferPartner}
+            leadIds={[lead.id]}
+            onSuccess={() => { void refreshReferral(); void fetchAll(true); }}
+          />
+        </Suspense>
+      )}
+
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} courseName={courseName} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
       <SchoolFeeProposalDialog

@@ -19,6 +19,9 @@ import { LeadPipeline } from "@/components/admissions/LeadPipeline";
 import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS } from "@/lib/leadReferral";
 import {
   type LeadFunnelStage,
   leadStagesForBucket,
@@ -407,8 +410,27 @@ const attendancePercent = (present: number, total: number) => {
   return `${Math.round((present / total) * 100)}%`;
 };
 
+/** A NIMT lead handed to this partner for calling. */
+interface ReferralRow {
+  id: string;
+  status: string;
+  partner_notes: string | null;
+  referred_at: string;
+  leads: {
+    id: string;
+    name: string;
+    phone: string | null;
+    stage: string;
+    courses?: { name: string } | null;
+    campuses?: { name: string } | null;
+  } | null;
+}
+
+const REFERRAL_STATUS_OPTIONS = ["pending", "contacted", "not_reachable", "admitted", "not_admitted"] as const;
+
 const PORTAL_TABS = [
   { label: "Leads", value: "leads" },
+  { label: "Referrals", value: "referrals" },
   { label: "Applications", value: "applications" },
   { label: "Students", value: "students" },
   { label: "Fee Collection", value: "fees" },
@@ -498,6 +520,9 @@ export default function AcademicPartnerPortal() {
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [receiptsByLead, setReceiptsByLead] = useState<Map<string, FeeReceipt[]>>(new Map());
   const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [referralNotesDraft, setReferralNotesDraft] = useState<Record<string, string>>({});
+  const [savingReferralId, setSavingReferralId] = useState<string | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
   const [detailsLead, setDetailsLead] = useState<Lead | null>(null);
   const [offerLead, setOfferLead] = useState<Lead | null>(null);
@@ -841,6 +866,22 @@ export default function AcademicPartnerPortal() {
         setReceiptsByLead(grouped);
       }
     }
+    // Leads NIMT referred to us for calling. These are NOT partner-sourced leads
+    // (leads.academic_partner_id stays null) so they never touch payout maths.
+    {
+      const { data: referralRows, error: referralsError } = await supabase
+        .from("lead_referrals" as never)
+        .select("id, status, partner_notes, referred_at, leads:lead_id(id, name, phone, stage, courses:course_id(name), campuses:campus_id(name))")
+        .eq("partner_id", partnerId)
+        .order("referred_at", { ascending: false });
+      if (referralsError) {
+        console.error("[lead_referrals]", referralsError.message);
+        setReferrals([]);
+      } else {
+        setReferrals((referralRows || []) as unknown as ReferralRow[]);
+      }
+    }
+
     setPayouts(((payoutsRes.data || []) as unknown as PayoutRow[]).map((p) => ({
       ...p,
       lead_name: p.leads?.name,
@@ -1146,6 +1187,24 @@ export default function AcademicPartnerPortal() {
     } finally {
       setCallingLeadId(null);
     }
+  };
+
+  const updateReferral = async (referral: ReferralRow, status: string) => {
+    if (!partner?.id) return;
+    setSavingReferralId(referral.id);
+    const { error } = await supabase.rpc("academic_partner_update_referral" as never, {
+      _referral_id: referral.id,
+      _status: status,
+      _notes: referralNotesDraft[referral.id] ?? null,
+      _partner_id: isImpersonating && realRole === "super_admin" ? partner.id : null,
+    } as never);
+    setSavingReferralId(null);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Referral updated", description: `${referral.leads?.name || "Lead"} marked as ${REFERRAL_STATUS_LABELS[status] || status}.` });
+    await fetchPortal(partner.id);
   };
 
   // Drop the in-progress cloud call. hangup_only tears down both Plivo legs
@@ -1479,6 +1538,85 @@ export default function AcademicPartnerPortal() {
                   </tr>
                 ))}
                 {visibleLeads.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{leadFunnelStage ? "No leads at this stage" : "No leads added yet"}</td></tr>}
+              </tbody>
+            </table>
+            </div>
+          </CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="referrals" className="mt-4 space-y-4">
+          <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Lead</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Referred</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Outcome</th>
+                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+              </tr></thead>
+              <tbody>
+                {referrals.map((referral) => {
+                  const lead = referral.leads;
+                  return (
+                    <tr key={referral.id} className="border-b last:border-0 hover:bg-muted/30 align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{lead?.name || "—"}</div>
+                        <div className="text-xs text-muted-foreground">{lead?.phone || "No phone"}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>{lead?.courses?.name || "—"}</div>
+                        <div className="text-xs text-muted-foreground">{lead?.campuses?.name || "—"}</div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(referral.referred_at).toLocaleDateString("en-IN")}
+                      </td>
+                      <td className="px-4 py-3 space-y-2 min-w-[220px]">
+                        <Badge className={`border-0 text-[10px] ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}>
+                          {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+                        </Badge>
+                        <Select
+                          value={referral.status}
+                          onValueChange={(value) => updateReferral(referral, value)}
+                          disabled={savingReferralId === referral.id}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {REFERRAL_STATUS_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value} className="text-xs">
+                                {REFERRAL_STATUS_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Textarea
+                          rows={2}
+                          className="text-xs"
+                          placeholder="Notes for NIMT (saved with the next status change)"
+                          value={referralNotesDraft[referral.id] ?? referral.partner_notes ?? ""}
+                          onChange={(e) => setReferralNotesDraft((prev) => ({ ...prev, [referral.id]: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => lead && placeCloudCall({ id: lead.id, name: lead.name, phone: lead.phone } as Lead)}
+                            disabled={!lead?.phone || callingLeadId === lead?.id || !!activeCall}
+                          >
+                            {callingLeadId === lead?.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                            Call
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {referrals.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No leads referred to you yet</td></tr>
+                )}
               </tbody>
             </table>
             </div>
