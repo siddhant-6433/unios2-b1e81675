@@ -13,6 +13,7 @@
  */
 
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
+import { referLeadsToPartner } from "@/lib/leadReferral";
 
 import { resolveCallDispositionTransition } from "@/lib/leadTransitions";
 export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
@@ -409,6 +410,14 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
   // out-of-band so the save never blocked on the session lookup or the
   // edge-function round-trip; genuinely fire-and-forget from here.
   dispatchDispositionWhatsApp(args, label);
+
+  // Optional hand-off to the referral partner. Deliberately after the confirmed
+  // save and never throwing: a referral failure must not roll back a disposition
+  // the counsellor already logged.
+  if (data.refer_to_partner) {
+    const { failed } = await referLeadsToPartner([leadId]);
+    if (failed.length > 0) console.error("[refer_lead_to_partner]", failed[0].message);
+  }
 }
 
 /**

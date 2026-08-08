@@ -16,7 +16,7 @@ import {
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
-  Library, Barcode, DoorOpen,
+  Library, Barcode, DoorOpen, Share2,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -69,6 +69,7 @@ const academicPartnerMenu: MenuItem[] = [
   { title: "Overview", url: "/academic-partner-portal", icon: LayoutDashboard, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Inbox", url: "/academic-partner-portal?tab=requests", icon: Inbox, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Leads", url: "/academic-partner-portal?tab=leads", icon: GraduationCap, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Referrals", url: "/academic-partner-portal?tab=referrals", icon: Share2, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Applications", url: "/academic-partner-portal?tab=applications", icon: FileText, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Students", url: "/academic-partner-portal?tab=students", icon: Users, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner", "academic_partner_offer_letter"] },

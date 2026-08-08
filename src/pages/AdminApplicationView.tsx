@@ -6,7 +6,7 @@ import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School, PauseCircle, PlayCircle, MessageSquare } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School, PauseCircle, PlayCircle, MessageSquare, Share2 } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -22,6 +22,11 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { ReferToPartnerDialog } from "@/components/admissions/ReferToPartnerDialog";
+import {
+  fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL,
+  REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow,
+} from "@/lib/leadReferral";
 import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApplication, type SupabaseUpdeledClient, type UpdeledRegistrationDetails } from "@/lib/updeled";
 import { buildApplicationDossier } from "@/lib/applicationDossier";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -221,6 +226,8 @@ export default function AdminApplicationView() {
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  const [referral, setReferral] = useState<LeadReferralRow | null>(null);
   const [updeledRegistration, setUpdeledRegistration] = useState<UpdeledRegistrationDetails | null>(null);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
@@ -375,6 +382,12 @@ export default function AdminApplicationView() {
         const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
         const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
+        if (isBptOrBmritCourseName(courseName) && effectiveLeadRow?.id) {
+          const referralMap = await fetchReferralsByLead([effectiveLeadRow.id]);
+          setReferral(referralMap.get(effectiveLeadRow.id) || null);
+        } else {
+          setReferral(null);
+        }
         setUpdeledRegistration(isDeledCourseName(courseName) ? (updeledRow || applicationUpdeled) : null);
 
         // Resolve recorded_by names for payments
@@ -1063,6 +1076,25 @@ export default function AdminApplicationView() {
               </>
             );
           })()}
+          {referral && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}
+              title={referral.partner_notes || undefined}
+            >
+              <Share2 className="h-3 w-3" />
+              {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+            </span>
+          )}
+          {!referral && (lead?.id || app.lead_id) && isReferrableCourse(lead?.course?.name) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setShowReferPartner(true)}
+            >
+              <Share2 className="h-3.5 w-3.5" /> Refer to {REFERRAL_PARTNER_LABEL}
+            </Button>
+          )}
           {(lead?.id || app.lead_id) && (
             <Button
               variant="outline"
@@ -1664,6 +1696,19 @@ export default function AdminApplicationView() {
           onOpenChange={setSendLinkOpen}
           leadId={lead?.id || app.lead_id}
           onCreated={refresh}
+        />
+      )}
+
+      {/* Refer to partner (BPT/BMRIT only) */}
+      {lead?.id && showReferPartner && (
+        <ReferToPartnerDialog
+          open={showReferPartner}
+          onOpenChange={setShowReferPartner}
+          leadIds={[lead.id]}
+          onSuccess={async () => {
+            const map = await fetchReferralsByLead([lead.id]);
+            setReferral(map.get(lead.id) || null);
+          }}
         />
       )}
 
