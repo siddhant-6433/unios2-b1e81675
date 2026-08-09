@@ -342,7 +342,7 @@ const Library = () => {
   const [selectedDigitization, setSelectedDigitization] = useState<Set<string>>(new Set());
   const [enrichFilter, setEnrichFilter] = useState<"all" | "enriched" | "no_match" | "not_tried" | "missing_cover">("all");
   const [publisherEntities, setPublisherEntities] = useState<{ id: string; name: string; normalized_name: string }[]>([]);
-  const [enrichCron, setEnrichCron] = useState<{ enabled: boolean; minutes: number }>({ enabled: false, minutes: 30 });
+  const [enrichCron, setEnrichCron] = useState<{ enabled: boolean; minutes: number; last_run: string | null; last_processed: string | null; enriched: number; no_match: number; remaining: number }>({ enabled: false, minutes: 30, last_run: null, last_processed: null, enriched: 0, no_match: 0, remaining: 0 });
   const [bulkEnrich, setBulkEnrich] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -1368,8 +1368,13 @@ const Library = () => {
   // Super-admin: schedule / run the server-side enrichment batch.
   const fetchEnrichCron = async () => {
     try {
-      const { data } = await (supabase as any).rpc("library_get_enrich_cron");
-      if (data?.[0]) setEnrichCron({ enabled: !!data[0].enabled, minutes: Number(data[0].minutes) || 30 });
+      const { data } = await (supabase as any).rpc("library_enrich_status");
+      const r = data?.[0];
+      if (r) setEnrichCron({
+        enabled: !!r.enabled, minutes: Number(r.minutes) || 30,
+        last_run: r.last_run ?? null, last_processed: r.last_processed ?? null,
+        enriched: Number(r.enriched) || 0, no_match: Number(r.no_match) || 0, remaining: Number(r.remaining) || 0,
+      });
     } catch { /* non-fatal */ }
   };
   const handleSetEnrichCron = async (enabled: boolean, minutes: number) => {
@@ -1377,8 +1382,9 @@ const Library = () => {
     try {
       const { error } = await (supabase as any).rpc("library_set_enrich_cron", { _enabled: enabled, _minutes: minutes });
       if (error) throw error;
-      setEnrichCron({ enabled, minutes });
+      setEnrichCron((c) => ({ ...c, enabled, minutes }));
       toast({ title: enabled ? `Auto-fill scheduled every ${minutes} min` : "Auto-fill schedule turned off" });
+      fetchEnrichCron();
     } catch (err: any) {
       toast({ title: "Schedule update failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1391,6 +1397,7 @@ const Library = () => {
       const { data, error } = await (supabase as any).functions.invoke("library-enrich-batch", { body: { limit: 150 } });
       if (error) throw error;
       toast({ title: "Batch run complete", description: `${data?.matched ?? 0} matched · ${data?.covers ?? 0} covers · ${data?.remaining ?? 0} left` });
+      fetchEnrichCron();
       fetchLibrary();
     } catch (err: any) {
       toast({ title: "Batch run failed", description: err.message, variant: "destructive" });
@@ -2089,7 +2096,19 @@ const Library = () => {
                   <Badge variant={enrichCron.enabled ? "outline" : "secondary"}>
                     {enrichCron.enabled ? `Scheduled · every ${enrichCron.minutes} min` : "Off"}
                   </Badge>
+                  <Button type="button" variant="ghost" size="sm" onClick={fetchEnrichCron}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+                  </Button>
                 </div>
+                <div className="grid gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm sm:grid-cols-3">
+                  <div><span className="font-semibold text-foreground">{enrichCron.enriched.toLocaleString("en-IN")}</span> <span className="text-muted-foreground">enriched</span></div>
+                  <div><span className="font-semibold text-foreground">{enrichCron.no_match.toLocaleString("en-IN")}</span> <span className="text-muted-foreground">no web match</span></div>
+                  <div><span className="font-semibold text-foreground">{enrichCron.remaining.toLocaleString("en-IN")}</span> <span className="text-muted-foreground">still to process</span></div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {enrichCron.last_run ? `Last run ${new Date(enrichCron.last_run).toLocaleString("en-IN")}` : "Not run yet"}
+                  {enrichCron.last_processed ? ` · last record processed ${new Date(enrichCron.last_processed).toLocaleString("en-IN")}` : ""}
+                </p>
               </CardContent>
             </Card>
           )}
