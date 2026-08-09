@@ -1536,6 +1536,56 @@ const Library = () => {
     printWindow.document.close();
   };
 
+  // Two accession slips per book (inside front cover + back cover) with the accession barcode,
+  // for pasting so books scan easily later. Opens a print view (Save as PDF to download).
+  const handlePrintAccessionSlips = () => {
+    const rows = filteredItems.filter((item) => item.accession_no);
+    if (!rows.length) {
+      toast({ title: "No slips to print", description: "The current library filter has no accessioned books." });
+      return;
+    }
+    const slip = (item: typeof rows[number], placement: string) => `
+      <div class="slip">
+        <div class="place">${placement}</div>
+        <div class="lib">${escapeHtml(item.library_branches?.name || selectedBranchLabel)}</div>
+        <div class="title">${escapeHtml(item.library_books?.title || "Library book")}</div>
+        <div class="author">${escapeHtml(authorsLabel(item.library_books?.authors))}</div>
+        <div class="barcode">${code39Svg(item.accession_no)}</div>
+        <div class="acc">${escapeHtml(item.accession_no)}</div>
+      </div>`;
+    // Two slips per book, kept adjacent so a librarian cuts the pair and pastes both in one book.
+    const cells = rows.map((item) => slip(item, "Inside front cover") + slip(item, "Back cover")).join("");
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <title>Accession Slips</title>
+          <style>
+            @page { size: A4; margin: 10mm; }
+            body { font-family: Arial, sans-serif; margin: 0; color: #111; }
+            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+            .slip { border: 1px dashed #555; border-radius: 4px; padding: 8px 10px; break-inside: avoid; text-align: center; }
+            .place { font-size: 8px; text-transform: uppercase; letter-spacing: .04em; color: #666; text-align: left; }
+            .lib { font-size: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .title { font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .author { font-size: 8px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .barcode svg { width: 100%; height: 40px; margin-top: 4px; }
+            .acc { font-size: 13px; font-weight: 700; margin-top: 2px; }
+          </style>
+        </head>
+        <body>
+          <div class="grid">${cells}</div>
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>`;
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      toast({ title: "Popup blocked", description: "Allow popups to print accession slips.", variant: "destructive" });
+      return;
+    }
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   if (loading) {
     return <PageLoader />;
   }
@@ -1879,6 +1929,13 @@ const Library = () => {
                   <Printer className="mr-2 h-4 w-4" />
                   Print {filteredItems.length} Labels
                 </Button>
+                <Button type="button" variant="outline" className="w-full" disabled={!canExport || filteredItems.length === 0} onClick={handlePrintAccessionSlips}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Accession slips — 2 per book ({filteredItems.length * 2})
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Two slips per book (inside front cover + back cover) with the accession barcode. Use your browser's “Save as PDF” to download.
+                </p>
               </CardContent>
             </Card>
           </div>
