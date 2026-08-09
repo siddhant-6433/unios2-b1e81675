@@ -43,16 +43,27 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const limit = Math.min(Math.max(Number(body?.limit) || 150, 1), 400);
+    const onlyBranch: string | null = typeof body?.branch_id === "string" ? body.branch_id : null;
     const admin = createClient(supabaseUrl, serviceKey);
 
     // Never-tried pending records only (enrichment_status IS NULL).
-    const { data: records, error } = await admin
+    let query = admin
       .from("library_digitization_records")
       .select("id, title, isbn, authors_text, publisher, place, edition, published_year, category, subject, language, cover_image_url, suggested_metadata")
       .in("status", ["captured", "matched", "needs_review"])
       .is("enrichment_status", null)
       .order("created_at", { ascending: true })
       .limit(limit);
+    if (onlyBranch) {
+      // Explicit per-library run — process that branch regardless of its auto flag.
+      query = query.eq("branch_id", onlyBranch);
+    } else {
+      // Scheduled/all run — skip libraries the super admin paused.
+      const { data: paused } = await admin.from("library_enrich_branch_settings").select("branch_id").eq("auto_enabled", false);
+      const pausedIds = (paused || []).map((p: any) => p.branch_id);
+      if (pausedIds.length) query = query.not("branch_id", "in", `(${pausedIds.join(",")})`);
+    }
+    const { data: records, error } = await query;
     if (error) return json({ error: error.message }, 500);
 
     const blank = (v: unknown) => v == null || String(v).trim() === "";

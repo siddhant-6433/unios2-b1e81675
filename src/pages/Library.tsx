@@ -343,6 +343,7 @@ const Library = () => {
   const [enrichFilter, setEnrichFilter] = useState<"all" | "enriched" | "no_match" | "not_tried" | "missing_cover">("all");
   const [publisherEntities, setPublisherEntities] = useState<{ id: string; name: string; normalized_name: string }[]>([]);
   const [enrichCron, setEnrichCron] = useState<{ enabled: boolean; minutes: number; last_run: string | null; last_processed: string | null; enriched: number; no_match: number; remaining: number }>({ enabled: false, minutes: 30, last_run: null, last_processed: null, enriched: 0, no_match: 0, remaining: 0 });
+  const [branchProgress, setBranchProgress] = useState<{ branch_id: string; branch_name: string; enriched: number; no_match: number; remaining: number; auto_enabled: boolean }[]>([]);
   const [bulkEnrich, setBulkEnrich] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -1368,14 +1369,48 @@ const Library = () => {
   // Super-admin: schedule / run the server-side enrichment batch.
   const fetchEnrichCron = async () => {
     try {
-      const { data } = await (supabase as any).rpc("library_enrich_status");
-      const r = data?.[0];
+      const [statusRes, branchRes] = await Promise.all([
+        (supabase as any).rpc("library_enrich_status"),
+        (supabase as any).rpc("library_enrich_status_by_branch"),
+      ]);
+      const r = statusRes.data?.[0];
       if (r) setEnrichCron({
         enabled: !!r.enabled, minutes: Number(r.minutes) || 30,
         last_run: r.last_run ?? null, last_processed: r.last_processed ?? null,
         enriched: Number(r.enriched) || 0, no_match: Number(r.no_match) || 0, remaining: Number(r.remaining) || 0,
       });
+      if (branchRes.data) setBranchProgress(branchRes.data.map((b: any) => ({
+        branch_id: b.branch_id, branch_name: b.branch_name,
+        enriched: Number(b.enriched) || 0, no_match: Number(b.no_match) || 0, remaining: Number(b.remaining) || 0,
+        auto_enabled: b.auto_enabled !== false,
+      })));
     } catch { /* non-fatal */ }
+  };
+  const handleToggleBranchEnrich = async (branchId: string, enabled: boolean) => {
+    setSaving(`branch-enrich-${branchId}`);
+    try {
+      const { error } = await (supabase as any).rpc("library_set_branch_enrich", { _branch_id: branchId, _enabled: enabled });
+      if (error) throw error;
+      setBranchProgress((rows) => rows.map((r) => r.branch_id === branchId ? { ...r, auto_enabled: enabled } : r));
+    } catch (err: any) {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+  const handleRunEnrichBranch = async (branchId: string, branchName: string) => {
+    setSaving(`branch-run-${branchId}`);
+    try {
+      const { data, error } = await (supabase as any).functions.invoke("library-enrich-batch", { body: { limit: 150, branch_id: branchId } });
+      if (error) throw error;
+      toast({ title: `${branchName}: batch run`, description: `${data?.matched ?? 0} matched · ${data?.covers ?? 0} covers` });
+      fetchEnrichCron();
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Batch run failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
   };
   const handleSetEnrichCron = async (enabled: boolean, minutes: number) => {
     setSaving("enrich-cron");
@@ -2109,6 +2144,50 @@ const Library = () => {
                   {enrichCron.last_run ? `Last run ${new Date(enrichCron.last_run).toLocaleString("en-IN")}` : "Not run yet"}
                   {enrichCron.last_processed ? ` · last record processed ${new Date(enrichCron.last_processed).toLocaleString("en-IN")}` : ""}
                 </p>
+                {branchProgress.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Per-library progress</p>
+                    <div className="overflow-hidden rounded-xl border border-border">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/40 text-xs text-muted-foreground">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Library</th>
+                            <th className="px-3 py-2 text-right font-medium">Enriched</th>
+                            <th className="px-3 py-2 text-right font-medium">No match</th>
+                            <th className="px-3 py-2 text-right font-medium">Left</th>
+                            <th className="px-3 py-2 text-center font-medium">Auto</th>
+                            <th className="px-3 py-2 text-right font-medium">Run</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {branchProgress.map((b) => (
+                            <tr key={b.branch_id} className="border-t border-border">
+                              <td className="px-3 py-2 font-medium text-foreground">{b.branch_name}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{b.enriched.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{b.no_match.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-right tabular-nums font-medium">{b.remaining.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-border"
+                                  checked={b.auto_enabled}
+                                  disabled={saving === `branch-enrich-${b.branch_id}`}
+                                  onChange={(e) => handleToggleBranchEnrich(b.branch_id, e.target.checked)}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <Button type="button" variant="ghost" size="sm" disabled={b.remaining === 0 || saving === `branch-run-${b.branch_id}`} onClick={() => handleRunEnrichBranch(b.branch_id, b.branch_name)}>
+                                  {saving === `branch-run-${b.branch_id}` ? <ButtonOrb state="working" /> : "Run"}
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Untick “Auto” to pause a library so the scheduled run processes the others first.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
