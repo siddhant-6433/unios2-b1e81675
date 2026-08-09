@@ -48,7 +48,14 @@ type LibraryBranch = {
   code: string | null;
 };
 
-type ScanAction = 'digitize' | 'issue' | 'return' | 'audit';
+type ScanAction = 'digitize' | 'add_isbn' | 'issue' | 'return' | 'audit';
+
+type QueuedRecord = {
+  id: string; title: string | null; accession_no: string | null; isbn: string | null;
+  authors_text: string | null; publisher: string | null; category: string | null;
+  subject: string | null; language: string | null; published_year: number | null;
+  cover_image_url: string | null; suggested_metadata: any;
+};
 
 function authorLabel(authors?: string[] | null) {
   return authors?.length ? authors.join(', ') : 'Unknown author';
@@ -73,6 +80,7 @@ export default function LibraryScreen() {
   const [issueAdmissionNo, setIssueAdmissionNo] = useState('');
   const [auditStatus, setAuditStatus] = useState('available');
   const [capturing, setCapturing] = useState(false);
+  const [addIsbnRecord, setAddIsbnRecord] = useState<QueuedRecord | null>(null);
 
   const canOperate = role === 'librarian' || role === 'super_admin';
 
@@ -198,6 +206,62 @@ export default function LibraryScreen() {
     }
   };
 
+  // Two-step: scan a queued book's accession to select it, then scan its ISBN to attach + look up.
+  const addIsbnFlow = async (value: string) => {
+    if (!canOperate || !value.trim()) return;
+    setCapturing(true);
+    try {
+      if (!selectedBranchId) throw new Error('Select or assign a library first.');
+      if (!addIsbnRecord) {
+        // Step 1 — find the queued record by scanned accession number.
+        const { data, error } = await (supabase as any)
+          .from('library_digitization_records')
+          .select('id, title, accession_no, isbn, authors_text, publisher, category, subject, language, published_year, cover_image_url, suggested_metadata')
+          .eq('branch_id', selectedBranchId)
+          .eq('accession_no', value.trim())
+          .in('status', ['captured', 'matched', 'needs_review'])
+          .limit(1).maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error(`No queued book with accession ${value.trim()} in this library.`);
+        setAddIsbnRecord(data);
+        setScannedValue('');
+        Alert.alert('Book selected', `${data.title || 'Untitled'} (acc ${data.accession_no}).\n\nNow scan the ISBN barcode on the book.`);
+        return;
+      }
+      // Step 2 — treat scan as the ISBN, attach it, and enrich by ISBN.
+      const isbn = normalizeIsbn(value);
+      if (isbn.length !== 10 && isbn.length !== 13) throw new Error('That is not a valid ISBN barcode.');
+      const rec = addIsbnRecord;
+      const { data: lk } = await supabase.functions.invoke('library-book-lookup', { body: { isbn } });
+      const book: any = lk?.book;
+      const blank = (v: unknown) => v == null || String(v).trim() === '';
+      const upd: Record<string, unknown> = { isbn, enrichment_status: book ? 'enriched' : 'no_match' };
+      if (book) {
+        upd.suggested_metadata = { ...(rec.suggested_metadata || {}), ...book };
+        if (blank(rec.title) && book.title) upd.title = book.title;
+        if (blank(rec.authors_text) && Array.isArray(book.authors) && book.authors.length) upd.authors_text = book.authors.join(', ');
+        if (blank(rec.publisher) && book.publisher) upd.publisher = book.publisher;
+        if (blank(rec.category) && book.category) upd.category = book.category;
+        if (blank(rec.subject) && book.subject) upd.subject = book.subject;
+        if (blank(rec.language) && book.language) upd.language = book.language;
+        if (blank(rec.published_year) && book.published_year) upd.published_year = book.published_year;
+      }
+      const { error: updErr } = await (supabase as any).from('library_digitization_records').update(upd).eq('id', rec.id);
+      if (updErr) throw updErr;
+      if (book?.cover_url && blank(rec.cover_image_url)) {
+        await supabase.functions.invoke('library-cover-capture', { body: { target: 'record', id: rec.id, source_url: book.cover_url } });
+      }
+      Alert.alert(book ? 'ISBN added + data fetched' : 'ISBN added', book ? `Matched "${book.title || rec.title}". Metadata + cover updated.` : 'No online match for this ISBN, but it was saved to the record.');
+      setAddIsbnRecord(null);
+      setScannedValue('');
+      fetchLibrary();
+    } catch (err: any) {
+      Alert.alert('Add ISBN failed', err.message || 'Could not add the ISBN.');
+    } finally {
+      setCapturing(false);
+    }
+  };
+
   const attachCover = async (recordId: string, fromCamera: boolean) => {
     try {
       if (fromCamera) {
@@ -292,6 +356,7 @@ export default function LibraryScreen() {
     if (scanAction === 'issue') return issueScannedBook(value);
     if (scanAction === 'return') return returnScannedBook(value);
     if (scanAction === 'audit') return auditScannedBook(value);
+    if (scanAction === 'add_isbn') return addIsbnFlow(value);
     return captureDigitizationRecord(value);
   };
 
@@ -351,6 +416,7 @@ export default function LibraryScreen() {
             <View style={styles.modeGrid}>
               {[
                 ['digitize', 'Digitize'],
+                ['add_isbn', 'Add ISBN'],
                 ['issue', 'Issue'],
                 ['return', 'Return'],
                 ['audit', 'Audit'],
@@ -358,7 +424,7 @@ export default function LibraryScreen() {
                 <Pressable
                   key={mode}
                   style={[styles.modeButton, scanAction === mode && styles.modeButtonActive]}
-                  onPress={() => setScanAction(mode as ScanAction)}
+                  onPress={() => { setScanAction(mode as ScanAction); setAddIsbnRecord(null); setScannedValue(''); }}
                 >
                   <Text style={[styles.modeText, scanAction === mode && styles.modeTextActive]}>{label}</Text>
                 </Pressable>
@@ -388,6 +454,13 @@ export default function LibraryScreen() {
                 ))}
               </ScrollView>
             )}
+            {scanAction === 'add_isbn' && (
+              <Text style={styles.cardHint}>
+                {addIsbnRecord
+                  ? `Step 2 · Scan the ISBN barcode for "${addIsbnRecord.title || 'this book'}" (acc ${addIsbnRecord.accession_no}).`
+                  : 'Step 1 · Scan the accession barcode of a queued book to select it.'}
+              </Text>
+            )}
             {scanMode ? (
               <CameraView
                 style={styles.camera}
@@ -416,7 +489,9 @@ export default function LibraryScreen() {
             >
               {capturing ? <ActivityIndicator color={colors.primary} /> : scanAction === 'return' ? <RotateCcw size={16} color={colors.primary} /> : <CheckCircle2 size={16} color={colors.primary} />}
               <Text style={styles.secondaryButtonText}>
-                {scanAction === 'digitize' ? 'Save to Review Queue' : scanAction === 'issue' ? 'Issue Book' : scanAction === 'return' ? 'Return Book' : 'Update Shelf Audit'}
+                {scanAction === 'digitize' ? 'Save to Review Queue'
+                  : scanAction === 'add_isbn' ? (addIsbnRecord ? 'Attach ISBN & look up' : 'Find book by accession')
+                  : scanAction === 'issue' ? 'Issue Book' : scanAction === 'return' ? 'Return Book' : 'Update Shelf Audit'}
               </Text>
             </Pressable>
           </View>
