@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { Barcode, BookOpen, CheckCircle2, RefreshCw, RotateCcw, Search } from 'lucide-react-native';
 import { colors, radius, spacing, typography } from '../../constants/Colors';
 import { supabase } from '../../lib/supabase';
@@ -168,7 +169,7 @@ export default function LibraryScreen() {
         }
       }
 
-      const { error } = await (supabase as any).from('library_digitization_records').insert({
+      const { data: inserted, error } = await (supabase as any).from('library_digitization_records').insert({
         branch_id: selectedBranchId,
         source: 'barcode',
         scanned_barcode: value,
@@ -176,15 +177,48 @@ export default function LibraryScreen() {
         suggested_metadata: suggested,
         confidence,
         status: Object.keys(suggested).length ? 'matched' : 'needs_review',
-      });
+      }).select('id').single();
       if (error) throw error;
-      Alert.alert('Captured', Object.keys(suggested).length ? 'Book metadata matched for review.' : 'Record queued for manual review.');
       setScannedValue('');
       fetchLibrary();
+      // Offer to attach a cover photo right after capture.
+      Alert.alert(
+        'Captured',
+        (Object.keys(suggested).length ? 'Book metadata matched for review.' : 'Record queued for manual review.') + '\n\nAdd a cover photo?',
+        [
+          { text: 'Take photo', onPress: () => attachCover(inserted.id, true) },
+          { text: 'Choose from gallery', onPress: () => attachCover(inserted.id, false) },
+          { text: 'Skip', style: 'cancel' },
+        ],
+      );
     } catch (err: any) {
       Alert.alert('Capture failed', err.message || 'Could not save digitization record.');
     } finally {
       setCapturing(false);
+    }
+  };
+
+  const attachCover = async (recordId: string, fromCamera: boolean) => {
+    try {
+      if (fromCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) throw new Error('Camera permission denied — choose from gallery instead.');
+      }
+      const opts: ImagePicker.ImagePickerOptions = { quality: 0.7, base64: true, mediaTypes: ['images'] };
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.base64) throw new Error('Could not read the image.');
+      const { data, error } = await supabase.functions.invoke('library-cover-capture', {
+        body: { target: 'record', id: recordId, image_base64: `data:image/jpeg;base64,${asset.base64}` },
+      });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || 'Upload failed');
+      Alert.alert('Cover added', 'The cover photo was attached to this record.');
+      fetchLibrary();
+    } catch (err: any) {
+      Alert.alert('Cover failed', err.message || 'Could not attach the cover.');
     }
   };
 

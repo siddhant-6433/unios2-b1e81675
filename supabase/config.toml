@@ -223,6 +223,10 @@ verify_jwt = false
 [functions.apply-portal-upload-doc]
 verify_jwt = false
 
+# Auth handled inside: x-cron-secret (pg_cron) or a super-admin JWT ("Run now").
+[functions.library-enrich-batch]
+verify_jwt = false
+
 [functions.pay-link]
 verify_jwt = false
 
