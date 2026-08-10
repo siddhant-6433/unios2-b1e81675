@@ -229,14 +229,21 @@ export async function renderCourseFactsBlock(admin: SupabaseLike): Promise<strin
   try {
     const { data, error } = await (admin as any)
       .from("course_facts")
-      .select("duration, eligibility, entrance_exam, affiliation, intake_seats, fee_first_year, courses!inner(name, code, is_active)")
+      .select(
+        "duration, eligibility, entrance_exam, affiliation, intake_seats, fee_first_year," +
+          "courses!inner(name, code, is_active, departments(institutions(campuses(name))))",
+      )
       .limit(200);
     if (error || !Array.isArray(data) || !data.length) return "";
 
     const lines: string[] = [];
+    const byCampus = new Map<string, string[]>();
+    const affiliations = new Set<string>();
+
     for (const row of data as any[]) {
       const course = row.courses;
       if (!course?.name || course.is_active === false) continue;
+
       const bits = [
         row.duration ? `Duration: ${row.duration}` : "",
         row.eligibility ? `Eligibility: ${row.eligibility}` : "",
@@ -246,16 +253,38 @@ export async function renderCourseFactsBlock(admin: SupabaseLike): Promise<strin
         row.fee_first_year ? `First-year fee: ${row.fee_first_year}` : "",
       ].filter(Boolean);
       if (bits.length) lines.push(`${course.name}${course.code ? ` [${course.code}]` : ""}\n  ${bits.join("\n  ")}`);
+
+      // Which campus runs what, and the affiliation roll-up, are derived here
+      // rather than restated in prose — they used to be a second, drifting copy.
+      const campus = course.departments?.institutions?.campuses?.name;
+      if (campus) {
+        if (!byCampus.has(campus)) byCampus.set(campus, []);
+        byCampus.get(campus)!.push(course.name);
+      }
+      for (const a of String(row.affiliation || "").split(/\s*\|\s*/)) {
+        const t = a.trim();
+        if (t) affiliations.add(t);
+      }
     }
     if (!lines.length) return "";
 
     lines.sort((a, b) => a.localeCompare(b));
-    return [
-      "COURSES (AUTHORITATIVE — from course_facts, curated by admissions).",
-      "These figures override anything stated elsewhere in this prompt. If a course is not listed here, say you will check with the admissions team rather than guessing.",
+    const out = [
+      "COURSES — this is the complete and current list. Answer course questions from it, using its wording.",
       "",
       ...lines,
-    ].join("\n");
+    ];
+
+    if (byCampus.size) {
+      out.push("", "WHICH CAMPUS RUNS WHAT:");
+      for (const campus of [...byCampus.keys()].sort()) {
+        out.push(`${campus}: ${[...new Set(byCampus.get(campus)!)].sort().join(", ")}`);
+      }
+    }
+    if (affiliations.size) {
+      out.push("", `AFFILIATIONS AND APPROVALS ACROSS PROGRAMMES: ${[...affiliations].sort().join(", ")}`);
+    }
+    return out.join("\n");
   } catch {
     return "";
   }

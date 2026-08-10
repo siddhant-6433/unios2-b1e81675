@@ -104,7 +104,7 @@ Tagline: "Where Ambition Meets Action"
 
 APPROVALS & AFFILIATIONS:
 Approved by: AICTE, UGC, Bar Council of India (BCI), NCTE, Indian Nursing Council (INC), Pharmacy Council of India (PCI)
-Affiliated to: AKTU, GGSIPU, ABVMU (Atal Bihari Vajpayee Medical University), ALU (Dr. Bhimrao Ambedkar Law University), CCSU, University of Rajasthan
+(Per-programme affiliation is listed against each course below — use that, it is what admissions has verified.)
 
 RANKINGS & RECOGNITION:
 - #1 in UP — EW Higher Education Rankings
@@ -120,11 +120,11 @@ Highest package: INR 18.75 LPA | Average: INR 5.40 LPA
 Top recruiters: Fortis, KPMG, Cognizant, ICICI Bank, Wipro, HCL, Dell, Airtel, Kotak Mahindra, Infosys, Deloitte, TCS
 
 CAMPUSES:
-1. Greater Noida (Main) — Plot No. 41, Knowledge Park-1, Near Pari Chowk, Greater Noida, UP 201310. Houses: PGDM, MBA, BPT, BSc Nursing, BCA, BA LLB, LLB, D Pharma, BMRIT, GNM. On-campus parent hospital for clinical training.
-2. Ghaziabad Arthala — Near Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007. NIMT Institute of Technology and Management. BBA, B.Ed, PGDM, MBA.
+1. Greater Noida (Main) — Plot No. 41, Knowledge Park-1, Near Pari Chowk, Greater Noida, UP 201310. On-campus parent hospital for clinical training.
+2. Ghaziabad Arthala — Near Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007. NIMT Institute of Technology and Management.
 3. Ghaziabad Avantika — Ansal Avantika Colony, Shastri Nagar, Ghaziabad 201015. NIMT Beacon School (CBSE), B.Ed institutions.
 4. Ghaziabad Avantika II — Avantika Extension Colony, Ghaziabad. Residential and day school campus.
-5. Kotputli Jaipur — SP-3-1, RIICO Industrial Area, Keshwana, Kotputli, Jaipur 303108. 20-acre campus. Law, Management, Pharmacy, B.Ed. Affiliated to University of Rajasthan.
+5. Kotputli Jaipur — SP-3-1, RIICO Industrial Area, Keshwana, Kotputli, Jaipur 303108. 20-acre campus.
 
 COURSES:
 {{COURSE_FACTS}}

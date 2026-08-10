@@ -411,3 +411,18 @@ export function renderCuratedCourseFacts(rows: CuratedCourseFacts[]): string {
     ...lines,
   ].join("\n");
 }
+
+/**
+ * Highlights minus any factual claim.
+ *
+ * COURSE_KNOWLEDGE's `highlights` mix genuine colour ("On-campus parent
+ * hospital", "1,200+ recruiters") with restated facts ("Affiliated to ABVMU",
+ * "Approved by INC", duration and fee figures). The facts belong to
+ * course_facts; leaving copies here is what let the two drift. Strip anything
+ * that asserts an affiliation, approval, duration, eligibility or fee and keep
+ * the rest.
+ */
+export function qualitativeHighlights(highlights: string[]): string[] {
+  const FACTUAL = /(affiliated\s+to|approved\s+by|recognis(?:ed|ed)\s+by|recognized\s+by|eligibility|entrance\s+exam|₹|rs\.?\s*\d|\d+\s*%|\byears?\b\s*(?:programme|program|course|duration)|duration\s*:)/i;
+  return (highlights || []).filter((h) => !FACTUAL.test(h));
+}

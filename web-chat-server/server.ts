@@ -29,6 +29,7 @@ import {
   fetchCuratedCourseFacts,
   matchCuratedCourse,
   renderCuratedCourseFacts,
+  qualitativeHighlights,
   ADMISSIONS_INFO,
   getCourseKnowledge,
 } from "./knowledge.ts";
@@ -345,7 +346,7 @@ async function buildKnowledgeContext(course: string): Promise<string> {
       (facts?.intake_seats ? `Seats: ${facts.intake_seats}\n` : "") +
       (facts?.fee_first_year ? `First-year fee: ${facts.fee_first_year}\n` : ck?.fee ? `Fee: ${ck.fee}\n` : "") +
       (ck ? `Campus: ${ck.campus}\n` +
-            `Highlights: ${ck.highlights.join("; ")}\n` +
+            `Highlights: ${qualitativeHighlights(ck.highlights).join("; ")}\n` +
             `Careers: ${ck.careers}\n` +
             `Practical Exposure: ${ck.practicalExposure}\n` +
             (ck.placementHighlights ? `Placement: ${ck.placementHighlights}\n` : "")

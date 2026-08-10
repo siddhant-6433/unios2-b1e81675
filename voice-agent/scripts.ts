@@ -2,7 +2,7 @@
  * Conversation scripts for the NIMT Voice AI Agent.
  * Supports outbound admission calls and inbound call handling.
  */
-import { getCourseKnowledge } from "./knowledge.ts";
+import { getCourseKnowledge, qualitativeHighlights } from "./knowledge.ts";
 
 export interface CallContext {
   direction: "outbound" | "inbound";
@@ -140,7 +140,7 @@ export function buildSystemInstruction(ctx: CallContext): string {
 
   const courseBlock = ck ? `
 COURSE — ${ctx.courseName}:
-Highlights: ${ck.highlights.join(". ")}
+Highlights: ${qualitativeHighlights(ck.highlights).join(". ")}
 Practical: ${ck.practicalExposure}
 Careers: ${ck.careers}
 Why NIMT: ${ck.whyNimt}` : "";
