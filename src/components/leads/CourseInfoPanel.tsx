@@ -8,7 +8,27 @@ import {
   BookOpen, Award, Clock, CheckCircle,
 } from "lucide-react";
 
-// Known affiliations/approvals per institution code
+/**
+ * Curated course facts from public.course_facts, via fn_course_facts.
+ * This is the single source of truth shared with the website, the WhatsApp
+ * course_info templates and Navya — see the table comment in
+ * 20260810*_course_facts_single_source_of_truth.sql.
+ */
+interface CourseFacts {
+  duration?: string | null;
+  eligibility?: string | null;
+  entrance_exam?: string | null;
+  approval?: string | null;
+  age_requirement?: string | null;
+  intake_seats?: string | null;
+  subjects?: string | null;
+  fee_first_year?: string | null;
+  curated?: boolean;
+  verified_at?: string | null;
+}
+
+// Last-resort affiliations per institution, used only when neither course_facts
+// nor courses.affiliations has a value.
 const INSTITUTION_INFO: Record<string, { affiliations: string[]; approvals: string[] }> = {
   "NIMT-IMPS": {
     affiliations: ["Dr. A.P.J. Abdul Kalam Technical University (AKTU), Lucknow"],
@@ -89,11 +109,12 @@ interface Props {
 export function CourseInfoPanel({ courseId }: Props) {
   const [course, setCourse] = useState<CourseData | null>(null);
   const [eligibility, setEligibility] = useState<EligibilityData | null>(null);
+  const [facts, setFacts] = useState<CourseFacts | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [courseRes, eligRes] = await Promise.all([
+      const [courseRes, eligRes, factsRes] = await Promise.all([
         supabase
           .from("courses")
           .select(`
@@ -111,7 +132,11 @@ export function CourseInfoPanel({ courseId }: Props) {
           .select("*")
           .eq("course_id", courseId)
           .maybeSingle(),
+        // course_facts is the curated single source of truth — the same values
+        // the website, WhatsApp templates and Navya now render.
+        (supabase.rpc as any)("fn_course_facts", { p_course_id: courseId, p_student_name: null }),
       ]);
+      if (!factsRes?.error && factsRes?.data) setFacts(factsRes.data as CourseFacts);
 
       if (courseRes.data) {
         const d = courseRes.data as any;
@@ -138,10 +163,17 @@ export function CourseInfoPanel({ courseId }: Props) {
   if (loading) return <PageLoader />;
   if (!course) return <p className="text-xs text-muted-foreground text-center py-4">Course not found</p>;
 
-  // Prefer course-level affiliations from DB; fall back to hardcoded institution defaults
+  // Curated course_facts wins, then course-level affiliations, then the
+  // hardcoded institution defaults.
   const instDefaults = INSTITUTION_INFO[course.institution_code] || { affiliations: [], approvals: [] };
+  const curatedAffiliations = (facts?.approval || "")
+    .split(/\s*\|\s*/)
+    .map(s => s.trim())
+    .filter(s => s && s !== "NIMT Educational Institutions");
   const instInfo = {
-    affiliations: course.affiliations.length > 0 ? course.affiliations : instDefaults.affiliations,
+    affiliations: curatedAffiliations.length > 0
+      ? curatedAffiliations
+      : (course.affiliations.length > 0 ? course.affiliations : instDefaults.affiliations),
     approvals: instDefaults.approvals,
   };
   const websiteUrl = course.webflow_slug ? `https://www.nimt.ac.in/${course.webflow_slug}` : null;
@@ -167,7 +199,9 @@ export function CourseInfoPanel({ courseId }: Props) {
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg bg-muted/30 px-3 py-2">
             <span className="text-[10px] text-muted-foreground">Duration</span>
-            <p className="text-xs font-semibold text-foreground">{course.duration_years} year{course.duration_years > 1 ? "s" : ""}</p>
+            <p className="text-xs font-semibold text-foreground">
+              {facts?.duration || `${course.duration_years} year${course.duration_years > 1 ? "s" : ""}`}
+            </p>
           </div>
           <div className="rounded-lg bg-muted/30 px-3 py-2">
             <span className="text-[10px] text-muted-foreground">Exam Mode</span>
@@ -217,11 +251,46 @@ export function CourseInfoPanel({ courseId }: Props) {
         </div>
       )}
 
+      {/* Curated facts — verbatim what the website, WhatsApp templates and Navya
+          tell students. Shown above the structured rules so a counsellor can
+          quote the same words rather than paraphrase. */}
+      {facts?.curated && (
+        <div className="rounded-xl border border-success/30 bg-success/[0.03] p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold text-success uppercase tracking-wide flex items-center gap-1">
+              <CheckCircle className="h-3.5 w-3.5" /> What we tell students
+            </h4>
+            {facts.verified_at && (
+              <span className="text-[10px] text-muted-foreground">
+                verified {new Date(facts.verified_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+              </span>
+            )}
+          </div>
+          <div className="space-y-1.5 text-xs">
+            {([
+              ["Eligibility", facts.eligibility],
+              ["Entrance exam", facts.entrance_exam],
+              ["Subjects", facts.subjects],
+              ["Age", facts.age_requirement],
+              ["Seats", facts.intake_seats],
+              ["First-year fee", facts.fee_first_year],
+            ] as Array<[string, string | null | undefined]>)
+              .filter(([, v]) => v)
+              .map(([label, v]) => (
+                <div key={label} className="flex items-start gap-2">
+                  <span className="text-muted-foreground w-28 shrink-0">{label}</span>
+                  <span className="text-foreground">{v}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Eligibility */}
       {eligibility && (
         <div className="rounded-xl border border-border/60 p-4 space-y-2">
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-            <GraduationCap className="h-3.5 w-3.5" /> Eligibility
+            <GraduationCap className="h-3.5 w-3.5" /> Eligibility (structured rules)
           </h4>
           <div className="space-y-1.5 text-xs">
             <div className="flex items-start gap-2">

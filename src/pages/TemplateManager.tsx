@@ -87,7 +87,19 @@ const TemplateManager = () => {
     video_url: string | null;
     slug: string | null;
     maps_cid: string | null;
+    // Curated single source of truth (public.course_facts). Edited here, read by
+    // the website, the counsellor Course tab, WhatsApp templates and Navya.
+    fact_duration: string | null;
+    fact_eligibility: string | null;
+    fact_entrance_exam: string | null;
+    fact_affiliation: string | null;
+    fact_fee_first_year: string | null;
   };
+  const FACT_FIELDS = {
+    fact_duration: "duration", fact_eligibility: "eligibility",
+    fact_entrance_exam: "entrance_exam", fact_affiliation: "affiliation",
+    fact_fee_first_year: "fee_first_year",
+  } as const;
   const [courseRows, setCourseRows] = useState<CourseRow[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [courseEdits, setCourseEdits] = useState<Record<string, Partial<CourseRow>>>({});
@@ -96,11 +108,25 @@ const TemplateManager = () => {
 
   const fetchCourses = async () => {
     setCoursesLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("courses")
-      .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug, maps_cid")
-      .order("code");
-    if (!error && data) setCourseRows(data as CourseRow[]);
+    const [{ data, error }, { data: factRows }] = await Promise.all([
+      (supabase as any)
+        .from("courses")
+        .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug, maps_cid")
+        .order("code"),
+      (supabase as any)
+        .from("course_facts")
+        .select("course_id, duration, eligibility, entrance_exam, affiliation, fee_first_year"),
+    ]);
+    if (!error && data) {
+      const factsById = new Map<string, any>(((factRows || []) as any[]).map((f) => [f.course_id, f]));
+      setCourseRows((data as CourseRow[]).map((c) => {
+        const f = factsById.get(c.id) || {};
+        return { ...c,
+          fact_duration: f.duration ?? null, fact_eligibility: f.eligibility ?? null,
+          fact_entrance_exam: f.entrance_exam ?? null, fact_affiliation: f.affiliation ?? null,
+          fact_fee_first_year: f.fee_first_year ?? null };
+      }));
+    }
     setCoursesLoading(false);
   };
 
@@ -108,7 +134,24 @@ const TemplateManager = () => {
     const edits = courseEdits[id];
     if (!edits) return;
     setSavingCourseId(id);
-    const { error } = await (supabase as any).from("courses").update(edits).eq("id", id);
+    // Curated facts live in course_facts; everything else stays on courses.
+    const factPatch: Record<string, unknown> = {};
+    const coursePatch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(edits)) {
+      const factCol = (FACT_FIELDS as Record<string, string>)[k];
+      if (factCol) factPatch[factCol] = v === "" ? null : v;
+      else coursePatch[k] = v;
+    }
+    let error: { message: string } | null = null;
+    if (Object.keys(coursePatch).length) {
+      ({ error } = await (supabase as any).from("courses").update(coursePatch).eq("id", id));
+    }
+    if (!error && Object.keys(factPatch).length) {
+      ({ error } = await (supabase as any).from("course_facts").upsert(
+        { course_id: id, ...factPatch, verified_at: new Date().toISOString() },
+        { onConflict: "course_id" },
+      ));
+    }
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
     } else {
@@ -127,10 +170,9 @@ const TemplateManager = () => {
   const previewCourseTemplate = (c: CourseRow) => {
     const e = courseEdits[c.id] || {};
     const merged = { ...c, ...e } as CourseRow;
-    const duration = merged.duration_years
-      ? `${merged.duration_years} year${merged.duration_years === 1 ? "" : "s"} (${merged.type || "—"})`
-      : "—";
-    const eligibility = merged.marketing_eligibility || "(falls back to eligibility_rules.notes)";
+    const duration = merged.fact_duration
+      || (merged.duration_years ? `${merged.duration_years} year${merged.duration_years === 1 ? "" : "s"} (${merged.type || "—"})` : "—");
+    const eligibility = merged.fact_eligibility || "(no curated eligibility yet)";
     const courseUrl = merged.slug
       ? `https://www.nimt.ac.in/courses/${merged.slug}#admissions`
       : "https://www.nimt.ac.in/courses";
@@ -139,7 +181,7 @@ const TemplateManager = () => {
 `Hi <student>, here are the details for ${merged.name} at NIMT:
 • Duration: ${duration}
 • Eligibility: ${eligibility}
-• Accreditation: (resolved from approval_letters)
+• Accreditation: ${merged.fact_affiliation || "(resolved from courses.affiliations)"}
 
 Buttons:
   ▶ Watch course video → ${videoUrl}
@@ -495,9 +537,12 @@ Buttons:
                   Course data sent in WhatsApp templates
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-                  These five fields feed the <span className="font-mono">course_info_v1</span> template body (Duration,
-                  Eligibility, Accreditation, the video button, and the fees-and-apply button). Edit them here so
-                  outbound messages match reality. Preview shows the rendered template.
+                  This is the <span className="font-medium text-foreground">single source of truth</span> for course
+                  information. What you type here is exactly what the <span className="font-medium text-foreground">website</span>,
+                  the <span className="font-medium text-foreground">counsellor Course tab</span>, the
+                  {" "}<span className="font-mono">course_info</span> WhatsApp templates and
+                  {" "}<span className="font-medium text-foreground">Navya</span> all show. Curated fields save to
+                  {" "}<span className="font-mono">course_facts</span>; video URL, slug and Maps CID stay on the course record.
                 </p>
               </div>
               <Button variant="outline" size="sm" className="gap-2" onClick={fetchCourses} disabled={coursesLoading}>
@@ -515,8 +560,11 @@ Buttons:
                   <tr>
                     <th className="text-left px-3 py-2 font-medium">Code</th>
                     <th className="text-left px-3 py-2 font-medium">Course name</th>
-                    <th className="text-left px-3 py-2 font-medium">Duration</th>
-                    <th className="text-left px-3 py-2 font-medium min-w-[220px]">Marketing eligibility</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[150px]">Duration</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[240px]">Eligibility</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[170px]">Entrance exam</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[190px]">Affiliation</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[120px]">1st-year fee</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[200px]">Video URL</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[180px]">Slug</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[180px]">Maps CID (optional)</th>
@@ -533,16 +581,47 @@ Buttons:
                       <tr key={c.id} className="border-t border-border align-top">
                         <td className="px-3 py-2 font-mono text-foreground whitespace-nowrap">{c.code}</td>
                         <td className="px-3 py-2 text-foreground">{c.name}</td>
-                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
-                          {c.duration_years ? `${c.duration_years}y` : "—"} {c.type ? `(${c.type})` : ""}
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.fact_duration || ""}
+                            onChange={(ev) => set("fact_duration", ev.target.value)}
+                            placeholder={c.duration_years ? `${c.duration_years} years` : "3 Years (6 Semesters)"}
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
+                          />
                         </td>
                         <td className="px-3 py-2">
                           <textarea
-                            value={merged.marketing_eligibility || ""}
-                            onChange={(ev) => set("marketing_eligibility", ev.target.value)}
+                            value={merged.fact_eligibility || ""}
+                            onChange={(ev) => set("fact_eligibility", ev.target.value)}
                             rows={2}
                             placeholder="10+2 with PCB, min 50%…"
                             className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <textarea
+                            value={merged.fact_entrance_exam || ""}
+                            onChange={(ev) => set("fact_entrance_exam", ev.target.value)}
+                            rows={2}
+                            placeholder="CUET UG accepted. Not mandatory."
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <textarea
+                            value={merged.fact_affiliation || ""}
+                            onChange={(ev) => set("fact_affiliation", ev.target.value)}
+                            rows={2}
+                            placeholder="Chaudhary Charan Singh University | AICTE"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.fact_fee_first_year || ""}
+                            onChange={(ev) => set("fact_fee_first_year", ev.target.value)}
+                            placeholder="75,000"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
                           />
                         </td>
                         <td className="px-3 py-2">

@@ -8,6 +8,7 @@ const FEE_STRUCTURE_URL = "https://nimt.ac.in/admissions/fees/";
 
 type SupabaseLike = {
   from: (table: string) => any;
+  rpc?: (fn: string, args?: Record<string, unknown>) => any;
 };
 
 interface CourseKnowledge {
@@ -209,6 +210,31 @@ async function loadEligibilityContext(
   return formatEligibility((data || null) as EligibilityRow | null, course, knowledge);
 }
 
+/**
+ * The curated single source of truth (public.course_facts via fn_course_facts).
+ * These are the exact words the website, the counsellor Course tab and the
+ * WhatsApp course_info templates show, signed off by admissions. Navya must
+ * quote them rather than paraphrase from the knowledge file — the knowledge file
+ * and courses.marketing_eligibility disagreed with the DB on eligibility, fee
+ * and duration for 21 courses.
+ */
+async function loadCuratedCourseFacts(
+  admin: SupabaseLike,
+  courseId: string | null,
+): Promise<Record<string, string> | null> {
+  if (!courseId) return null;
+  try {
+    const { data, error } = await (admin as any).rpc("fn_course_facts", {
+      p_course_id: courseId,
+      p_student_name: null,
+    });
+    if (error || !data || typeof data !== "object") return null;
+    return data as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadVerifiedAdmissionsContext(
   admin: SupabaseLike,
   courseId: string | null,
@@ -217,22 +243,44 @@ export async function loadVerifiedAdmissionsContext(
   const course = await resolveCourse(admin, courseId, courseName);
   const knowledgeEntry = findKnowledgeByCourse(course?.name || courseName);
   const knowledge = knowledgeEntry?.[1] || null;
+  const facts = await loadCuratedCourseFacts(admin, course?.id || courseId);
   const feeContext = await loadFeeContext(admin, course?.id || courseId, knowledge);
   const eligibilityContext = await loadEligibilityContext(admin, course, knowledge);
 
+  const curated = facts?.curated ? facts : null;
+  const val = (key: string) => {
+    const v = curated?.[key];
+    return typeof v === "string" && v.trim() ? v.trim() : "";
+  };
+
   const lines = [
     "VERIFIED ADMISSIONS CONTEXT",
-    "Source priority: fee_structures/fee_structure_items + courses.marketing_eligibility/eligibility_rules first; web-chat-server/knowledge.ts second; static fallback last.",
+    curated
+      ? "Source priority: CURATED COURSE FACTS below are authoritative — quote them verbatim for eligibility, duration, entrance exam, affiliation, seats and first-year fee. Everything after them is background only and must never contradict them."
+      : "Source priority: fee_structures/fee_structure_items + eligibility_rules first; web-chat-server/knowledge.ts second; static fallback last. No curated facts exist for this course.",
     `Official fee page: ${FEE_STRUCTURE_URL}`,
     course ? `Course from DB: ${course.name || course.code} (${course.code || "no code"})` : "",
+    // ── Curated facts (authoritative) ─────────────────────────────────────
+    curated ? "--- CURATED COURSE FACTS (authoritative) ---" : "",
+    val("duration") ? `Duration: ${val("duration")}` : "",
+    val("eligibility") ? `Eligibility: ${val("eligibility")}` : "",
+    val("entrance_exam") ? `Entrance exam: ${val("entrance_exam")}` : "",
+    val("approval") ? `Affiliation/approval: ${val("approval")}` : "",
+    val("subjects") ? `Subject requirement: ${val("subjects")}` : "",
+    val("age_requirement") ? `Age requirement: ${val("age_requirement")}` : "",
+    val("intake_seats") ? `Intake/seats: ${val("intake_seats")}` : "",
+    val("fee_first_year") ? `First-year fee: ${val("fee_first_year")}` : "",
+    val("course_url") ? `Course page: ${val("course_url")}` : "",
+    curated ? "--- END CURATED FACTS ---" : "",
+    // ── Background ────────────────────────────────────────────────────────
     course?.course_summary ? `Course summary from DB: ${course.course_summary}` : "",
-    course?.duration_years ? `DB duration: ${course.duration_years} years (${course.type || "programme"})` : "",
+    !curated && course?.duration_years ? `DB duration: ${course.duration_years} years (${course.type || "programme"})` : "",
     knowledgeEntry ? `Knowledge.ts course key: ${knowledgeEntry[0]}` : "",
-    knowledge?.duration ? `Knowledge.ts duration: ${knowledge.duration}` : "",
+    !val("duration") && knowledge?.duration ? `Knowledge.ts duration: ${knowledge.duration}` : "",
     knowledge?.campus ? `Knowledge.ts campus: ${knowledge.campus}` : "",
-    eligibilityContext ? `Eligibility: ${eligibilityContext}` : "",
-    feeContext ? `Fees: ${feeContext}` : "",
-    knowledge?.entrance ? `Entrance: ${knowledge.entrance}` : "",
+    !val("eligibility") && eligibilityContext ? `Eligibility: ${eligibilityContext}` : "",
+    feeContext ? `Fee structure detail (installments/discounts): ${feeContext}` : "",
+    !val("entrance_exam") && knowledge?.entrance ? `Entrance: ${knowledge.entrance}` : "",
     knowledge?.whyNimt ? `Why NIMT: ${knowledge.whyNimt}` : "",
     knowledge?.placementHighlights ? `Placements: ${knowledge.placementHighlights}` : "",
     `Institution overview from knowledge.ts: ${NIMT_OVERVIEW}`,
