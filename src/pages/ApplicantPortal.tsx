@@ -6,6 +6,7 @@ import { GraduationCap, LogOut, ArrowRight, CheckCircle2, Clock, FileText, Alert
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
+import ApplicantReceipts from "@/components/applicant/ApplicantReceipts";
 
 interface CourseSelection {
   course_name?: string;
@@ -390,6 +391,9 @@ export default function ApplicantPortal() {
                       courseName={(app.course_selections as any[])?.[0]?.course_name || null}
                       onPayment={fetchApplications}
                     />
+
+                    {/* Fee receipts — shown regardless of offer state (TokenFeePanel bails out with no offer) */}
+                    <ApplicantReceipts leadId={app.lead_id || null} />
                   </div>
                 );
               })}
