@@ -502,9 +502,12 @@ export default function AdminApplicationView() {
       reviewed_by: profile?.id ?? null,
       reviewed_at: new Date().toISOString(),
     };
-    const { error } = await supabase
-      .from("application_doc_reviews" as any)
-      .upsert(payload, { onConflict: "application_id,file_path" });
+    // Route through the edge function: it writes the review, recomputes the
+    // application's mandatory-document completeness, and re-runs the admission-
+    // number engine (so verifying the last mandatory doc auto-issues the AN).
+    const { error } = await supabase.functions.invoke("review-admission-doc", {
+      body: { application_id: applicationId, file_path: doc.path, status: next, notes: payload.notes },
+    });
     if (error) {
       toast({ title: "Couldn't save review", description: error.message, variant: "destructive" });
       return;

@@ -22,7 +22,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -51,6 +51,28 @@ interface CertificateApprovalItem {
   submitted_by_name: string | null;
   submitted_at: string | null;
   pdf_path: string | null;
+}
+
+// Paid students whose admission number is held by the mandatory-document gate.
+type PendingAnDocState = "verified" | "rejected" | "pending" | "missing";
+interface PendingAnDocStatus {
+  complete?: boolean;
+  required_total?: number;
+  verified?: number;
+  rejected?: number;
+  pending?: number;
+  missing?: number;
+  docs?: { key: string; label: string; state: PendingAnDocState }[];
+}
+interface PendingAnItem {
+  id: string; // lead_id (row key)
+  lead_id: string;
+  student_id: string;
+  name: string;
+  course: string | null;
+  pre_admission_no: string | null;
+  application_id: string | null;
+  doc_status: PendingAnDocStatus | null;
 }
 
 interface AbvmuDepositItem {
@@ -174,7 +196,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -229,6 +251,7 @@ export default function Inbox() {
     abvmu_deposits: 0,
     offer_approvals: 0,
     certificate_approvals: 0,
+    pending_an_generation: 0,
     contact_changes: 0,
     applications: 0,
     followups: 0,
@@ -287,6 +310,14 @@ export default function Inbox() {
       count: counts.certificate_approvals,
       roles: ["super_admin"],
       color: "text-emerald-600",
+    },
+    {
+      id: "pending_an_generation",
+      label: "Pending AN Generation",
+      icon: AlertTriangle,
+      count: counts.pending_an_generation,
+      roles: ["super_admin", "principal"],
+      color: "text-amber-600",
     },
     {
       id: "contact_changes",
@@ -448,6 +479,11 @@ export default function Inbox() {
             .select("id")
             .in("status", ["pending_principal", "pending_super_admin"])
         : Promise.resolve({ count: 0 }),
+
+      // Pending AN generation — super_admin + principal
+      (isSuperAdmin || isPrincipal)
+        ? supabase.rpc("list_pending_an_generation")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -468,6 +504,7 @@ export default function Inbox() {
       voice_messages: get(8),
       certificate_approvals: get(9),
       fee_concessions: get(10),
+      pending_an_generation: get(11),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -744,6 +781,20 @@ export default function Inbox() {
             submitted_at: r.pgdm_certificate_submitted_at,
             pdf_path: r.pgdm_certificate_pdf_path,
           } as CertificateApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "pending_an_generation") {
+        const { data, error } = await supabase.rpc("list_pending_an_generation");
+        if (error) throw error;
+        const nextItems = ((data || []) as any[]).map((r: any) => ({
+            id: r.lead_id,
+            lead_id: r.lead_id,
+            student_id: r.student_id,
+            name: r.name || "—",
+            course: r.course,
+            pre_admission_no: r.pre_admission_no,
+            application_id: r.application_id,
+            doc_status: r.admission_doc_status || null,
+          } as PendingAnItem));
         commitItems(cat, nextItems);
       } else if (cat === "contact_changes") {
         const { data, error } = await supabase
@@ -1045,6 +1096,33 @@ export default function Inbox() {
     }
   };
 
+  // Super-admin override: generate the admission number despite the document gate.
+  const bypassAn = async (p: PendingAnItem) => {
+    if (!isSuperAdmin) return;
+    const reason = window.prompt("Reason for generating the admission number despite the document check:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({ title: "Reason required", description: "A reason is needed to override the document check.", variant: "destructive" });
+      return;
+    }
+    setProcessing(p.id);
+    try {
+      const { data, error } = await (supabase as any).rpc("admission_bypass_generate_an", {
+        _lead_id: p.lead_id,
+        _reason: reason.trim(),
+      });
+      if (error) throw error;
+      toast({ title: "Admission number generated", description: data ? `AN: ${data}` : "Issued." });
+      setSelectedItem(null);
+      loadItems("pending_an_generation");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Couldn't generate AN", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const decideConcession = async (c: FeeConcessionItem, approve: boolean) => {
     if (!isSuperAdmin) return;
     let note: string | null = null;
@@ -1298,6 +1376,26 @@ export default function Inbox() {
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
             {c.submitted_by_name ? `by ${c.submitted_by_name} · ` : ""}{fmtTime(c.submitted_at)}
+          </p>
+        </button>
+      );
+    }
+
+    if (selected === "pending_an_generation") {
+      const p = item as PendingAnItem;
+      const ds = p.doc_status || {};
+      const outstanding = (ds.missing || 0) + (ds.rejected || 0) + (ds.pending || 0);
+      return (
+        <button key={p.id} className={baseClass} onClick={() => setSelectedItem(p)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{p.pre_admission_no || "PAN pending"} · {p.course || "—"}</p>
+            </div>
+            <span className="text-[10px] text-amber-600 font-medium shrink-0">{ds.verified ?? 0}/{ds.required_total ?? 0} verified</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {outstanding > 0 ? `${outstanding} document${outstanding === 1 ? "" : "s"} pending` : "Documents complete"}
           </p>
         </button>
       );
@@ -1744,6 +1842,76 @@ export default function Inbox() {
           <p className="text-[10px] text-muted-foreground text-center">
             To correct details, open in Student Services and use Regenerate.
           </p>
+        </div>
+      );
+    }
+
+    if (selected === "pending_an_generation") {
+      const p = selectedItem as PendingAnItem;
+      const ds = p.doc_status || {};
+      const docs = ds.docs || [];
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{p.name}</h3>
+            <p className="text-sm text-muted-foreground">{p.pre_admission_no || "PAN pending"} · {p.course || "—"}</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-2">
+              Mandatory documents — {ds.verified ?? 0} of {ds.required_total ?? 0} verified
+            </p>
+            <div className="space-y-1.5">
+              {docs.length === 0 && (
+                <p className="text-xs text-muted-foreground">No mandatory-document breakdown available.</p>
+              )}
+              {docs.map((d) => (
+                <div key={d.key} className="flex items-center justify-between text-sm">
+                  <span className="text-foreground truncate">{d.label}</span>
+                  <span className={cn(
+                    "text-[11px] font-medium shrink-0 ml-2 capitalize",
+                    d.state === "verified" ? "text-success"
+                      : d.state === "rejected" ? "text-destructive"
+                      : d.state === "missing" ? "text-muted-foreground"
+                      : "text-amber-600",
+                  )}>
+                    {d.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {p.application_id && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => navigate(`/applications/${p.application_id}`)}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Open document review
+            </Button>
+          )}
+
+          {isSuperAdmin ? (
+            <>
+              <Button
+                size="sm"
+                className="w-full bg-amber-600/90 hover:bg-amber-600 text-white"
+                disabled={processing === p.id}
+                onClick={() => bypassAn(p)}
+              >
+                {processing === p.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Bypass & Generate AN</>}
+              </Button>
+              <p className="text-[10px] text-muted-foreground text-center">
+                Use only when a document flag is incorrect — the override is recorded.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground text-center">
+              Only a super admin can override the document check and generate the admission number.
+            </p>
+          )}
         </div>
       );
     }
