@@ -1003,11 +1003,22 @@ async function executeTool(
         const dept = course.departments;
         const inst = dept?.institutions;
         const campus = inst?.campuses;
-        const feeRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/fee_structures?course_id=eq.${course.id}&is_active=eq.true&select=version,metadata,fee_structure_items(amount,term,fee_codes:fee_code_id(code,name,category))`,
-          { headers },
-        );
+        // course_facts is the single source of truth for what we tell callers
+        // about duration, eligibility, entrance exam, affiliation, seats and
+        // first-year fee. The fee STRUCTURE below still comes from the ledger,
+        // because that carries installments, waivers and year-wise breakdown.
+        const [feeRes, factsRes] = await Promise.all([
+          fetch(
+            `${SUPABASE_URL}/rest/v1/fee_structures?course_id=eq.${course.id}&is_active=eq.true&select=version,metadata,fee_structure_items(amount,term,fee_codes:fee_code_id(code,name,category))`,
+            { headers },
+          ),
+          fetch(
+            `${SUPABASE_URL}/rest/v1/course_facts?course_id=eq.${course.id}&select=duration,eligibility,entrance_exam,affiliation,intake_seats,fee_first_year&limit=1`,
+            { headers },
+          ),
+        ]);
         const feeStructures = await feeRes.json();
+        const curatedFacts = (await factsRes.json().catch(() => []))?.[0] || null;
 
         // Summarize fees using metadata (year-wise breakdown) — NOT by summing items
         let feeSummary = "Fee structure not available yet.";
@@ -1059,7 +1070,9 @@ async function executeTool(
           feeSummary = parts.join(". ") || "Fee details available on request.";
         }
 
-        // Build affiliation/approval info from institution code
+        // Last-resort affiliations, used only when course_facts has none.
+        // These were a fourth hardcoded copy of affiliation data; course_facts
+        // is now the authority.
         const KNOWN_AFFILIATIONS: Record<string, string> = {
           "NIMT-IMPS": "AKTU affiliated, AICTE approved, NIRF ranked",
           "NIMT-CON": "Indian Nursing Council (INC) approved, ABVMU (Atal Bihari Vajpayee Medical University) affiliated, UP State Medical Faculty",
@@ -1073,14 +1086,22 @@ async function executeTool(
           "MIRAI": "IB World School (PYP and MYP)",
         };
         const instCode = course.code?.split("-").slice(0, 2).join("-") || "";
-        const affiliations = KNOWN_AFFILIATIONS[instCode] || inst?.name || "";
+        const affiliations = curatedFacts?.affiliation
+          || KNOWN_AFFILIATIONS[instCode] || inst?.name || "";
+
+        if (curatedFacts?.fee_first_year && feeSummary === "Fee structure not available yet.") {
+          feeSummary = `First year fee: ${curatedFacts.fee_first_year}`;
+        }
 
         return {
           found: true,
           name: course.name,
-          duration: course.duration_years ? `${course.duration_years} years` : "not specified",
-          eligibility: course.eligibility || "Check website for eligibility",
-          entrance_exam: course.entrance_exam || (course.entrance_mandatory ? "Entrance exam required" : "No entrance exam. Merit and interview based."),
+          duration: curatedFacts?.duration
+            || (course.duration_years ? `${course.duration_years} years` : "not specified"),
+          eligibility: curatedFacts?.eligibility || course.eligibility || "Check website for eligibility",
+          entrance_exam: curatedFacts?.entrance_exam || course.entrance_exam
+            || (course.entrance_mandatory ? "Entrance exam required" : "No entrance exam. Merit and interview based."),
+          seats: curatedFacts?.intake_seats || undefined,
           fees: feeSummary,
           campus: campus ? `${campus.name}${campus.city ? `, ${campus.city}` : ""}` : "NIMT campus",
           affiliations: `VERIFIED: ${affiliations}`,

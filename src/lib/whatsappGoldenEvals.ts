@@ -45,7 +45,7 @@ export const WHATSAPP_GOLDEN_ANSWER_EVALS: WhatsAppGoldenAnswerEval[] = [
     expectedAnswerNotes: "Use DB eligibility: 10+2 PCB/English, minimum marks, and CAHET counselling for UP 2026-27.",
     requiredTerms: ["BPT", "10+2", "PCB", "CAHET"],
     forbiddenTerms: ["NEET required"],
-    sourceRefs: ["eligibility_rules", "courses.marketing_eligibility", "web-chat-server/knowledge.ts"],
+    sourceRefs: ["course_facts", "eligibility_rules"],
   },
   {
     id: "course_not_offered_mbbs",

@@ -85,6 +85,45 @@ describe("one resolver, read by every surface", () => {
   });
 });
 
+describe("no course facts are hardcoded any more", () => {
+  const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
+  const webChatServer = readFileSync("web-chat-server/server.ts", "utf8");
+  const voiceServer = readFileSync("voice-agent/server.ts", "utf8");
+
+  it("renders Navya's COURSES section from the database", () => {
+    // KNOWLEDGE_BASE used to carry ~114 lines of per-course duration,
+    // eligibility, entrance and fee that drifted from the DB.
+    expect(aiReply).toContain("{{COURSE_FACTS}}");
+    expect(aiReply).toContain("renderCourseFactsBlock");
+    const knowledgeBase = aiReply.slice(aiReply.indexOf("const KNOWLEDGE_BASE"));
+    const body = knowledgeBase.slice(0, knowledgeBase.indexOf("\n`;"));
+    expect(body).not.toMatch(/^- Eligibility:/m);
+    expect(body).not.toMatch(/^- Duration:/m);
+  });
+
+  it("refuses to state figures when the DB block is unavailable", () => {
+    // Better to deflect to a counsellor than to answer from a stale constant.
+    expect(aiReply).toContain("Course details unavailable right now");
+    expect(aiReply).toContain("do NOT state any course duration");
+  });
+
+  it("feeds the web chat agent from course_facts", () => {
+    expect(webChatServer).toContain("fetchCuratedCourseFacts");
+    expect(webChatServer).toContain("renderCuratedCourseFacts");
+  });
+
+  it("feeds the voice agent's get_course_info from course_facts", () => {
+    expect(voiceServer).toContain("rest/v1/course_facts");
+    expect(voiceServer).toContain("curatedFacts?.eligibility");
+    expect(voiceServer).toContain("curatedFacts?.affiliation");
+  });
+
+  it("stops surfacing the field that disagreed with everything else", () => {
+    // courses.marketing_eligibility told LLB enquirers "10+2 with min 50%".
+    expect(navyaContext).not.toContain("Customer-facing eligibility");
+  });
+});
+
 describe("editing goes to the source of truth", () => {
   it("saves curated fields to course_facts, not the deprecated column", () => {
     expect(templateManager).toContain('from("course_facts")');

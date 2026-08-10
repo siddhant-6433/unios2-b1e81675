@@ -98,7 +98,10 @@ function findKnowledgeByCourse(courseName: string | null | undefined): [string, 
 
 function formatEligibility(row: EligibilityRow | null, course: CourseRow | null, knowledge: CourseKnowledge | null): string {
   const parts: string[] = [];
-  if (course?.marketing_eligibility) parts.push(`Customer-facing eligibility: ${course.marketing_eligibility}`);
+  // courses.marketing_eligibility is deliberately NOT used: it was the field
+  // that disagreed with every other surface (LLB read "10+2 with min 50%" for a
+  // graduate-entry course). Curated eligibility comes from course_facts and is
+  // injected above this block, marked authoritative.
   if (row?.notes) parts.push(`Eligibility rule notes: ${row.notes}`);
   if (row?.subject_prerequisites?.length) parts.push(`Subjects: ${row.subject_prerequisites.join(", ")}`);
   if (row?.class_12_min_marks) parts.push(`Class 12 minimum marks: ${row.class_12_min_marks}%`);
@@ -208,6 +211,54 @@ async function loadEligibilityContext(
     .eq("course_id", course.id)
     .maybeSingle();
   return formatEligibility((data || null) as EligibilityRow | null, course, knowledge);
+}
+
+/**
+ * Render every course's curated facts as a compact block for an AI system prompt.
+ *
+ * This replaces the hardcoded per-course COURSES: sections that used to live in
+ * three separate places (whatsapp-ai-reply's KNOWLEDGE_BASE,
+ * web-chat-server/knowledge.ts and voice-agent/knowledge.ts — the latter two
+ * byte-identical copies of each other). They drifted from the database and from
+ * each other; now there is one list and it comes from public.course_facts.
+ *
+ * Returns "" on any failure, so a caller falls back to its static text rather
+ * than losing the course list entirely.
+ */
+export async function renderCourseFactsBlock(admin: SupabaseLike): Promise<string> {
+  try {
+    const { data, error } = await (admin as any)
+      .from("course_facts")
+      .select("duration, eligibility, entrance_exam, affiliation, intake_seats, fee_first_year, courses!inner(name, code, is_active)")
+      .limit(200);
+    if (error || !Array.isArray(data) || !data.length) return "";
+
+    const lines: string[] = [];
+    for (const row of data as any[]) {
+      const course = row.courses;
+      if (!course?.name || course.is_active === false) continue;
+      const bits = [
+        row.duration ? `Duration: ${row.duration}` : "",
+        row.eligibility ? `Eligibility: ${row.eligibility}` : "",
+        row.entrance_exam ? `Entrance: ${row.entrance_exam}` : "",
+        row.affiliation ? `Affiliation: ${row.affiliation}` : "",
+        row.intake_seats ? `Seats: ${row.intake_seats}` : "",
+        row.fee_first_year ? `First-year fee: ${row.fee_first_year}` : "",
+      ].filter(Boolean);
+      if (bits.length) lines.push(`${course.name}${course.code ? ` [${course.code}]` : ""}\n  ${bits.join("\n  ")}`);
+    }
+    if (!lines.length) return "";
+
+    lines.sort((a, b) => a.localeCompare(b));
+    return [
+      "COURSES (AUTHORITATIVE — from course_facts, curated by admissions).",
+      "These figures override anything stated elsewhere in this prompt. If a course is not listed here, say you will check with the admissions team rather than guessing.",
+      "",
+      ...lines,
+    ].join("\n");
+  } catch {
+    return "";
+  }
 }
 
 /**
