@@ -2191,20 +2191,22 @@ export default function Applications() {
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
                     <td className="px-2 py-2 min-w-[180px] max-w-[240px]">
-                      <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
-                        {app.full_name || "—"}
-                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`font-medium truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
+                          {app.full_name || "—"}
+                        </span>
+                        {app.lead_external_owner_id && (
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                            title={`${ownerTypeLabel(app.lead_external_owner_type)}${app.lead_external_owner_name ? `: ${app.lead_external_owner_name}` : ""}`}
+                          >
+                            {ownerBadgeText(app.lead_external_owner_type)}
+                          </span>
+                        )}
+                      </div>
                       {app.lead_shared_with_nimt === false && (
                         <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
                           Not shared with NIMT
-                        </span>
-                      )}
-                      {app.lead_external_owner_id && (
-                        <span
-                          className="ml-1 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-                          title={`${ownerTypeLabel(app.lead_external_owner_type)}${app.lead_external_owner_name ? `: ${app.lead_external_owner_name}` : ""}`}
-                        >
-                          {ownerBadgeText(app.lead_external_owner_type)}
                         </span>
                       )}
                       {app.exam_registration && (
