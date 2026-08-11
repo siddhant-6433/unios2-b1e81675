@@ -80,7 +80,19 @@ async function createSession(admin: SupabaseClient, userId: string) {
   });
   if (magicError || !magicLink) return null;
 
-  const { data: sessionData, error: verifyError } = await admin.auth.verifyOtp({
+  // verifyOtp REPLACES the calling client's auth state. Running it on `admin`
+  // demotes that client from service_role to this user for the rest of the
+  // request — the whatsapp_login_intents "consumed" update in status_sign_in
+  // then matched 0 rows under RLS and returned no error, leaving the intent
+  // replayable. Burn a throwaway client instead (same fix as
+  // student-portal-claim). This also keeps the service_role-only
+  // find_auth_user_by_email_or_phone RPC callable later in the request.
+  const authClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { data: sessionData, error: verifyError } = await authClient.auth.verifyOtp({
     token_hash: magicLink.properties.hashed_token,
     type: "magiclink",
   });
@@ -90,6 +102,39 @@ async function createSession(admin: SupabaseClient, userId: string) {
     access_token: sessionData.session.access_token,
     refresh_token: sessionData.session.refresh_token,
   };
+}
+
+// Indexed, uncapped lookup of an existing auth user by email.
+//
+// This used to be auth.admin.listUsers({ page: 1, perPage: 1000 }) scanned in
+// JS. Production has ~2,836 auth users and GoTrue returns them created_at DESC,
+// so page 1 was the 1,000 NEWEST and every older account was invisible. A
+// returning applicant past row 1000 was never found, provisionUser returned
+// null, and OTP verify 500'd with "Failed to provision applicant user".
+// Same bug, same fix as student-portal-claim.
+//
+// _phone stays null DELIBERATELY. The synthetic emails are role-scoped
+// ({digits}@alumni|student|parent.unios.local) and one number legitimately
+// fronts several accounts. student-portal-claim is the only writer of
+// auth.users.phone, which is exactly the column the RPC's phone arm matches —
+// so passing a phone here would hand back the STUDENT account for an alumni
+// provisioning request. Never set it.
+async function findUserIdByEmail(admin: SupabaseClient, email: string): Promise<string | null> {
+  const { data, error } = await admin.rpc("find_auth_user_by_email_or_phone", {
+    _email: email,
+    _phone: null,
+  });
+  if (!error) return (data as string | null) ?? null;
+
+  // ponytail: RPC missing (migration drift) — paginated scan, 20k ceiling.
+  console.error("[whatsapp-otp] lookup RPC failed, falling back to scan:", error.message);
+  for (let page = 1; page <= 20; page++) {
+    const { data: list } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (!list?.users?.length) return null;
+    const match = list.users.find((u) => u.email === email);
+    if (match) return match.id;
+  }
+  return null;
 }
 
 async function provisionUser(
@@ -112,15 +157,21 @@ async function provisionUser(
     userId = created.user.id;
     console.log(`[whatsapp-otp] provisioned new ${role} user ${userId} for ${phone}`);
   } else {
-    // User already exists — find by scanning listUsers (rare path)
-    console.log(`[whatsapp-otp] createUser failed (${createErr?.message}), scanning for existing ${email}`);
-    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const match = list?.users?.find((u) => u.email === email);
-    if (match) {
-      userId = match.id;
-      // Backfill phone in user_metadata for users provisioned before this field existed —
-      // RLS via current_user_phone() reads it on the alumni portal.
-      const existingMeta = (match.user_metadata ?? {}) as Record<string, unknown>;
+    // User already exists — resolve them with the indexed lookup.
+    console.log(`[whatsapp-otp] createUser failed (${createErr?.message}), looking up existing ${email}`);
+    userId = await findUserIdByEmail(admin, email);
+
+    if (userId) {
+      // Backfill phone in user_metadata for users provisioned before this field
+      // existed — current_user_phone() reads raw_user_meta_data->>'phone' and the
+      // alumni_verification_requests policies are scoped by it. This matters MORE
+      // now: the accounts the lookup newly reaches are the oldest ones, i.e.
+      // precisely those predating the field.
+      //
+      // Fetch first, never blind-write: student-portal-claim and AuthContext keep
+      // display_name/full_name/student_id in this same blob.
+      const { data: existing } = await admin.auth.admin.getUserById(userId);
+      const existingMeta = (existing?.user?.user_metadata ?? {}) as Record<string, unknown>;
       if (!existingMeta.phone) {
         await admin.auth.admin.updateUserById(userId, {
           user_metadata: { ...existingMeta, phone: digits },
@@ -358,11 +409,20 @@ Deno.serve(async (req) => {
         );
       }
 
-      await adminClient
+      // .select() so a zero-row write is visible. whatsapp_login_intents has RLS
+      // enabled with no policies, so if this client were ever demoted (see
+      // createSession) this update would match nothing, return no error, and
+      // leave the intent replayable.
+      const { data: consumed } = await adminClient
         .from("whatsapp_login_intents")
         .update({ status: "consumed", consumed_at: new Date().toISOString() })
         .eq("id", intent.id)
-        .eq("status", "verified");
+        .eq("status", "verified")
+        .select("id");
+
+      if (!consumed?.length) {
+        console.error("[whatsapp-otp] intent not marked consumed — replayable:", intent.id);
+      }
 
       return new Response(
         JSON.stringify({ success: true, status: "verified", token, role }),
@@ -587,6 +647,11 @@ Deno.serve(async (req) => {
           console.log("[whatsapp-otp] student login for student", studentSelf.id);
           return new Response(JSON.stringify({ success: true, verified: true, token, role: "student" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
+
+        // No user id: falls through to the parent/alumni branches below, which
+        // would sign this student in under a DIFFERENT identity with no
+        // user_roles row. Make it greppable rather than silent.
+        console.error("[whatsapp-otp] student provisioning failed, falling through for", normalizedPhone, "student", studentSelf.id);
       }
 
       // ── 3. Parent login: check father_phone / father_whatsapp ─────────────
@@ -616,6 +681,8 @@ Deno.serve(async (req) => {
           console.log("[whatsapp-otp] father/parent login for student", studentByFather.id);
           return new Response(JSON.stringify({ success: true, verified: true, token, role: "parent" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
+
+        console.error("[whatsapp-otp] father provisioning failed, falling through for", normalizedPhone, "student", studentByFather.id);
       }
 
       // ── 4. Parent login: check mother_phone / mother_whatsapp ─────────────
@@ -645,19 +712,33 @@ Deno.serve(async (req) => {
           console.log("[whatsapp-otp] mother/parent login for student", studentByMother.id);
           return new Response(JSON.stringify({ success: true, verified: true, token, role: "parent" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
+
+        console.error("[whatsapp-otp] mother provisioning failed, falling through for", normalizedPhone, "student", studentByMother.id);
       }
 
-      // ── 5. Fallback: alumni applicant — provision a session-only user ──
-      // The alumni portal inserts into alumni_verification_requests, which has
-      // no anon SELECT policy. PostgREST's .insert().select() requires SELECT
-      // RLS on the new row, so the caller must be authenticated.
+      // ── 5. Fallback: alumni / applicant ──
+      // The alumni portal needs a session (alumni_verification_requests has no
+      // anon SELECT policy), but the apply portal is session-less — it only
+      // needs { success, verified }. Don't hard-fail OTP verification when
+      // provisioning fails; return success without a token instead.
       const alumniUserId = await provisionUser(adminClient, normalizedPhone, "alumni");
       if (!alumniUserId) {
-        return new Response(JSON.stringify({ error: "Failed to provision applicant user" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // ponytail: provisioning failed but OTP was verified — return success
+        // so the session-less apply portal still works. Alumni portal will
+        // see no token and can prompt a retry.
+        console.warn("[whatsapp-otp] alumni provisioning failed for", normalizedPhone, "— returning verified-only");
+        return new Response(
+          JSON.stringify({ success: true, verified: true, role: "alumni" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
       const alumniToken = await createSession(adminClient, alumniUserId);
       if (!alumniToken) {
-        return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        console.warn("[whatsapp-otp] session creation failed for alumni user", alumniUserId);
+        return new Response(
+          JSON.stringify({ success: true, verified: true, role: "alumni" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
       console.log("[whatsapp-otp] alumni applicant login for user", alumniUserId);
       return new Response(
