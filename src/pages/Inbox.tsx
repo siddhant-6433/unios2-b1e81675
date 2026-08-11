@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck } from "lucide-react";
+import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
@@ -22,7 +22,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -130,6 +130,21 @@ interface OfferApprovalItem {
   application_id: string | null;
 }
 
+interface OfferEditItem {
+  id: string;
+  offer_letter_id: string;
+  lead_id: string;
+  lead_name: string;
+  course_name: string | null;
+  created_at: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  reason: string | null;
+  proposed_changes: { acceptance_deadline?: string; token_fee_amount?: number; course_id?: string };
+  current_deadline: string | null;
+  current_token_fee: number | null;
+}
+
 interface ContactChangeItem {
   id: string;
   student_id: string;
@@ -196,7 +211,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -239,6 +254,7 @@ export default function Inbox() {
   const { role, profile, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<CategoryId | null>(null);
   const [items, setItems] = useState<InboxItem[]>([]);
@@ -250,6 +266,7 @@ export default function Inbox() {
     fee_concessions: 0,
     abvmu_deposits: 0,
     offer_approvals: 0,
+    offer_edits: 0,
     certificate_approvals: 0,
     pending_an_generation: 0,
     contact_changes: 0,
@@ -301,6 +318,14 @@ export default function Inbox() {
       icon: FileText,
       count: counts.offer_approvals,
       roles: APPROVER_ROLES,
+      color: "text-info-foreground",
+    },
+    {
+      id: "offer_edits",
+      label: "Offer Letter Edits",
+      icon: FilePen,
+      count: counts.offer_edits,
+      roles: ["super_admin"],
       color: "text-info-foreground",
     },
     {
@@ -484,6 +509,14 @@ export default function Inbox() {
       (isSuperAdmin || isPrincipal)
         ? supabase.rpc("list_pending_an_generation")
         : Promise.resolve({ count: 0 }),
+
+      // Offer letter edit requests — super_admin only (they alone can decide)
+      isSuperAdmin
+        ? supabase
+            .from("offer_letter_edit_requests" as any)
+            .select("id")
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -505,6 +538,7 @@ export default function Inbox() {
       certificate_approvals: get(9),
       fee_concessions: get(10),
       pending_an_generation: get(11),
+      offer_edits: get(12),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -514,10 +548,14 @@ export default function Inbox() {
   }, [fetchCounts]);
 
   useEffect(() => {
-    if (visibleCategories.length > 0 && !selected) {
-      setSelected(visibleCategories[0].id);
-    }
-  }, [visibleCategories.length]);
+    if (visibleCategories.length === 0 || selected) return;
+    // Deep-link: /inbox?category=<id> (e.g. from a notification) wins over first-visible.
+    const wanted = searchParams.get("category") as CategoryId | null;
+    const target = wanted && visibleCategories.some((c) => c.id === wanted)
+      ? wanted
+      : visibleCategories[0].id;
+    setSelected(target);
+  }, [visibleCategories.length, searchParams]);
 
   // ── Item loading ──────────────────────────────────────────────────────────
 
@@ -726,6 +764,37 @@ export default function Inbox() {
             requested_by_name: null,
             application_id: null,
           } as OfferApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "offer_edits") {
+        const { data, error } = await supabase
+          .from("offer_letter_edit_requests" as any)
+          .select(`
+            id, offer_letter_id, reason, proposed_changes,
+            requested_by_name, requested_by_role, created_at,
+            offer_letters!offer_letter_id (
+              lead_id, acceptance_deadline, token_fee_amount,
+              leads!lead_id ( name ),
+              courses!course_id ( name )
+            )
+          `)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        const nextItems = (data || []).map((r: any) => ({
+            id: r.id,
+            offer_letter_id: r.offer_letter_id,
+            lead_id: r.offer_letters?.lead_id || "",
+            lead_name: r.offer_letters?.leads?.name || "—",
+            course_name: r.offer_letters?.courses?.name || null,
+            created_at: r.created_at || null,
+            requested_by_name: r.requested_by_name,
+            requested_by_role: r.requested_by_role,
+            reason: r.reason,
+            proposed_changes: r.proposed_changes || {},
+            current_deadline: r.offer_letters?.acceptance_deadline || null,
+            current_token_fee: r.offer_letters?.token_fee_amount ?? null,
+          } as OfferEditItem));
         commitItems(cat, nextItems);
       } else if (cat === "fee_concessions") {
         const { data, error } = await supabase
@@ -1075,6 +1144,44 @@ export default function Inbox() {
     }
   };
 
+  const decideOfferEdit = async (req: OfferEditItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      rejection_reason = r || undefined;
+    }
+    setProcessing(req.id);
+    try {
+      const { error } = await supabase
+        .from("offer_letter_edit_requests" as any)
+        .update({
+          status: decision,
+          reviewed_by: user?.id,
+          reviewed_at: new Date().toISOString(),
+          ...(rejection_reason ? { rejection_reason } : {}),
+        })
+        .eq("id", req.id);
+      if (error) throw error;
+      // Approved deadline is written back to offer_letters by the apply trigger;
+      // regenerate the PDF so it reflects the new value (fire-and-forget).
+      if (decision === "approved") {
+        supabase.functions
+          .invoke("generate-offer-letter", { body: { offer_letter_id: req.offer_letter_id } })
+          .catch(() => {});
+      }
+      toast({ title: decision === "approved" ? "Edit approved" : "Edit rejected" });
+      setSelectedItem(null);
+      loadItems("offer_edits");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const approveCertificate = async (cert: CertificateApprovalItem) => {
     if (!isSuperAdmin) return;
     const notes = window.prompt("Approval notes (optional):") ?? undefined;
@@ -1339,6 +1446,22 @@ export default function Inbox() {
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "offer_edits") {
+      const r = item as OfferEditItem;
+      return (
+        <button key={r.id} className={baseClass} onClick={() => setSelectedItem(r)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{r.lead_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{r.requested_by_name || "Staff"}</p>
+            </div>
+            <span className="text-[10px] text-info-foreground font-medium shrink-0">Edit</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(r.created_at)}</p>
         </button>
       );
     }
@@ -1733,6 +1856,89 @@ export default function Inbox() {
                 size="sm"
                 className="w-full"
                 onClick={() => navigate(`/admissions/${o.lead_id}`)}
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                View Lead Profile
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (selected === "offer_edits") {
+      const r = selectedItem as OfferEditItem;
+      const pc = r.proposed_changes || {};
+      const fmtFee = (n: number | null | undefined) =>
+        n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{r.lead_name}</h3>
+            {r.course_name && <p className="text-sm text-muted-foreground">{r.course_name}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row
+              label="Requested By"
+              value={`${r.requested_by_name || "Staff"}${r.requested_by_role ? ` (${r.requested_by_role})` : ""}`}
+            />
+            <Row label="Requested On" value={fmtDate(r.created_at)} />
+            {r.reason && <Row label="Reason" value={r.reason} />}
+          </div>
+
+          <div className="rounded-xl border border-info/30 bg-info/5 divide-y divide-border">
+            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-info-foreground">
+              Proposed Changes
+            </div>
+            {pc.acceptance_deadline && (
+              <Row
+                label="Acceptance Deadline"
+                value={`${fmtDate(r.current_deadline)} → ${fmtDate(pc.acceptance_deadline)}`}
+              />
+            )}
+            {pc.token_fee_amount != null && (
+              <Row
+                label="Token Fee"
+                value={`${fmtFee(r.current_token_fee)} → ${fmtFee(pc.token_fee_amount)}`}
+              />
+            )}
+            {!pc.acceptance_deadline && pc.token_fee_amount == null && (
+              <Row label="Changes" value="See reason" />
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === r.id}
+              onClick={() => decideOfferEdit(r, "approved")}
+            >
+              {processing === r.id ? (
+                <ButtonOrb state="working" onFilled />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === r.id}
+              onClick={() => decideOfferEdit(r, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {r.lead_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => navigate(`/admissions/${r.lead_id}`)}
               >
                 <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                 View Lead Profile
