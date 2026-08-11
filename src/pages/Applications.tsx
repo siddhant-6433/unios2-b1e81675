@@ -135,6 +135,8 @@ interface AppRow {
   lead_admission_no?: string | null;
   has_offer?: boolean;
   app_fee_paid?: number;
+  /** Sum of confirmed lead_payments with type != 'application_fee' (token/registration/other). */
+  other_fee_paid?: number;
   has_token_fee_paid?: boolean;
   doc_counts?: { total: number; verified: number; rejected: number; pending: number };
   /** Amount still due for PAN issuance (null when lead has no offer yet or already has PAN). */
@@ -401,6 +403,7 @@ export default function Applications() {
   const [reportCampus, setReportCampus] = useState("all");
   const [reportStages, setReportStages] = useState<string[]>([]); // empty = all stages
   const [reportExcludedColumns, setReportExcludedColumns] = useState<string[]>([]); // columns to drop
+  const [reportOnlyOtherFeePaid, setReportOnlyOtherFeePaid] = useState(false); // only candidates who paid a fee beyond the application fee
   const [exportingReport, setExportingReport] = useState(false);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   /** When a funnel stage is active: further narrow to on-hold vs not-on-hold at that stage. */
@@ -572,6 +575,7 @@ export default function Applications() {
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
       const appFeePaidMap: Record<string, number> = {};
+      const nonAppFeePaidMap: Record<string, number> = {};
       const leadTokenFeePaidSet: Set<string> = new Set();
       const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
@@ -610,6 +614,7 @@ export default function Applications() {
         });
         return {
           ...applyApplicationDossierToRow(a, dossier),
+          other_fee_paid: nonAppFeePaidMap[leadId] || 0,
           registration_statuses: buildRegistrationStatuses(a, {
             cahet: cahetRegistrationMap,
             updeled: updeledRegistrationMap,
@@ -668,7 +673,6 @@ export default function Applications() {
             supabase.from("lead_payments")
               .select("lead_id, amount, type")
               .in("lead_id", batch)
-              .in("type", ["application_fee", "token_fee"])
               .eq("status", "confirmed"),
             registrationClient.from("cahet_registrations")
               .select("lead_id, registration_no")
@@ -721,8 +725,11 @@ export default function Applications() {
           (paymentsResult.data || []).forEach((p: { lead_id: string; amount: number | string | null; type: string }) => {
             if (p.type === "application_fee") {
               appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
-            } else if (p.type === "token_fee") {
-              leadTokenFeePaidSet.add(p.lead_id);
+            } else {
+              nonAppFeePaidMap[p.lead_id] = (nonAppFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+              if (p.type === "token_fee") {
+                leadTokenFeePaidSet.add(p.lead_id);
+              }
             }
           });
         }));
@@ -936,8 +943,9 @@ export default function Applications() {
     if (reportCourse !== "all" && course !== reportCourse) return false;
     if (reportCampus !== "all" && campus !== reportCampus) return false;
     if (reportStages.length > 0 && !reportStages.includes(funnelStageOf(app))) return false;
+    if (reportOnlyOtherFeePaid && !(app.other_fee_paid && app.other_fee_paid > 0)) return false;
     return true;
-  }), [apps, reportCourse, reportCampus, reportStages]);
+  }), [apps, reportCourse, reportCampus, reportStages, reportOnlyOtherFeePaid]);
 
   const counsellorOptions = useMemo(() => {
     const counsellors = new Map<string, string>();
@@ -1463,6 +1471,7 @@ export default function Applications() {
       "Current Status": currentStatus,
       "Application Status": app.status || "",
       "Payment Status": app.payment_status || "pending",
+      "Other Fee Paid": app.other_fee_paid ? String(app.other_fee_paid) : "",
       "Lead Stage": app.lead_stage ? (LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage) : "",
       Course: course === "No course" ? "" : course,
       Campus: campus === "No campus" ? "" : campus,
@@ -2735,6 +2744,13 @@ export default function Applications() {
                 ))}
               </div>
             </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={reportOnlyOtherFeePaid}
+                onCheckedChange={(v) => setReportOnlyOtherFeePaid(!!v)}
+              />
+              Only candidates who paid a fee beyond the application fee
+            </label>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-muted-foreground">Columns</p>
