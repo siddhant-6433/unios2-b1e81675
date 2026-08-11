@@ -47,13 +47,18 @@ Deno.serve(async (req) => {
       families.get(key)!.push(s);
     }
 
-    // 3. Fetch all existing auth users to check by phone/email
-    const { data: allUsers } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    // 3. Fetch all existing auth users to check by phone/email.
+    // Paginated: a single perPage:1000 call silently truncated at 1,000 of
+    // ~2,836 users, so ~65% looked like they had no account and got a duplicate.
     const usersByPhone = new Map<string, any>();
     const usersByEmail = new Map<string, any>();
-    for (const u of allUsers?.users || []) {
-      if (u.phone) usersByPhone.set(u.phone.replace(/^\+/, ""), u);
-      if (u.email) usersByEmail.set(u.email.toLowerCase(), u);
+    for (let page = 1; page <= 20; page++) {
+      const { data: allUsers } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (!allUsers?.users?.length) break;
+      for (const u of allUsers.users) {
+        if (u.phone) usersByPhone.set(u.phone.replace(/^\+/, ""), u);
+        if (u.email) usersByEmail.set(u.email.toLowerCase(), u);
+      }
     }
 
     const results: any[] = [];
