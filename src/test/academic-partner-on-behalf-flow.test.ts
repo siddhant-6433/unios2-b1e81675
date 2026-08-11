@@ -14,14 +14,23 @@ const offerOtp = readFileSync("supabase/functions/academic-partner-offer-otp/ind
 const migration = readFileSync("supabase/migrations/20260627090000_academic_partner_on_behalf_flow.sql", "utf8");
 
 describe("academic partner on-behalf application flow", () => {
-  it("adds on-behalf actions inside the academic partner portal", () => {
-    expect(portal).toContain('mode="academic_partner_on_behalf"');
-    expect(portal).toContain("Complete Application");
-    expect(portal).toContain("Continue Application");
-    expect(portal).toContain("Start New Application");
-    expect(portal).toContain("View/Download PDF");
+  // The partner-on-behalf BUTTONS were removed from every portal tab at the
+  // user's request — partners now hand the candidate a login link and the
+  // candidate fills their own form. The on-behalf backend (edge functions,
+  // audit table, scope checks) is deliberately left intact and is still
+  // covered by the remaining cases in this file.
+  it("no longer offers on-behalf form-filling from the partner portal", () => {
+    expect(portal).not.toContain('mode="academic_partner_on_behalf"');
+    expect(portal).not.toContain("Continue Application");
+    expect(portal).not.toContain("Start New Application");
+    // Candidates are driven through their own login link instead.
+    expect(portal).toContain("Send Login Link");
+    expect(portal).toContain("setLoginLinkLead");
+  });
+
+  it("keeps the partner portal's application surfaces", () => {
+    expect(portal).toContain("Application PDF");
     expect(portal).toContain("application_form_pdf_url");
-    expect(portal).toContain("isCompletedApplication");
     expect(portal).toContain('label: "Applications", value: "applications"');
     expect(portal).toContain('label: "Leads", value: "leads"');
     expect(portal).not.toContain('navigate(`/admissions/${lead.id}`)');
