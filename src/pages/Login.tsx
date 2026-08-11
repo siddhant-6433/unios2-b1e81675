@@ -355,15 +355,19 @@ const Login = () => {
       }
       if (data?.error) throw new Error(data.error);
 
-      // Sign in with the custom token returned by the edge function
-      if (data?.token) {
-        const { error: signInError } = await supabase.auth.setSession({
-          access_token: data.token.access_token,
-          refresh_token: data.token.refresh_token,
-        });
-        if (signInError) throw signInError;
-        navigate("/");
+      // Sign in with the custom token returned by the edge function.
+      // A verified-but-tokenless response means the OTP was right but no session
+      // could be minted — without this guard the spinner just stopped and the
+      // user was left staring at the form with no explanation.
+      if (!data?.token) {
+        throw new Error("Verified, but we could not sign you in. Please try again or contact support.");
       }
+      const { error: signInError } = await supabase.auth.setSession({
+        access_token: data.token.access_token,
+        refresh_token: data.token.refresh_token,
+      });
+      if (signInError) throw signInError;
+      navigate("/");
     } catch (error: unknown) {
       toast({ title: "Error", description: getErrorMessage(error, "Verification failed"), variant: "destructive" });
     } finally {

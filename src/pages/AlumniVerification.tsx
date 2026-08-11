@@ -120,16 +120,23 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
     // Establish a real Supabase session so subsequent DB calls are authenticated.
     // RLS on alumni_verification_requests is scoped to authenticated callers
     // whose auth phone matches the row — anonymous reads/updates are blocked.
-    if (data?.token?.access_token && data?.token?.refresh_token) {
-      const { error: sessErr } = await supabase.auth.setSession({
-        access_token: data.token.access_token,
-        refresh_token: data.token.refresh_token,
-      });
-      if (sessErr) {
-        setLoading(false);
-        toast({ title: "Sign-in failed", description: sessErr.message, variant: "destructive" });
-        return;
-      }
+    // Stop here if no session was issued. Proceeding would run every subsequent
+    // call as `anon`, and the failure would only surface much later at the
+    // alumni_verification_requests insert (anon has no SELECT policy, and
+    // .insert().select() needs SELECT visibility on the new row).
+    if (!data?.token?.access_token || !data?.token?.refresh_token) {
+      setLoading(false);
+      toast({ title: "Sign-in failed", description: "Verified, but no session was issued. Please try again.", variant: "destructive" });
+      return;
+    }
+    const { error: sessErr } = await supabase.auth.setSession({
+      access_token: data.token.access_token,
+      refresh_token: data.token.refresh_token,
+    });
+    if (sessErr) {
+      setLoading(false);
+      toast({ title: "Sign-in failed", description: sessErr.message, variant: "destructive" });
+      return;
     }
     setLoading(false);
     onVerified(fullPhone);
