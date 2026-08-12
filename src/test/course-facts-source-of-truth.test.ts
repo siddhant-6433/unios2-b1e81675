@@ -124,6 +124,65 @@ describe("no course facts are hardcoded any more", () => {
   });
 });
 
+describe("no display surface bypasses the resolver", () => {
+  const adminAppView = readFileSync("src/pages/AdminApplicationView.tsx", "utf8");
+  const leadDetail = readFileSync("src/pages/LeadDetail.tsx", "utf8");
+  const sendDialog = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
+  const cloudDialer = readFileSync("src/pages/CloudDialer.tsx", "utf8");
+  const offerLetter = readFileSync("supabase/functions/generate-offer-letter/index.ts", "utf8");
+  const loanLetter = readFileSync("supabase/functions/generate-loan-letter/index.ts", "utf8");
+
+  it("document review reads curated eligibility", () => {
+    expect(adminAppView).toContain('"fn_course_facts"');
+    expect(adminAppView).toContain("courseFacts?.eligibility");
+  });
+
+  it("manual WhatsApp sends resolve the same facts as the inbox", () => {
+    // Without this a hand-sent course_info said "4 years" where every other
+    // surface said "4 Years (3 Years + 1 Year Internship)".
+    expect(leadDetail).toContain("courseId={lead.course_id");
+    expect(sendDialog).toContain("resolveCourseTemplateFields");
+    expect(sendDialog).toContain("curatedCourse.duration ||");
+  });
+
+  it("offer and loan letters print the curated duration", () => {
+    expect(offerLetter).toContain("duration_text");
+    expect(loanLetter).toContain("duration_text");
+    expect(offerLetter).toContain('from("course_facts")');
+    expect(loanLetter).toContain('from("course_facts")');
+  });
+
+  it("drops the DAOTT duration hardcode the curated value replaces", () => {
+    expect(offerLetter).not.toContain('"2.5 years (5 semesters)"');
+  });
+
+  it("the dialer quotes the curated fee, not the numeric column", () => {
+    // 29 of 48 curated fees aren't plain numbers ("800/month", the DAOTT
+    // semester breakdown), so ₹{n}/year cannot represent them.
+    expect(cloudDialer).toContain("curatedFeeByCourse");
+    expect(cloudDialer).toContain('from("course_facts")');
+  });
+});
+
+describe("the field that disagreed with everything is gone", () => {
+  it("is referenced nowhere in application code", () => {
+    const sources = [
+      "src/pages/TemplateManager.tsx",
+      "src/pages/AdminApplicationView.tsx",
+      "src/pages/CloudDialer.tsx",
+      "supabase/functions/_shared/nimt-admissions-context.ts",
+    ];
+    for (const path of sources) {
+      const body = readFileSync(path, "utf8")
+        .split("\n")
+        // Comments explaining why it was retired are fine; reads are not.
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+        .join("\n");
+      expect(body, `${path} still reads marketing_eligibility`).not.toContain("marketing_eligibility");
+    }
+  });
+});
+
 describe("editing goes to the source of truth", () => {
   it("saves curated fields to course_facts, not the deprecated column", () => {
     expect(templateManager).toContain('from("course_facts")');

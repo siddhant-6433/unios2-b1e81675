@@ -39,6 +39,9 @@ export interface DocReviewCourseInfo {
   name: string;
   code: string | null;
   durationYears: number | null;
+  /** Curated duration from course_facts ("4 Years (3 Years + 1 Year Internship)").
+   *  Preferred over durationYears, which can only say "4 years". */
+  durationText?: string | null;
   eligibility: string | null;
   entranceExam: string | null;
   entranceMandatory: boolean | null;
@@ -156,8 +159,11 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               {courseInfo.code && (
                 <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">({courseInfo.code})</span>
               )}
-              {courseInfo.durationYears && (
-                <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">· {courseInfo.durationYears} {courseInfo.durationYears === 1 ? "year" : "years"}</span>
+              {(courseInfo.durationText || courseInfo.durationYears) && (
+                <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                  · {courseInfo.durationText
+                      || `${courseInfo.durationYears} ${courseInfo.durationYears === 1 ? "year" : "years"}`}
+                </span>
               )}
             </p>
             {courseInfo.eligibility ? (

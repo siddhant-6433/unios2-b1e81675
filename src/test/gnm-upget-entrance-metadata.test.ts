@@ -22,11 +22,15 @@ describe("GNM UPGET entrance metadata", () => {
     expect(migration).not.toContain("UPCNET");
   });
 
-  it("uses eligibility_rules as the canonical source on the document review page", () => {
+  it("shows the curated course facts on the document review page", () => {
+    // The reviewer checks documents against the criteria the student was
+    // actually shown, so curated course_facts now lead. eligibility_rules stays
+    // as the fallback and remains canonical for entrance_mandatory, which is a
+    // boolean course_facts does not carry.
+    expect(adminApplicationView).toContain('"fn_course_facts"');
     expect(adminApplicationView).toContain('from("eligibility_rules")');
-    expect(adminApplicationView).toContain("entrance_exam_name");
-    expect(adminApplicationView).toContain("entrance_exam_required");
-    expect(adminApplicationView).toContain("eligibilityRule?.entrance_exam_name || lead.course.entrance_exam");
+    expect(adminApplicationView).toContain("courseFacts?.eligibility || eligibilityRule?.notes || lead.course.eligibility");
+    expect(adminApplicationView).toContain("courseFacts?.entrance_exam || eligibilityRule?.entrance_exam_name || lead.course.entrance_exam");
     expect(adminApplicationView).toContain("eligibilityRule?.entrance_exam_required ?? lead.course.entrance_mandatory");
   });
 

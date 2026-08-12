@@ -30,7 +30,6 @@ interface CourseRow {
   code: string | null;
   duration_years: number | null;
   type: string | null;
-  marketing_eligibility?: string | null;
   course_summary?: string | null;
   curriculum_url?: string | null;
 }
@@ -156,7 +155,7 @@ async function resolveCourse(admin: SupabaseLike, courseId: string | null, cours
   if (courseId) {
     const { data } = await admin
       .from("courses")
-      .select("id,name,code,duration_years,type,marketing_eligibility,course_summary,curriculum_url")
+      .select("id,name,code,duration_years,type,course_summary,curriculum_url")
       .eq("id", courseId)
       .maybeSingle();
     return (data || null) as CourseRow | null;
@@ -166,7 +165,7 @@ async function resolveCourse(admin: SupabaseLike, courseId: string | null, cours
   const term = courseName.trim();
   const { data } = await admin
     .from("courses")
-    .select("id,name,code,duration_years,type,marketing_eligibility,course_summary,curriculum_url")
+    .select("id,name,code,duration_years,type,course_summary,curriculum_url")
     .or(`name.ilike.%${term}%,code.ilike.%${term}%`)
     .limit(1)
     .maybeSingle();

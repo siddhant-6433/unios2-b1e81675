@@ -83,7 +83,6 @@ const TemplateManager = () => {
     name: string;
     duration_years: number | null;
     type: string | null;
-    marketing_eligibility: string | null;
     video_url: string | null;
     slug: string | null;
     maps_cid: string | null;
@@ -111,7 +110,7 @@ const TemplateManager = () => {
     const [{ data, error }, { data: factRows }] = await Promise.all([
       (supabase as any)
         .from("courses")
-        .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug, maps_cid")
+        .select("id, code, name, duration_years, type, video_url, slug, maps_cid")
         .order("code"),
       (supabase as any)
         .from("course_facts")

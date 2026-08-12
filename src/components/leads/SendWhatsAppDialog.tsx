@@ -18,6 +18,7 @@ import {
 import {
   buildTemplateParams,
   loadWhatsAppTemplateCatalog,
+  resolveCourseTemplateFields,
   type CatalogTemplate,
   type TemplateParamSlot,
 } from "@/lib/whatsappTemplateCatalog";
@@ -260,10 +261,13 @@ interface SendWhatsAppDialogProps {
   campusName?: string;
   courseDuration?: number;
   courseType?: string;
+  /** Lets the dialog resolve curated course facts, so a hand-sent course_info
+   *  matches what the inbox and the website say. */
+  courseId?: string;
   onSuccess?: () => void;
 }
 
-export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campusName, courseDuration, courseType, onSuccess }: SendWhatsAppDialogProps) {
+export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campusName, courseDuration, courseType, courseId, onSuccess }: SendWhatsAppDialogProps) {
   const { toast } = useToast();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -389,14 +393,33 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   // Values we can fill without asking. Anything not here becomes an input rather
   // than a fabricated string like "the pending amount", which used to ship to
   // students verbatim.
+  // Curated course facts for this lead's course. Without these a hand-sent
+  // course_info said "4 years" where every other surface said
+  // "4 Years (3 Years + 1 Year Internship)".
+  const [curatedCourse, setCuratedCourse] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!open || !courseId) { setCuratedCourse({}); return; }
+    let cancelled = false;
+    (async () => {
+      const resolved = await resolveCourseTemplateFields(courseId, lead.name);
+      if (!cancelled) setCuratedCourse(resolved);
+    })();
+    return () => { cancelled = true; };
+  }, [open, courseId, lead.name]);
+
   const leadContext = useMemo(() => ({
     student_name: lead.name,
-    course_name: courseName,
+    course_name: curatedCourse.course_name || courseName,
     campus_name: campusName,
     lead_source: lead.source,
     application_id: lead.application_id,
-    duration: courseDuration ? `${courseDuration} years` : undefined,
-  }), [lead.name, lead.source, lead.application_id, courseName, campusName, courseDuration]);
+    // Curated wins; the years-only derivation is the fallback.
+    duration: curatedCourse.duration || (courseDuration ? `${courseDuration} years` : undefined),
+    eligibility: curatedCourse.eligibility,
+    approval: curatedCourse.approval,
+    video_url: curatedCourse.video_url,
+    course_url: curatedCourse.course_url,
+  }), [lead.name, lead.source, lead.application_id, courseName, campusName, courseDuration, curatedCourse]);
 
   /**
    * Meta's placeholder_count is the authority. Use the hardcoded buildParams

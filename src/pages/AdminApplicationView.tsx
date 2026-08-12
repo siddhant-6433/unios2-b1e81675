@@ -217,6 +217,9 @@ export default function AdminApplicationView() {
     entrance_exam_name: string | null;
     entrance_exam_required: boolean | null;
   } | null>(null);
+  // Curated course facts (public.course_facts via fn_course_facts) — the single
+  // source of truth shared with the website, WhatsApp templates and Navya.
+  const [courseFacts, setCourseFacts] = useState<Record<string, string> | null>(null);
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
@@ -350,13 +353,26 @@ export default function AdminApplicationView() {
           }
         }
         let ruleRow = null;
+        let factsRow: Record<string, string> | null = null;
         if (effectiveLeadRow?.course_id) {
-          const { data } = await supabase
-            .from("eligibility_rules")
-            .select("notes, entrance_exam_name, entrance_exam_required")
-            .eq("course_id", effectiveLeadRow.course_id)
-            .maybeSingle();
+          const [{ data }, factsRes] = await Promise.all([
+            supabase
+              .from("eligibility_rules")
+              .select("notes, entrance_exam_name, entrance_exam_required")
+              .eq("course_id", effectiveLeadRow.course_id)
+              .maybeSingle(),
+            // Curated single source of truth — the same words the student was
+            // shown on the website and over WhatsApp, so the reviewer checks
+            // documents against the criteria we actually published.
+            (supabase.rpc as any)("fn_course_facts", {
+              p_course_id: effectiveLeadRow.course_id,
+              p_student_name: null,
+            }),
+          ]);
           ruleRow = data;
+          if (!factsRes?.error && factsRes?.data && typeof factsRes.data === "object") {
+            factsRow = factsRes.data as Record<string, string>;
+          }
         }
         if (effectiveLeadRow?.academic_partner_id) {
           const { data: apRow } = await supabase
@@ -368,6 +384,7 @@ export default function AdminApplicationView() {
         }
         setLead(effectiveLeadRow as any);
         setEligibilityRule(ruleRow);
+        setCourseFacts(factsRow);
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = effectiveLeadRow?.course?.name || primarySelection?.course_name || null;
@@ -399,6 +416,7 @@ export default function AdminApplicationView() {
       } else {
         setLead(null);
         setEligibilityRule(null);
+        setCourseFacts(null);
         setHasOffer(false);
         setAppFeePaid(0);
         setCahetRegistration(null);
@@ -1516,8 +1534,10 @@ export default function AdminApplicationView() {
           name: lead.course.name,
           code: lead.course.code,
           durationYears: lead.course.duration_years,
-          eligibility: eligibilityRule?.notes || lead.course.eligibility,
-          entranceExam: eligibilityRule?.entrance_exam_name || lead.course.entrance_exam,
+          // Curated facts win; the legacy chain stays as fallback.
+          durationText: courseFacts?.duration || null,
+          eligibility: courseFacts?.eligibility || eligibilityRule?.notes || lead.course.eligibility,
+          entranceExam: courseFacts?.entrance_exam || eligibilityRule?.entrance_exam_name || lead.course.entrance_exam,
           entranceMandatory: eligibilityRule?.entrance_exam_required ?? lead.course.entrance_mandatory,
         } : null}
         cahetRegistration={cahetRegistration}
