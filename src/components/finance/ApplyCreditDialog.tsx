@@ -6,10 +6,11 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
-import { Loader2, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 const AUTO = "__auto__";
@@ -113,7 +114,7 @@ export function ApplyCreditDialog({ open, onOpenChange, studentId, leadId, fees,
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={saving || availableCredit <= 0}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {saving ? <ButtonOrb state="working" onFilled /> : null}
             Apply Credit
           </Button>
         </DialogFooter>

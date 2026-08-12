@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Users, Plus, Loader2, Trash2, UserPlus, Crown, X, ChevronDown, ChevronRight,
-} from "lucide-react";
+import { Users, Plus, Trash2, UserPlus, Crown, X, ChevronDown, ChevronRight } from "lucide-react";
 
 interface Team {
   id: string;
@@ -142,7 +141,7 @@ export default function TeamManagement() {
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   if (loading) {
-    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return <div className="flex justify-center py-16"><OrbLoader state="working" /></div>;
   }
 
   return (
@@ -253,7 +252,7 @@ export default function TeamManagement() {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
               <Button onClick={handleCreate} disabled={creating || !newName.trim() || !newLeader} className="gap-1.5">
-                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create
+                {creating ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />} Create
               </Button>
             </div>
           </div>
@@ -277,7 +276,7 @@ export default function TeamManagement() {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setAddMemberTeam(null)}>Cancel</Button>
               <Button onClick={handleAddMember} disabled={addingMember || !selectedMember} className="gap-1.5">
-                {addingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Add
+                {addingMember ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />} Add
               </Button>
             </div>
           </div>

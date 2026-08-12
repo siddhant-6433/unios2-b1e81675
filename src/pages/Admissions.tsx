@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
@@ -9,12 +10,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
-  Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
-  Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download,
-} from "lucide-react";
+import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download, Share2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +23,10 @@ import { type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
+import {
+  fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL,
+  REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow,
+} from "@/lib/leadReferral";
 import {
   isEmptyFilterDefinition, toFilterDefinition, unsupportedDynamicFilters,
 } from "@/lib/dynamicListFilters";
@@ -63,6 +63,10 @@ const TransferLeadDialog = lazy(() =>
   import("@/components/admissions/TransferLeadDialog").then((m) => ({ default: m.TransferLeadDialog })));
 const BulkWhatsAppDialog = lazy(() =>
   import("@/components/admissions/BulkWhatsAppDialog").then((m) => ({ default: m.BulkWhatsAppDialog })));
+const ReferToPartnerDialog = lazy(() =>
+  import("@/components/admissions/ReferToPartnerDialog").then((m) => ({ default: m.ReferToPartnerDialog })));
+const ReferralsOverview = lazy(() =>
+  import("@/components/admissions/ReferralsOverview").then((m) => ({ default: m.ReferralsOverview })));
 const SeatMatrix = lazy(() =>
   import("@/components/admissions/SeatMatrix").then((m) => ({ default: m.SeatMatrix })));
 const PaymentReconciliation = lazy(() =>
@@ -241,7 +245,14 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 }
 
 function DeferredBlock({ className = "h-24" }: { className?: string }) {
-  return <div className={`rounded-2xl border border-border/40 bg-muted/20 flutes ${className}`} />;
+  // load-delayed goes on the wrapper: it owns `animation`, and an element can
+  // only run one animation shorthand — putting it on the blade-skeleton div
+  // would silently kill the skeleton's pulse.
+  return (
+    <div className="load-delayed">
+      <div className={`rounded-2xl border border-border/40 blade-skeleton ${className}`} />
+    </div>
+  );
 }
 
 const Admissions = () => {
@@ -251,7 +262,7 @@ const Admissions = () => {
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
-  const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments">(
+  const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments" | "referrals">(
     "list"
   );
   const [actionCounsellorFilter, setActionCounsellorFilter] = useState<string>("all");
@@ -318,6 +329,9 @@ const Admissions = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  // Referral rows for the leads currently on screen, keyed by lead_id.
+  const [referrals, setReferrals] = useState<Map<string, LeadReferralRow>>(new Map());
   const [showAddToList, setShowAddToList] = useState(false);
   const [listMode, setListMode] = useState<"new" | "existing">("new");
   const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
@@ -1344,6 +1358,27 @@ const Admissions = () => {
     }
   };
 
+  // Only BPT/BMRIT leads can be referred, so only those need a referral lookup.
+  const referrableLeadKey = useMemo(
+    () => leads.filter((l) => isReferrableCourse(l.course_name)).map((l) => l.id).join(","),
+    [leads],
+  );
+
+  useEffect(() => {
+    const ids = referrableLeadKey ? referrableLeadKey.split(",") : [];
+    if (ids.length === 0) { setReferrals(new Map()); return; }
+    let cancelled = false;
+    fetchReferralsByLead(ids).then((m) => { if (!cancelled) setReferrals(m); });
+    return () => { cancelled = true; };
+  }, [referrableLeadKey]);
+
+  const selectedLeads = useMemo(
+    () => Array.from(selectedIds).map((id) => leads.find((l) => l.id === id)).filter(Boolean) as Lead[],
+    [selectedIds, leads],
+  );
+  const canReferSelected = selectedLeads.length > 0
+    && selectedLeads.every((l) => isReferrableCourse(l.course_name));
+
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase().trim();
     const digits = q.replace(/\D/g, "");
@@ -1731,7 +1766,7 @@ const Admissions = () => {
           <h1 className="text-lg font-semibold text-foreground">Admissions CRM could not load</h1>
           <p className="mt-2 text-sm text-muted-foreground">{loadError}</p>
           <Button className="mt-5" onClick={() => fetchLeads()} disabled={loading}>
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {loading && <ButtonOrb state="working" onFilled />}
             Retry
           </Button>
         </div>
@@ -1740,6 +1775,13 @@ const Admissions = () => {
   }
 
   const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);
+  // Counsellors lose Action Center: it renders the same seven buckets the Cloud
+  // Dialer (their landing page) already works through, so /admissions is purely
+  // their searchable lead list. Referrals is a super-admin oversight view.
+  const viewTabs: typeof view[] = role === "counsellor" ? ["pipeline", "list"]
+    : isSuperAdmin ? ["action_center", "pipeline", "list", "seats", "payments", "referrals"]
+    : ["action_center", "pipeline", "list", "seats", "payments"];
+
   const bulkActionBar = selectedIds.size > 0 ? (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
       <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
@@ -1750,6 +1792,11 @@ const Admissions = () => {
         <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
           <Send className="h-4 w-4" /> WhatsApp
         </Button>
+        {canReferSelected && (
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowReferPartner(true)}>
+            <Share2 className="h-4 w-4" /> Refer to {REFERRAL_PARTNER_LABEL}
+          </Button>
+        )}
         {canTransfer && (
           <>
             <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
@@ -1813,7 +1860,7 @@ const Admissions = () => {
               className="gap-2"
               title="Export leads matching the current filters"
             >
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
               Download CSV
             </Button>
           )}
@@ -2267,10 +2314,7 @@ const Admissions = () => {
 
       {/* View tabs — always visible */}
       <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
-        {/* Counsellors lose Action Center: it renders the same seven buckets the
-            Cloud Dialer (their landing page) already works through, so /admissions
-            is purely their searchable lead list. */}
-        {((role === "counsellor" ? ["pipeline", "list"] : ["action_center", "pipeline", "list", "seats", "payments"]) as const).map((v) => (
+        {viewTabs.map((v) => (
           <button key={v} onClick={() => setView(v)}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             {v === "action_center" ? "Action Center" : v.charAt(0).toUpperCase() + v.slice(1)}
@@ -2278,12 +2322,13 @@ const Admissions = () => {
         ))}
       </div>
 
-      {/* Search & filters — hidden on Action Center view */}
-      {view !== "action_center" && (
+      {/* Search & filters — hidden on Action Center and the referrals overview,
+          which carry their own filtering. */}
+      {view !== "action_center" && view !== "referrals" && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card/50 p-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             {serverSearching ? (
-              <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
+              <ButtonOrb state="searching" className="absolute left-3 top-1/2 -translate-y-1/2" />
             ) : (
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             )}
@@ -2494,7 +2539,7 @@ const Admissions = () => {
                 className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 hover:bg-muted/40"
               >
                 {applicationStageResolving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <ButtonOrb state="working" />
                 ) : (
                   <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
@@ -2664,6 +2709,10 @@ const Admissions = () => {
             }}
           />
         </Suspense>
+      ) : view === "referrals" ? (
+        <Suspense fallback={<DeferredBlock className="h-64" />}>
+          <ReferralsOverview />
+        </Suspense>
       ) : view === "seats" ? (
         <Suspense fallback={<DeferredBlock className="h-64" />}>
           <SeatMatrix />
@@ -2709,6 +2758,11 @@ const Admissions = () => {
                                 {lead.shared_with_nimt === false && (
                                   <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
                                     Not shared with NIMT
+                                  </span>
+                                )}
+                                {referrals.get(lead.id) && (
+                                  <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${REFERRAL_STATUS_COLORS[referrals.get(lead.id)!.status] || "bg-muted text-muted-foreground"}`} title={`Referred to ${REFERRAL_PARTNER_LABEL} — ${REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}`}>
+                                    {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}
                                   </span>
                                 )}
                               </div>
@@ -2827,6 +2881,11 @@ const Admissions = () => {
                         {lead.shared_with_nimt === false && (
                           <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 shrink-0" title="Academic-partner lead not shared with the NIMT team">
                             Not shared with NIMT
+                          </span>
+                        )}
+                        {referrals.get(lead.id) && (
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 ${REFERRAL_STATUS_COLORS[referrals.get(lead.id)!.status] || "bg-muted text-muted-foreground"}`} title={`Referred to ${REFERRAL_PARTNER_LABEL} — ${REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}`}>
+                            {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referrals.get(lead.id)!.status] || referrals.get(lead.id)!.status}
                           </span>
                         )}
                         <span onClick={(e) => e.stopPropagation()}>
@@ -3129,7 +3188,7 @@ const Admissions = () => {
               }
               className="gap-2"
             >
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <ListPlus className="h-4 w-4" />}
               {assignAfterCreate
                 ? "Create & assign"
                 : listMode === "new" ? "Create List" : "Add to List"}
@@ -3146,6 +3205,18 @@ const Admissions = () => {
             onOpenChange={setShowBulkWhatsApp}
             leads={Array.from(selectedIds).map(id => leads.find(l => l.id === id)).filter(Boolean) as Lead[]}
             onSuccess={() => { fetchLeads(); setSelectedIds(new Set()); }}
+          />
+        </Suspense>
+      )}
+
+      {/* Refer to partner (BPT/BMRIT only) */}
+      {showReferPartner && (
+        <Suspense fallback={null}>
+          <ReferToPartnerDialog
+            open={showReferPartner}
+            onOpenChange={setShowReferPartner}
+            leadIds={Array.from(selectedIds)}
+            onSuccess={() => { setSelectedIds(new Set()); fetchLeads(); }}
           />
         </Suspense>
       )}
@@ -3209,7 +3280,7 @@ const Admissions = () => {
               disabled={submittingRequest || (deleteReason === "other" && !deleteCustomMsg.trim())}
               className="gap-2"
             >
-              {submittingRequest && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submittingRequest && <ButtonOrb state="working" onFilled />}
               Submit Request
             </Button>
           </DialogFooter>
@@ -3228,7 +3299,7 @@ const Admissions = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleBulkDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {deleting && <ButtonOrb state="working" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

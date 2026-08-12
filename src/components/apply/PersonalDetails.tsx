@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { ArrowRight, Loader2, AlertTriangle } from "lucide-react";
+import { ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
@@ -323,7 +324,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           disabled={saving || !!dobWarning}
           className="gap-2"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>
       </div>

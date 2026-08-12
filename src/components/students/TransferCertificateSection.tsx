@@ -4,13 +4,14 @@ import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { FileText, Download, Loader2, Check, X, AlertCircle, Clock } from "lucide-react";
+import { FileText, Download, Check, X, AlertCircle, Clock } from "lucide-react";
 
 // Roles allowed to draft/submit a TC vs approve one. Mirrors the RPC guards.
 const CAN_ISSUE = new Set(["office_assistant", "school_coordinator", "principal", "super_admin", "campus_admin"]);
@@ -239,7 +240,7 @@ export function TransferCertificateSection({
         </div>
         {showIssueButton && (
           <Button size="sm" className="gap-2" onClick={openIssueDialog} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            {busy ? <ButtonOrb state="composing" onFilled /> : <FileText className="h-4 w-4" />}
             Issue TC
           </Button>
         )}
@@ -258,7 +259,7 @@ export function TransferCertificateSection({
           {request.status === "pending_approval" && canApprove && (
             <div className="flex gap-2 pt-1">
               <Button size="sm" className="gap-2" onClick={approve} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve & generate
+                {busy ? <ButtonOrb state="composing" onFilled /> : <Check className="h-4 w-4" />} Approve & generate
               </Button>
               <Button size="sm" variant="outline" className="gap-2" onClick={reject} disabled={busy}>
                 <X className="h-4 w-4" /> Reject
@@ -274,7 +275,7 @@ export function TransferCertificateSection({
                 </Button>
               ) : (
                 <Button size="sm" className="gap-2" onClick={() => generatePdf(request.id)} disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate PDF
+                  {busy ? <ButtonOrb state="composing" onFilled /> : <FileText className="h-4 w-4" />} Generate PDF
                 </Button>
               )}
             </div>
@@ -320,7 +321,7 @@ export function TransferCertificateSection({
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={busy}>Cancel</Button>
             <Button onClick={submit} disabled={busy || feeBlocked}>
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {busy ? <ButtonOrb state="composing" onFilled /> : null}
               Submit for approval
             </Button>
           </DialogFooter>

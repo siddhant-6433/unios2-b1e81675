@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  GraduationCap, LogOut, Loader2, ArrowRight, CheckCircle2,
-  Clock, FileText, AlertCircle, Plus, RefreshCw, Receipt,
-} from "lucide-react";
+import { GraduationCap, LogOut, ArrowRight, CheckCircle2, Clock, FileText, AlertCircle, Plus, RefreshCw, Receipt } from "lucide-react";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
+import ApplicantReceipts from "@/components/applicant/ApplicantReceipts";
 
 interface CourseSelection {
   course_name?: string;
@@ -195,7 +194,7 @@ export default function ApplicantPortal() {
         {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <OrbLoader state="working" />
           </div>
         )}
 
@@ -392,6 +391,9 @@ export default function ApplicantPortal() {
                       courseName={(app.course_selections as any[])?.[0]?.course_name || null}
                       onPayment={fetchApplications}
                     />
+
+                    {/* Fee receipts — shown regardless of offer state (TokenFeePanel bails out with no offer) */}
+                    <ApplicantReceipts leadId={app.lead_id || null} />
                   </div>
                 );
               })}

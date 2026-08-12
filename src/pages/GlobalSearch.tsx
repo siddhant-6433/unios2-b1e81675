@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
-import { Search as SearchIcon, Loader2, User, FileText, GraduationCap, Phone, Hash } from "lucide-react";
+import { Search as SearchIcon, User, FileText, GraduationCap, Phone, Hash } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 
 interface SearchResult {
@@ -100,7 +101,7 @@ const GlobalSearch = () => {
           disabled={loading || !query.trim()}
           className="rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchIcon className="h-4 w-4" />}
+          {loading ? <ButtonOrb state="working" onFilled /> : <SearchIcon className="h-4 w-4" />}
           Search
         </button>
       </div>

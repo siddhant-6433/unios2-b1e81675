@@ -1,16 +1,14 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
 import { useToast } from "@/hooks/use-toast";
-import {
-  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone,
-  Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet,
-} from "lucide-react";
+import { Share2, ArrowLeft, Trash2, ArrowRightLeft, Phone, Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints, ChevronRight, Ban, Sparkles, Handshake, School, Link as LinkIcon, Wallet } from "lucide-react";
+import { fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL, REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow } from "@/lib/leadReferral";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,6 +45,7 @@ const ScorePopup            = lazy(() => import("@/components/admissions/ScorePo
 // Lazy: dialogs — only loaded when the user opens them
 const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
 const OfferLetterDialog            = lazy(() => import("@/components/admissions/OfferLetterDialog").then(m => ({ default: m.OfferLetterDialog })));
+const ReferToPartnerDialog         = lazy(() => import("@/components/admissions/ReferToPartnerDialog").then(m => ({ default: m.ReferToPartnerDialog })));
 const SchoolFeeProposalDialog      = lazy(() => import("@/components/admissions/SchoolFeeProposalDialog").then(m => ({ default: m.SchoolFeeProposalDialog })));
 const ConvertToStudentDialog       = lazy(() => import("@/components/admissions/ConvertToStudentDialog").then(m => ({ default: m.ConvertToStudentDialog })));
 const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendWhatsAppDialog").then(m => ({ default: m.SendWhatsAppDialog })));
@@ -102,6 +101,9 @@ type FollowupQueueState = {
   returnUrl: string;
 };
 
+// sessionStorage key for the per-counsellor urgent-list guard snooze.
+const dialGuardSnoozeKey = (profileId: string) => `dialGuardSnoozeUntil:${profileId}`;
+
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -144,6 +146,8 @@ const LeadDetail = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showExternalOwner, setShowExternalOwner] = useState(false);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  const [referral, setReferral] = useState<LeadReferralRow | null>(null);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
@@ -169,7 +173,7 @@ const LeadDetail = () => {
   // "Record Offline Payment" trigger in the quick-action bar instead.
   const [feeLedgerEmpty, setFeeLedgerEmpty] = useState(false);
   const [showOfflinePayment, setShowOfflinePayment] = useState(false);
-  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const [deletingLead, setDeletingLead] = useState(false);
   const [showNotInterested, setShowNotInterested] = useState(false);
   const [notInterestedReason, setNotInterestedReason] = useState("");
@@ -186,6 +190,13 @@ const LeadDetail = () => {
   const [lastDisposition, setLastDisposition] = useState<string>("");
   // Soft direct-dial guard: pending priority counts gating non-priority calls.
   const [dialGuardCounts, setDialGuardCounts] = useState<{ paid_pending: number; overdue_pending: number } | null>(null);
+  const isDialGuardSnoozed = () => {
+    if (!profileId) return false;
+    try {
+      const until = Number(sessionStorage.getItem(dialGuardSnoozeKey(profileId)) || 0);
+      return until > Date.now();
+    } catch (_) { return false; }
+  };
   const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
   // When the lead_detail RPC returns nothing (RLS blocked because the lead is
   // assigned to someone else), we still want to tell the user *who* it is
@@ -402,6 +413,14 @@ const LeadDetail = () => {
     await queryClient.invalidateQueries({ queryKey: ["lead-detail", id] });
     await refetchDetail();
   };
+
+  // Referral to the academic partner (BPT/BMRIT only) — status badge + action gate.
+  const refreshReferral = useCallback(async () => {
+    if (!id) return;
+    const map = await fetchReferralsByLead([id]);
+    setReferral(map.get(id) || null);
+  }, [id]);
+  useEffect(() => { void refreshReferral(); }, [refreshReferral]);
 
   const addNote = async () => {
     if (!newNote.trim() || !id) return;
@@ -870,6 +889,9 @@ const LeadDetail = () => {
 
   const triggerManualCall = async () => {
     if (!id || !profileId) { await placeManualCall(); return; }
+    // Urgent-list bypass: counsellor snoozed the guard for this session
+    // (e.g. TL told them to work a specific list first). Skip straight to dial.
+    if (isDialGuardSnoozed()) { await placeManualCall(); return; }
     // Soft guard: counsellor must clear paid (meta/google <24h) + overdue
     // (>2h) priority work before direct-dialing a non-priority lead.
     // The RPC excludes the current lead from counts and flags exempt cases
@@ -889,6 +911,29 @@ const LeadDetail = () => {
       }
     } catch (_) {
       // Guard failures should never block calling — fall through and dial.
+    }
+    await placeManualCall();
+  };
+
+  // Snooze the guard for 2 hours (per counsellor, this tab/session) so an
+  // urgent list can be worked without a modal on every lead. Logs one
+  // override row for the TL audit trail, then dials.
+  const handleDialGuardSnooze = async () => {
+    if (profileId) {
+      try { sessionStorage.setItem(dialGuardSnoozeKey(profileId), String(Date.now() + 2 * 60 * 60 * 1000)); } catch (_) {}
+    }
+    if (id && profileId && dialGuardCounts) {
+      try {
+        await supabase.from("direct_dial_overrides" as any).insert({
+          counsellor_id: profileId,
+          lead_id: id,
+          reason: "Urgent list — guard snoozed for 2h",
+          paid_pending_count: dialGuardCounts.paid_pending,
+          overdue_pending_count: dialGuardCounts.overdue_pending,
+        });
+      } catch (e) {
+        console.error("Failed to log dial snooze:", e);
+      }
     }
     await placeManualCall();
   };
@@ -1076,7 +1121,7 @@ const LeadDetail = () => {
   // can paint immediately while heavy children stream in)
   const lazyFallback = (
     <div className="flex h-24 items-center justify-center text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />
+      <ButtonOrb state="working" />
     </div>
   );
   const currentExternalOwner = lead.consultant_id
@@ -1210,6 +1255,20 @@ const LeadDetail = () => {
               <Handshake className="h-3.5 w-3.5" /> Assign Owner
             </Button>
           )}
+          {referral && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}
+              title={referral.partner_notes || undefined}
+            >
+              <Share2 className="h-3 w-3" />
+              {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+            </span>
+          )}
+          {!referral && isReferrableCourse(courseName) && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowReferPartner(true)}>
+              <Share2 className="h-3.5 w-3.5" /> Refer to {REFERRAL_PARTNER_LABEL}
+            </Button>
+          )}
           {lead.stage !== "dnc" && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive border-destructive/30/60 hover:bg-destructive/5 dark:hover:bg-destructive/90/20" onClick={markAsDnc}>
               <Ban className="h-3.5 w-3.5" /> Mark DNC
@@ -1322,7 +1381,7 @@ const LeadDetail = () => {
                 title={tooltip || label}
               >
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
-                  {disabled && (label === "AI Call" || label === "Cloud Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                  {disabled && (label === "AI Call" || label === "Cloud Call") ? <ButtonOrb state="working" /> : <Icon className="h-4 w-4" />}
                 </div>
                 <div className="flex min-h-4 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                   <span>{label}</span>
@@ -1345,7 +1404,7 @@ const LeadDetail = () => {
           phone) was removed on user request; "Call Now" still opens tel:. */}
       <Suspense fallback={showCallDisposition ? (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 dark:border-cyan-900/50 dark:bg-cyan-950/20 px-4 py-3 flex items-center gap-2 text-sm text-cyan-900 dark:text-cyan-100">
-          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          <ButtonOrb state="working" />
           Opening call disposition...
         </div>
       ) : null}>
@@ -1651,6 +1710,17 @@ const LeadDetail = () => {
       {/* Dialogs */}
       <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
+      {showReferPartner && (
+        <Suspense fallback={null}>
+          <ReferToPartnerDialog
+            open={showReferPartner}
+            onOpenChange={setShowReferPartner}
+            leadIds={[lead.id]}
+            onSuccess={() => { void refreshReferral(); void fetchAll(true); }}
+          />
+        </Suspense>
+      )}
+
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} courseName={courseName} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
       <SchoolFeeProposalDialog
@@ -1758,6 +1828,7 @@ const LeadDetail = () => {
             leadName={lead.name}
             onOpenChange={(o) => { if (!o) setDialGuardCounts(null); }}
             onCallAnyway={handleDialGuardOverride}
+            onSnooze={handleDialGuardSnooze}
           />
         </Suspense>
       )}
@@ -1901,7 +1972,7 @@ const LeadDetail = () => {
               disabled={savingNotInterested || notInterestedReason.trim().split(/\s+/).filter(Boolean).length < 5}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {savingNotInterested && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {savingNotInterested && <ButtonOrb state="working" />}
               Mark Not Interested
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1920,7 +1991,7 @@ const LeadDetail = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingLead}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteLead} disabled={deletingLead} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deletingLead && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {deletingLead && <ButtonOrb state="working" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2175,7 +2246,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
           <DialogFooter>
             <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
             <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-success hover:bg-success/90">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
               {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
             </Button>
           </DialogFooter>
@@ -2207,7 +2278,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               toast({ title: "Visit rescheduled" });
               setSaving(false); setRescheduleDialog(null); onRefresh();
             }}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Calendar className="h-4 w-4 mr-2" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Calendar className="h-4 w-4 mr-2" />}
               Reschedule Visit
             </Button>
           </div>
@@ -2263,7 +2334,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               }
               setSaving(false); setNoShowDialog(null); onRefresh();
             }}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {saving ? <ButtonOrb state="working" onFilled /> : null}
               {noShowAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
             </Button>
           </div>

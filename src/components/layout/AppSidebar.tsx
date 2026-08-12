@@ -16,7 +16,7 @@ import {
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
-  Library, Barcode, DoorOpen,
+  Library, Barcode, DoorOpen, Share2,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -69,6 +69,7 @@ const academicPartnerMenu: MenuItem[] = [
   { title: "Overview", url: "/academic-partner-portal", icon: LayoutDashboard, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Inbox", url: "/academic-partner-portal?tab=requests", icon: Inbox, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Leads", url: "/academic-partner-portal?tab=leads", icon: GraduationCap, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Referrals", url: "/academic-partner-portal?tab=referrals", icon: Share2, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Applications", url: "/academic-partner-portal?tab=applications", icon: FileText, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Students", url: "/academic-partner-portal?tab=students", icon: Users, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner", "academic_partner_offer_letter"] },
@@ -87,7 +88,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: WhatsAppIcon, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
-  { title: "Incentives", url: "/incentive-approvals", icon: IndianRupee, roles: ["super_admin", "accountant"] },
+  { title: "Incentives", url: "/incentive-approvals", icon: IndianRupee, roles: ["super_admin", "accountant", "office_admin"] },
   { title: "Lead Assignments", url: "/lead-assignments", icon: UserCheck, permission: "leads:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
@@ -360,10 +361,15 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarContent className="bg-sidebar pt-4">
-        {/* Logo */}
-        <div className="px-3 pb-2">
-          <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-primary/5 to-transparent px-3 py-2.5">
-            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
+        {/* Logo. Collapsed the rail is only 3rem wide, so the px-3 + px-3 nesting
+            left the 2rem mark zero width — it has to lose the padding to show. */}
+        <div className={collapsed ? "pb-2" : "px-3 pb-2"}>
+          <div className={`flex items-center rounded-xl py-2.5 ${
+            collapsed
+              ? "justify-center"
+              : "gap-3 bg-gradient-to-r from-primary/5 to-transparent px-3"
+          }`}>
+            <img src={uniosLogo} alt="UniOs" className={`shrink-0 object-contain ${collapsed ? "h-7 w-7" : "h-8 w-8"}`} />
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>

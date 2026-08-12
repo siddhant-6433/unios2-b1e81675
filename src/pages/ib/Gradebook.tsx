@@ -2,11 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Loader2, Search, Download, Plus, BookOpen, GraduationCap,
-  ChevronDown, MessageSquare, Save,
-} from "lucide-react";
+import { Search, Download, Plus, BookOpen, GraduationCap, ChevronDown, MessageSquare, Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -372,7 +370,7 @@ function PypGradebook() {
   if (loadingBatches) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -415,7 +413,7 @@ function PypGradebook() {
       {/* Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-auto">
@@ -545,7 +543,7 @@ function PypGradebook() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={saveEdit} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save
+              {saving && <ButtonOrb state="working" onFilled />} Save
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -591,7 +589,7 @@ function PypGradebook() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
             <Button onClick={addAssessment} disabled={addingSaving || !newTitle.trim()}>
-              {addingSaving && <Loader2 className="h-4 w-4 animate-spin" />} Create
+              {addingSaving && <ButtonOrb state="working" onFilled />} Create
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -778,7 +776,7 @@ function MypGradebook() {
   if (loadingBatches) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -827,7 +825,7 @@ function MypGradebook() {
           <Download className="h-4 w-4" /> Export CSV
         </Button>
         <Button size="sm" onClick={submitTermGrades} disabled={submitting || !filteredStudents.length}>
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {submitting ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
           Submit Term Grades
         </Button>
       </div>
@@ -847,7 +845,7 @@ function MypGradebook() {
       {/* Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-auto">

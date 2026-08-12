@@ -1,5 +1,10 @@
 <!doctype html>
-<html lang="en">
+<!-- class="light" is a marker, not a style: this app is light-only (no .dark rule,
+     no theme provider). ThinkingOrb's theme="auto" walks ancestors for a
+     dark/light class and otherwise falls back to prefers-color-scheme — without
+     this, every orb renders light ink on our light background for OS-dark users.
+     Guarded by src/test/thinking-orb-sweep.test.ts. -->
+<html lang="en" class="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

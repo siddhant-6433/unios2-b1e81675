@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, ChevronRight, Loader2, Search, ShieldAlert } from "lucide-react";
+import { Camera, ChevronDown, ChevronRight, Search, ShieldAlert } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 
 type StaffRow = {
   user_id: string;
@@ -116,7 +117,7 @@ export function PhotoDayAssigneesPanel() {
   if (checking) {
     return (
       <div className="flex h-24 items-center justify-center rounded-xl border border-border bg-card">
-        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        <OrbLoader state="searching" />
       </div>
     );
   }
@@ -172,7 +173,7 @@ export function PhotoDayAssigneesPanel() {
 
       {loading && rows.length === 0 ? (
         <div className="flex h-20 items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          <OrbLoader state="searching" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-4 text-sm text-muted-foreground">
@@ -201,7 +202,7 @@ export function PhotoDayAssigneesPanel() {
                 }`}
               >
                 {savingId === row.user_id ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <ButtonOrb state="working" onFilled />
                 ) : row.has_capture ? (
                   "Capture on"
                 ) : (

@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { Loader2, UserPlus, X } from "lucide-react";
+import { UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface Props {
@@ -89,7 +90,7 @@ export function AddSecondaryCounsellorDialog({ open, onOpenChange, leadId, leadN
         </DialogHeader>
 
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-8"><OrbLoader state="searching" /></div>
         ) : (
           <div className="space-y-4 mt-2">
             {existing.length > 0 && (
@@ -121,7 +122,7 @@ export function AddSecondaryCounsellorDialog({ open, onOpenChange, leadId, leadN
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
               <Button onClick={handleAdd} disabled={saving || !selectedId} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Add
+                {saving ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />} Add
               </Button>
             </div>
           </div>

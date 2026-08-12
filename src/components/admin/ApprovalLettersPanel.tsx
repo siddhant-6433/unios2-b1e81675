@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -9,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/state-fields";
-import { Loader2, Plus, FileText, ExternalLink, Trash2, Search, Upload, CloudUpload } from "lucide-react";
+import { Plus, FileText, ExternalLink, Trash2, Search, Upload, CloudUpload } from "lucide-react";
 
 const R2_HOST = "r2.dev";
 const isR2Url = (url: string | null | undefined) => !!url && url.includes(R2_HOST);
@@ -280,7 +281,7 @@ export default function ApprovalLettersPanel() {
           <Badge variant="outline" className="text-xs">{filtered.length}/{letters.length} letters</Badge>
           {letters.some(l => l.file_url && !isR2Url(l.file_url)) && (
             <Button variant="outline" onClick={handleBulkMigrate} disabled={bulkMigrating} className="gap-2">
-              {bulkMigrating ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+              {bulkMigrating ? <ButtonOrb state="working" /> : <CloudUpload className="h-4 w-4" />}
               Migrate {letters.filter(l => l.file_url && !isR2Url(l.file_url)).length} to R2
             </Button>
           )}
@@ -373,7 +374,7 @@ export default function ApprovalLettersPanel() {
                           disabled={migratingId === l.id || bulkMigrating}
                           onClick={() => handleMigrate(l)}
                         >
-                          {migratingId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudUpload className="h-3.5 w-3.5" />}
+                          {migratingId === l.id ? <ButtonOrb state="working" /> : <CloudUpload className="h-3.5 w-3.5" />}
                         </Button>
                       )}
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(l.id)}>
@@ -499,7 +500,7 @@ export default function ApprovalLettersPanel() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={!form.name.trim() || (!pendingFile && !form.file_url.trim()) || saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <FileText className="h-4 w-4" />}
               {uploadingFile ? "Uploading..." : "Add Letter"}
             </Button>
           </DialogFooter>

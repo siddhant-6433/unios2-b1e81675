@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import {
-  MapPin, Save, Loader2, Search, Navigation, Radius,
-} from "lucide-react";
+import { MapPin, Save, Search, Navigation, Radius } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -240,7 +239,7 @@ export default function GeofenceDialog({ open, onClose, campus, onSaved }: Geofe
                 />
               </div>
               <Button onClick={handleSearch} disabled={searching} variant="outline" className="gap-1.5">
-                {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                {searching ? <ButtonOrb state="working" /> : <Search className="h-4 w-4" />}
                 Search
               </Button>
             </div>
@@ -336,7 +335,7 @@ export default function GeofenceDialog({ open, onClose, campus, onSaved }: Geofe
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || lat === null || lng === null} className="gap-2">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
             Save Geofence
           </Button>
         </div>

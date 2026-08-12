@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,14 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { LeadPipeline } from "@/components/admissions/LeadPipeline";
 import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
+import { type FeeAllocation } from "@/components/finance/FeeHeadAllocationField";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS } from "@/lib/leadReferral";
 import {
   type LeadFunnelStage,
   leadStagesForBucket,
@@ -36,11 +38,8 @@ import {
   IndianRupee,
   Loader2,
   LogIn,
-  MoreHorizontal,
   PhoneCall,
   PhoneOff,
-  Receipt,
-  Link as LinkIcon,
   Plus,
   FileText,
   Gift,
@@ -51,6 +50,12 @@ import {
 } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import {
+  type FeeReceipt,
+  PartnerReceiptsTable,
+  PartnerCandidateActions,
+  StudentLoginLinkDialog,
+} from "@/components/partner/PartnerCandidateActions";
 
 // Derive up to two-letter initials from a partner's company/display name,
 // used as the logo fallback when no logo has been uploaded.
@@ -141,6 +146,7 @@ type Student = {
   id: string;
   name: string;
   admission_no: string | null;
+  pre_admission_no: string | null;
   phone: string | null;
   course_id: string | null;
   batch_id: string | null;
@@ -173,21 +179,7 @@ type FeeRow = {
   status: string;
   due_date?: string | null;
   fee_code_name?: string | null;
-};
-
-type FeeReceipt = {
-  id: string;
-  lead_id: string;
-  type: string;
-  amount: number | null;
-  concession_amount: number | null;
-  payment_mode: string | null;
-  transaction_ref: string | null;
-  receipt_no: string | null;
-  receipt_url: string | null;
-  status: string;
-  payment_date: string | null;
-  created_at: string;
+  fee_code_id?: string | null;
 };
 
 type Payout = {
@@ -395,19 +387,65 @@ const applicationStageLabel = (app: ApplicationSummary | null | undefined) => {
   return "Draft";
 };
 
-const isCompletedApplication = (lead: Lead) =>
-  Boolean(
-    lead.application_submitted_at
-    || ["submitted", "under_review", "approved", "rejected"].includes(lead.application_status || "")
-  );
-
 const attendancePercent = (present: number, total: number) => {
   if (total <= 0) return "-";
   return `${Math.round((present / total) * 100)}%`;
 };
 
+// Students tab, unified candidate row. Built from partner-attributed leads
+// (attributed: true) plus assignment-scoped students with no attributed lead
+// (attributed: false — teaching-only "Direct" candidates, not payout-earning).
+type CandidateRow = {
+  key: string;
+  leadId: string | null;
+  student?: Student;
+  name: string;
+  phone: string;
+  courseName: string;
+  campusName: string;
+  batchName: string;
+  pan: string | null;
+  admissionNo: string | null;
+  stage: string;
+  paid: number;
+  attributed: boolean;
+};
+
+// Badge marking a candidate row that is not attributed to this partner (a
+// teaching-only assignment match) — not counted for payout.
+const DirectBadge = ({ attributed }: { attributed: boolean }) => {
+  if (attributed) return null;
+  return (
+    <Badge
+      className={`border-0 text-[9px] ${attributionBadge("direct")}`}
+      title="Not attributed to you — not counted for payout"
+    >
+      {ATTRIBUTION_LABELS.direct}
+    </Badge>
+  );
+};
+
+/** A NIMT lead handed to this partner for calling. */
+interface ReferralRow {
+  id: string;
+  status: string;
+  partner_notes: string | null;
+  referred_at: string;
+  leads: {
+    id: string;
+    name: string;
+    phone: string | null;
+    stage: string;
+    courses?: { name: string } | null;
+    campuses?: { name: string } | null;
+  } | null;
+}
+
+const REFERRAL_STATUS_OPTIONS = ["pending", "contacted", "not_reachable", "admitted", "not_admitted"] as const;
+
 const PORTAL_TABS = [
   { label: "Leads", value: "leads" },
+  { label: "Referrals", value: "referrals" },
   { label: "Applications", value: "applications" },
   { label: "Students", value: "students" },
   { label: "Fee Collection", value: "fees" },
@@ -497,10 +535,14 @@ export default function AcademicPartnerPortal() {
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [receiptsByLead, setReceiptsByLead] = useState<Map<string, FeeReceipt[]>>(new Map());
   const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [referralNotesDraft, setReferralNotesDraft] = useState<Record<string, string>>({});
+  const [savingReferralId, setSavingReferralId] = useState<string | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
-  const [detailsLead, setDetailsLead] = useState<Lead | null>(null);
   const [offerLead, setOfferLead] = useState<Lead | null>(null);
   const [feeDetailsStudentId, setFeeDetailsStudentId] = useState<string | null>(null);
+  // Fee-terms rows picked in the fee-details dialog, feeRow.id -> amount to collect.
+  const [feeDetailsPicked, setFeeDetailsPicked] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [savingAgentPhone, setSavingAgentPhone] = useState(false);
@@ -509,9 +551,11 @@ export default function AcademicPartnerPortal() {
   // the top-of-page call bar can offer an "End Call" that hangs up both Plivo legs.
   const [activeCall, setActiveCall] = useState<{ leadId: string; name: string; callId: string } | null>(null);
   const [endingCall, setEndingCall] = useState(false);
-  const [receiptsModalLead, setReceiptsModalLead] = useState<Lead | null>(null);
+  const [receiptsModal, setReceiptsModal] = useState<{ leadId: string; name: string } | null>(null);
   const [payLinkLead, setPayLinkLead] = useState<{ id: string; name: string } | null>(null);
   const [loginLinkLead, setLoginLinkLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
+  const [payLinkStudent, setPayLinkStudent] = useState<{ id: string; name: string; allocations?: FeeAllocation[]; amount?: number } | null>(null);
+  const [loginLinkStudent, setLoginLinkStudent] = useState<{ id: string; name: string } | null>(null);
   const [agentPhone, setAgentPhone] = useState("");
   const [leadForm, setLeadForm] = useState({ name: "", phone: "", email: "", course_id: "", notes: "", share_with_nimt: false });
   const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
@@ -563,6 +607,25 @@ export default function AcademicPartnerPortal() {
   const feeDetailsSummary = feeDetailsStudentId ? feeByStudent.get(feeDetailsStudentId) : null;
   const feeDetailsStudent = feeDetailsRows[0] || null;
 
+  // Fee-terms rows currently ticked in the fee-details dialog, turned into the
+  // create-payment-link allocation shape — mirrors openLinkForSelection in
+  // src/components/finance/StudentFeePanel.tsx:308-321.
+  const feeDetailsAllocations = useMemo(() => {
+    const allocs: FeeAllocation[] = [];
+    for (const fee of feeDetailsRows) {
+      const amount = feeDetailsPicked[fee.id];
+      if (!amount || amount <= 0 || !fee.fee_code_id) continue;
+      allocs.push({
+        fee_code_id: fee.fee_code_id,
+        fee_ledger_id: fee.id,
+        amount,
+        label: `${fee.fee_code_name || "Fee"} — ${defaultFeeTermLabel(fee.term)}`,
+      });
+    }
+    return allocs;
+  }, [feeDetailsRows, feeDetailsPicked]);
+  const feeDetailsPickedTotal = feeDetailsAllocations.reduce((sum, a) => sum + a.amount, 0);
+
   // Actual payment receipts for the open student — matched via the student's
   // lead (lead_payments is lead-scoped).
   const feeDetailsReceipts = useMemo(() => {
@@ -575,6 +638,112 @@ export default function AcademicPartnerPortal() {
     () => paidApplications.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)),
     [paidApplications],
   );
+  // Students tab: one unified candidate list, mirroring the Applications
+  // funnel strip's Token Paid / Pre-Admitted / Admitted stages exactly.
+  //
+  // Row (a): partner-attributed leads (from `leads`) that already qualify as
+  // a candidate — admission no, pre-admission no (PAN), or a confirmed
+  // payment beyond the application fee. `attributed: true`.
+  // Row (b): students (from `students`) not already covered by (a) — these
+  // sit in a course/batch the partner is assigned to teach but their lead
+  // isn't attributed to the partner, so they earn no payout. `attributed: false`.
+  const candidateRows = useMemo(() => {
+    const rows: CandidateRow[] = [];
+    const coveredLeadIds = new Set<string>();
+
+    leads.forEach((lead) => {
+      const matchedStudent = students.find((s) => s.lead_id === lead.id);
+      const admissionNo = lead.lead_admission_no ?? matchedStudent?.admission_no ?? null;
+      const pan = lead.lead_pre_admission_no ?? matchedStudent?.pre_admission_no ?? null;
+      const receipts = receiptsByLead.get(lead.id) || [];
+      // Checked by receipt `type`, not `has_token_fee_paid`, so
+      // pre_admission_token / registration_fee / other non-application
+      // payments also qualify a candidate as token-paid.
+      const hasNonApplicationFeePayment = receipts.some((r) => r.type !== "application_fee");
+      if (!admissionNo && !pan && !hasNonApplicationFeePayment) return;
+      coveredLeadIds.add(lead.id);
+      rows.push({
+        key: lead.id,
+        leadId: lead.id,
+        student: matchedStudent,
+        name: lead.name,
+        phone: lead.phone,
+        courseName: lead.course_name,
+        campusName: lead.campus_name,
+        batchName: matchedStudent?.batch_name ?? "-",
+        pan,
+        admissionNo,
+        stage: lead.stage,
+        paid: receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0),
+        attributed: true,
+      });
+    });
+
+    students.forEach((student) => {
+      if (student.lead_id && coveredLeadIds.has(student.lead_id)) return;
+      const receipts = student.lead_id ? (receiptsByLead.get(student.lead_id) || []) : [];
+      rows.push({
+        key: student.lead_id ?? student.id,
+        leadId: student.lead_id,
+        student,
+        name: student.name,
+        phone: student.phone ?? "",
+        courseName: student.course_name,
+        campusName: "-",
+        batchName: student.batch_name,
+        pan: student.pre_admission_no,
+        admissionNo: student.admission_no,
+        stage: student.status,
+        paid: receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0),
+        attributed: false,
+      });
+    });
+
+    return rows;
+  }, [leads, students, receiptsByLead]);
+
+  // Buckets are mutually exclusive and mirror the Applications funnel strip.
+  const admittedRows = useMemo(() => candidateRows.filter((row) => Boolean(row.admissionNo)), [candidateRows]);
+  const preAdmittedRows = useMemo(
+    () => candidateRows.filter((row) => !row.admissionNo && Boolean(row.pan)),
+    [candidateRows],
+  );
+  const tokenPaidRows = useMemo(
+    () => candidateRows.filter((row) => !row.admissionNo && !row.pan),
+    [candidateRows],
+  );
+
+  // Shared candidate-row action wiring for the Students sub-tabs — student
+  // row present routes to the student-scoped dialogs, otherwise falls back
+  // to the lead-scoped ones. Receipts are omitted (not passed a null lead id)
+  // when the row genuinely has no lead at all.
+  // A "Direct" candidate is one the partner only teaches — their lead carries no
+  // academic_partner_id, so every one of these actions is refused server-side:
+  // manual-call and create-payment-link 403 on the attribution check, and
+  // issue_student_login_link fails can_academic_partner_view_fee_student.
+  // Rendering four buttons that are all guaranteed to error is worse than
+  // rendering none.
+  const candidateActions = (row: CandidateRow) => (!row.attributed ? {} : {
+    onCall: row.leadId && row.phone ? () => placeCloudCall({ id: row.leadId, name: row.name, phone: row.phone } as Lead) : undefined,
+    callBusy: callingLeadId === row.leadId,
+    callDisabled: !!activeCall,
+    onReceipts: row.leadId ? () => setReceiptsModal({ leadId: row.leadId as string, name: row.name }) : undefined,
+    onPayLink: row.student
+      ? () => setPayLinkStudent({ id: row.student!.id, name: row.name })
+      : row.leadId ? () => setPayLinkLead({ id: row.leadId as string, name: row.name }) : undefined,
+    onLoginLink: row.student
+      ? () => setLoginLinkStudent({ id: row.student!.id, name: row.name })
+      : row.leadId ? () => setLoginLinkLead({ id: row.leadId as string, name: row.name, phone: row.phone }) : undefined,
+    loginLinkDisabled: !row.phone && !row.student,
+  });
+
+  // Money for a Direct candidate is not zero — it is invisible. Their payments
+  // live on a lead the partner has no RLS grant on (Diya Sharma, for one, has
+  // two confirmed payments), so academic_partner_fee_receipts returns nothing
+  // and every total lands on ₹0. Showing ₹0 asserts "they have paid nothing",
+  // which is false; NA states what is actually true.
+  const NA = <span className="text-muted-foreground" title="Not available — this candidate is not attributed to you">NA</span>;
+
   const onboardingComplete = partner?.onboarding_status === "completed";
   const onboardingSkipped = partner?.onboarding_status === "skipped";
   const onboardingNeedsAttention = Boolean(partner && !onboardingComplete && showOnboarding);
@@ -754,7 +923,7 @@ export default function AcademicPartnerPortal() {
       setPaidApplications(mappedLeads.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)));
     }
 
-    const studentSelect = "id, name, admission_no, phone, status, course_id, batch_id, lead_id, courses:course_id(name), batches:batch_id(name)";
+    const studentSelect = "id, name, admission_no, pre_admission_no, phone, status, course_id, batch_id, lead_id, courses:course_id(name), batches:batch_id(name)";
     const assignmentStudentQueries = activeAssignments.map((assignment) => {
       let query = supabase
         .from("students")
@@ -777,9 +946,9 @@ export default function AcademicPartnerPortal() {
     const mappedStudentRows = mappedLeadIds.length > 0
       ? ((await supabase
         .from("students")
-        .select("id, lead_id")
+        .select(studentSelect)
         .in("lead_id", mappedLeadIds)
-        .limit(500)).data || []) as Array<{ id: string; lead_id: string | null }>
+        .limit(500)).data || []) as unknown as StudentRow[]
       : [];
     const feeStudentIds = Array.from(new Set(mappedStudentRows.map((student) => student.id)));
 
@@ -795,14 +964,21 @@ export default function AcademicPartnerPortal() {
       feeStudentIds.length > 0
         ? supabase
           .from("fee_ledger")
-          .select("id, student_id, term, total_amount, paid_amount, balance, status, due_date, students:student_id(name, admission_no, pre_admission_no), fee_codes:fee_code_id(code, name)")
+          .select("id, student_id, term, total_amount, paid_amount, balance, status, due_date, fee_code_id, students:student_id(name, admission_no, pre_admission_no), fee_codes:fee_code_id(code, name)")
           .in("student_id", feeStudentIds)
           .order("due_date", { ascending: false })
           .limit(300)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
-    setStudents(scopedStudentRows.map((s) => ({
+    // Union of assignment-scoped students (active course/batch assignment) and
+    // lead-scoped students (the partner's own converted candidates). A
+    // converted candidate may not yet sit in any active course/batch
+    // assignment, but their fees/receipts are already lead-scoped — so they'd
+    // otherwise vanish from the Students tab despite being fully visible via
+    // Fees. Only the assignment-derived half is filtered by assignment; the
+    // lead-derived half is partner-owned by construction.
+    setStudents(uniqueById([...scopedStudentRows, ...mappedStudentRows]).map((s) => ({
       ...s,
       course_name: s.courses?.name || "-",
       batch_name: s.batches?.name || "-",
@@ -818,6 +994,7 @@ export default function AcademicPartnerPortal() {
       student_name: f.students?.name || "-",
       student_admission_no: f.students?.admission_no || f.students?.pre_admission_no || null,
       fee_code_name: f.fee_codes?.name || null,
+      fee_code_id: f.fee_code_id || null,
     })));
 
     // Fee receipts (lead_payments) are RLS-blocked for the academic_partner
@@ -840,6 +1017,22 @@ export default function AcademicPartnerPortal() {
         setReceiptsByLead(grouped);
       }
     }
+    // Leads NIMT referred to us for calling. These are NOT partner-sourced leads
+    // (leads.academic_partner_id stays null) so they never touch payout maths.
+    {
+      const { data: referralRows, error: referralsError } = await supabase
+        .from("lead_referrals" as never)
+        .select("id, status, partner_notes, referred_at, leads:lead_id(id, name, phone, stage, courses:course_id(name), campuses:campus_id(name))")
+        .eq("partner_id", partnerId)
+        .order("referred_at", { ascending: false });
+      if (referralsError) {
+        console.error("[lead_referrals]", referralsError.message);
+        setReferrals([]);
+      } else {
+        setReferrals((referralRows || []) as unknown as ReferralRow[]);
+      }
+    }
+
     setPayouts(((payoutsRes.data || []) as unknown as PayoutRow[]).map((p) => ({
       ...p,
       lead_name: p.leads?.name,
@@ -1147,6 +1340,24 @@ export default function AcademicPartnerPortal() {
     }
   };
 
+  const updateReferral = async (referral: ReferralRow, status: string) => {
+    if (!partner?.id) return;
+    setSavingReferralId(referral.id);
+    const { error } = await supabase.rpc("academic_partner_update_referral" as never, {
+      _referral_id: referral.id,
+      _status: status,
+      _notes: referralNotesDraft[referral.id] ?? null,
+      _partner_id: isImpersonating && realRole === "super_admin" ? partner.id : null,
+    } as never);
+    setSavingReferralId(null);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Referral updated", description: `${referral.leads?.name || "Lead"} marked as ${REFERRAL_STATUS_LABELS[status] || status}.` });
+    await fetchPortal(partner.id);
+  };
+
   // Drop the in-progress cloud call. hangup_only tears down both Plivo legs
   // (hanging up the counsellor A-leg drops the bridged student B-leg too).
   const endActiveCall = async () => {
@@ -1368,11 +1579,11 @@ export default function AcademicPartnerPortal() {
               <div className="flex flex-wrap gap-2">
                 {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
                   <Button onClick={() => goToOnboardingStep(onboardingStep + 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving && <Loader2 className="h-4 w-4 animate-spin" />} Save & Continue
+                    {onboardingSaving && <ButtonOrb state="working" onFilled />} Save & Continue
                   </Button>
                 ) : (
                   <Button onClick={() => saveOnboarding("completed", ONBOARDING_STEPS.length - 1)} disabled={onboardingSaving} className="gap-2">
-                    {onboardingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
+                    {onboardingSaving ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
                   </Button>
                 )}
               </div>
@@ -1382,14 +1593,24 @@ export default function AcademicPartnerPortal() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-        {[
+        {([
           { label: "Courses", value: stats?.assigned_courses || 0, icon: BookOpen, bg: "bg-pastel-blue" },
           { label: "Batches", value: stats?.assigned_batches || 0, icon: GraduationCap, bg: "bg-pastel-purple" },
           { label: "Leads", value: stats?.total_leads || 0, icon: Users, bg: "bg-pastel-orange" },
-          { label: "Candidates", value: stats?.total_candidates || 0, icon: TrendingUp, bg: "bg-pastel-green" },
+          // Counted off the same three buckets the Students tab renders, so the
+          // card and the sub-tabs can never disagree. The dashboard view's
+          // total_candidates missed candidates who paid a token fee but never
+          // got a students row.
+          {
+            label: "Candidates",
+            value: tokenPaidRows.length + preAdmittedRows.length + admittedRows.length,
+            sub: `${tokenPaidRows.length} token paid · ${preAdmittedRows.length} pre-admitted · ${admittedRows.length} admitted`,
+            icon: TrendingUp,
+            bg: "bg-pastel-green",
+          },
           { label: "Fee Collected", value: fmt(stats?.total_fee_collected), icon: IndianRupee, bg: "bg-pastel-mint" },
           { label: "Pending Payout", value: fmt(stats?.pending_payout), icon: IndianRupee, bg: "bg-pastel-yellow" },
-        ].map((item) => (
+        ] as Array<{ label: string; value: string | number; sub?: string; icon: typeof BookOpen; bg: string }>).map((item) => (
           <Card key={item.label} className="border-border/60 shadow-none">
             <CardContent className="p-4">
               <div className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.bg}`}>
@@ -1397,6 +1618,7 @@ export default function AcademicPartnerPortal() {
               </div>
               <p className="text-xl font-bold text-foreground">{item.value}</p>
               <p className="text-[11px] text-muted-foreground">{item.label}</p>
+              {item.sub && <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground/80">{item.sub}</p>}
             </CardContent>
           </Card>
         ))}
@@ -1409,7 +1631,7 @@ export default function AcademicPartnerPortal() {
             <span>In call with <span className="font-semibold">{activeCall.name}</span> — pick up your phone to connect.</span>
           </div>
           <Button size="sm" variant="destructive" className="gap-2" onClick={endActiveCall} disabled={endingCall}>
-            {endingCall ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneOff className="h-3.5 w-3.5" />}
+            {endingCall ? <ButtonOrb state="working" onFilled /> : <PhoneOff className="h-3.5 w-3.5" />}
             End Call
           </Button>
         </div>
@@ -1436,7 +1658,7 @@ export default function AcademicPartnerPortal() {
           />
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Lead</th>
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
@@ -1448,36 +1670,109 @@ export default function AcademicPartnerPortal() {
                 {visibleLeads.map((lead) => (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-3"><div className="font-medium">{lead.name}</div><div className="text-xs text-muted-foreground">{lead.phone}</div></td>
-                    <td className="px-4 py-3"><div>{lead.course_name}</div><div className="text-xs text-muted-foreground">{lead.campus_name}</div></td>
+                    <td className="px-4 py-3 whitespace-nowrap"><div>{lead.course_name}</div><div className="text-xs text-muted-foreground">{lead.campus_name}</div></td>
                     <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(lead.stage)}`}>{STAGE_LABELS[lead.stage] || lead.stage}</Badge></td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(lead.created_at).toLocaleDateString("en-IN")}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="flex flex-wrap justify-end gap-2">
-                      <ApplyMagicLinkButton
-                        leadId={lead.id}
-                        leadName={lead.name}
-                        leadPhone={lead.phone}
-                        mode="academic_partner_on_behalf"
-                        label={lead.application_id ? "Continue Application" : "Complete Application"}
-                        directOpen
+                      {/* The candidate fills their own form via the login link.
+                          The partner-on-behalf form-filling buttons were removed
+                          from every tab at the user's request; the on-behalf
+                          backend is left intact. */}
+                      <PartnerCandidateActions
+                        variant="buttons"
+                        onCall={() => placeCloudCall(lead)}
+                        callBusy={callingLeadId === lead.id}
+                        callDisabled={!!activeCall}
+                        onReceipts={() => setReceiptsModal({ leadId: lead.id, name: lead.name })}
+                        onPayLink={() => setPayLinkLead({ id: lead.id, name: lead.name })}
+                        onLoginLink={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}
+                        loginLinkDisabled={!lead.phone}
                       />
-                      <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
-                        {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
-                        Call
-                      </Button>
-                      <Button size="sm" variant="outline" className="gap-2" onClick={() => setPayLinkLead({ id: lead.id, name: lead.name })}>
-                        <LinkIcon className="h-3.5 w-3.5" />
-                        Payment Link
-                      </Button>
-                      <Button size="sm" variant="outline" className="gap-2" disabled={!lead.phone} onClick={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}>
-                        <LogIn className="h-3.5 w-3.5" />
-                        Login Link
-                      </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
                 {visibleLeads.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{leadFunnelStage ? "No leads at this stage" : "No leads added yet"}</td></tr>}
+              </tbody>
+            </table>
+            </div>
+          </CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="referrals" className="mt-4 space-y-4">
+          <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Lead</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Referred</th>
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Outcome</th>
+                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+              </tr></thead>
+              <tbody>
+                {referrals.map((referral) => {
+                  const lead = referral.leads;
+                  return (
+                    <tr key={referral.id} className="border-b last:border-0 hover:bg-muted/30 align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{lead?.name || "—"}</div>
+                        <div className="text-xs text-muted-foreground">{lead?.phone || "No phone"}</div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div>{lead?.courses?.name || "—"}</div>
+                        <div className="text-xs text-muted-foreground">{lead?.campuses?.name || "—"}</div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(referral.referred_at).toLocaleDateString("en-IN")}
+                      </td>
+                      <td className="px-4 py-3 space-y-2 min-w-[220px]">
+                        <Badge className={`border-0 text-[10px] ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}>
+                          {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+                        </Badge>
+                        <Select
+                          value={referral.status}
+                          onValueChange={(value) => updateReferral(referral, value)}
+                          disabled={savingReferralId === referral.id}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {REFERRAL_STATUS_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value} className="text-xs">
+                                {REFERRAL_STATUS_LABELS[value]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Textarea
+                          rows={2}
+                          className="text-xs"
+                          placeholder="Notes for NIMT (saved with the next status change)"
+                          value={referralNotesDraft[referral.id] ?? referral.partner_notes ?? ""}
+                          onChange={(e) => setReferralNotesDraft((prev) => ({ ...prev, [referral.id]: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => lead && placeCloudCall({ id: lead.id, name: lead.name, phone: lead.phone } as Lead)}
+                            disabled={!lead?.phone || callingLeadId === lead?.id || !!activeCall}
+                          >
+                            {callingLeadId === lead?.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                            Call
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {referrals.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No leads referred to you yet</td></tr>
+                )}
               </tbody>
             </table>
             </div>
@@ -1492,44 +1787,45 @@ export default function AcademicPartnerPortal() {
           />
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead><tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Application</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Attribution</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Application Stage</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Payment</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Submitted</th>
+                <th className="px-4 py-2.5 text-left text-xs uppercase text-muted-foreground">Candidate</th>
+                <th className="min-w-[240px] px-4 py-2.5 text-left text-xs uppercase text-muted-foreground">Course</th>
+                <th className="px-4 py-2.5 text-left text-xs uppercase text-muted-foreground">Application</th>
+                {/* Status columns shrink to their content (w-px + nowrap) so the
+                    badges stay on one line instead of wrapping into tall pills
+                    and stealing width from the Application cell. */}
+                <th className="w-px whitespace-nowrap px-4 py-2.5 text-center text-xs uppercase text-muted-foreground">Attribution</th>
+                <th className="w-px whitespace-nowrap px-4 py-2.5 text-center text-xs uppercase text-muted-foreground">Stage</th>
+                <th className="w-px whitespace-nowrap px-4 py-2.5 text-center text-xs uppercase text-muted-foreground">Fee</th>
+                <th className="w-px whitespace-nowrap px-4 py-2.5 text-right text-xs uppercase text-muted-foreground">Submitted</th>
               </tr></thead>
               <tbody>
                 {visibleApplicationLeads.map((lead) => {
-                  const completed = isCompletedApplication(lead);
                   const isPartnerAttributed = lead.academic_partner_id === partner.id;
                   return (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-3"><div className="font-medium">{lead.name}</div><div className="text-xs text-muted-foreground">{lead.phone}</div></td>
-                    <td className="px-4 py-3"><div>{lead.course_name}</div><div className="text-xs text-muted-foreground">{lead.campus_name}</div></td>
-                    <td className="px-4 py-3 min-w-[300px]">
+                    <td className="px-4 py-2.5"><div className="font-medium">{lead.name}</div><div className="text-xs text-muted-foreground">{lead.phone}</div></td>
+                    {/* nowrap: course names like "Master of Business Administration
+                        (MBA)" wrapped onto three lines and made every row tall.
+                        The table already scrolls horizontally. */}
+                    <td className="min-w-[240px] whitespace-nowrap px-4 py-2.5"><div>{lead.course_name}</div><div className="text-xs text-muted-foreground">{lead.campus_name}</div></td>
+                    <td className="px-4 py-2.5 min-w-[260px]">
                       <div className="font-medium">{lead.application_id || "-"}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Status: {lead.application_status || "not started"}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {/* Primary action: the partner's own on-behalf application flow. */}
-                        {isPartnerAttributed && (
-                          <ApplyMagicLinkButton
-                            leadId={lead.id}
-                            leadName={lead.name}
-                            leadPhone={lead.phone}
-                            mode="academic_partner_on_behalf"
-                            label="Continue Application"
-                            directOpen
-                          />
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        {/* Primary action: hand the candidate a login link so they
+                            finish the form themselves. The partner's own on-behalf
+                            flow lives on the Leads tab — it was a second copy of
+                            the same journey here. */}
+                        {isPartnerAttributed && lead.phone && (
+                          <Button size="sm" variant="outline" className="gap-2" onClick={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}>
+                            <LogIn className="h-3.5 w-3.5" />
+                            Send Login Link
+                          </Button>
                         )}
                         {isPartnerAttributed && (
                           <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id || !!activeCall}>
-                            {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                            {callingLeadId === lead.id ? <ButtonOrb state="working" /> : <PhoneCall className="h-3.5 w-3.5" />}
                             Call
                           </Button>
                         )}
@@ -1539,47 +1835,18 @@ export default function AcademicPartnerPortal() {
                             {lead.has_offer ? "View Offer" : "Issue Offer"}
                           </Button>
                         )}
-                        {/* Everything secondary collapses into one compact menu. */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button size="sm" variant="outline" className="gap-1 px-2">
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                              More
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56">
-                            <DropdownMenuItem onSelect={() => setDetailsLead(lead)}>
-                              <FileText className="h-3.5 w-3.5" /> View details
-                            </DropdownMenuItem>
-                            {isPartnerAttributed && completed && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <ApplyMagicLinkButton
-                                  leadId={lead.id}
-                                  leadName={lead.name}
-                                  leadPhone={lead.phone}
-                                  mode="academic_partner_on_behalf"
-                                  label="Start New Application"
-                                  startNew
-                                  directOpen
-                                  asMenuItem
-                                />
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                       {/* Small links — receipts (app fee / token / etc.) and the
                           submitted application PDF, visible even before the
-                          candidate becomes a student. */}
+                          candidate becomes a student. Login Link is deliberately
+                          NOT here: it is the primary button above, and having it
+                          in both rows read as duplicated actions. */}
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => setReceiptsModalLead(lead)}
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                        >
-                          <Receipt className="h-3 w-3" /> Receipts
-                        </button>
+                        <PartnerCandidateActions
+                          variant="links"
+                          onReceipts={() => setReceiptsModal({ leadId: lead.id, name: lead.name })}
+                          onPayLink={isPartnerAttributed && lead.phone ? () => setPayLinkLead({ id: lead.id, name: lead.name }) : undefined}
+                        />
                         {lead.application_form_pdf_url && (
                           <a
                             href={lead.application_form_pdf_url}
@@ -1590,34 +1857,27 @@ export default function AcademicPartnerPortal() {
                             <FileText className="h-3 w-3" /> Application PDF
                           </a>
                         )}
-                        {isPartnerAttributed && lead.phone && (
-                          <button
-                            type="button"
-                            onClick={() => setLoginLinkLead({ id: lead.id, name: lead.name, phone: lead.phone })}
-                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                          >
-                            <LogIn className="h-3 w-3" /> Send login link
-                          </button>
-                        )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge className={`border-0 text-[10px] ${attributionBadge(lead.attribution_type)}`}>
+                    <td className="w-px whitespace-nowrap px-4 py-2.5 text-center">
+                      <Badge className={`border-0 text-[10px] whitespace-nowrap ${attributionBadge(lead.attribution_type)}`}>
                         {attributionLabel(lead, partner.id)}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge className={`border-0 text-[10px] ${statusBadge(lead.application_status || lead.application_stage || "")}`}>
+                    <td className="w-px whitespace-nowrap px-4 py-2.5 text-center">
+                      <Badge className={`border-0 text-[10px] whitespace-nowrap ${statusBadge(lead.application_status || lead.application_stage || "")}`}>
                         {lead.application_stage || "Not Started"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge className={`border-0 text-[10px] ${statusBadge(lead.application_payment_status || "pending")}`}>
+                    <td className="w-px whitespace-nowrap px-4 py-2.5 text-center">
+                      <Badge className={`border-0 text-[10px] capitalize whitespace-nowrap ${statusBadge(lead.application_payment_status || "pending")}`}>
                         {lead.application_payment_status || "pending"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {lead.application_submitted_at ? new Date(lead.application_submitted_at).toLocaleDateString("en-IN") : "-"}
+                    <td className="w-px whitespace-nowrap px-4 py-2.5 text-right text-xs text-muted-foreground">
+                      {lead.application_submitted_at
+                        ? new Date(lead.application_submitted_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                        : "-"}
                     </td>
                   </tr>
                   );
@@ -1630,45 +1890,171 @@ export default function AcademicPartnerPortal() {
         </TabsContent>
 
         <TabsContent value="students" className="mt-4">
-          <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Student</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Batch</th>
-                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Fee Paid</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Attendance</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
-              </tr></thead>
-              <tbody>
-                {students.map((student) => {
-                  const fee = feeByStudent.get(student.id);
-                  const att = attendanceByStudent.get(student.id);
-                  const receiptCount = student.lead_id ? (receiptsByLead.get(student.lead_id)?.length || 0) : 0;
-                  return (
-                    <tr key={student.id} className="border-b last:border-0">
-                      <td className="px-4 py-3"><div className="font-medium">{student.name}</div><div className="text-xs text-muted-foreground">{student.admission_no || student.phone || "-"}</div></td>
-                      <td className="px-4 py-3">{student.course_name}</td>
-                      <td className="px-4 py-3">{student.batch_name}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{fmt(fee?.paid)}</div>
-                        {receiptCount > 0 ? (
-                          <button onClick={() => setFeeDetailsStudentId(student.id)} className="text-xs text-primary hover:underline">
-                            {receiptCount} receipt{receiptCount === 1 ? "" : "s"}
-                          </button>
-                        ) : (
-                          <div className="text-xs text-muted-foreground">Balance {fmt(fee?.balance)}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center"><div className="font-medium">{attendancePercent(att?.present || 0, att?.total || 0)}</div><div className="text-xs text-muted-foreground">{att?.present || 0}/{att?.total || 0} present</div></td>
-                      <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(student.status)}`}>{student.status}</Badge></td>
-                    </tr>
-                  );
-                })}
-                {students.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No assigned students found</td></tr>}
-              </tbody>
-            </table>
-          </CardContent></Card>
+          <Tabs
+            defaultValue={tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}
+            className="w-full"
+          >
+            <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start overflow-x-auto mb-4">
+              <TabsTrigger value="token_paid" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2 text-sm">
+                Token Paid ({tokenPaidRows.length})
+              </TabsTrigger>
+              <TabsTrigger value="pre_admitted" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2 text-sm">
+                Pre-Admitted ({preAdmittedRows.length})
+              </TabsTrigger>
+              <TabsTrigger value="admitted" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2 text-sm">
+                Admitted ({admittedRows.length})
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="token_paid" className="mt-0">
+              <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[1180px] text-sm">
+                  <thead><tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Paid</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Stage</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {tokenPaidRows.map((row) => (
+                      <tr key={row.key} className="border-b last:border-0">
+                        <td className="px-4 py-3">
+                          <div className="font-medium flex items-center gap-1.5">{row.name}<DirectBadge attributed={row.attributed} /></div>
+                          <div className="text-xs text-muted-foreground">{row.phone}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap"><div>{row.courseName}</div><div className="text-xs text-muted-foreground">{row.campusName}</div></td>
+                        <td className="px-4 py-3 text-right">
+                          {!row.attributed ? NA : (
+                            <>
+                              <div className="font-medium">{fmt(row.paid)}</div>
+                              {row.leadId && (
+                                <button onClick={() => setReceiptsModal({ leadId: row.leadId as string, name: row.name })} className="text-xs text-primary hover:underline">
+                                  {(receiptsByLead.get(row.leadId)?.length || 0)} receipt{(receiptsByLead.get(row.leadId)?.length || 0) === 1 ? "" : "s"}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(row.stage)}`}>{STAGE_LABELS[row.stage] || row.stage}</Badge></td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <PartnerCandidateActions variant="buttons" {...candidateActions(row)} />
+                        </td>
+                      </tr>
+                    ))}
+                    {tokenPaidRows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No token-paid candidates yet</td></tr>}
+                  </tbody>
+                </table>
+                </div>
+              </CardContent></Card>
+            </TabsContent>
+
+            <TabsContent value="pre_admitted" className="mt-0">
+              <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[1180px] text-sm">
+                  <thead><tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">PAN</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Paid</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Stage</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {preAdmittedRows.map((row) => (
+                      <tr key={row.key} className="border-b last:border-0">
+                        <td className="px-4 py-3">
+                          <div className="font-medium flex items-center gap-1.5">{row.name}<DirectBadge attributed={row.attributed} /></div>
+                          <div className="text-xs text-muted-foreground">{row.phone}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap"><div>{row.courseName}</div><div className="text-xs text-muted-foreground">{row.campusName}</div></td>
+                        <td className="px-4 py-3">{row.pan || <span className="text-xs text-muted-foreground">Not issued yet</span>}</td>
+                        <td className="px-4 py-3 text-right">
+                          {!row.attributed ? NA : (
+                            <>
+                              <div className="font-medium">{fmt(row.paid)}</div>
+                              {row.leadId && (
+                                <button onClick={() => setReceiptsModal({ leadId: row.leadId as string, name: row.name })} className="text-xs text-primary hover:underline">
+                                  {(receiptsByLead.get(row.leadId)?.length || 0)} receipt{(receiptsByLead.get(row.leadId)?.length || 0) === 1 ? "" : "s"}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(row.stage)}`}>{STAGE_LABELS[row.stage] || row.stage}</Badge></td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <PartnerCandidateActions variant="buttons" {...candidateActions(row)} />
+                        </td>
+                      </tr>
+                    ))}
+                    {preAdmittedRows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No pre-admitted candidates yet</td></tr>}
+                  </tbody>
+                </table>
+                </div>
+              </CardContent></Card>
+            </TabsContent>
+
+            <TabsContent value="admitted" className="mt-0">
+              <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[1180px] text-sm">
+                  <thead><tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Student</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Batch</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Fee Paid</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Attendance</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {admittedRows.map((row) => {
+                      const fee = row.student ? feeByStudent.get(row.student.id) : undefined;
+                      const att = row.student ? attendanceByStudent.get(row.student.id) : undefined;
+                      const receiptCount = row.leadId ? (receiptsByLead.get(row.leadId)?.length || 0) : 0;
+                      const status = row.student?.status || row.stage;
+                      return (
+                        <tr key={row.key} className="border-b last:border-0">
+                          <td className="px-4 py-3">
+                            <div className="font-medium flex items-center gap-1.5">{row.name}<DirectBadge attributed={row.attributed} /></div>
+                            <div className="text-xs text-muted-foreground">{row.admissionNo || row.phone || "-"}</div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">{row.courseName}</td>
+                          <td className="px-4 py-3">{row.batchName}</td>
+                          <td className="px-4 py-3 text-right">
+                            {!row.attributed ? NA : (
+                              <>
+                                <div className="font-medium">{fmt(fee?.paid)}</div>
+                                {receiptCount > 0 ? (
+                                  <button
+                                    onClick={() => row.student ? setFeeDetailsStudentId(row.student.id) : setReceiptsModal({ leadId: row.leadId as string, name: row.name })}
+                                    className="text-xs text-primary hover:underline"
+                                  >
+                                    {receiptCount} receipt{receiptCount === 1 ? "" : "s"}
+                                  </button>
+                                ) : (
+                                  <div className="text-xs text-muted-foreground">Balance {fmt(fee?.balance)}</div>
+                                )}
+                              </>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center"><div className="font-medium">{attendancePercent(att?.present || 0, att?.total || 0)}</div><div className="text-xs text-muted-foreground">{att?.present || 0}/{att?.total || 0} present</div></td>
+                          <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(status)}`}>{status}</Badge></td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <PartnerCandidateActions variant="buttons" {...candidateActions(row)} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {admittedRows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No admitted students yet</td></tr>}
+                  </tbody>
+                </table>
+                </div>
+              </CardContent></Card>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         <TabsContent value="fees" className="mt-4">
@@ -1858,7 +2244,7 @@ export default function AcademicPartnerPortal() {
                   </p>
                 </div>
                 <Button onClick={saveCallingAgentPhone} disabled={profileLoading || savingAgentPhone} className="gap-2">
-                  {savingAgentPhone ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+                  {savingAgentPhone ? <ButtonOrb state="working" onFilled /> : <PhoneCall className="h-4 w-4" />}
                   Save Calling Number
                 </Button>
                 </div>
@@ -1868,96 +2254,7 @@ export default function AcademicPartnerPortal() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={!!detailsLead} onOpenChange={(open) => !open && setDetailsLead(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Application Details</DialogTitle>
-            <DialogDescription>
-              {detailsLead?.name || "Candidate"} {detailsLead?.application_id ? `- ${detailsLead.application_id}` : ""}
-            </DialogDescription>
-          </DialogHeader>
-          {detailsLead && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Application ID</p>
-                <p className="mt-1 font-medium">{detailsLead.application_id || "Not started"}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Application Stage</p>
-                <p className="mt-1 font-medium">{detailsLead.application_stage || "Not Started"}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Application Status</p>
-                <p className="mt-1 font-medium">{detailsLead.application_status || "not started"}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Payment Status</p>
-                <p className="mt-1 font-medium">{detailsLead.application_payment_status || "pending"}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Attribution</p>
-                <Badge className={`mt-1 border-0 text-[10px] ${attributionBadge(detailsLead.attribution_type)}`}>
-                  {attributionLabel(detailsLead, partner.id)}
-                </Badge>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Application Fee</p>
-                <p className="mt-1 font-medium">{fmt(detailsLead.application_fee_amount)}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Form Progress</p>
-                <p className="mt-1 font-medium">
-                  {completedCount(detailsLead.application_completed_sections)}/{totalCount(detailsLead.application_completed_sections)} sections
-                </p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Course</p>
-                <p className="mt-1 font-medium">{detailsLead.course_name}</p>
-                <p className="text-xs text-muted-foreground">{detailsLead.campus_name}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Candidate Contact</p>
-                <p className="mt-1 font-medium">{detailsLead.phone}</p>
-                <p className="text-xs text-muted-foreground">{detailsLead.email || "-"}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Started</p>
-                <p className="mt-1 font-medium">
-                  {detailsLead.application_created_at ? new Date(detailsLead.application_created_at).toLocaleString("en-IN") : "-"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[11px] uppercase text-muted-foreground">Submitted</p>
-                <p className="mt-1 font-medium">
-                  {detailsLead.application_submitted_at ? new Date(detailsLead.application_submitted_at).toLocaleString("en-IN") : "-"}
-                </p>
-              </div>
-            </div>
-          )}
-          {detailsLead && (
-            <DialogFooter className="gap-2 sm:gap-2">
-              {detailsLead.academic_partner_id === partner.id && (
-                <>
-                  <Button variant="outline" className="gap-2" onClick={() => placeCloudCall(detailsLead)} disabled={callingLeadId === detailsLead.id}>
-                    {callingLeadId === detailsLead.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
-                    Cloud Call
-                  </Button>
-                  <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} directOpen />
-                  <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} />
-                </>
-              )}
-              {canIssueOfferLetters && detailsLead.application_id && detailsLead.course_id && (
-                <Button className="gap-2 bg-teal-600 hover:bg-teal-700" onClick={() => setOfferLead(detailsLead)}>
-                  <Gift className="h-4 w-4" />
-                  {detailsLead.has_offer ? "View Offer" : "Issue Offer"}
-                </Button>
-              )}
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!feeDetailsStudentId} onOpenChange={(open) => { if (!open) setFeeDetailsStudentId(null); }}>
+      <Dialog open={!!feeDetailsStudentId} onOpenChange={(open) => { if (!open) { setFeeDetailsStudentId(null); setFeeDetailsPicked({}); } }}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Fee Terms &amp; Receipts</DialogTitle>
@@ -1988,31 +2285,96 @@ export default function AcademicPartnerPortal() {
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-muted">
                 <tr className="border-b">
+                  <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground w-8"></th>
                   <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Term</th>
                   <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Due Date</th>
                   <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Total</th>
                   <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Paid</th>
                   <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Balance</th>
                   <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Collect Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {feeDetailsRows.map((fee) => (
-                  <tr key={fee.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${defaultFeeTermLabel(fee.term)}` : defaultFeeTermLabel(fee.term)}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{fee.due_date ? new Date(fee.due_date).toLocaleDateString("en-IN") : "-"}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.balance)}</td>
-                    <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(fee.status)}`}>{fee.status}</Badge></td>
-                  </tr>
-                ))}
+                {feeDetailsRows.map((fee) => {
+                  const collectible = fee.balance > 0;
+                  const checked = Object.prototype.hasOwnProperty.call(feeDetailsPicked, fee.id);
+                  return (
+                    <tr key={fee.id} className="border-b last:border-0">
+                      <td className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-primary"
+                          disabled={!collectible}
+                          checked={checked}
+                          onChange={(e) => setFeeDetailsPicked((prev) => {
+                            const next = { ...prev };
+                            if (e.target.checked) next[fee.id] = fee.balance;
+                            else delete next[fee.id];
+                            return next;
+                          })}
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${defaultFeeTermLabel(fee.term)}` : defaultFeeTermLabel(fee.term)}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{fee.due_date ? new Date(fee.due_date).toLocaleDateString("en-IN") : "-"}</td>
+                      <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
+                      <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>
+                      <td className="px-4 py-3 text-right">{fmt(fee.balance)}</td>
+                      <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(fee.status)}`}>{fee.status}</Badge></td>
+                      <td className="px-4 py-3 text-right">
+                        {checked && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={fee.balance}
+                            className="w-28 rounded-md border border-input bg-background px-2 py-1 text-right text-xs"
+                            value={feeDetailsPicked[fee.id]}
+                            onChange={(e) => {
+                              const raw = Number(e.target.value);
+                              const clamped = Math.min(Math.max(raw || 0, 0), fee.balance);
+                              setFeeDetailsPicked((prev) => ({ ...prev, [fee.id]: clamped }));
+                            }}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {feeDetailsRows.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee terms found</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No fee terms found</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+          {feeDetailsRows.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+              <span className="text-sm text-muted-foreground">
+                Selected total: <span className="font-semibold text-foreground">{fmt(feeDetailsPickedTotal)}</span>
+              </span>
+              <Button
+                size="sm"
+                className="gap-2"
+                disabled={feeDetailsAllocations.length === 0}
+                onClick={() => {
+                  if (!feeDetailsStudentId) return;
+                  const s = students.find((st) => st.id === feeDetailsStudentId);
+                  setPayLinkStudent({
+                    id: feeDetailsStudentId,
+                    name: feeDetailsStudent?.student_name || s?.name || "Candidate",
+                    allocations: feeDetailsAllocations,
+                    amount: feeDetailsPickedTotal,
+                  });
+                  // Hand off rather than stack: two nested modal dialogs fight
+                  // over the focus trap. The picked rows are already captured
+                  // in payLinkStudent above.
+                  setFeeDetailsStudentId(null);
+                }}
+              >
+                <IndianRupee className="h-3.5 w-3.5" />
+                Send payment link
+              </Button>
+            </div>
+          )}
 
           {/* Actual payment receipts (lead_payments) — what the candidate has
               paid, with downloadable receipts. */}
@@ -2020,89 +2382,22 @@ export default function AcademicPartnerPortal() {
             <p className="mb-2 text-sm font-semibold text-foreground">
               Fee Receipts{feeDetailsReceipts.length > 0 ? ` (${feeDetailsReceipts.length})` : ""}
             </p>
-            <div className="max-h-[40vh] overflow-auto rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-muted">
-                  <tr className="border-b">
-                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Receipt No.</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Type</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Date</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Mode</th>
-                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Amount</th>
-                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {feeDetailsReceipts.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-mono text-xs">{r.receipt_no || "—"}</td>
-                      <td className="px-4 py-3 capitalize">{(r.type || "").replace(/_/g, " ") || "—"}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{(r.payment_date || r.created_at) ? new Date(r.payment_date || r.created_at).toLocaleDateString("en-IN") : "-"}</td>
-                      <td className="px-4 py-3 text-xs capitalize">{(r.payment_mode || "").replace(/_/g, " ") || "—"}</td>
-                      <td className="px-4 py-3 text-right font-medium">{fmt(r.amount)}</td>
-                      <td className="px-4 py-3 text-center">
-                        {r.receipt_url ? (
-                          <a href={r.receipt_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-                            <FileText className="h-3.5 w-3.5" /> View
-                          </a>
-                        ) : <span className="text-xs text-muted-foreground">—</span>}
-                      </td>
-                    </tr>
-                  ))}
-                  {feeDetailsReceipts.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee receipts recorded yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <PartnerReceiptsTable receipts={feeDetailsReceipts} maxHeightClass="max-h-[40vh]" />
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Receipts modal for an application row — surfaces application-fee / token
-          and any other confirmed fee receipts, working even before the candidate
-          becomes a student (receiptsByLead is keyed on the lead, not student). */}
-      <Dialog open={!!receiptsModalLead} onOpenChange={(o) => { if (!o) setReceiptsModalLead(null); }}>
+      {/* Receipts modal for a lead / application / student row — surfaces
+          application-fee / token and any other confirmed fee receipts, working
+          even before the candidate becomes a student (receiptsByLead is keyed
+          on the lead, not student). */}
+      <Dialog open={!!receiptsModal} onOpenChange={(o) => { if (!o) setReceiptsModal(null); }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Fee Receipts{receiptsModalLead ? ` — ${receiptsModalLead.name}` : ""}</DialogTitle>
+            <DialogTitle>Fee Receipts{receiptsModal ? ` — ${receiptsModal.name}` : ""}</DialogTitle>
             <DialogDescription>Application fee, token / admission fee and other confirmed payments.</DialogDescription>
           </DialogHeader>
-          <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-muted">
-                <tr className="border-b">
-                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Receipt No.</th>
-                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Type</th>
-                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Date</th>
-                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Mode</th>
-                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Amount</th>
-                  <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Receipt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(receiptsModalLead ? (receiptsByLead.get(receiptsModalLead.id) ?? []) : []).map((r) => (
-                  <tr key={r.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-mono text-xs">{r.receipt_no || "—"}</td>
-                    <td className="px-4 py-3 capitalize">{(r.type || "").replace(/_/g, " ") || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{(r.payment_date || r.created_at) ? new Date(r.payment_date || r.created_at).toLocaleDateString("en-IN") : "-"}</td>
-                    <td className="px-4 py-3 text-xs capitalize">{(r.payment_mode || "").replace(/_/g, " ") || "—"}</td>
-                    <td className="px-4 py-3 text-right font-medium">{fmt(r.amount)}</td>
-                    <td className="px-4 py-3 text-center">
-                      {r.receipt_url ? (
-                        <a href={r.receipt_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-                          <FileText className="h-3.5 w-3.5" /> View
-                        </a>
-                      ) : <span className="text-xs text-muted-foreground">—</span>}
-                    </td>
-                  </tr>
-                ))}
-                {receiptsModalLead && (receiptsByLead.get(receiptsModalLead.id) ?? []).length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee receipts recorded yet</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <PartnerReceiptsTable receipts={receiptsModal ? (receiptsByLead.get(receiptsModal.leadId) ?? []) : []} />
         </DialogContent>
       </Dialog>
 
@@ -2141,6 +2436,27 @@ export default function AcademicPartnerPortal() {
           leadPhone={loginLinkLead.phone}
           controlledOpen={!!loginLinkLead}
           onControlledOpenChange={(open) => !open && setLoginLinkLead(null)}
+        />
+      )}
+
+      {payLinkStudent && (
+        <SendPaymentLinkDialog
+          open={!!payLinkStudent}
+          onOpenChange={(open) => { if (!open) { setPayLinkStudent(null); setFeeDetailsPicked({}); } }}
+          studentId={payLinkStudent.id}
+          defaultPurpose="fee_due"
+          defaultAmount={payLinkStudent.amount}
+          defaultAllocations={payLinkStudent.allocations}
+          onCreated={() => { if (partner) void fetchPortal(partner.id); }}
+        />
+      )}
+
+      {loginLinkStudent && (
+        <StudentLoginLinkDialog
+          studentId={loginLinkStudent.id}
+          studentName={loginLinkStudent.name}
+          open={!!loginLinkStudent}
+          onOpenChange={(open) => !open && setLoginLinkStudent(null)}
         />
       )}
 
@@ -2195,7 +2511,7 @@ export default function AcademicPartnerPortal() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddLead(false)}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={saving || !leadForm.name.trim() || !leadForm.phone.trim() || !leadForm.course_id} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Add Lead
+              {saving ? <ButtonOrb state="working" onFilled /> : <CalendarCheck className="h-4 w-4" />} Add Lead
             </Button>
           </DialogFooter>
         </DialogContent>

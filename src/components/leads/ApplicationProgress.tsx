@@ -4,13 +4,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  User, Users, BookOpen, Trophy, CreditCard, Upload, FileSearch, Baby,
-  MessageSquare, CheckCircle, Lock, Eye, Loader2, History, Save, X,
-  KeyRound, ShieldCheck, AlertCircle, Clock, Unlock,
-} from "lucide-react";
+import { User, Users, BookOpen, Trophy, CreditCard, Upload, FileSearch, Baby, MessageSquare, CheckCircle, Lock, Eye, History, Save, X, KeyRound, ShieldCheck, AlertCircle, Clock, Unlock } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -170,7 +167,7 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
     return (
       <Card className="border-border/60">
         <CardContent className="p-4 flex items-center justify-center">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <ButtonOrb state="searching" />
         </CardContent>
       </Card>
     );
@@ -884,7 +881,7 @@ function EditAccessPanel({ app, requests, isAdmin, canRequest, steps, onRefresh 
                   Cancel
                 </Button>
                 <Button size="sm" className="flex-1 gap-1.5" disabled={submitting || !reason.trim()} onClick={submitRequest}>
-                  {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                  {submitting ? <ButtonOrb state="working" onFilled /> : <KeyRound className="h-3.5 w-3.5" />}
                   {isAdmin ? "Grant Access" : "Submit Request"}
                 </Button>
               </div>

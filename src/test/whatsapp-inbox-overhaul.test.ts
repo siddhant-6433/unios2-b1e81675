@@ -18,6 +18,7 @@ import {
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
 const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "utf8");
 const sendDialog = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
+const leadTemplatesModule = readFileSync("src/components/leads/whatsappTemplates.ts", "utf8");
 const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
 const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
@@ -263,7 +264,11 @@ describe("no fabricated template values", () => {
 
   it("reads the real approved list rather than only hardcoded arrays", () => {
     expect(inbox).toContain("loadWhatsAppTemplateCatalog");
-    expect(sendDialog).toContain("loadWhatsAppTemplateCatalog");
+    // The lead picker's catalogue loading lives in the extracted
+    // whatsappTemplates module; the dialog consumes it via useWhatsAppTemplates.
+    expect(leadTemplatesModule).toContain("loadWhatsAppTemplateCatalog");
+    expect(leadTemplatesModule).not.toContain("row.placeholder_count === 0");
+    expect(sendDialog).toContain("useWhatsAppTemplates");
     expect(templatesRlsMigration).toContain("Staff can read whatsapp_templates");
     expect(templatesRlsMigration).toContain("'counsellor'::public.app_role");
     expect(templatesRlsMigration).not.toContain("team_leader");

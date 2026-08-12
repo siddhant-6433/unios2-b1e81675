@@ -2,6 +2,8 @@ import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { OrbLoader } from "@/components/ui/thinking-orb";
+import { PageLoader } from "@/components/ui/page-loader";
 import {
   decideApplicantAccess,
   decideBlockedRoleAccess,
@@ -13,14 +15,18 @@ import {
   type AccessState,
 } from "@/lib/accessPolicy";
 
+// Pre-shell gates run before AppLayout exists, so they own the whole viewport.
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-background">
-    <div className="flex flex-col items-center gap-3">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <p className="text-sm text-muted-foreground">Loading...</p>
-    </div>
+    <OrbLoader state="working" label="Loading…" />
   </div>
 );
+
+// RequirePermission is the one gate that renders INSIDE AppLayout's
+// <main className="overflow-auto p-6">, where an h-screen child forces a
+// scrollbar and pushes the orb below the fold. Render the same surface the
+// shell is about to render instead — the handoff becomes invisible.
+const InShellSpinner = () => <PageLoader />;
 
 const renderDecision = (decision: AccessDecision, children: ReactNode) => {
   if (decision.allowed) return <>{children}</>;
@@ -115,7 +121,7 @@ export const RequirePermission = ({
 }) => {
   const { permissions, loading } = usePermissions();
   const { session, role, realRole, isImpersonating } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) return <InShellSpinner />;
   const accessState: AccessState = {
     isAuthenticated: !!session,
     role,

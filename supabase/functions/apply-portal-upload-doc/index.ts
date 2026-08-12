@@ -347,6 +347,18 @@ Deno.serve(async (req) => {
       if (reviewErr) console.error("[apply-portal-upload-doc] review reset error:", reviewErr);
     }
 
+    // Recompute admission document-completeness (and re-run the AN engine).
+    // Best-effort: the upload already succeeded, so a sync hiccup must not fail it.
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/sync-admission-doc-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ application_id: applicationId }),
+      });
+    } catch (e) {
+      console.error("[apply-portal-upload-doc] doc-status sync failed:", (e as Error).message);
+    }
+
     return new Response(JSON.stringify({ ok: true, path: uploadedPath, url: uploadedUrl, storage_provider: storageProvider }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

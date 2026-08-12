@@ -1,5 +1,14 @@
 project_id = "deylhigsisuexszsmypq"
 
+# Meta lead ingestion: auth is internal (cron sends x-cron-secret; Meta signs
+# webhooks with x-hub-signature-256). Gateway JWT verification must stay OFF or
+# it 401s both the pg_cron poller and Meta's webhook before the function runs.
+[functions.meta-leads-poll]
+verify_jwt = false
+
+[functions.meta-leads-webhook]
+verify_jwt = false
+
 [functions.invite-user]
 verify_jwt = false
 
@@ -214,6 +223,10 @@ verify_jwt = false
 [functions.apply-portal-upload-doc]
 verify_jwt = false
 
+# Auth handled inside: x-cron-secret (pg_cron) or a super-admin JWT ("Run now").
+[functions.library-enrich-batch]
+verify_jwt = false
+
 [functions.pay-link]
 verify_jwt = false
 
@@ -221,4 +234,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.zoho-books-poll]
+verify_jwt = false
+
+# Called by pg_cron ('counselling-watch') with the service-role key, which the
+# gateway can't validate as a JWT. The function checks the bearer itself.
+[functions.counselling-watch]
 verify_jwt = false

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,12 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Loader2, Phone, MessageSquare, CalendarCheck, MapPin, UserCheck,
-  Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp,
-  Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown,
-  ExternalLink, CalendarDays, History,
-} from "lucide-react";
+import { Phone, MessageSquare, CalendarCheck, MapPin, UserCheck, Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp, Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, CalendarDays, History } from "lucide-react";
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
 import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
@@ -1140,7 +1136,7 @@ const CounsellorDashboard = () => {
               </Button>
             </div>
 
-            {breakdownLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {breakdownLoading && <ButtonOrb state="searching" />}
           </div>
 
           {/* Breakdown summary cards */}
@@ -1336,7 +1332,7 @@ const CounsellorDashboard = () => {
                                       </div>
                                       {dispLoading ? (
                                         <div className="flex items-center justify-center py-6">
-                                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                          <ButtonOrb state="searching" />
                                         </div>
                                       ) : dispLeads.length === 0 ? (
                                         <div className="px-3 py-4 text-center text-xs text-muted-foreground">No leads found</div>
@@ -1569,7 +1565,7 @@ const CounsellorDashboard = () => {
                 </button>
               ))}
             </div>
-            {activityLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {activityLoading && <ButtonOrb state="searching" />}
           </div>
 
           <Card className="border-border/60 shadow-none overflow-hidden">
@@ -1705,7 +1701,7 @@ const CounsellorDashboard = () => {
                 </button>
               ))}
             </div>
-            {callingLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {callingLoading && <ButtonOrb state="searching" />}
           </div>
 
           {/* Summary pills */}
@@ -2014,7 +2010,7 @@ const FunnelTab = ({
             </button>
           ))}
         </div>
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+        {loading && <ButtonOrb state="searching" />}
       </div>
 
       <Card className="rounded-2xl">

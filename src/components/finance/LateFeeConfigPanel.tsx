@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Plus, Edit2, Check, X, ShieldAlert, Clock } from "lucide-react";
+import { Plus, Edit2, Check, X, ShieldAlert, Clock } from "lucide-react";
 
 interface FeeStructure {
   id: string;
@@ -57,7 +58,7 @@ export function LateFeeConfigPanel() {
   const [search, setSearch] = useState("");
   const [overdueStats, setOverdueStats] = useState<{ total: number; amount: number }>({ total: 0, amount: 0 });
 
-  const canEdit = ["super_admin", "campus_admin", "accountant", "principal"].includes(role || "");
+  const canEdit = ["super_admin", "campus_admin", "accountant", "principal", "office_admin"].includes(role || "");
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -327,7 +328,7 @@ export function LateFeeConfigPanel() {
                                 disabled={saving || editState.applies_to_categories.length === 0}
                                 onClick={() => handleSave(s.id)}
                               >
-                                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                {saving ? <ButtonOrb state="working" /> : <Check className="h-3.5 w-3.5" />}
                               </Button>
                               <Button
                                 size="sm" variant="ghost"

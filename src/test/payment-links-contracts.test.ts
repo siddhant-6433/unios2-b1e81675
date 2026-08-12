@@ -147,7 +147,7 @@ describe("receipt + offer letter wording", () => {
 
 describe("offline recording restriction (owner decision)", () => {
   it("OfflinePaymentDialog only renders for accountant + super_admin and offers the pre-admission token type", () => {
-    expect(offlineDialog).toContain('const allowedRole = ["super_admin", "accountant"].includes(role || "");');
+    expect(offlineDialog).toContain('const allowedRole = ["super_admin", "accountant", "office_admin"].includes(role || "");');
     expect(offlineDialog).not.toContain('"campus_admin", "accountant"].includes(role');
     expect(offlineDialog).toContain('{ value: "pre_admission_token", label: "Token Fee (prior to admission)" }');
   });

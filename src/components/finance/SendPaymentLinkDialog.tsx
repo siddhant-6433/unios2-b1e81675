@@ -6,15 +6,16 @@
 // Surfaced from LeadDetail QuickActions, staff StudentFeePanel, and the
 // consultant portal (AcademicPartnerPortal).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
-import { Loader2, LinkIcon, Copy, Check } from "lucide-react";
+import { LinkIcon, Copy, Check } from "lucide-react";
 
 type Purpose = "pre_admission_token" | "fee_due" | "custom";
 
@@ -27,7 +28,14 @@ interface Props {
   defaultAmount?: number | null;
   /** Defaults the purpose. Pre-application surfaces should pass 'pre_admission_token'. */
   defaultPurpose?: Purpose;
-  onCreated?: () => void;
+  /**
+   * A breakup already chosen elsewhere — the rows ticked in the fee table.
+   * Each entry carries fee_ledger_id, so paying the link settles those exact
+   * rows. Shown read-only; the picker is skipped.
+   */
+  defaultAllocations?: FeeAllocation[] | null;
+  /** Receives the created pay URL so callers can keep it on screen. */
+  onCreated?: (payUrl?: string) => void;
 }
 
 // Two modes, deliberately. "Collect Fee" shows the whole fee structure with
@@ -40,6 +48,15 @@ const PURPOSE_OPTIONS: { value: Purpose; label: string }[] = [
   { value: "pre_admission_token", label: "Token Fee (prior to admission)" },
 ];
 
+// Default is payer-choice: no hosted Razorpay link is minted, so the /pay page
+// offers the cheaper gateway too. Razorpay-hosted is still there for the one
+// thing it buys — Razorpay's own SMS/email reminders.
+const GATEWAY_OPTIONS = [
+  { value: "choice", label: "Let the payer choose (lowest charges)" },
+  { value: "easebuzz", label: "Easebuzz only" },
+  { value: "razorpay", label: "Razorpay hosted link (auto reminders)" },
+];
+
 const CHANNEL_OPTIONS = [
   { value: "none", label: "Don't send — just create the link" },
   { value: "whatsapp", label: "WhatsApp" },
@@ -48,7 +65,8 @@ const CHANNEL_OPTIONS = [
 ];
 
 export function SendPaymentLinkDialog({
-  open, onOpenChange, leadId, studentId, defaultAmount, defaultPurpose, onCreated,
+  open, onOpenChange, leadId, studentId, defaultAmount, defaultPurpose,
+  defaultAllocations, onCreated,
 }: Props) {
   const { toast } = useToast();
   const initialPurpose: Purpose =
@@ -61,12 +79,22 @@ export function SendPaymentLinkDialog({
   const [note, setNote] = useState<string>("");
   const [expiryDays, setExpiryDays] = useState<string>("7");
   const [channel, setChannel] = useState<string>("whatsapp");
+  const [gateway, setGateway] = useState<string>("choice");
   const [submitting, setSubmitting] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const seeded = !!(defaultAllocations && defaultAllocations.length > 0);
   const usingBreakup = allocations.length > 0;
   const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+
+  // Re-seed each time the dialog opens for a different set of ticked rows.
+  useEffect(() => {
+    if (!open || !seeded) return;
+    setPurpose("fee_due");
+    setAllocations(defaultAllocations!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, seeded, defaultAllocations]);
 
   const reset = () => {
     setPurpose(defaultPurpose || (studentId ? "fee_due" : "pre_admission_token"));
@@ -75,6 +103,7 @@ export function SendPaymentLinkDialog({
     setNote("");
     setExpiryDays("7");
     setChannel("whatsapp");
+    setGateway("choice");
     setCreatedUrl(null);
     setCopied(false);
   };
@@ -101,6 +130,7 @@ export function SendPaymentLinkDialog({
         note: note.trim() || undefined,
         expires_days: parseInt(expiryDays, 10) || 7,
         send_channel: channel,
+        gateway,
       },
     });
     setSubmitting(false);
@@ -119,7 +149,7 @@ export function SendPaymentLinkDialog({
       title: "Payment link created",
       description: channel === "none" ? "Copy the link to share it." : "Link created and sent to the candidate.",
     });
-    onCreated?.();
+    onCreated?.(data.pay_url);
   };
 
   const copyUrl = async () => {
@@ -195,7 +225,30 @@ export function SendPaymentLinkDialog({
             </FieldShell>
             {/* Collect Fee lists the whole structure pre-ticked; Token Fee is a
                 free amount with no breakup at all. */}
-            {collectingFee && (
+            {collectingFee && seeded && (
+              <div className="min-w-0 space-y-1.5 rounded-xl border border-border/60 p-3">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Link covers {allocations.length} head{allocations.length === 1 ? "" : "s"}
+                </p>
+                {allocations.map((a, i) => (
+                  <div key={a.fee_ledger_id || `${a.fee_code_id}-${i}`} className="flex items-center gap-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
+                    <span className="shrink-0 font-medium text-foreground">
+                      ₹{Number(a.amount).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-border/60 pt-2 text-xs font-semibold text-foreground">
+                  <span>Total</span>
+                  <span>₹{breakupTotal.toLocaleString("en-IN")}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Paying this link settles exactly these rows. Change it by re-ticking the fee table.
+                </p>
+              </div>
+            )}
+
+            {collectingFee && !seeded && (
               <FeeHeadAllocationField
                 open={open}
                 studentId={studentId}
@@ -212,6 +265,13 @@ export function SendPaymentLinkDialog({
                 onChange={(e) => setExpiryDays(e.target.value)}
               />
             </FieldShell>
+            <SelectField
+              value={gateway}
+              onValueChange={setGateway}
+              options={GATEWAY_OPTIONS}
+              label="Payment gateway"
+              allowEmpty={false}
+            />
             <SelectField
               value={channel}
               onValueChange={setChannel}
@@ -235,7 +295,7 @@ export function SendPaymentLinkDialog({
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
               <Button onClick={handleSubmit} disabled={submitting}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
                 {submitting ? "Creating…" : "Create Link"}
               </Button>
             </>

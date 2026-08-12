@@ -5,12 +5,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { HelpCircle, Loader2, Plus, Send, FileDown, CheckCircle, XCircle, Copy, Trash2 } from "lucide-react";
+import { HelpCircle, Plus, Send, FileDown, CheckCircle, XCircle, Copy, Trash2 } from "lucide-react";
 import {
   buildSchoolFeeSnapshot,
   allocateFeeHeaderWaivers,
@@ -1815,7 +1816,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
 
         {loading ? (
           <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <OrbLoader state="composing" />
           </div>
         ) : (
           <div className="space-y-4">
@@ -2200,7 +2201,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                   )}
 
                   <Button onClick={saveProposal} disabled={saving || selectedChildren.length === 0 || courses.length === 0 || hasMissingWaiverType || hasMissingTransport || hasMissingBoarding} className="w-full">
-                    {saving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                    {saving && <ButtonOrb state="composing" onFilled />}
                     {revisingProposal ? "Submit Revision" : "Submit Proposal"}
                   </Button>
                 </CardContent>
@@ -2272,7 +2273,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                       {canApproveProposal(proposal) && proposal.status.startsWith("pending") && (
                         <>
                           <Button size="sm" onClick={() => decideProposal(proposal, "approved")} disabled={decidingId === proposal.id}>
-                            {decidingId === proposal.id ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                            {decidingId === proposal.id ? <ButtonOrb state="composing" onFilled /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
                             Approve
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => decideProposal(proposal, "rejected")} disabled={decidingId === proposal.id}>
@@ -2293,14 +2294,14 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
                             <FileDown className="h-4 w-4 mr-1.5" /> PDF
                           </Button>
                           <Button size="sm" onClick={() => sendProposal(proposal)} disabled={sendingId === proposal.id}>
-                            {sendingId === proposal.id ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Send className="h-4 w-4 mr-1.5" />}
+                            {sendingId === proposal.id ? <ButtonOrb state="composing" onFilled /> : <Send className="h-4 w-4 mr-1.5" />}
                             WhatsApp
                           </Button>
                         </>
                       )}
                       {isSuperAdmin && (
                         <Button size="sm" variant="outline" className="text-destructive" onClick={() => deleteProposal(proposal)} disabled={deletingId === proposal.id}>
-                          {deletingId === proposal.id ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+                          {deletingId === proposal.id ? <ButtonOrb state="composing" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
                           Delete
                         </Button>
                       )}

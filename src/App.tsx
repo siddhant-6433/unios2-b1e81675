@@ -3,6 +3,7 @@ import { Component, ReactNode, Suspense, lazy, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -234,14 +235,7 @@ const App = () => (
               "suspended while responding to synchronous input". */}
           <Suspense fallback={
             <div className="flex min-h-screen items-center justify-center bg-background">
-              <div className="flex flex-col items-center gap-4 animate-rs-slide-up">
-                <div className="flex gap-1.5">
-                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
-                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:150ms]" />
-                  <span className="h-3 w-3 rounded-full bg-primary/50 animate-bounce [animation-delay:300ms]" />
-                </div>
-                <span className="text-sm text-muted-foreground">Loading…</span>
-              </div>
+              <OrbLoader state="working" label="Loading…" className="animate-rs-slide-up" />
             </div>
           }>
           <Routes>
@@ -372,7 +366,7 @@ const App = () => (
                       {/* Analytics & reporting */}
                       <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />
                       <Route path="/counsellor-dashboard" element={<RequirePermission module="performance" action="view"><CounsellorDashboard /></RequirePermission>} />
-                      <Route path="/incentive-approvals" element={<RequireRole roles={["super_admin", "accountant"]}><IncentiveApprovalPage /></RequireRole>} />
+                      <Route path="/incentive-approvals" element={<RequireRole roles={["super_admin", "accountant", "office_admin"]}><IncentiveApprovalPage /></RequireRole>} />
                       <Route path="/reports" element={<RequirePermission module="reports" action="view"><Reports /></RequirePermission>} />
 
                       {/* Portals */}

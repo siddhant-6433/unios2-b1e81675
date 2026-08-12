@@ -2,10 +2,11 @@ import { Component, ReactNode, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School, PauseCircle, PlayCircle, MessageSquare } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil, IndianRupee, Receipt, FileDown, ExternalLink, Plus, Handshake, School, PauseCircle, PlayCircle, MessageSquare, Share2 } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -21,6 +22,11 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { ReferToPartnerDialog } from "@/components/admissions/ReferToPartnerDialog";
+import {
+  fetchReferralsByLead, isReferrableCourse, REFERRAL_PARTNER_LABEL,
+  REFERRAL_STATUS_COLORS, REFERRAL_STATUS_LABELS, type LeadReferralRow,
+} from "@/lib/leadReferral";
 import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApplication, type SupabaseUpdeledClient, type UpdeledRegistrationDetails } from "@/lib/updeled";
 import { buildApplicationDossier } from "@/lib/applicationDossier";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -223,6 +229,8 @@ export default function AdminApplicationView() {
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
+  const [showReferPartner, setShowReferPartner] = useState(false);
+  const [referral, setReferral] = useState<LeadReferralRow | null>(null);
   const [updeledRegistration, setUpdeledRegistration] = useState<UpdeledRegistrationDetails | null>(null);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
@@ -391,6 +399,12 @@ export default function AdminApplicationView() {
         const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
         const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
+        if (isBptOrBmritCourseName(courseName) && effectiveLeadRow?.id) {
+          const referralMap = await fetchReferralsByLead([effectiveLeadRow.id]);
+          setReferral(referralMap.get(effectiveLeadRow.id) || null);
+        } else {
+          setReferral(null);
+        }
         setUpdeledRegistration(isDeledCourseName(courseName) ? (updeledRow || applicationUpdeled) : null);
 
         // Resolve recorded_by names for payments
@@ -506,9 +520,12 @@ export default function AdminApplicationView() {
       reviewed_by: profile?.id ?? null,
       reviewed_at: new Date().toISOString(),
     };
-    const { error } = await supabase
-      .from("application_doc_reviews" as any)
-      .upsert(payload, { onConflict: "application_id,file_path" });
+    // Route through the edge function: it writes the review, recomputes the
+    // application's mandatory-document completeness, and re-runs the admission-
+    // number engine (so verifying the last mandatory doc auto-issues the AN).
+    const { error } = await supabase.functions.invoke("review-admission-doc", {
+      body: { application_id: applicationId, file_path: doc.path, status: next, notes: payload.notes },
+    });
     if (error) {
       toast({ title: "Couldn't save review", description: error.message, variant: "destructive" });
       return;
@@ -933,7 +950,7 @@ export default function AdminApplicationView() {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="searching" />
       </div>
     );
   }
@@ -1080,6 +1097,25 @@ export default function AdminApplicationView() {
               </>
             );
           })()}
+          {referral && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${REFERRAL_STATUS_COLORS[referral.status] || "bg-muted text-muted-foreground"}`}
+              title={referral.partner_notes || undefined}
+            >
+              <Share2 className="h-3 w-3" />
+              {REFERRAL_PARTNER_LABEL} · {REFERRAL_STATUS_LABELS[referral.status] || referral.status}
+            </span>
+          )}
+          {!referral && (lead?.id || app.lead_id) && isReferrableCourse(lead?.course?.name) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setShowReferPartner(true)}
+            >
+              <Share2 className="h-3.5 w-3.5" /> Refer to {REFERRAL_PARTNER_LABEL}
+            </Button>
+          )}
           {(lead?.id || app.lead_id) && (
             <Button
               variant="outline"
@@ -1117,7 +1153,7 @@ export default function AdminApplicationView() {
               onClick={() => createLinkedLead()}
               disabled={repairingLead}
             >
-              {repairingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              {repairingLead ? <ButtonOrb state="working" /> : <UserPlus className="h-3.5 w-3.5" />}
               Create Linked Lead
             </Button>
           )}
@@ -1171,7 +1207,7 @@ export default function AdminApplicationView() {
               onClick={generateFormPdf}
               disabled={generatingFormPdf}
             >
-              {generatingFormPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+              {generatingFormPdf ? <ButtonOrb state="working" /> : <FileText className="h-3.5 w-3.5" />}
               Generate Form PDF
             </Button>
           )}
@@ -1203,7 +1239,7 @@ export default function AdminApplicationView() {
               onClick={openProgramEditor}
               disabled={courseOptionsLoading || savingProgram}
             >
-              {savingProgram ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              {savingProgram ? <ButtonOrb state="working" /> : <Pencil className="h-3.5 w-3.5" />}
               Edit Program
             </Button>
           )}
@@ -1239,7 +1275,7 @@ export default function AdminApplicationView() {
                 {leadPayments.length}
               </span>
             </div>
-            {["super_admin", "accountant"].includes(role || "") && (
+            {["super_admin", "accountant", "office_admin"].includes(role || "") && (
               <button
                 onClick={() => setOfflinePaymentOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
@@ -1325,7 +1361,7 @@ export default function AdminApplicationView() {
       )}
 
       {/* Empty-state: no payments yet but superadmin can add one */}
-      {lead?.id && leadPayments.length === 0 && ["super_admin", "accountant"].includes(role || "") && (
+      {lead?.id && leadPayments.length === 0 && ["super_admin", "accountant", "office_admin"].includes(role || "") && (
         <div className="rounded-xl border border-dashed border-border bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -1404,7 +1440,7 @@ export default function AdminApplicationView() {
                   title={hasOffer ? undefined : reason}
                   className={hasOffer ? "bg-info hover:bg-info/60 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
                 >
-                  {repairingLead ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
+                  {repairingLead ? <ButtonOrb state="working" onFilled /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
                   {hasOffer ? "View Offer Letter" : lead?.id ? "Issue Offer Letter" : "Create Lead & Issue Offer"}
                 </Button>
               );
@@ -1470,7 +1506,7 @@ export default function AdminApplicationView() {
           />
           <div className="flex justify-end">
             <Button size="sm" onClick={addComment} disabled={!newComment.trim() || savingComment}>
-              {savingComment ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+              {savingComment ? <ButtonOrb state="working" onFilled /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
               Add comment
             </Button>
           </div>
@@ -1594,7 +1630,7 @@ export default function AdminApplicationView() {
               onClick={saveProgramChange}
               disabled={savingProgram || !editCourseId || editCourseId === currentCourseOption?.id}
             >
-              {savingProgram && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              {savingProgram && <ButtonOrb state="working" onFilled />}
               Save Program
             </Button>
           </DialogFooter>
@@ -1683,6 +1719,19 @@ export default function AdminApplicationView() {
           onOpenChange={setSendLinkOpen}
           leadId={lead?.id || app.lead_id}
           onCreated={refresh}
+        />
+      )}
+
+      {/* Refer to partner (BPT/BMRIT only) */}
+      {lead?.id && showReferPartner && (
+        <ReferToPartnerDialog
+          open={showReferPartner}
+          onOpenChange={setShowReferPartner}
+          leadIds={[lead.id]}
+          onSuccess={async () => {
+            const map = await fetchReferralsByLead([lead.id]);
+            setReferral(map.get(lead.id) || null);
+          }}
         />
       )}
 

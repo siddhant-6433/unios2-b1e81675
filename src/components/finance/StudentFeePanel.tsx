@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,10 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Loader2, Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon,
-  Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy,
-} from "lucide-react";
+import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -20,6 +18,8 @@ import { ApplyCreditDialog } from "./ApplyCreditDialog";
 import { TransferFeeDialog } from "./TransferFeeDialog";
 import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { RowConcessionPopover } from "./RowConcessionPopover";
+import { PaidBreakdownPopover } from "./PaidBreakdownPopover";
+import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
@@ -61,18 +61,32 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // payment). One receipt is then issued across every ticked row.
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [collectAllocations, setCollectAllocations] = useState<FeeAllocation[] | null>(null);
-  const [loginLink, setLoginLink] = useState<{ url: string; phone: string } | null>(null);
+  const [linkAllocations, setLinkAllocations] = useState<FeeAllocation[] | null>(null);
+  const [loginLink, setLoginLink] = useState<
+    { tokenId: string; url: string; phone: string | null; sent: boolean } | null
+  >(null);
   const [issuingLink, setIssuingLink] = useState(false);
+  const [sendingLink, setSendingLink] = useState(false);
+  const [payLink, setPayLink] = useState<string | null>(null);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
 
-  const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
+  const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
-  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
-  const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant"].includes(role || "");
+  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
-  const canCollect = ["super_admin", "accountant"].includes(role || "") && !!student?.lead_id;
+  // Works for both lead-based candidates and lead-less (school) students — the
+  // receipt books against lead_id or student_id respectively.
+  const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "") && !!student?.id;
+  // Counsellors can ask their own candidate to pay — a payment link or a portal
+  // login — but never take money. RLS scopes what they can even see here to
+  // students on their assigned leads (can_view_student_via_lead).
+  const canSendLink = isFinanceRole || ["counsellor", "admission_head"].includes(role || "");
+  // Ticking rows builds either a receipt or a link, so anyone who can do one
+  // may select. The Collect button itself stays cashier-only.
+  const canPick = canCollect || canSendLink;
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   const isStethoBatch = student?.fee_structure_version === "stetho_batch";
@@ -108,7 +122,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // cashier may correct any row that has no money against it.
   const canRemoveRow = (f: any) =>
     Number(f.paid_amount) === 0 &&
-    (["super_admin", "accountant"].includes(role || "") || hasPermission("fee_structure:manage"));
+    (["super_admin", "accountant", "office_admin"].includes(role || "") || hasPermission("fee_structure:manage"));
 
   const fetchCredit = async () => {
     const { data } = await (supabase.rpc as any)("student_fee_credit_balance", { _id: student.id });
@@ -137,12 +151,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   };
 
   const fetchPayments = async () => {
-    if (!student?.lead_id) return;
-    const { data } = await supabase
+    if (!student?.id) return;
+    // Lead-based receipts key on lead_id; a lead-less (school) student's
+    // receipts key on student_id — both live in lead_payments.
+    const q = supabase
       .from("lead_payments")
       .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, status, payment_date, created_at, concession_amount")
-      .eq("lead_id", student.lead_id)
       .order("created_at", { ascending: false });
+    const { data } = student.lead_id
+      ? await q.eq("lead_id", student.lead_id)
+      : await q.eq("student_id", student.id);
     if (data) setPayments(data);
   };
 
@@ -238,9 +256,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // ── Counter selection ────────────────────────────────────────────────────
   // Fee Code, Total, Concession, Paid, Balance, Due Date, Status (+ tick,
   // Paying for cashiers; + the row-actions column for finance roles).
-  const colCount = 7 + (canCollect ? 2 : 0) + (isFinanceRole ? 1 : 0);
+  const colCount = 7 + (canPick ? 2 : 0) + (isFinanceRole ? 1 : 0);
   const rowBalance = (f: any) => Math.max(0, Math.round(Number(f.balance || 0)));
-  const isPickable = (f: any) => canCollect && rowBalance(f) > 0;
+  const isPickable = (f: any) => canPick && rowBalance(f) > 0;
   const pickedTotal = Object.values(picked).reduce((s, v) => s + (Number(v) || 0), 0);
   const pickedCount = Object.keys(picked).length;
 
@@ -269,13 +287,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // entry carries fee_ledger_id so provision_student_fees credits that exact
   // row — without it the money spills onto the earliest-due row of the same
   // fee code, which is wrong when the cashier deliberately skipped a quarter.
-  const openCollect = (rows: any[], amounts: Record<string, number> = picked) => {
+  const openCollect = (rows: any[]) => {
     const allocs: FeeAllocation[] = rows
-      .filter((f) => Number(amounts[f.id]) > 0)
+      .filter((f) => Number(picked[f.id]) > 0)
       .map((f) => ({
         fee_code_id: f.fee_code_id,
         fee_ledger_id: f.id,
-        amount: Number(amounts[f.id]),
+        amount: Number(picked[f.id]),
         label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
           defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
       }));
@@ -284,6 +302,27 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     setCollectOpen(true);
   };
 
+  // Same ticked rows, but hand them to the payer instead of taking cash. The
+  // link's breakup carries fee_ledger_id, so when it is paid the money lands on
+  // exactly these rows.
+  const openLinkForSelection = (rows: any[]) => {
+    const allocs: FeeAllocation[] = rows
+      .filter((f) => Number(picked[f.id]) > 0)
+      .map((f) => ({
+        fee_code_id: f.fee_code_id,
+        fee_ledger_id: f.id,
+        amount: Number(picked[f.id]),
+        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
+          defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
+      }));
+    if (!allocs.length) return;
+    setLinkAllocations(allocs);
+    setSendLinkOpen(true);
+  };
+
+  // Generate only. Sending is a second, deliberate click — a cashier who just
+  // wants to read the URL out at the counter shouldn't have already messaged
+  // the parent by the time the button finishes.
   const handleIssueLoginLink = async () => {
     setIssuingLink(true);
     const { data, error } = await (supabase.rpc as any)("issue_student_login_link", {
@@ -294,11 +333,30 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       toast({ title: "Could not create the login link", description: error.message, variant: "destructive" });
       return;
     }
-    setLoginLink({ url: data?.url, phone: data?.phone });
+    setLoginLink({ tokenId: data?.token_id, url: data?.url, phone: data?.phone || null, sent: false });
     toast({
-      title: "Login link sent",
-      description: `WhatsApp sent to ${data?.phone}. The link signs the student straight in — no OTP — and expires in 7 days.`,
+      title: "Login link ready",
+      description: "Signs the student straight in — no OTP — and expires in 7 days. Copy it, or send it on WhatsApp.",
     });
+  };
+
+  const handleSendLoginLink = async () => {
+    if (!loginLink) return;
+    setSendingLink(true);
+    const { data, error } = await (supabase.rpc as any)("send_student_login_link", {
+      _token_id: loginLink.tokenId,
+    });
+    setSendingLink(false);
+    if (error) {
+      toast({ title: "Could not send the link", description: error.message, variant: "destructive" });
+      return;
+    }
+    if (data?.sent === false) {
+      toast({ title: "Not sent", description: data?.reason || "WhatsApp delivery is not configured.", variant: "destructive" });
+      return;
+    }
+    setLoginLink({ ...loginLink, sent: true });
+    toast({ title: "Sent on WhatsApp", description: `Delivered to ${loginLink.phone}.` });
   };
 
   const totalFee = fees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
@@ -379,20 +437,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <Receipt className="h-3.5 w-3.5" /> Collect Payment
           </Button>
         )}
-        {["super_admin", "accountant"].includes(role || "") && (
+        {["super_admin", "accountant", "office_admin"].includes(role || "") && (
           <Button size="sm" variant="outline" onClick={() => setChargeOpen(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Charge
           </Button>
         )}
-        {isFinanceRole && student?.id && (
+        {canSendLink && student?.id && (
           <Button size="sm" variant="outline" onClick={() => setSendLinkOpen(true)} className="gap-1.5">
             <LinkIcon className="h-3.5 w-3.5" /> Send Payment Link
           </Button>
         )}
-        {isFinanceRole && student?.id && (
+        {canSendLink && student?.id && (
           <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
-            {issuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
-            Send Login Link
+            {issuingLink ? <ButtonOrb state="working" /> : <LogIn className="h-3.5 w-3.5" />}
+            Generate Login Link
           </Button>
         )}
 
@@ -439,12 +497,34 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         )}
       </div>
 
-      {/* The freshly minted login link, so the cashier can also read it out or
-          paste it elsewhere when WhatsApp doesn't land. */}
+      {/* The payment link just created, kept on screen after the dialog closes
+          so it can be copied into any channel. */}
+      {payLink && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+          <LinkIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Payment link</span>
+          <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{payLink}</code>
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(payLink);
+              toast({ title: "Payment link copied" });
+            }}
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            title="Copy link"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => setPayLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* The minted login link. Nothing has been messaged yet — the cashier
+          decides whether to read it out, copy it, or send it on WhatsApp. */}
       {loginLink && (
-        <div className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-3 py-2">
           <LogIn className="h-3.5 w-3.5 shrink-0 text-success" />
-          <span className="text-[11px] text-muted-foreground">Sent to {loginLink.phone} ·</span>
           <code className="min-w-0 flex-1 truncate text-[11px] text-foreground">{loginLink.url}</code>
           <button
             onClick={() => {
@@ -456,19 +536,37 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
+          {loginLink.sent ? (
+            <span className="shrink-0 text-[11px] font-medium text-success">
+              Sent to {loginLink.phone}
+            </span>
+          ) : loginLink.phone ? (
+            <Button size="sm" variant="outline" className="h-7 shrink-0 gap-1.5" onClick={handleSendLoginLink} disabled={sendingLink}>
+              {sendingLink ? <ButtonOrb state="working" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              Send on WhatsApp to {loginLink.phone}
+            </Button>
+          ) : (
+            <span className="shrink-0 text-[11px] text-muted-foreground">No phone on file — copy the link instead</span>
+          )}
           <button onClick={() => setLoginLink(null)} className="shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss">
-            <Trash2 className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Summary. Five cards in a four-column grid orphaned the fifth on its own
+          row; the unallocated credit is also rarely non-zero, so it only earns a
+          slot when there is credit to show. */}
+      <div className={`grid grid-cols-2 gap-3 ${
+        Number(credit?.general_credit || 0) > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"
+      }`}>
         <SummaryCard label="Total Fee" value={totalFee} color="bg-chart-5/10 text-chart-5" />
         <SummaryCard label="Paid" value={totalPaid} color="bg-success/10 text-success" />
         <SummaryCard label="Concession" value={totalConcession} color="bg-pastel-purple text-foreground/70" />
         <SummaryCard label="Balance" value={totalBalance} color={totalBalance > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"} />
-        <SummaryCard label="Credit (unallocated)" value={Number(credit?.general_credit || 0)} color="bg-pastel-mint text-foreground/70" />
+        {Number(credit?.general_credit || 0) > 0 && (
+          <SummaryCard label="Credit (unallocated)" value={Number(credit?.general_credit || 0)} color="bg-pastel-mint text-foreground/70" />
+        )}
       </div>
       {Number(credit?.application_fee_paid || 0) > 0 && (
         <p className="text-[11px] text-muted-foreground -mt-2">
@@ -476,21 +574,30 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         </p>
       )}
 
+      {/* ABVMU deposit challan — cashier can submit/track on the candidate's
+          behalf (BPT/BMRIT/B.Sc Nursing carry a seat-reservation deposit).
+          Self-hides when the course has no deposit or the student has no lead. */}
+      {student?.lead_id && (
+        <AbvmuDepositPanel leadId={student.lead_id} onChanged={onRefresh} />
+      )}
+
       {/* Fee table */}
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left">
-              {canCollect && <th className="w-10 px-4 py-3"></th>}
-              <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
+              {canPick && <th className="w-10 px-4 py-3"></th>}
+              <th className="px-4 py-3 font-medium text-muted-foreground">Fee Head</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
               <th className="px-4 py-3 font-medium text-muted-foreground text-right">Balance</th>
-              {canCollect && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
               <th className="px-4 py-3 font-medium text-muted-foreground">Due Date</th>
               <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
               {isFinanceRole && <th className="px-4 py-3 font-medium text-muted-foreground w-10"></th>}
+              {/* Paying sits last, next to the running total and Collect button
+                  in the bar below — the amounts and the action read together. */}
+              {canPick && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paying</th>}
             </tr>
           </thead>
           <tbody>
@@ -507,9 +614,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               const gPicked = gPickable.filter((r: any) => picked[r.id] !== undefined);
               return (
               <Fragment key={g.term}>
-                <tr className="bg-muted/40 border-b border-border">
-                  {canCollect && (
-                    <td className="px-4 py-1.5">
+                <tr className="border-y border-border bg-muted/60">
+                  {canPick && (
+                    <td className="px-4 py-2.5">
                       {gPickable.length > 0 && (
                         <input
                           type="checkbox"
@@ -522,18 +629,18 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                       )}
                     </td>
                   )}
-                  <td className="px-4 py-1.5 text-xs font-semibold text-foreground">
+                  <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-foreground">
                     {g.term === ONE_TIME_GROUP
                       ? "One-time Fees"
                       : defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
                   </td>
-                  <td className="px-4 py-1.5 text-right text-[11px] font-semibold text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
-                  <td className="px-4 py-1.5 text-right text-[11px] text-muted-foreground">{gConcession > 0 ? `₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
-                  <td colSpan={colCount - (canCollect ? 4 : 3)} />
+                  <td className="px-4 py-2.5 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-2.5 text-right text-[11px] tabular-nums text-success">{gConcession > 0 ? `−₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
+                  <td colSpan={colCount - (canPick ? 4 : 3)} />
                 </tr>
                 {g.rows.map((f: any) => (
                   <tr key={f.id} className={`border-b border-border last:border-0 transition-colors ${picked[f.id] !== undefined ? "bg-primary/5" : "hover:bg-muted/30"}`}>
-                    {canCollect && (
+                    {canPick && (
                       <td className="px-4 py-3">
                         {isPickable(f) && (
                           <input
@@ -546,46 +653,66 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         )}
                       </td>
                     )}
+                    {/* Name leads. The code is an internal identifier — in caps
+                        it was the loudest thing in the row, so a cashier read
+                        IB-MEAL-ADD-ON-QUARTERLY-FEE before "IB Meal Add On". */}
                     <td className="px-4 py-3 pl-6">
-                      <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
-                      <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
+                      <span className="block font-medium text-foreground">
+                        {f.fee_codes?.name || f.fee_codes?.code || "—"}
+                      </span>
+                      {f.fee_codes?.name && f.fee_codes?.code && (
+                        <span className="block font-mono text-[10px] text-muted-foreground">
+                          {f.fee_codes.code}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">
-                      <div className="flex flex-col items-end gap-0.5">
-                        <span>{Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}</span>
-                        {pendingWaivers[f.id] > 0 && (
-                          <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
-                            +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
-                          </span>
-                        )}
-                        {/* Waiver lives on the row it applies to, rather than in
-                            a dialog that re-asks which row you meant. */}
-                        {canRequestConcession && Number(f.balance || 0) > 0 && (
-                          <RowConcessionPopover
-                            fee={f}
-                            onDone={() => { fetchFees(); fetchPendingWaivers(); onRefresh?.(); }}
-                          />
-                        )}
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
+                    {/* The waiver control sits inline as a quiet icon rather than
+                        a blue "+ Waiver" link under an em dash on every row —
+                        that repeated twice per row down the whole table and
+                        competed with Collect. Still always rendered, never
+                        hover-only, so it works on touch. */}
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex flex-col items-end">
+                          {Number(f.concession) > 0 ? (
+                            <span className="font-medium text-success">
+                              −₹{Number(f.concession).toLocaleString("en-IN")}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                          {pendingWaivers[f.id] > 0 && (
+                            <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
+                              +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                            </span>
+                          )}
+                        </div>
+                        {canRequestConcession ? (
+                          Number(f.balance || 0) > 0 || Number(f.concession) > 0 ? (
+                            <RowConcessionPopover
+                              fee={f}
+                              // Only refresh the ledger table in place — NOT the
+                              // parent onRefresh, which on StudentProfile flips the
+                              // whole page into its loading state and scrolls to top.
+                              onDone={() => { fetchFees(); fetchPendingWaivers(); }}
+                            />
+                          ) : (
+                            // Keeps the amounts right-aligned down the column.
+                            <span className="h-6 w-6 shrink-0" aria-hidden />
+                          )
+                        ) : null}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
-                    {canCollect && (
-                      <td className="px-4 py-3 text-right">
-                        {picked[f.id] !== undefined ? (
-                          <input
-                            type="number" min={0} max={rowBalance(f)} step={1} inputMode="numeric"
-                            value={picked[f.id] || ""}
-                            onChange={(e) => setPickAmount(f, Math.round(Number(e.target.value) || 0))}
-                            className="w-24 rounded-lg border border-input bg-background px-2 py-1 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                            title="Part payments are allowed — capped at the balance"
-                          />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
+                    <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        ₹{Number(f.paid_amount).toLocaleString("en-IN")}
+                        {Number(f.paid_amount) > 0 && (
+                          <PaidBreakdownPopover feeLedgerId={f.id} paidAmount={Number(f.paid_amount)} />
                         )}
-                      </td>
-                    )}
+                      </span>
+                    </td>
+                    <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
                     </td>
@@ -597,33 +724,36 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         {f.status}
                       </span>
                     </td>
+                    {/* No per-row Collect. Collection happens once, from the
+                        bar at the foot of the table, against every ticked row —
+                        a link here just offered a second way to do the same
+                        thing one head at a time. */}
                     {isFinanceRole && (
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {canCollect && Number(f.balance) > 0 && (
-                            <button
-                              onClick={() => {
-                                // Same path as the tick-boxes — just this one row.
-                                const one = { [f.id]: rowBalance(f) };
-                                setPicked(one);
-                                openCollect([f], one);
-                              }}
-                              className="text-primary hover:underline text-[11px] font-medium whitespace-nowrap"
-                              title="Collect against this head"
-                            >
-                              Collect
-                            </button>
-                          )}
-                          {canRemoveRow(f) && (
-                            <button
-                              onClick={() => handleRemoveUnpaid(f)}
-                              className="text-muted-foreground hover:text-destructive transition-colors"
-                              title="Remove from this candidate's ledger"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
+                        {canRemoveRow(f) && (
+                          <button
+                            onClick={() => handleRemoveUnpaid(f)}
+                            className="text-muted-foreground transition-colors hover:text-destructive"
+                            title="Remove from this candidate's ledger"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                    {canPick && (
+                      <td className="px-4 py-3 text-right">
+                        {picked[f.id] !== undefined ? (
+                          <input
+                            type="number" min={0} max={rowBalance(f)} step={1} inputMode="numeric"
+                            value={picked[f.id] || ""}
+                            onChange={(e) => setPickAmount(f, Math.round(Number(e.target.value) || 0))}
+                            className="w-24 rounded-lg border border-input bg-background px-2 py-1 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                            title="Part payments are allowed — capped at the balance"
+                          />
+                        ) : (
+                          <span className="text-muted-foreground/40">—</span>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -637,7 +767,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {/* Running total for the ticked rows — the cashier's confirmation that
             the drawer amount and the receipt will agree before anything is
             recorded. Mirrors the old ERP's Total Amount row. */}
-        {canCollect && pickedCount > 0 && (
+        {canPick && pickedCount > 0 && (
           <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
             <span className="text-xs text-muted-foreground">
               {pickedCount} head{pickedCount === 1 ? "" : "s"} selected
@@ -648,9 +778,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             <span className="ml-auto text-sm font-semibold text-foreground">
               Total ₹{pickedTotal.toLocaleString("en-IN")}
             </span>
-            <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
-              <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
-            </Button>
+            {canSendLink && (
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openLinkForSelection(fees)}>
+                <LinkIcon className="h-3.5 w-3.5" /> Send Link
+              </Button>
+            )}
+            {canCollect && (
+              <Button size="sm" className="gap-1.5" disabled={pickedTotal <= 0} onClick={() => openCollect(fees)}>
+                <Receipt className="h-3.5 w-3.5" /> Collect ₹{pickedTotal.toLocaleString("en-IN")}
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -762,11 +899,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         );
       })()}
 
-      {student?.lead_id && (
+      {student?.id && (
         <OfflinePaymentDialog
           open={collectOpen}
           onOpenChange={(v) => { setCollectOpen(v); if (!v) setCollectAllocations(null); }}
-          leadId={student.lead_id}
+          leadId={student.lead_id || undefined}
+          studentId={student.id}
           defaultType="other"
           defaultAmount={collectAllocations
             ? collectAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
@@ -789,12 +927,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
 
       <SendPaymentLinkDialog
         open={sendLinkOpen}
-        onOpenChange={setSendLinkOpen}
+        onOpenChange={(v) => { setSendLinkOpen(v); if (!v) setLinkAllocations(null); }}
         studentId={student.id}
         leadId={student.lead_id || undefined}
-        defaultAmount={totalBalance > 0 ? Math.round(totalBalance) : null}
+        defaultAmount={linkAllocations
+          ? linkAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
+          : (totalBalance > 0 ? Math.round(totalBalance) : null)}
+        defaultAllocations={linkAllocations}
         defaultPurpose="fee_due"
-        onCreated={() => { fetchPayments(); onRefresh?.(); }}
+        onCreated={(payUrl) => {
+          // Keep the link on screen after the dialog closes — the cashier
+          // often needs to paste it somewhere the send channels don't cover.
+          if (payUrl) setPayLink(payUrl);
+          setLinkAllocations(null); setPicked({}); fetchPayments(); onRefresh?.();
+        }}
       />
 
       <ApplyCreditDialog
@@ -830,9 +976,9 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
         <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
           <span className="text-xs font-bold">₹</span>
         </div>
-        <div>
-          <p className="text-[11px] text-muted-foreground">{label}</p>
-          <p className="text-lg font-bold text-foreground">₹{value.toLocaleString("en-IN")}</p>
+        <div className="min-w-0">
+          <p className="truncate text-[11px] text-muted-foreground">{label}</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">₹{value.toLocaleString("en-IN")}</p>
         </div>
       </CardContent>
     </Card>

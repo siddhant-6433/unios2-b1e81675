@@ -1,7 +1,8 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
@@ -373,6 +374,14 @@ const StudentProfile = () => {
   const [photoInputKey, setPhotoInputKey] = useState(0);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
+  // The tab lives in the URL, not in Radix's internal state: a non-silent
+  // fetchStudent() flips the page into <PageLoader/>, which unmounts the tab
+  // subtree — an uncontrolled Tabs would snap back to Details every time.
+  // Also makes /students/<an>?tab=fees shareable and reload-proof.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "details";
+  const setActiveTab = (tab: string) =>
+    setSearchParams((prev) => { prev.set("tab", tab); return prev; }, { replace: true });
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
@@ -449,14 +458,20 @@ const StudentProfile = () => {
     if (error) console.error("[student-profile] audit log insert failed", error);
   };
 
-  const fetchStudent = async () => {
-    setLoading(true);
-    setLeadDocs([]);
-    setAppDocs([]);
-    setApplicationPhotoUrl(null);
-    setInferredBatch(null);
-    setStudentDocs([]);
-    setAuditRows([]);
+  // silent: refresh data in place without flipping the whole page into its
+  // loading spinner. A full reload unmounts the tab subtree, which scrolls to
+  // top and (uncontrolled Tabs) snaps back to the Details tab — jarring after
+  // an in-panel action like adding/removing a fee charge or waiver.
+  const fetchStudent = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setLeadDocs([]);
+      setAppDocs([]);
+      setApplicationPhotoUrl(null);
+      setInferredBatch(null);
+      setStudentDocs([]);
+      setAuditRows([]);
+    }
     let { data } = await supabase.from("students")
       .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
@@ -630,7 +645,7 @@ const StudentProfile = () => {
         }
       }
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   if (loading) return <PageLoader />;
@@ -703,7 +718,7 @@ const StudentProfile = () => {
       setSyncMsg(`Nothing synced: ${syncData.reason}`);
     } else {
       setSyncMsg(`Synced from application (${syncData?.app_status ?? "unknown"} status).`);
-      await fetchStudent();
+      await fetchStudent(true);
     }
     setSyncing(false);
   };
@@ -772,7 +787,7 @@ const StudentProfile = () => {
       setDocumentName("");
       setDocumentFile(null);
       setDocumentInputKey((key) => key + 1);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Upload failed", description: message, variant: "destructive" });
@@ -820,7 +835,7 @@ const StudentProfile = () => {
 
       toast({ title: "Photo uploaded" });
       setPhotoInputKey((key) => key + 1);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Photo upload failed", description: message, variant: "destructive" });
@@ -894,7 +909,7 @@ const StudentProfile = () => {
       await logStudentAudit(auditEvents);
       toast({ title: "Student information updated" });
       setEditDialogOpen(false);
-      await fetchStudent();
+      await fetchStudent(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast({ title: "Update failed", description: message, variant: "destructive" });
@@ -1006,7 +1021,7 @@ const StudentProfile = () => {
         <div className="flex items-center gap-2">
           {syncMsg && <span className="text-xs text-muted-foreground">{syncMsg}</span>}
           <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={syncFromApplication} disabled={syncing}>
-            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {syncing ? <ButtonOrb state="working" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Sync from Application
           </Button>
           {canCorrectProfile && (
@@ -1099,7 +1114,7 @@ const StudentProfile = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="details" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
           <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
@@ -1389,7 +1404,7 @@ const StudentProfile = () => {
                     />
                   </div>
                   <Button className="gap-2" onClick={uploadStudentDocument} disabled={!documentFile || uploadingDocument}>
-                    {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {uploadingDocument ? <ButtonOrb state="working" onFilled /> : <Upload className="h-4 w-4" />}
                     Upload
                   </Button>
                 </div>
@@ -1500,7 +1515,7 @@ const StudentProfile = () => {
 
         <TabsContent value="fees">
           <div className="mt-4">
-            <StudentFeePanel student={student} onRefresh={fetchStudent} />
+            <StudentFeePanel student={student} onRefresh={() => fetchStudent(true)} />
           </div>
         </TabsContent>
 
@@ -1620,7 +1635,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setRemovalAction(null); setRemovalReason(""); }} disabled={removalBusy}>Cancel</Button>
             <Button variant={removalAction === "delete" ? "destructive" : "default"} onClick={submitRemoval} disabled={removalBusy || !removalReason.trim()}>
-              {removalBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removalBusy ? <ButtonOrb state="working" onFilled /> : null}
               {removalAction === "delete" ? "Delete" : "Archive"}
             </Button>
           </DialogFooter>
@@ -1682,7 +1697,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={editSaving}>Cancel</Button>
             <Button type="button" onClick={submitProfileCorrections} disabled={editSaving}>
-              {editSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              {editSaving && <ButtonOrb state="working" onFilled />}
               Save Corrections
             </Button>
           </DialogFooter>
@@ -1747,7 +1762,7 @@ const StudentProfile = () => {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setContactDialogOpen(false)}>Cancel</Button>
             <Button type="button" onClick={submitContactChange} disabled={contactSaving}>
-              {contactSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              {contactSaving && <ButtonOrb state="working" onFilled />}
               Submit Request
             </Button>
           </DialogFooter>

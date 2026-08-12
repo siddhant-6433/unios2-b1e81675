@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { AlertCircle, CreditCard, Info, Loader2, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
+import { AlertCircle, CreditCard, Info, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
 import { DEFAULT_GATEWAY_PRIORITY } from "@/lib/paymentGatewayResolver";
 import type { GatewayScopeType, PaymentContext, PaymentGateway } from "@/lib/paymentGatewayResolver";
 
@@ -212,7 +213,7 @@ export default function PaymentGatewaysPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -238,7 +239,7 @@ export default function PaymentGatewaysPanel() {
             <p className="text-sm font-medium text-foreground">Failed to load scoped gateway rules</p>
             <p className="text-xs text-muted-foreground font-mono">{error}</p>
             <button onClick={seedGateways} disabled={saving === "seed"} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60">
-              {saving === "seed" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+              {saving === "seed" ? <ButtonOrb state="connecting" onFilled /> : <CreditCard className="h-4 w-4" />}
               Seed Gateway Catalog
             </button>
           </div>
@@ -351,7 +352,7 @@ function ToggleButton({
       }`}
     >
       {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <ButtonOrb state="connecting" onFilled />
       ) : enabled ? (
         <ToggleRight className="h-4 w-4" />
       ) : (

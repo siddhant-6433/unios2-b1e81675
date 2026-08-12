@@ -1,13 +1,10 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2,
-  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
-  Globe, MousePointer, Flame, CheckCircle,
-} from "lucide-react";
+import { Send, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2, CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit, Globe, MousePointer, Flame, CheckCircle } from "lucide-react";
 import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import {
@@ -80,7 +77,7 @@ export function LeadTimeline({
               size="icon"
               className="rounded-full h-8 w-8 bg-primary hover:bg-primary/90"
             >
-              {savingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {savingNote ? <ButtonOrb state="working" onFilled /> : <Send className="h-3.5 w-3.5" />}
             </Button>
             <button className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
               <Link2 className="h-3.5 w-3.5" />

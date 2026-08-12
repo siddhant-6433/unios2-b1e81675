@@ -79,7 +79,12 @@ describe("hidden-mode student views (due + Pay + receipts, no structure)", () =>
   });
 
   it("unflagged students keep the full structure view (fallback only fires on zero rows)", () => {
-    expect(studentPortal).toContain("if (feeRes.data.length === 0) {");
+    // The due-summary RPC is now called for every student, because it is also
+    // the only route to their paid receipts (lead_payments is unreadable by a
+    // student login). What must stay gated on zero ledger rows is the
+    // hidden-mode *view* — setHiddenFee — not the RPC call.
+    expect(studentPortal).toContain("feeRes.data.length === 0 &&");
+    expect(studentPortal).toContain("setHiddenFee({ due_total: dueTotal, receipts });");
     expect(studentPortal).toContain("setHiddenFee(null);");
   });
 

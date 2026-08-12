@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { CheckCircle2, Loader2, Upload } from "lucide-react";
+import { CheckCircle2, Upload } from "lucide-react";
 
 export interface UpdeledRegisterTarget {
   lead_id: string;
@@ -153,7 +154,7 @@ export function UpdeledRegisterDialog({ target, onClose, onSaved }: Props) {
           </Button>
           <Button onClick={submit} disabled={saving} className="bg-primary hover:bg-primary/60">
             {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              <ButtonOrb state="working" onFilled />
             ) : (
               <CheckCircle2 className="h-4 w-4 mr-1.5" />
             )}

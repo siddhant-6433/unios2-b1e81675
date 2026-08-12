@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const portal = readFileSync("src/pages/AcademicPartnerPortal.tsx", "utf8");
 const migration = readFileSync(
-  "supabase/migrations/20260717120000_academic_partner_lead_share_with_nimt.sql",
+  "supabase/migrations/20260717125000_academic_partner_lead_share_with_nimt.sql",
   "utf8",
 );
 

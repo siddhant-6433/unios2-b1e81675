@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, Plus, Trash2, BookOpen, GraduationCap, BookText, ClipboardCheck } from "lucide-react";
+import { ArrowRight, ArrowLeft, AlertTriangle, Info, CheckCircle, XCircle, Plus, Trash2, BookOpen, GraduationCap, BookText, ClipboardCheck } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -1247,7 +1248,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
           </Button>
         ) : <div />}
         <Button onClick={handleContinue} disabled={saving} className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+          {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>
       </div>

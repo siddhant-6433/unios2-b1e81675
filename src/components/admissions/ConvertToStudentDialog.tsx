@@ -3,10 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SelectField, DatePickerField } from "@/components/ui/state-fields";
-import { Loader2, UserCheck, ArrowRight } from "lucide-react";
+import { UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -84,13 +85,15 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
   }, [isSchoolCourse, form.session_id, sessions]);
 
   const generatePAN = () => `PAN-${Date.now().toString(36).toUpperCase()}`;
-  const generateAN = () => `AN-${Date.now().toString(36).toUpperCase()}`;
 
   const handleConvert = async () => {
     setSaving(true);
     const isPreadmit = conversionType === "pre_admit";
-    const pan = isPreadmit ? generatePAN() : (lead.pre_admission_no || generatePAN());
-    const an = isPreadmit ? null : generateAN();
+    const pan = lead.pre_admission_no || generatePAN();
+    // The admission number is NEVER minted on the client — for a full admit it is
+    // issued by the audited admission_bypass_generate_an RPC after the student row
+    // exists (it records the override and enforces the 25% fee gate).
+    let an: string | null = null;
     const applicationPhotoUrl = (await getApplicationPhotoUrlsByLeadId([lead.id])).get(lead.id) || null;
 
     // Create student record
@@ -110,8 +113,8 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       semester: !isSchoolCourse ? form.semester || null : null,
       admission_date: form.admission_date || null,
       pre_admission_no: pan,
-      admission_no: an,
-      status: isPreadmit ? "pre_admitted" as any : "active" as any,
+      admission_no: null,
+      status: "pre_admitted" as any,
       created_by: user?.id || null,
     } as any).select("id").single();
 
@@ -124,16 +127,13 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
     // Update lead
     const transition = resolveLeadTransitionCommand({
       currentStage: lead.stage,
-      command: isPreadmit ? "convertPreAdmitted" : "convertAdmitted",
+      command: "convertPreAdmitted",
     });
     try {
       await applyResolvedLeadTransition(supabase as any, {
         leadId: lead.id,
         transition,
-        extraPatch: {
-          pre_admission_no: pan,
-          ...(an ? { admission_no: an } : {}),
-        },
+        extraPatch: { pre_admission_no: pan },
       });
     } catch (error: any) {
       if (student?.id) {
@@ -144,13 +144,31 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       return;
     }
 
+    // Full admit → issue the AN through the audited engine (never client-side).
+    // Enforces the 25% fee gate + super_admin; on refusal the student stays
+    // pre-admitted and shows up under Inbox → Pending AN Generation.
+    if (!isPreadmit) {
+      const { data: issuedAn, error: anErr } = await supabase.rpc("admission_bypass_generate_an", {
+        _lead_id: lead.id,
+        _reason: "Full admit via Convert-to-Student",
+      });
+      if (anErr) {
+        toast({
+          title: "Student pre-admitted — admission number pending",
+          description: `The admission number couldn't be issued (${anErr.message}). A super admin can issue it from Inbox → Pending AN Generation once the fee/documents are cleared.`,
+        });
+      } else {
+        an = (issuedAn as string) ?? null;
+      }
+    }
+
     // Activity log
     await supabase.from("lead_activities").insert({
       lead_id: lead.id, user_id: user?.id || null, type: "conversion",
-      description: isPreadmit
-        ? `Pre-admitted with PAN: ${pan}`
-        : `Admitted with AN: ${an} (PAN: ${pan})`,
-      new_stage: isPreadmit ? "pre_admitted" as any : "admitted" as any,
+      description: an
+        ? `Admitted with AN: ${an} (PAN: ${pan})`
+        : `Pre-admitted with PAN: ${pan}`,
+      new_stage: an ? "admitted" as any : "pre_admitted" as any,
     });
 
     // Send student_welcome WhatsApp (fire-and-forget)
@@ -166,7 +184,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       }).catch(() => {});
     }
 
-    toast({ title: isPreadmit ? "Pre-admission complete" : "Admission complete", description: isPreadmit ? `PAN: ${pan}` : `AN: ${an}` });
+    toast({ title: an ? "Admission complete" : "Pre-admission complete", description: an ? `AN: ${an}` : `PAN: ${pan}` });
     setSaving(false);
     onOpenChange(false);
     onSuccess();
@@ -245,7 +263,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleConvert} disabled={saving || !form.session_id || (isSchoolCourse ? !form.admission_date || !form.joining_academic_year : !form.batch_id || !form.semester)} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <ArrowRight className="h-4 w-4" />}
               {conversionType === "pre_admit" ? "Pre-Admit" : "Admit"} Student
             </Button>
           </div>

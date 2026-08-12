@@ -3,8 +3,9 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, Printer, Download } from "lucide-react";
+import { ArrowLeft, Printer, Download } from "lucide-react";
 
 interface ReportCardData {
   id: string;
@@ -94,7 +95,7 @@ const ReportCardView = () => {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="searching" />
       </div>
     );
   }

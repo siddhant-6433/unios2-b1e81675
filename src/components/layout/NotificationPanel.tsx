@@ -2,12 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  Bell, UserPlus, AlertTriangle, RotateCcw, Calendar, Clock,
-  MapPin, ArrowRightLeft, Trash2, Info, CheckCheck, Loader2,
-  MessageSquare, X, ShieldCheck, Star,
-} from "lucide-react";
+import { Bell, UserPlus, AlertTriangle, RotateCcw, Calendar, Clock, MapPin, ArrowRightLeft, Trash2, Info, CheckCheck, MessageSquare, X, ShieldCheck, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
@@ -290,7 +287,7 @@ export function NotificationPanel() {
           <div className="max-h-[400px] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <ButtonOrb state="connecting" />
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">

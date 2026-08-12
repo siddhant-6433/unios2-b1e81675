@@ -5,18 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useCampus } from "@/contexts/CampusContext";
-import {
-  ChevronDown,
-  CreditCard,
-  Download,
-  FileSpreadsheet,
-  Loader2,
-  Search,
-  ShieldAlert,
-  UserCheck,
-  Users,
-} from "lucide-react";
+import { ChevronDown, CreditCard, Download, FileSpreadsheet, Search, ShieldAlert, UserCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -26,7 +17,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/state-fields";
-import { avatarThumbUrl, idCardPhotoUrl } from "@/lib/storageImage";
 import { whiteBgCutout } from "@/lib/whiteBgCutout";
 import { QRCodeSVG } from "qrcode.react";
 import { brandForStudentOwner, MIRAI_BRAND, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
@@ -45,6 +35,9 @@ interface CardPerson {
   type: CardMode;
   name: string;
   primaryNo: string;
+  /** For students who carry both: the PAN, so a card printed at pre-admission
+   *  reconciles to the AN now shown as primaryNo. Empty otherwise. */
+  secondaryNo: string;
   subtitle: string;
   group: string;
   campus: string;
@@ -171,11 +164,11 @@ function photoStatus(row: CardPerson): string {
 
 /** Download the given rows as a CSV (opens in Excel). Filename reflects the active photo filter. */
 function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
-  const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
+  const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", ...(mode === "students" ? ["PAN (Pre-Adm. No.)"] : []), "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
   const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [
     headers.map(esc).join(","),
-    ...rows.map((r) => [r.name, r.primaryNo, r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
+    ...rows.map((r) => [r.name, r.primaryNo, ...(mode === "students" ? [r.secondaryNo] : []), r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
   ];
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -189,7 +182,7 @@ function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
 /** Tiny list avatar: lazy-load a storage thumb; fall back to initials on error. */
 function PersonAvatar({ name, photoUrl, className }: { name: string; photoUrl: string | null; className?: string }) {
   const [failed, setFailed] = useState(false);
-  const src = avatarThumbUrl(photoUrl);
+  const src = photoUrl;
   const showImage = !!src && !failed;
 
   return (
@@ -270,6 +263,7 @@ const IdCardCenter = () => {
       return (
         row.name.toLowerCase().includes(q) ||
         row.primaryNo.toLowerCase().includes(q) ||
+        row.secondaryNo.toLowerCase().includes(q) ||
         row.subtitle.toLowerCase().includes(q) ||
         row.group.toLowerCase().includes(q)
       );
@@ -335,6 +329,7 @@ const IdCardCenter = () => {
         type: "students",
         name: student.name || "Unnamed student",
         primaryNo: displayNo(student.admission_no, student.pre_admission_no),
+        secondaryNo: student.admission_no && student.pre_admission_no ? student.pre_admission_no : "",
         subtitle: `${grade}${section}`,
         group: grade,
         campus: campusName,
@@ -415,6 +410,7 @@ const IdCardCenter = () => {
         type: "employees",
         name: ep.display_name || profile.display_name || "Unnamed employee",
         primaryNo: ep.employee_number || profile.employee_id || "-",
+        secondaryNo: "",
         subtitle: ep.job_title || roleLabel,
         group: profile.department || roleLabel,
         campus: profile.campus || profile.institution || "-",
@@ -788,7 +784,7 @@ const IdCardCenter = () => {
 
       {loading ? (
         <div className="print:hidden flex h-48 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="working" />
         </div>
       ) : (
         <div className="print:hidden rounded-xl bg-card card-shadow overflow-hidden">
@@ -808,7 +804,9 @@ const IdCardCenter = () => {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">{row.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {row.primaryNo} - {row.subtitle} - {row.group}
+                      {row.primaryNo}
+                      {row.secondaryNo && <span className="text-muted-foreground/70"> (PAN {row.secondaryNo})</span>}
+                      {" "}- {row.subtitle} - {row.group}
                     </p>
                   </div>
                   <GenerateMenu
@@ -864,7 +862,7 @@ function GenerateMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button className="gap-2" size={size} disabled={disabled}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {busy ? <ButtonOrb state="composing" onFilled /> : <Download className="h-4 w-4" />}
           {label}
           {!busy && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
         </Button>
@@ -1122,7 +1120,7 @@ function IdCardFront({ person, cutoutUrl }: { person: CardPerson; cutoutUrl?: st
           <img src={cutoutUrl} alt="" decoding="async" style={{ position: "relative", zIndex: 1, width: 252, height: 288, objectFit: "contain", objectPosition: "center bottom" }} />
         ) : person.photoUrl ? (
           <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <img src={idCardPhotoUrl(person.photoUrl) || person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={person.photoUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
         ) : (
           <div style={{ position: "relative", width: 214, height: 248, zIndex: 1, background: "#fff", borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center", color: accent, fontSize: 56, fontWeight: 700 }}>

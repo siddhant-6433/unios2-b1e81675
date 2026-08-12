@@ -3,15 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, FileText, Eye, Edit, Send, Users, FilePlus, CheckCircle,
-  Clock, FileCheck, Search,
-} from "lucide-react";
+import { FileText, Eye, Edit, Send, Users, FilePlus, CheckCircle, Clock, FileCheck, Search } from "lucide-react";
 
 interface ReportCard {
   id: string;
@@ -294,11 +292,11 @@ const ReportCards = () => {
             disabled={publishing || reviewCount === 0}
             className="gap-1.5 text-sm"
           >
-            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {publishing ? <ButtonOrb state="solving" /> : <Send className="h-4 w-4" />}
             Publish All
           </Button>
           <Button onClick={handleGenerate} disabled={generating} className="gap-1.5 text-sm">
-            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus className="h-4 w-4" />}
+            {generating ? <ButtonOrb state="solving" onFilled /> : <FilePlus className="h-4 w-4" />}
             Generate Reports
           </Button>
         </div>
@@ -378,7 +376,7 @@ const ReportCards = () => {
       {/* Table */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="searching" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -506,7 +504,7 @@ const ReportCards = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={saveEdit} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {saving && <ButtonOrb state="solving" onFilled />}
               Save
             </Button>
           </DialogFooter>

@@ -27,6 +27,14 @@ const leadAssociationMigration = readFileSync(
   "supabase/migrations/20260619121300_lead_association_approval_requests.sql",
   "utf8",
 );
+const studentLoginLinkMigration = readFileSync(
+  "supabase/migrations/20260809052920_academic_partner_student_login_link.sql",
+  "utf8",
+);
+const partnerCandidateActions = readFileSync(
+  "src/components/partner/PartnerCandidateActions.tsx",
+  "utf8",
+);
 
 describe("academic partner access scope", () => {
   it("hides and blocks marketing surfaces for academic partners", () => {
@@ -108,11 +116,14 @@ describe("academic partner access scope", () => {
     expect(portal).toContain("ApplyMagicLinkButton");
     expect(portal).toContain('label: "Applications", value: "applications"');
     expect(portal).toContain('<TabsContent value="applications"');
-    expect(portal).toContain("Application Stage");
+    expect(portal).toContain("application_stage");
     expect(portal).toContain("application_status");
     expect(portal).toContain("application_payment_status");
-    expect(portal).toContain("View details");
-    expect(portal).toContain("directOpen");
+    expect(portal).toContain("Send Login Link");
+    expect(portal).not.toContain("setDetailsLead");
+    // `directOpen` went with the on-behalf buttons; the login link is now the
+    // only ApplyMagicLinkButton use, driven as a controlled share dialog.
+    expect(portal).toContain("controlledOpen");
     expect(portal.match(/ApplyMagicLinkButton/g)?.length || 0).toBeGreaterThanOrEqual(3);
   });
 
@@ -180,5 +191,89 @@ describe("academic partner access scope", () => {
     expect(offerRoleMigration).toContain("Application fee is not paid");
     expect(offerRoleMigration).toContain("Application is outside academic partner assigned course scope");
     expect(offerRoleMigration).toContain("'offer_issued_by_partner'");
+  });
+
+  it("keeps partner-converted students visible even without a course assignment", () => {
+    // Regression: `students` used to be set from scopedStudentRows only
+    // (course/batch ASSIGNMENT matches). Fees/receipts are keyed off the
+    // partner's own leads, so a converted student with no active assignment
+    // vanished from the Students tab and the fee-details dialog silently
+    // rendered "No fee receipts recorded yet". Union both sets.
+    expect(portal).toContain("uniqueById([...scopedStudentRows, ...mappedStudentRows])");
+    // The lead-derived student query must select full columns (course_id,
+    // batch_id, lead_id, etc.) — not just id/lead_id — so the union entries
+    // render name/course/batch correctly in the Students tab.
+    expect(portal).not.toContain('.select("id, lead_id")');
+    // fee_code_id is needed to build payment-link allocations for a student.
+    expect(portal).toContain("fee_code_id, students:student_id(name, admission_no, pre_admission_no)");
+  });
+
+  it("adds shared per-stage partner actions (candidate actions, receipts, login link)", () => {
+    expect(portal).toContain(
+      'PartnerReceiptsTable,\n  PartnerCandidateActions,\n  StudentLoginLinkDialog,\n} from "@/components/partner/PartnerCandidateActions";',
+    );
+    expect(portal.match(/<PartnerCandidateActions/g)?.length || 0).toBeGreaterThanOrEqual(3);
+    expect(portal).toContain("<PartnerReceiptsTable receipts={feeDetailsReceipts}");
+    expect(portal).toContain("<StudentLoginLinkDialog");
+    // The students-stage payment link is a fee-due collection, not a token.
+    expect(portal).toContain('studentId={payLinkStudent.id}');
+    expect(portal).toContain('defaultPurpose="fee_due"');
+    expect(partnerCandidateActions).toContain("export function PartnerReceiptsTable");
+    expect(partnerCandidateActions).toContain("export type FeeReceipt");
+  });
+
+  it("widens the student login-link guards without dropping the cashier/super_admin branches", () => {
+    expect(studentLoginLinkMigration).toContain("CREATE OR REPLACE FUNCTION public.issue_student_login_link");
+    expect(studentLoginLinkMigration).toContain("CREATE OR REPLACE FUNCTION public.send_student_login_link");
+    const guardCount = (studentLoginLinkMigration.match(/can_academic_partner_view_fee_student\(auth\.uid\(\), /g) || []).length;
+    expect(guardCount).toBe(2);
+    const collectFeeCount = (studentLoginLinkMigration.match(/public\.can_collect_fee\(auth\.uid\(\)\)/g) || []).length;
+    expect(collectFeeCount).toBe(2);
+    const superAdminCount = (studentLoginLinkMigration.match(/public\.has_role\(auth\.uid\(\), 'super_admin'\)/g) || []).length;
+    expect(superAdminCount).toBe(2);
+  });
+
+  it("splits the Students tab into Token Paid/Pre-Admitted/Admitted, deriving all three from one unified candidateRows list", () => {
+    // Sub-tabs exist, defaulting to the first non-empty bucket in Token Paid → Pre-Admitted → Admitted order.
+    expect(portal).toContain(
+      'defaultValue={tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}',
+    );
+    expect(portal).toContain("Token Paid ({tokenPaidRows.length})");
+    expect(portal).toContain("Pre-Admitted ({preAdmittedRows.length})");
+    expect(portal).toContain("Admitted ({admittedRows.length})");
+    expect(portal).toContain("No admitted students yet");
+    expect(portal).toContain("No pre-admitted candidates yet");
+    expect(portal).toContain("No token-paid candidates yet");
+    // candidateRows unifies partner-attributed leads with assignment-scoped
+    // students not covered by a lead, so a candidate with no `students` row at
+    // all (paid a token/part fee, no admission number) still shows up.
+    expect(portal).toContain("const candidateRows = useMemo(() => {");
+    expect(portal).toContain("const rows: CandidateRow[] = [];");
+    // Qualifies on receipt `type` !== application_fee, not has_token_fee_paid,
+    // so pre_admission_token / registration_fee / other payments also count.
+    expect(portal).toContain('const hasNonApplicationFeePayment = receipts.some((r) => r.type !== "application_fee");');
+    expect(portal).not.toContain("return lead.has_token_fee_paid");
+    // Buckets are mutually exclusive and derived off candidateRows.
+    expect(portal).toContain(
+      "const admittedRows = useMemo(() => candidateRows.filter((row) => Boolean(row.admissionNo)), [candidateRows]);",
+    );
+    expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && Boolean(row.pan))");
+    expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && !row.pan)");
+  });
+
+  it("bucket (b): a non-attributed (teaching-only) student is bucketed by admission no and rendered with the Direct badge", () => {
+    // Students not covered by a partner-attributed lead are still added to
+    // candidateRows, marked attributed: false, keyed by lead id when present
+    // else the student id.
+    expect(portal).toContain("if (student.lead_id && coveredLeadIds.has(student.lead_id)) return;");
+    expect(portal).toContain("key: student.lead_id ?? student.id,");
+    expect(portal).toContain("admissionNo: student.admission_no,");
+    expect(portal).toContain("attributed: false,");
+    // Every candidate table renders a Direct badge next to the name for
+    // non-attributed rows, using the shared ATTRIBUTION_LABELS.direct text.
+    expect(portal.match(/<DirectBadge attributed=\{row\.attributed\} \/>/g)?.length || 0).toBeGreaterThanOrEqual(3);
+    expect(portal).toContain('attributionBadge("direct")');
+    expect(portal).toContain("{ATTRIBUTION_LABELS.direct}");
+    expect(portal).toContain('title="Not attributed to you — not counted for payout"');
   });
 });

@@ -12,6 +12,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { logGeminiUsage } from "../_shared/geminiUsage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,7 +25,9 @@ const corsHeaders = {
 // HALLUCINATES entire plausible conversations when given silent audio (seen
 // in prod: a 9s blank recording produced a full fabricated MBA call with a
 // fake visit booking). Never transcribe what can't contain a conversation.
-const MIN_TRANSCRIBABLE_SECONDS = 15;
+// 30s (was 15s): the average completed call is 45s, and sub-30s recordings are
+// almost entirely "hello? hello?" with nothing worth billing audio tokens for.
+const MIN_TRANSCRIBABLE_SECONDS = 30;
 async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string, durationSeconds?: number): Promise<{
   transcript: string | null;
   summary: string | null;
@@ -32,11 +35,15 @@ async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string
   disposition: string | null;
 } | null> {
   try {
-    if (typeof durationSeconds === "number" && durationSeconds > 0 && durationSeconds < MIN_TRANSCRIBABLE_SECONDS) {
-      console.log(`Skipping transcription: recording ${durationSeconds}s < ${MIN_TRANSCRIBABLE_SECONDS}s minimum`);
+    // coalesce, don't require > 0: a null/0 duration used to SKIP this guard
+    // entirely and send blank audio to Gemini at full price (and full
+    // hallucination risk). Unknown duration is treated as untranscribable.
+    const dur = typeof durationSeconds === "number" ? durationSeconds : 0;
+    if (dur < MIN_TRANSCRIBABLE_SECONDS) {
+      console.log(`Skipping transcription: recording ${dur}s < ${MIN_TRANSCRIBABLE_SECONDS}s minimum`);
       return {
         transcript: null,
-        summary: `Call too short to transcribe (${durationSeconds}s) — no meaningful conversation.`,
+        summary: `Call too short to transcribe (${dur}s) — no meaningful conversation.`,
         conversionProb: null,
         disposition: "no_answer",
       };
@@ -52,7 +59,10 @@ async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string
     console.log(`Processing ${(audioBuffer.byteLength / 1024).toFixed(0)}KB audio via Gemini direct API...`);
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${googleApiKey}`,
+      // 2.5-flash, not 3-flash-preview: verbatim transcription + a 4-field
+      // classification is stenography, not reasoning. 3-flash was billing
+      // frontier rates on the highest-volume Gemini path we have.
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,6 +100,10 @@ Respond ONLY in valid JSON.`
           }],
           generationConfig: {
             responseMimeType: "application/json",
+            // Transcription is stenography — thinking adds nothing and bills
+            // at the (expensive) output rate on every one of ~2.2k calls/week.
+            thinkingConfig: { thinkingBudget: 0 },
+            maxOutputTokens: 8192,
           },
         }),
       }
@@ -102,6 +116,7 @@ Respond ONLY in valid JSON.`
     }
 
     const data = await res.json();
+    logGeminiUsage("voice-call-callback", "gemini-2.5-flash", data);
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!content) { console.error("No content in Gemini response:", JSON.stringify(data).slice(0, 500)); return null; }
 
@@ -561,20 +576,30 @@ Deno.serve(async (req) => {
     }
 
     // ── TRANSCRIBE SCAN: records with recordings but no summary ──
+    // This scan runs every 5 minutes. Without MAX_TRANSCRIBE_ATTEMPTS a record
+    // whose audio Gemini can't process stays summary=null forever and gets
+    // re-downloaded and re-billed on every run — 94 records were stuck in that
+    // loop, the oldest since 2026-07-31. Count the attempt BEFORE calling out,
+    // so a crash mid-call still burns an attempt rather than looping.
+    const MAX_TRANSCRIBE_ATTEMPTS = 3;
     const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
     if (GOOGLE_AI_KEY) {
       const { data: untranscribed } = await db
         .from("ai_call_records")
-        .select("id, lead_id, recording_url, duration_seconds")
+        .select("id, lead_id, recording_url, duration_seconds, transcribe_attempts")
         .not("recording_url", "is", null)
         .is("summary", null)
         .eq("status", "completed")
+        .lt("transcribe_attempts", MAX_TRANSCRIBE_ATTEMPTS)
         .order("created_at", { ascending: false })
         .limit(5);
 
       for (const call of untranscribed || []) {
         if (!call.recording_url) continue;
         console.log(`Transcribing call ${call.id} for lead ${call.lead_id}...`);
+        await db.from("ai_call_records").update({
+          transcribe_attempts: ((call as any).transcribe_attempts ?? 0) + 1,
+        }).eq("id", call.id);
         const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY, (call as any).duration_seconds ?? undefined);
         if (result) {
           await db.from("ai_call_records").update({

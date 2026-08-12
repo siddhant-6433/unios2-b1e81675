@@ -144,13 +144,36 @@ async function provisionStudent(
   // 1. Fetch student (incl. lead_id so we can look up approved offer waivers).
   const { data: student, error: sErr } = await db
     .from("students")
-    .select("id, lead_id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id")
+    .select("id, lead_id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id, admission_date")
     .eq("id", studentId)
     .single();
 
   if (sErr || !student) throw new Error(`Student not found: ${studentId}`);
   if (!student.course_id) throw new Error("Student has no course_id");
-  if (!student.session_id) throw new Error("Student has no session_id");
+
+  // Resolve a missing academic session instead of throwing. session_id is copied
+  // verbatim from leads.session_id, which stays null unless an offer letter was
+  // approved carrying a session — so higher-ed students reach PAN/AN with a null
+  // session and their ledger never provisions (and the 25% admission-number chain
+  // silently stalls). Fall back to the admission_session whose date range covers
+  // the student's admission date (today if unset), and persist it so downstream
+  // consumers (late-fee recompute joins, UI) also see a real session.
+  if (!student.session_id) {
+    const anchor = student.admission_date || new Date().toISOString().slice(0, 10);
+    const { data: sess } = await db
+      .from("admission_sessions")
+      .select("id")
+      .lte("start_date", anchor)
+      .gte("end_date", anchor)
+      .order("is_active", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!sess) {
+      throw new Error(`Student has no session_id and no admission_session covers ${anchor}`);
+    }
+    await db.from("students").update({ session_id: sess.id }).eq("id", studentId);
+    student.session_id = sess.id;
+  }
 
   const version = student.fee_structure_version || "new_admission";
 
@@ -381,16 +404,42 @@ async function provisionStudent(
   // Rule: apply token to Year-1 first; any remainder goes to Year-2, then Year-3, etc.
   // This handles the case where the token floor (₹5,000) exceeds the net Year-1
   // balance after waivers — excess rolls forward rather than sitting unallocated.
+  // Every rupee credited here is attributed to the payment that funded it and
+  // written to fee_ledger_payments after the insert. Without that link the
+  // credit is invisible to any reconciliation: it was exactly this blind spot
+  // that let one token payment get counted twice (once here at insert, once by
+  // the then-unguarded SQL provisioner) and sit undetected for months.
+  const creditLinks: { rowKey: string; lead_payment_id: string; amount: number }[] = [];
+  const rowKeyOf = (r: any) => `${r.fee_code_id}::${r.term}`;
+
+  // Draws `amount` from the payment queue, recording who funded what.
+  const drawFrom = (
+    queue: { id: string; remaining: number }[],
+    row: any,
+    amount: number,
+  ) => {
+    let left = amount;
+    for (const p of queue) {
+      if (left <= 0) break;
+      if (p.remaining <= 0) continue;
+      const take = Math.min(p.remaining, left);
+      p.remaining -= take;
+      left -= take;
+      creditLinks.push({ rowKey: rowKeyOf(row), lead_payment_id: p.id, amount: take });
+    }
+  };
+
   if (student.lead_id && newRows.length > 0) {
     const { data: appPayments } = await db
       .from("lead_payments")
-      .select("amount")
+      .select("id, amount")
       .eq("lead_id", student.lead_id)
       .eq("type", "application_fee")
-      .eq("status", "confirmed");
+      .eq("status", "confirmed")
+      .order("created_at");
 
-    let remainingApplicationCredit = (appPayments || [])
-      .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+    const appQueue = (appPayments || []).map((p: any) => ({ id: p.id, remaining: Number(p.amount || 0) }));
+    let remainingApplicationCredit = appQueue.reduce((s, p) => s + p.remaining, 0);
 
     if (remainingApplicationCredit > 0) {
       const newSeatRows = newRows
@@ -408,17 +457,20 @@ async function provisionStudent(
         row.paid_amount = Number(row.paid_amount || 0) + credit;
         if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
         remainingApplicationCredit -= credit;
+        drawFrom(appQueue, row, credit);
       }
     }
 
     const { data: toks } = await db
       .from("lead_payments")
-      .select("amount")
+      .select("id, amount")
       .eq("lead_id", student.lead_id)
       .eq("type", "token_fee")
-      .eq("status", "confirmed");
+      .eq("status", "confirmed")
+      .order("created_at");
 
-    const totalToken = (toks || []).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+    const tokenQueue = (toks || []).map((p: any) => ({ id: p.id, remaining: Number(p.amount || 0) }));
+    const totalToken = tokenQueue.reduce((s, p) => s + p.remaining, 0);
 
     if (totalToken > 0) {
       // Sum paid_amount already in existing year_N rows so we don't double-credit
@@ -428,6 +480,17 @@ async function provisionStudent(
         .reduce((s: number, r: any) => s + Number(r.paid_amount || 0), 0);
 
       let remaining = Math.max(0, totalToken - alreadyCredited);
+
+      // Token already credited on an earlier run belongs to the head of the
+      // queue, so drain it (no links — those were written then) and attribute
+      // only what this run actually places.
+      let toDrain = Math.min(alreadyCredited, totalToken);
+      for (const p of tokenQueue) {
+        if (toDrain <= 0) break;
+        const take = Math.min(p.remaining, toDrain);
+        p.remaining -= take;
+        toDrain -= take;
+      }
 
       // Apply to the new year_N rows in ascending term order.
       const newYearRows = newRows
@@ -445,6 +508,7 @@ async function provisionStudent(
         row.paid_amount = Number(row.paid_amount || 0) + credit;
         if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
         remaining -= credit;
+        drawFrom(tokenQueue, row, credit);
       }
     }
   }
@@ -453,14 +517,44 @@ async function provisionStudent(
 
   // Try insert with fee_structure_item_id; if column doesn't exist yet, retry without it
   const insertRows = newRows.map(({ fee_code_code, fee_code_name, ...row }: any) => row);
-  let { error: insertErr } = await db.from("fee_ledger").insert(insertRows);
+  const LINK_COLS = "id, fee_code_id, term";
+  let { data: inserted, error: insertErr } = await db
+    .from("fee_ledger").insert(insertRows).select(LINK_COLS);
   if (insertErr && insertErr.message?.includes("fee_structure_item_id")) {
     console.warn("fee_structure_item_id column not found, retrying without it");
     const fallbackRows = insertRows.map(({ fee_structure_item_id, ...rest }: any) => rest);
-    const res = await db.from("fee_ledger").insert(fallbackRows);
+    const res = await db.from("fee_ledger").insert(fallbackRows).select(LINK_COLS);
+    inserted = res.data;
     insertErr = res.error;
   }
   if (insertErr) throw new Error(`Insert failed: ${insertErr.message}`);
+
+  // Receipts for the credit applied above. paid_amount without a link row is
+  // money the ledger cannot account for, so this is not optional bookkeeping —
+  // it is what makes over-crediting detectable.
+  if (creditLinks.length > 0) {
+    const idByKey = new Map<string, string>(
+      (inserted || []).map((r: any) => [`${r.fee_code_id}::${r.term}`, r.id]),
+    );
+    const linkRows: Record<string, unknown>[] = [];
+    for (const l of creditLinks) {
+      const ledgerId = idByKey.get(l.rowKey);
+      if (!ledgerId || l.amount <= 0) continue;
+      linkRows.push({
+        fee_ledger_id: ledgerId,
+        lead_payment_id: l.lead_payment_id,
+        amount: l.amount,
+        concession_amount: 0,
+      });
+    }
+
+    if (linkRows.length > 0) {
+      const { error: linkErr } = await db.from("fee_ledger_payments").insert(linkRows as never);
+      // Never fail provisioning over the audit row, but make the gap loud:
+      // the reconciliation view will show it as unlinked credit.
+      if (linkErr) console.error("[provision] fee_ledger_payments link insert failed:", linkErr.message);
+    }
+  }
 
   // Canonical reconciliation: the SQL function sync_fee_ledger_concessions is
   // the single source of truth for how approved offer waivers (and manual

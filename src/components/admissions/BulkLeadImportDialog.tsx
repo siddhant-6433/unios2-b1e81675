@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { LEAD_SOURCES } from "@/config/leadSources";
 import { Badge } from "@/components/ui/badge";
-import { Upload, FileText, Loader2, CheckCircle, XCircle, Download, ArrowRight, ArrowLeft } from "lucide-react";
+import { Upload, FileText, CheckCircle, XCircle, Download, ArrowRight, ArrowLeft } from "lucide-react";
 
 interface BulkLeadImportDialogProps {
   open: boolean;
@@ -821,7 +822,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                 disabled={importing || !validCount || (listMode === "existing" && !existingListId)}
                 className="gap-1.5"
               >
-                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {importing ? <ButtonOrb state="solving" onFilled /> : <Upload className="h-4 w-4" />}
                 Import {validCount} lead{validCount === 1 ? "" : "s"}{triggerAiCalls ? " + AI Call" : ""}
               </Button>
             </div>

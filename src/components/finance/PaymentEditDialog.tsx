@@ -13,7 +13,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2 } from "lucide-react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { Trash2 } from "lucide-react";
 
 const MODE_OPTIONS: { value: string; label: string }[] = [
   { value: "cash",          label: "Cash" },
@@ -261,7 +262,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
                 Cancel
               </Button>
               <Button size="sm" onClick={handleSave} disabled={busy}>
-                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save changes"}
+                {busy ? <ButtonOrb state="connecting" onFilled /> : "Save changes"}
               </Button>
             </>
           ) : (
@@ -278,7 +279,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
                 onClick={handleDelete}
                 disabled={busy}
               >
-                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Confirm delete"}
+                {busy ? <ButtonOrb state="connecting" onFilled /> : "Confirm delete"}
               </Button>
             </>
           )}

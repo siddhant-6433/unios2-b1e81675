@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { ArrowLeft, Loader2, Send, CheckCircle, Download } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationData } from "./types";
 import { usePortal } from "@/components/apply/PortalContext";
@@ -121,7 +122,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
             </div>
           </div>
           <Button onClick={downloadPDF} disabled={generating} variant="outline" size="sm" className="gap-2">
-            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {generating ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
             Download PDF
           </Button>
         </div>
@@ -329,7 +330,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
               </Button>
             ) : <div />}
             <Button onClick={handleSubmit} disabled={saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
               Submit Application
             </Button>
           </div>

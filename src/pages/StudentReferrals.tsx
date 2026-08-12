@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,9 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Users, Gift, Plus, Loader2, CheckCircle, Clock, UserPlus, Send, IndianRupee,
-} from "lucide-react";
+import { Users, Gift, Plus, CheckCircle, Clock, UserPlus, Send, IndianRupee } from "lucide-react";
 
 interface Referral {
   id: string;
@@ -307,7 +306,7 @@ const StudentReferrals = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!name.trim() || !phone.trim() || saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Send className="h-4 w-4" />}
               Submit Referral
             </Button>
           </DialogFooter>

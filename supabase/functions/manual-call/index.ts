@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumberPool } from "../_shared/phone.ts";
+import { maskPhoneForLog, normalizePlivoVoiceNumber } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,47 +30,29 @@ function json(data: any, status = 200) {
   });
 }
 
-function chooseNextDialerNumber(dialerNumbers: string[], previousFromNumber: string | null | undefined): string {
-  const previous = normalizePlivoVoiceNumber(previousFromNumber);
-  const previousIndex = previous ? dialerNumbers.indexOf(previous) : -1;
-  return dialerNumbers[(previousIndex + 1) % dialerNumbers.length];
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
     const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
-    // Cloud-dialer caller-id — separate from the AI agent's number so leads
-    // can tell whether they're being called by an AI vs a human counsellor.
+    // Cloud-dialer caller-id — dedicated number for counsellor-initiated calls,
+    // separate from the AI agent's number so leads can tell who's calling.
+    // ponytail: single number, no rotation — add pool back if spam-flagging returns
     const PLIVO_DIALER_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER");
-    const PLIVO_DIALER_PHONE_NUMBERS = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const dialerNumberSecrets = [PLIVO_DIALER_PHONE_NUMBERS, PLIVO_DIALER_PHONE_NUMBER];
-
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !dialerNumberSecrets.some(Boolean) || !VOICE_AGENT_URL) {
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
-    const dialerNumbers = normalizePlivoVoiceNumberPool(dialerNumberSecrets);
-    if (dialerNumbers.length === 0) {
-      console.error(
-        "Invalid PLIVO_DIALER_PHONE_NUMBER(S) for voice calls:",
-        dialerNumberSecrets.map(maskPhoneForLog).filter(Boolean).join(", "),
-      );
+    const dialerFrom = normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER);
+    if (!dialerFrom) {
+      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER:", maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER));
       return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
-    }
-    if (dialerNumbers.length < 2) {
-      console.error(
-        "At least two unique PLIVO_DIALER_PHONE_NUMBER(S) are required for Cloud Call rotation:",
-        dialerNumbers.map(maskPhoneForLog).join(", "),
-      );
-      return json({ error: "At least two calling numbers must be configured. Contact admin." }, 503);
     }
 
     // Auth: accept anon key (manual button) or service role (internal).
@@ -108,21 +90,6 @@ Deno.serve(async (req) => {
         return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
       }
     }
-
-    const { data: latestManualCall, error: latestManualCallErr } = await db
-      .from("ai_call_records")
-      .select("from_number")
-      .eq("call_type", "manual")
-      .not("from_number", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latestManualCallErr) {
-      console.warn("Could not read last Plivo caller ID for rotation; defaulting to first dialer number:", latestManualCallErr);
-    }
-    const dialerFrom = latestManualCallErr
-      ? dialerNumbers[0]
-      : chooseNextDialerNumber(dialerNumbers, (latestManualCall as any)?.from_number);
 
     // Fetch lead
     const { data: lead, error: leadErr } = await db
@@ -278,7 +245,6 @@ Deno.serve(async (req) => {
       ...plivoPayload,
       from: maskPhoneForLog(dialerFrom),
       to: maskPhoneForLog(counsellorPhone),
-      dialer_pool_size: dialerNumbers.length,
     }));
 
     if (!plivoRes.ok) {

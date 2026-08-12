@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft } from "lucide-react";
+import { UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft } from "lucide-react";
 
 interface Course { id: string; name: string; code: string; }
 interface Campus { id: string; name: string; }
@@ -418,7 +419,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
                 <ChevronLeft className="h-4 w-4" /> Back
               </Button>
               <Button onClick={handleSubmit} disabled={saving || !canSubmit} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />}
                 Add Student
               </Button>
             </div>

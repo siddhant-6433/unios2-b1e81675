@@ -77,8 +77,15 @@ Deno.serve(async (req) => {
       ? await admin.from("profiles").select("user_id, phone").in("user_id", saIds)
       : { data: [] };
 
-    // Resolve emails via auth admin API
-    const { data: { users: authUsers } } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    // Resolve emails via auth admin API.
+    // Paginated: a single perPage:1000 call truncated at 1,000 of ~2,836 users,
+    // so super_admins outside that page silently got no reminder.
+    const authUsers: Awaited<ReturnType<typeof admin.auth.admin.listUsers>>["data"]["users"] = [];
+    for (let page = 1; page <= 20; page++) {
+      const { data: pageData } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (!pageData?.users?.length) break;
+      authUsers.push(...pageData.users);
+    }
     const saIdSet = new Set(saIds);
     const profileMap = new Map((profileRows || []).map((p: { user_id: string; phone: string | null }) => [p.user_id, p.phone]));
 

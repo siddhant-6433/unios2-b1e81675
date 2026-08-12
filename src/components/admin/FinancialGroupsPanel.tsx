@@ -2,10 +2,8 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Building2, MapPin, Layers, Pencil, Check, X, Plus, Loader2,
-  ChevronDown, ChevronRight, Users,
-} from "lucide-react";
+import { OrbLoader } from "@/components/ui/thinking-orb";
+import { Building2, MapPin, Layers, Pencil, Check, X, Plus, ChevronDown, ChevronRight, Users } from "lucide-react";
 
 // ── Local interfaces ──────────────────────────────────────────────────────
 
@@ -224,7 +222,7 @@ export default function FinancialGroupsPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }

@@ -11,6 +11,7 @@ import {
   extForMime,
   processPassportPhoto,
 } from "../_shared/passportPhoto.ts";
+import { downscaleForDisplay } from "../_shared/resizeImage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -91,19 +92,20 @@ async function processOne(
       return { id: job.id, ok: false, error: err };
     }
 
-    const outBytes = base64ToBytes(result.base64);
-    if (outBytes.byteLength > MAX_IMAGE_BYTES) {
+    const rawOutBytes = base64ToBytes(result.base64);
+    if (rawOutBytes.byteLength > MAX_IMAGE_BYTES) {
       throw new Error("Processed image exceeds 5MB");
     }
+    const display = await downscaleForDisplay(rawOutBytes, result.mimeType);
 
-    const ext = extForMime(result.mimeType);
+    const ext = extForMime(display.mimeType);
     const version = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
     const processedPath =
       `${job.campus_id || "unassigned"}/${job.student_id}/processed-${version}.${ext}`;
 
     const { error: uploadError } = await admin.storage
       .from(BUCKET)
-      .upload(processedPath, outBytes, { contentType: result.mimeType, upsert: true });
+      .upload(processedPath, display.bytes, { contentType: display.mimeType, upsert: true });
     if (uploadError) throw new Error(uploadError.message);
 
     const { data: publicUrl } = admin.storage.from(BUCKET).getPublicUrl(processedPath);

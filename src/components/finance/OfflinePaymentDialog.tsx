@@ -12,11 +12,12 @@ import { useToast } from "@/hooks/use-toast";
 import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
-import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
+import { IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
   { value: "application_fee",     label: "Application Fee" },
@@ -65,7 +66,15 @@ type ChargeHead = { id: string; fee_code_id: string; code: string; name: string;
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  leadId: string;
+  /** Pre-admission / admitted-with-lead payer. Omit for a lead-less student. */
+  leadId?: string;
+  /**
+   * Post-admission student with no admission lead (school pupils). When set and
+   * leadId is absent, the receipt is booked against the student directly:
+   * lead_payments.student_id, type is locked to a plain fee payment, and the
+   * receipt PDF is generated from the student's own course→institution chain.
+   */
+  studentId?: string;
   applicationId?: string | null;
   defaultType?: string;
   /** Pre-fills the amount — the cashier desk passes the selected head's balance. */
@@ -81,13 +90,16 @@ interface Props {
 }
 
 export function OfflinePaymentDialog({
-  open, onOpenChange, leadId, applicationId, defaultType,
+  open, onOpenChange, leadId, studentId, applicationId, defaultType,
   defaultAmount, defaultAllocations, onRecorded,
 }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
 
-  const [type,   setType]   = useState<string>(defaultType || "application_fee");
+  // Lead-less student receipt: no lead, book against the student directly.
+  const isStudent = !leadId && !!studentId;
+
+  const [type,   setType]   = useState<string>(defaultType || (isStudent ? "other" : "application_fee"));
   const [amount, setAmount] = useState<string>(defaultAmount ? String(defaultAmount) : "");
   const initialDateTime = getCurrentIndiaDateTimeInput();
   const [date,   setDate]   = useState<string>(initialDateTime.date);
@@ -170,21 +182,24 @@ export function OfflinePaymentDialog({
   }, [isCreditNote, consultantId]);
 
   // Day-closer / 9AM–6PM cash window gate (super_admin is always exempt server-side).
-  const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode);
+  const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode, studentId);
 
   // Owner decision: offline cash recording is cashier (accountant) + super_admin
-  // only — no counsellors, no campus admins, no consultants.
-  const allowedRole = ["super_admin", "accountant"].includes(role || "");
+  // only — no counsellors, no campus admins, no consultants. office_admin has
+  // full accountant-level access (see has_role inheritance).
+  const allowedRole = ["super_admin", "accountant", "office_admin"].includes(role || "");
 
   if (!allowedRole) return null;
 
-  const modeOptions = isSuperAdmin
+  // Consultant credit notes are a lead concept — never offered for a lead-less
+  // student receipt.
+  const modeOptions = isSuperAdmin && !isStudent
     ? [...MODE_OPTIONS, { value: CREDIT_NOTE_MODE, label: "Consultant Credit Note (no cash)" }]
     : MODE_OPTIONS;
 
   const reset = () => {
     const now = getCurrentIndiaDateTimeInput();
-    setType(defaultType || "application_fee");
+    setType(defaultType || (isStudent ? "other" : "application_fee"));
     setAmount(defaultAmount ? String(defaultAmount) : "");
     setChargeHeadId("");
     setDate(now.date);
@@ -291,7 +306,7 @@ export function OfflinePaymentDialog({
     let proofUrl: string | null = null;
     if (proofFile) {
       const ext = proofFile.name.split(".").pop() || "bin";
-      const path = `payment-proofs/${leadId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const path = `payment-proofs/${leadId ?? studentId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("application-documents")
         .upload(path, proofFile, { contentType: proofFile.type, upsert: false });
@@ -305,7 +320,8 @@ export function OfflinePaymentDialog({
     }
 
     const { data: inserted, error } = await (supabase.from("lead_payments") as any).insert({
-      lead_id:         leadId,
+      lead_id:         leadId ?? null,
+      student_id:      isStudent ? studentId : null,
       type,
       amount:          amt,
       payment_mode:    mode,
@@ -317,7 +333,7 @@ export function OfflinePaymentDialog({
       notes:           notes || null,
       proof_url:       proofUrl,
       fee_code_id:     selectedChargeHead?.fee_code_id || null,
-      application_id:   type === "application_fee" ? applicationId || null : null,
+      application_id:  !isStudent && type === "application_fee" ? applicationId || null : null,
       allocations:     allocations.length ? allocations : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
@@ -336,10 +352,18 @@ export function OfflinePaymentDialog({
     // rows so we don't double-send.
     const paymentId = inserted?.id as string | undefined;
     if (paymentId) {
-      const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
-      supabase.functions.invoke("notify-event", {
-        body: { event, lead_id: leadId, context: { payment_id: paymentId, application_id: applicationId || undefined } },
-      }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
+      if (isStudent) {
+        // No lead to notify (WhatsApp/email flow is lead-centric); just mint the
+        // receipt PDF + receipt_url straight from generate-payment-receipt.
+        supabase.functions.invoke("generate-payment-receipt", {
+          body: { payment_id: paymentId },
+        }).catch(e => console.error("[OfflinePaymentDialog] generate-payment-receipt failed:", e));
+      } else {
+        const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
+        supabase.functions.invoke("notify-event", {
+          body: { event, lead_id: leadId, context: { payment_id: paymentId, application_id: applicationId || undefined } },
+        }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
+      }
     }
 
     toast({
@@ -364,13 +388,22 @@ export function OfflinePaymentDialog({
         <div className="min-w-0 space-y-3 py-2">
           {/* Type + amount row */}
           <div className="grid grid-cols-2 gap-3">
-            <SelectField
-              value={type}
-              onValueChange={setType}
-              options={PAY_TYPES.map(p => ({ value: p.value, label: p.label }))}
-              label="Fee Type"
-              allowEmpty={false}
-            />
+            {isStudent ? (
+              // Lead-less student receipt: type is a plain fee payment (the
+              // ticked ledger rows carry the real heads). App-fee/token types
+              // are lead concepts and would fire lead-only triggers.
+              <FieldShell label="Fee Type">
+                <Input value="Fee Payment" readOnly />
+              </FieldShell>
+            ) : (
+              <SelectField
+                value={type}
+                onValueChange={setType}
+                options={PAY_TYPES.map(p => ({ value: p.value, label: p.label }))}
+                label="Fee Type"
+                allowEmpty={false}
+              />
+            )}
             <FieldShell label="Amount (₹)">
               <Input
                 type="number" min="1" step="1" inputMode="numeric"
@@ -608,7 +641,7 @@ export function OfflinePaymentDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting || cashBlocked}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
             {submitting ? "Recording…" : "Mark as Paid"}
           </Button>
         </DialogFooter>

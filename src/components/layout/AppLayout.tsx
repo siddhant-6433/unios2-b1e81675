@@ -1,4 +1,5 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { PageLoader } from "@/components/ui/page-loader";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
@@ -135,6 +136,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [deferredShellReady, setDeferredShellReady] = useState(false);
   const [showWalkIn, setShowWalkIn] = useState(false);
   const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || role === "principal";
+  // Console routes own their own scrolling and want the full viewport: the
+  // shell stops growing and <main> stops padding, so a three-column layout can
+  // just use h-full instead of guessing the chrome height with calc(100vh-Npx).
+  const isConsole = location.pathname === "/cloud-dialer";
   usePresenceHeartbeat();
 
   useEffect(() => {
@@ -145,12 +150,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <CounsellorFilterProvider>
-    <div className="flex flex-col min-h-screen">
+    <div className={`flex flex-col ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       <ImpersonationBanner />
       <SidebarProvider>
-        <div className="flex-1 flex w-full">
+        <div className="flex-1 flex w-full min-h-0">
           <AppSidebar />
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border/60 bg-card/80 backdrop-blur-xl px-3 py-2 sm:px-5">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
@@ -184,23 +189,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 meant two places to decide what to work on next. */}
             {deferredShellReady && role !== "counsellor" && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
-            <main className="flex-1 overflow-auto p-6">
-              <Suspense fallback={
-                <div className="animate-rs-slide-up space-y-6">
-                  <div className="blade-indeterminate h-0.5 w-full rounded-full bg-primary/20" />
-                  <div className="space-y-2">
-                    <div className="h-7 w-48 rounded-lg blade-skeleton" />
-                    <div className="h-4 w-80 rounded-md blade-skeleton" />
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="h-28 rounded-xl flutes" />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '80ms' }} />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '160ms' }} />
-                    <div className="h-28 rounded-xl flutes" style={{ animationDelay: '240ms' }} />
-                  </div>
-                  <div className="h-64 rounded-xl flutes" />
-                </div>
-              }>
+            <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : "overflow-auto p-6"}`}>
+              {/* Same surface the RequirePermission gate and the page's own
+                  loading branch render, so the three handoffs read as one. */}
+              <Suspense fallback={<PageLoader className={isConsole ? "p-6" : undefined} />}>
                 {children}
               </Suspense>
             </main>

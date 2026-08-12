@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -126,10 +127,16 @@ interface AppRow {
   lead_stage?: string;
   lead_counsellor_id?: string;
   lead_shared_with_nimt?: boolean | null;
+  /** External owner = academic partner OR consultant (mirrors LeadDetail: consultant wins). */
+  lead_external_owner_id?: string | null;
+  lead_external_owner_type?: "academic_partner" | "consultant" | null;
+  lead_external_owner_name?: string | null;
   lead_pre_admission_no?: string | null;
   lead_admission_no?: string | null;
   has_offer?: boolean;
   app_fee_paid?: number;
+  /** Sum of confirmed lead_payments with type != 'application_fee' (token/registration/other). */
+  other_fee_paid?: number;
   has_token_fee_paid?: boolean;
   doc_counts?: { total: number; verified: number; rejected: number; pending: number };
   /** Amount still due for PAN issuance (null when lead has no offer yet or already has PAN). */
@@ -168,6 +175,12 @@ const FUNNEL_ORDER: FunnelStage[] = [
 ];
 
 const funnelStageOf = applicationFunnelStageOf;
+
+// External-owner (academic partner / consultant) display helpers.
+const ownerTypeLabel = (type?: "academic_partner" | "consultant" | null) =>
+  type === "consultant" ? "Consultant" : type === "academic_partner" ? "Admission Partner" : "";
+const ownerBadgeText = (type?: "academic_partner" | "consultant" | null) =>
+  type === "consultant" ? "C" : type === "academic_partner" ? "AP" : "";
 const RELATED_QUERY_BATCH_SIZE = 100;
 const APPLICATION_TABLE_PAGE_SIZE = 100;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
@@ -370,7 +383,7 @@ export default function Applications() {
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
   // offline cash recording is cashier (accountant) + super_admin (matches OfflinePaymentDialog gate)
-  const canRecordOffline = ["super_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "accountant", "office_admin"].includes(role || "");
   const canManageApplicationLists = role === "super_admin" || role === "admission_head";
   const canViewCourseBreakup = canManageApplicationLists;
   const canExportApplications = isSuperAdmin || role === "principal";
@@ -383,7 +396,15 @@ export default function Applications() {
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted" | "on_hold">("all");
   const [courseFilter, setCourseFilter] = useState("all");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const [partnerFilter, setPartnerFilter] = useState("all");
   const [sharedWithNimtFilter, setSharedWithNimtFilter] = useState<"all" | "shared" | "not_shared">("all");
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportCourse, setReportCourse] = useState("all");
+  const [reportCampus, setReportCampus] = useState("all");
+  const [reportStages, setReportStages] = useState<string[]>([]); // empty = all stages
+  const [reportExcludedColumns, setReportExcludedColumns] = useState<string[]>([]); // columns to drop
+  const [reportOnlyOtherFeePaid, setReportOnlyOtherFeePaid] = useState(false); // only candidates who paid a fee beyond the application fee
+  const [exportingReport, setExportingReport] = useState(false);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   /** When a funnel stage is active: further narrow to on-hold vs not-on-hold at that stage. */
   const [stageHoldSplit, setStageHoldSplit] = useState<"all" | "on_hold" | "active">("all");
@@ -546,10 +567,15 @@ export default function Applications() {
       const leadStageMap: Record<string, string> = {};
       const leadCounsellorIdMap: Record<string, string> = {};
       const leadSharedMap: Record<string, boolean | null> = {};
+      const leadPartnerIdMap: Record<string, string | null> = {};
+      const leadConsultantIdMap: Record<string, string | null> = {};
+      const partnerNameMap: Record<string, string> = {}; // academic_partner_id → display name
+      const consultantNameMap: Record<string, string> = {}; // consultant_id → display name
       const leadPanMap: Record<string, string | null> = {};
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
       const appFeePaidMap: Record<string, number> = {};
+      const nonAppFeePaidMap: Record<string, number> = {};
       const leadTokenFeePaidSet: Set<string> = new Set();
       const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
@@ -588,6 +614,7 @@ export default function Applications() {
         });
         return {
           ...applyApplicationDossierToRow(a, dossier),
+          other_fee_paid: nonAppFeePaidMap[leadId] || 0,
           registration_statuses: buildRegistrationStatuses(a, {
             cahet: cahetRegistrationMap,
             updeled: updeledRegistrationMap,
@@ -603,6 +630,26 @@ export default function Applications() {
             };
           })(),
           lead_shared_with_nimt: leadSharedMap[leadId] ?? null,
+          ...(() => {
+            // Consultant takes precedence over academic partner (same as LeadDetail).
+            const consultantId = leadConsultantIdMap[leadId];
+            const partnerId = leadPartnerIdMap[leadId];
+            if (consultantId) {
+              return {
+                lead_external_owner_id: consultantId,
+                lead_external_owner_type: "consultant" as const,
+                lead_external_owner_name: consultantNameMap[consultantId] || null,
+              };
+            }
+            if (partnerId) {
+              return {
+                lead_external_owner_id: partnerId,
+                lead_external_owner_type: "academic_partner" as const,
+                lead_external_owner_name: partnerNameMap[partnerId] || null,
+              };
+            }
+            return { lead_external_owner_id: null, lead_external_owner_type: null, lead_external_owner_name: null };
+          })(),
         };
       });
 
@@ -626,7 +673,6 @@ export default function Applications() {
             supabase.from("lead_payments")
               .select("lead_id, amount, type")
               .in("lead_id", batch)
-              .in("type", ["application_fee", "token_fee"])
               .eq("status", "confirmed"),
             registrationClient.from("cahet_registrations")
               .select("lead_id, registration_no")
@@ -679,15 +725,18 @@ export default function Applications() {
           (paymentsResult.data || []).forEach((p: { lead_id: string; amount: number | string | null; type: string }) => {
             if (p.type === "application_fee") {
               appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
-            } else if (p.type === "token_fee") {
-              leadTokenFeePaidSet.add(p.lead_id);
+            } else {
+              nonAppFeePaidMap[p.lead_id] = (nonAppFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+              if (p.type === "token_fee") {
+                leadTokenFeePaidSet.add(p.lead_id);
+              }
             }
           });
         }));
 
         const leadResults = await Promise.all(leadBatches.map(async (batch) => {
           const { data, error } = await supabase.from("leads")
-            .select("id, counsellor_id, stage, pre_admission_no, admission_no, shared_with_nimt")
+            .select("id, counsellor_id, stage, pre_admission_no, admission_no, shared_with_nimt, academic_partner_id, consultant_id")
             .in("id", batch);
           if (error) {
             console.error("leads batch failed:", error);
@@ -702,6 +751,8 @@ export default function Applications() {
           pre_admission_no: string | null;
           admission_no: string | null;
           shared_with_nimt: boolean | null;
+          academic_partner_id: string | null;
+          consultant_id: string | null;
         }[];
         leads.forEach((l) => {
           leadStageMap[l.id] = l.stage;
@@ -709,6 +760,8 @@ export default function Applications() {
           leadPanMap[l.id] = l.pre_admission_no;
           leadAnMap[l.id] = l.admission_no;
           leadSharedMap[l.id] = l.shared_with_nimt;
+          leadPartnerIdMap[l.id] = l.academic_partner_id;
+          leadConsultantIdMap[l.id] = l.consultant_id;
         });
 
         const counsellorIds = [...new Set(leads.map((l) => l.counsellor_id).filter(Boolean))] as string[];
@@ -728,6 +781,40 @@ export default function Applications() {
             if (l.counsellor_id && profileMap[l.counsellor_id]) {
               counsellorMap[l.id] = profileMap[l.counsellor_id];
             }
+          });
+        }
+
+        // Academic-partner names for partner-sourced leads (leads.academic_partner_id).
+        const partnerIds = [...new Set(Object.values(leadPartnerIdMap).filter(Boolean))] as string[];
+        if (partnerIds.length > 0) {
+          const partnerResults = await Promise.all(chunkArray(partnerIds, RELATED_QUERY_BATCH_SIZE).map(async (batch) => {
+            const { data, error } = await supabase.from("academic_partners")
+              .select("id, name, organization")
+              .in("id", batch);
+            if (error) {
+              console.error("academic_partners batch failed:", error);
+            }
+            return data || [];
+          }));
+          partnerResults.flat().forEach((p: { id: string; name: string | null; organization: string | null }) => {
+            partnerNameMap[p.id] = p.organization || p.name || "";
+          });
+        }
+
+        // Consultant names for consultant-sourced leads (leads.consultant_id).
+        const consultantIds = [...new Set(Object.values(leadConsultantIdMap).filter(Boolean))] as string[];
+        if (consultantIds.length > 0) {
+          const consultantResults = await Promise.all(chunkArray(consultantIds, RELATED_QUERY_BATCH_SIZE).map(async (batch) => {
+            const { data, error } = await supabase.from("consultants")
+              .select("id, name, organization")
+              .in("id", batch);
+            if (error) {
+              console.error("consultants batch failed:", error);
+            }
+            return data || [];
+          }));
+          consultantResults.flat().forEach((c: { id: string; name: string | null; organization: string | null }) => {
+            consultantNameMap[c.id] = c.organization || c.name || "";
           });
         }
       }
@@ -838,6 +925,28 @@ export default function Applications() {
     return hasNoCourse ? ["No course", ...sorted] : sorted;
   }, [apps]);
 
+  // Campuses available for the chosen report course only (empty course = all).
+  // Same primary-selection derivation the top summary table groups by.
+  const reportCampusOptions = useMemo(() => {
+    const campuses = new Set<string>();
+    apps.forEach((app) => {
+      const { course, campus } = primaryCourseSelection(app);
+      if (reportCourse !== "all" && course !== reportCourse) return;
+      if (campus && campus !== "No campus") campuses.add(campus);
+    });
+    return Array.from(campuses).sort((a, b) => a.localeCompare(b));
+  }, [apps, reportCourse]);
+
+  // Live count of applications matching the current report selection.
+  const reportMatches = useMemo(() => apps.filter((app) => {
+    const { course, campus } = primaryCourseSelection(app);
+    if (reportCourse !== "all" && course !== reportCourse) return false;
+    if (reportCampus !== "all" && campus !== reportCampus) return false;
+    if (reportStages.length > 0 && !reportStages.includes(funnelStageOf(app))) return false;
+    if (reportOnlyOtherFeePaid && !(app.other_fee_paid && app.other_fee_paid > 0)) return false;
+    return true;
+  }), [apps, reportCourse, reportCampus, reportStages, reportOnlyOtherFeePaid]);
+
   const counsellorOptions = useMemo(() => {
     const counsellors = new Map<string, string>();
     let hasUnassigned = false;
@@ -856,6 +965,18 @@ export default function Applications() {
     return hasUnassigned
       ? [{ id: "__unassigned", name: "Unassigned" }, ...options]
       : options;
+  }, [apps]);
+
+  const partnerOptions = useMemo(() => {
+    const owners = new Map<string, string>();
+    apps.forEach((app) => {
+      if (app.lead_external_owner_id) {
+        const base = app.lead_external_owner_name || ownerTypeLabel(app.lead_external_owner_type) || "External owner";
+        owners.set(app.lead_external_owner_id, `${base} (${ownerTypeLabel(app.lead_external_owner_type)})`);
+      }
+    });
+    return Array.from(owners, ([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [apps]);
 
   const matchesCourseFilter = useCallback((app: AppRow) =>
@@ -881,6 +1002,7 @@ export default function Applications() {
     if (!matchesCounsellorFilter(a)) return false;
     if (sharedWithNimtFilter === "shared" && a.lead_shared_with_nimt === false) return false;
     if (sharedWithNimtFilter === "not_shared" && a.lead_shared_with_nimt !== false) return false;
+    if (partnerFilter !== "all" && a.lead_external_owner_id !== partnerFilter) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
@@ -945,7 +1067,7 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
+  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, partnerFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
@@ -1304,6 +1426,8 @@ export default function Applications() {
             "Sections Completed": `${completed}/${total}`,
             "Lead Stage": app.lead_stage || "",
             Counsellor: app.counsellor_name || "",
+            "External Owner": app.lead_external_owner_name || "",
+            "Owner Type": ownerTypeLabel(app.lead_external_owner_type),
             PAN: app.lead_pre_admission_no || "",
             AN: app.lead_admission_no || "",
             Gender: app.gender || "",
@@ -1347,6 +1471,7 @@ export default function Applications() {
       "Current Status": currentStatus,
       "Application Status": app.status || "",
       "Payment Status": app.payment_status || "pending",
+      "Other Fee Paid": app.other_fee_paid ? String(app.other_fee_paid) : "",
       "Lead Stage": app.lead_stage ? (LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage) : "",
       Course: course === "No course" ? "" : course,
       Campus: campus === "No campus" ? "" : campus,
@@ -1359,10 +1484,16 @@ export default function Applications() {
       PAN: app.lead_pre_admission_no || "",
       AN: app.lead_admission_no || "",
       Counsellor: app.counsellor_name || "",
+      "External Owner": app.lead_external_owner_name || "",
+      "Owner Type": ownerTypeLabel(app.lead_external_owner_type),
       "Submitted At": formatExportDateTime(app.submitted_at),
       "Created At": formatExportDateTime(app.created_at),
     };
   };
+
+  // Canonical report column order — derived from the row builder so it never drifts.
+  const reportAllColumns = apps.length > 0 ? Object.keys(applicationCourseExportRow(apps[0])) : [];
+  const reportIncludedColumns = reportAllColumns.filter((c) => !reportExcludedColumns.includes(c));
 
   const handleExportCourseSplitCsv = async () => {
     if (courseFilter === "all") {
@@ -1406,6 +1537,38 @@ export default function Applications() {
     }
   };
 
+  // Consolidated report: hand-picked course + campus + a set of lifecycle stages.
+  // Sources `apps` directly so it's independent of the page's filter bar.
+  const handleExportCustomReport = async () => {
+    setExportingReport(true);
+    try {
+      const slug = [reportCourse, reportCampus]
+        .filter((v) => v !== "all")
+        .map(exportFileSlug)
+        .join("-") || "all";
+      const { count } = exportRowsCsv(
+        reportMatches.map((app) => {
+          const full = applicationCourseExportRow(app) as Record<string, unknown>;
+          return Object.fromEntries(reportIncludedColumns.map((c) => [c, full[c]]));
+        }),
+        `applications-report-${slug}`,
+      );
+      toast({
+        title: count > 0 ? "Report exported" : "No applications match",
+        description: count > 0 ? `${count} application${count === 1 ? "" : "s"} exported.` : undefined,
+      });
+      if (count > 0) setShowReportDialog(false);
+    } catch (error) {
+      toast({
+        title: "Report export failed",
+        description: error instanceof Error ? error.message : "Unable to export report.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   if (loading) return <PageLoader className="min-h-[40vh]" />;
 
   return (
@@ -1426,14 +1589,14 @@ export default function Applications() {
               className="gap-1.5 text-xs font-medium text-muted-foreground"
               title="Export applications matching the current filters"
             >
-              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-3 w-3" />}
               Download CSV
             </Button>
           )}
           {!isCounsellor && (
             <Button variant="pill-outline" size="sm" onClick={regenerateAll} disabled={!!bulkRegen}
               className="gap-1.5 text-xs font-medium text-muted-foreground">
-              {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {bulkRegen ? <ButtonOrb state="working" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
                 : selectedPdfApps.length > 0
@@ -1808,8 +1971,20 @@ export default function Applications() {
               ? "Select a course first to export in-progress and paid/other CSV files"
               : "Download two CSV files for the selected course: in-progress and paid/other states"}
           >
-            {exportingCourseSplit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {exportingCourseSplit ? <ButtonOrb state="working" /> : <Download className="h-3.5 w-3.5" />}
             Course CSVs
+          </Button>
+        )}
+        {canExportApplications && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            onClick={() => setShowReportDialog(true)}
+            title="Build a consolidated CSV report for a course + campus across multiple lifecycle stages"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Custom Report
           </Button>
         )}
         {!isCounsellor && (
@@ -1867,6 +2042,19 @@ export default function Applications() {
             ariaLabel="Filter applications by academic-partner NIMT sharing"
           />
         )}
+        {partnerOptions.length > 0 && (
+          <SelectField
+            value={partnerFilter}
+            onValueChange={setPartnerFilter}
+            options={[
+              { value: "all", label: "All partners" },
+              ...partnerOptions.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+            ariaLabel="Filter applications by external owner (partner or consultant)"
+          />
+        )}
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}
@@ -1889,8 +2077,8 @@ export default function Applications() {
             Save filter ({filteredListApps.length})
           </Button>
         )}
-        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || partnerFilter !== "all" || paymentFilter !== "all" || statusFilter !== "all" || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPartnerFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
@@ -2012,9 +2200,19 @@ export default function Applications() {
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
                     <td className="px-2 py-2 min-w-[180px] max-w-[240px]">
-                      <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
-                        {app.full_name || "—"}
-                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`font-medium truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
+                          {app.full_name || "—"}
+                        </span>
+                        {app.lead_external_owner_id && (
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                            title={`${ownerTypeLabel(app.lead_external_owner_type)}${app.lead_external_owner_name ? `: ${app.lead_external_owner_name}` : ""}`}
+                          >
+                            {ownerBadgeText(app.lead_external_owner_type)}
+                          </span>
+                        )}
+                      </div>
                       {app.lead_shared_with_nimt === false && (
                         <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Academic-partner lead not shared with the NIMT team">
                           Not shared with NIMT
@@ -2194,14 +2392,14 @@ export default function Applications() {
                                   <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
                                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
                                     title="Regenerate Application Form PDF">
-                                    {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                    {generatingPdfFor === app.id ? <ButtonOrb state="working" onFilled /> : <RefreshCw className="h-3.5 w-3.5" />}
                                     Regenerate
                                   </button>
                                 </>
                               ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
                                 <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
                                   className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                                  {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                                  {generatingPdfFor === app.id ? <ButtonOrb state="working" onFilled /> : <FileText className="h-3.5 w-3.5" />}
                                   Generate Form PDF
                                 </button>
                               )}
@@ -2439,7 +2637,7 @@ export default function Applications() {
               disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
               className="gap-2"
             >
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <ListPlus className="h-4 w-4" />}
               {listMode === "new" ? "Create List" : "Add to List"}
             </Button>
           </DialogFooter>
@@ -2499,6 +2697,100 @@ export default function Applications() {
               })}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom consolidated report — course + campus + a set of lifecycle stages. */}
+      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Custom report</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Course</p>
+              <SelectField
+                value={reportCourse}
+                onValueChange={(v) => { setReportCourse(v); setReportCampus("all"); }}
+                options={[{ value: "all", label: "All courses" }, ...courseOptions.map((c) => ({ value: c, label: c }))]}
+                allowEmpty={false}
+                triggerClassName="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                ariaLabel="Report course"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Campus</p>
+              <SelectField
+                value={reportCampus}
+                onValueChange={setReportCampus}
+                options={[{ value: "all", label: "All campuses" }, ...reportCampusOptions.map((c) => ({ value: c, label: c }))]}
+                allowEmpty={false}
+                triggerClassName="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                ariaLabel="Report campus"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Stages (none selected = all)</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {FUNNEL_ORDER.map((stage) => (
+                  <label key={stage} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={reportStages.includes(stage)}
+                      onCheckedChange={(v) => setReportStages((prev) =>
+                        v ? Array.from(new Set([...prev, stage])) : prev.filter((s) => s !== stage))}
+                    />
+                    {FUNNEL_META[stage].label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={reportOnlyOtherFeePaid}
+                onCheckedChange={(v) => setReportOnlyOtherFeePaid(!!v)}
+              />
+              Only candidates who paid a fee beyond the application fee
+            </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">Columns</p>
+                {reportExcludedColumns.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => setReportExcludedColumns([])}
+                  >
+                    Select all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto rounded-lg border border-border/40 p-2">
+                {reportAllColumns.map((col) => (
+                  <label key={col} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <Checkbox
+                      checked={!reportExcludedColumns.includes(col)}
+                      onCheckedChange={(v) => setReportExcludedColumns((prev) =>
+                        v ? prev.filter((c) => c !== col) : Array.from(new Set([...prev, col])))}
+                    />
+                    <span className="truncate" title={col}>{col}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{reportMatches.length}</span>{" "}
+            application{reportMatches.length === 1 ? "" : "s"} match this selection.
+          </p>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setReportStages([])} disabled={reportStages.length === 0}>
+              Clear stages
+            </Button>
+            <Button size="sm" onClick={handleExportCustomReport} disabled={exportingReport || reportMatches.length === 0 || reportIncludedColumns.length === 0}>
+              {exportingReport ? <ButtonOrb state="working" /> : <Download className="h-3.5 w-3.5" />}
+              Download report ({reportMatches.length})
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

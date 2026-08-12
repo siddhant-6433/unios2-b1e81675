@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, UserPlus, X, ChevronDown } from "lucide-react";
+import { UserPlus, X, ChevronDown } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { TextField, SelectField } from "@/components/ui/state-fields";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -405,7 +406,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
             >
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <ButtonOrb state="connecting" onFilled />
                   {password ? "Creating…" : "Sending…"}
                 </>
               ) : (

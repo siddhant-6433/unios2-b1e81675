@@ -18,7 +18,7 @@ const Progress = React.forwardRef<
   return (
     <ProgressPrimitive.Root
       ref={ref}
-      className={cn("relative h-2 w-full overflow-hidden rounded bg-muted", isComplete && "rs-success-flash", className)}
+      className={cn("relative h-2 w-full overflow-hidden rounded bg-muted", isComplete && "animate-rs-success-pulse", className)}
       {...props}
     >
       <ProgressPrimitive.Indicator

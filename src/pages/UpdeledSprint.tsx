@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -812,7 +813,7 @@ const UpdeledSprint = () => {
         <CardContent className="p-0">
           {loading ? (
             <div className="p-10 text-center text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
+              <ButtonOrb state="working" />
               Loading sprint queue…
             </div>
           ) : filtered.length === 0 ? (
@@ -918,7 +919,7 @@ const UpdeledSprint = () => {
                         onClick={(e) => { e.stopPropagation(); placeCall(r); }}
                       >
                         {activeCall?.lead.lead_id === r.lead_id && activeCall.status !== "ended" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <ButtonOrb state="working" />
                         ) : (
                           <Phone className="h-3.5 w-3.5" />
                         )}
@@ -992,7 +993,7 @@ const UpdeledSprint = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSaveList(false)} disabled={savingList}>Cancel</Button>
             <Button onClick={handleSaveList} disabled={savingList || !newListName.trim() || !filtered.length}>
-              {savingList ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <BookmarkPlus className="h-4 w-4 mr-1.5" />}
+              {savingList ? <ButtonOrb state="working" onFilled /> : <BookmarkPlus className="h-4 w-4 mr-1.5" />}
               Save list
             </Button>
           </DialogFooter>
@@ -1181,7 +1182,7 @@ function UpdeledLeadPicker({
           <div className="max-h-80 overflow-y-auto rounded border divide-y">
             {loading ? (
               <div className="p-6 text-center text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin inline mr-1.5" />
+                <ButtonOrb state="searching" />
                 Searching…
               </div>
             ) : results.length === 0 ? (

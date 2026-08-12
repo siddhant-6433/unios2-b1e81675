@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload, Filter, BookOpen, Layers, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -198,6 +199,43 @@ const toggleSelection = (selected: string[], value: string) =>
 const matchesSelected = (selected: string[], value?: string | null) =>
   selected.length === 0 || (!!value && selected.includes(value));
 
+const digitsOnly = (value?: string | null) => (value || "").replace(/\D/g, "");
+
+// Last 10 digits — an Indian mobile without its country code. Needed in both
+// directions: the query can carry a +91 the stored value lacks, or the reverse.
+const phoneKey = (value?: string | null) => {
+  const digits = digitsOnly(value);
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
+
+// Search text → one student. Phone numbers are stored inconsistently
+// ('9871763193' here, '+919871763193' there), so a typed number is compared
+// digit-to-digit instead of as a substring — same trick as
+// src/lib/admissionsListRead.ts. Parent numbers count: the number on file for a
+// school student is usually the father's.
+export const matchesStudentSearch = (student: StudentRow, query: string) => {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  const digits = phoneKey(q);
+  if (digits.length >= 3 && [
+    student.phone, student.father_phone, student.mother_phone, student.guardian_phone,
+  ].some((phone) => phoneKey(phone).includes(digits))) return true;
+
+  return [
+    student.name,
+    student.admission_no,
+    student.pre_admission_no,
+    student.email,
+    student.student_email,
+    getProgramLabel(student),
+    getClassLabel(student),
+    getBatchLabel(student),
+    getSessionLabel(student),
+    getCurrentTermLabel(student),
+  ].some((field) => (field || "").toLowerCase().includes(q));
+};
+
 const initialsForName = (name: string) =>
   name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
@@ -330,28 +368,38 @@ const Students = () => {
     setTermFilters([]);
   }, [batchFilters]);
 
+  const matchesArchiveView = useCallback((s: StudentRow) => (
+    archiveView === "all" ? true
+    : archiveView === "archived" ? !!s.archived_at
+    : !s.archived_at // "active" (default): hide archived
+  ), [archiveView]);
+
+  const otherMode: SegregationMode = segregationMode === "class" ? "program" : "class";
+
+  // A college student is invisible in class mode and vice versa, so a search
+  // can come back empty while the answer sits one toggle away. Count the hits
+  // over there — segregation filters are deliberately ignored, they belong to
+  // the other mode.
+  const otherModeCount = useMemo(() => {
+    if (!search.trim()) return 0;
+    return students.filter((s) => (
+      (otherMode === "class" ? isSchoolStudent(s) : !isSchoolStudent(s)) &&
+      matchesStudentSearch(s, search) &&
+      matchesArchiveView(s)
+    )).length;
+  }, [students, search, otherMode, matchesArchiveView]);
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return students.filter((s) => {
       if (segregationMode === "class" && !isSchoolStudent(s)) return false;
       if (segregationMode === "program" && isSchoolStudent(s)) return false;
 
       const classLabel = getClassLabel(s);
       const programLabel = getProgramLabel(s);
-      const batchLabel = getBatchLabel(s);
-      const sessionLabel = getSessionLabel(s);
       const secondaryLabel = getSecondaryAcademicLabel(s, segregationMode);
       const currentTermLabel = getCurrentTermLabel(s);
 
-      const matchesSearch = !q ||
-        s.name.toLowerCase().includes(q) ||
-        (s.admission_no || "").toLowerCase().includes(q) ||
-        (s.pre_admission_no || "").toLowerCase().includes(q) ||
-        (programLabel || "").toLowerCase().includes(q) ||
-        (classLabel || "").toLowerCase().includes(q) ||
-        (batchLabel || "").toLowerCase().includes(q) ||
-        (sessionLabel || "").toLowerCase().includes(q) ||
-        (currentTermLabel || "").toLowerCase().includes(q);
+      const matchesSearch = matchesStudentSearch(s, search);
 
       const matchesGroup = segregationMode === "class"
         ? matchesSelected(classFilters, classLabel)
@@ -361,14 +409,18 @@ const Students = () => {
       const matchesTerm = segregationMode !== "program" ||
         matchesSelected(termFilters, currentTermLabel);
 
-      const matchesArchive =
-        archiveView === "all" ? true
-        : archiveView === "archived" ? !!s.archived_at
-        : !s.archived_at; // "active" (default): hide archived
-
-      return matchesSearch && matchesGroup && matchesBatch && matchesTerm && matchesArchive;
+      return matchesSearch && matchesGroup && matchesBatch && matchesTerm && matchesArchiveView(s);
     });
-  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters, archiveView]);
+  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters, matchesArchiveView]);
+
+  // Inactive mode holding search hits gets both signals: a tint you notice
+  // without reading, and the count.
+  const segregationToggleClass = (mode: SegregationMode) => {
+    const base = "inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors";
+    if (segregationMode === mode) return `${base} bg-primary text-primary-foreground`;
+    if (otherModeCount > 0) return `${base} bg-primary/10 text-foreground hover:bg-primary/15`;
+    return `${base} text-muted-foreground hover:text-foreground`;
+  };
 
   const hasActiveSegregation =
     classFilters.length > 0 ||
@@ -460,14 +512,14 @@ const Students = () => {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input type="text" placeholder="Search by name, admission no, course..."
+            <input type="text" placeholder="Search by name, mobile, email, admission no, course..."
               value={search} onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-background pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
           </div>
 
           {canExportStudents && (
             <Button type="button" variant="outline" onClick={exportStudents} disabled={exporting || filtered.length === 0} className="h-10 rounded-xl gap-1.5 sm:ml-auto">
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
               Download CSV
             </Button>
           )}
@@ -479,19 +531,25 @@ const Students = () => {
                 type="button"
                 aria-pressed={segregationMode === "class"}
                 onClick={() => setSegregationMode("class")}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${segregationMode === "class" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                className={segregationToggleClass("class")}
               >
                 <BookOpen className="h-3.5 w-3.5" />
                 Class + Session
+                {otherMode === "class" && otherModeCount > 0 && (
+                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{otherModeCount}</span>
+                )}
               </button>
               <button
                 type="button"
                 aria-pressed={segregationMode === "program"}
                 onClick={() => setSegregationMode("program")}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${segregationMode === "program" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                className={segregationToggleClass("program")}
               >
                 <GraduationCap className="h-3.5 w-3.5" />
                 Program + Batch
+                {otherMode === "program" && otherModeCount > 0 && (
+                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{otherModeCount}</span>
+                )}
               </button>
             </div>
 
@@ -549,16 +607,25 @@ const Students = () => {
             </Button>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           <span>{loading ? "Loading students..." : `Showing ${filtered.length} of ${students.length} students`}</span>
+          {!loading && otherModeCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setSegregationMode(otherMode)}
+              className="font-medium text-primary hover:underline"
+            >
+              {otherModeCount} more in {otherMode === "class" ? "Class + Session" : "Program + Batch"} — switch
+            </button>
+          )}
         </div>
       </div>
 
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         {loading ? (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <OrbLoader state="searching" />
           </div>
         ) : loadError ? (
           <div className="p-12 text-center">

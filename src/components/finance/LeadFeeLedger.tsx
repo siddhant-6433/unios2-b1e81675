@@ -1,14 +1,16 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useEffect, useMemo, useState, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send } from "lucide-react";
+import { Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 import { PaymentEditDialog } from "./PaymentEditDialog";
 import { PaymentAuditDialog } from "./PaymentAuditDialog";
+import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
@@ -100,7 +102,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
   const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
   const [auditPayment, setAuditPayment] = useState<LeadPayment | null>(null);
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
-  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
   const [resending, setResending] = useState<string | null>(null);
@@ -292,6 +294,12 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
         </div>
       )}
 
+      {/* ABVMU deposit challan — staff can submit/track on the candidate's
+          behalf; self-hides when the course has no seat-reservation deposit. */}
+      {resolvedLeadId && (
+        <AbvmuDepositPanel leadId={resolvedLeadId} onChanged={() => setInternalRefresh(n => n + 1)} />
+      )}
+
       {/* Credit balance — informational, read-only pre-admission (or post-
           admission before a Transfer/Apply UI is warranted here). */}
       {credit && Number(credit.general_credit || 0) > 0 && (
@@ -378,7 +386,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
                         className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:opacity-50"
                         title="Resend WhatsApp + email receipt"
                       >
-                        {resending === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                        {resending === p.id ? <ButtonOrb state="working" /> : <Send className="h-3 w-3" />}
                       </button>
                       <button
                         type="button"

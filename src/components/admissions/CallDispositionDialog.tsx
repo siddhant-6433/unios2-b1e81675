@@ -1,16 +1,14 @@
 import { useState, useRef, useEffect, type ReactNode, type ReactElement } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
-import {
-  Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
-  BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion,
-} from "lucide-react";
+import { Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3, BanIcon, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock, AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
+import { REFERRAL_PARTNER_LABEL } from "@/lib/leadReferral";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { useToast } from "@/hooks/use-toast";
 
@@ -43,6 +41,8 @@ export interface CallDispositionData {
   cnet_appeared?: boolean | null;
   /** BPT/BMRIT-only qualifier captured when the lead/course requires CAHET context */
   cahet_registered?: boolean | null;
+  /** BPT/BMRIT-only: also hand this lead to the referral partner (Stetho) */
+  refer_to_partner?: boolean;
   /** Free-text course name captured when disposition is "course_not_listed" —
    *  compiled later to see which unlisted courses prospective leads are asking for. */
   requested_course_text?: string | null;
@@ -260,6 +260,7 @@ export function CallDispositionDialog({
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
   const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
   const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
+  const [referToPartner, setReferToPartner] = useState(false);
   const [requestedCourseText, setRequestedCourseText] = useState("");
   // Live elapsed timer for the connected phase. Starts when the parent flips
   // callStatus → "connected" and stops when the dialog closes. Pure UI; the
@@ -340,6 +341,7 @@ export function CallDispositionDialog({
     setSendCourseInfo(false);
     setCnetAppeared(null);
     setCahetRegistered(null);
+    setReferToPartner(false);
     setRequestedCourseText("");
   };
 
@@ -368,6 +370,7 @@ export function CallDispositionDialog({
         send_course_info: sendCourseInfo,
         cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
         cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
+        refer_to_partner: asksCahetRegistered ? referToPartner : false,
         requested_course_text: disposition === "course_not_listed" ? requestedCourseText.trim() : null,
       });
       resetState();
@@ -538,7 +541,7 @@ export function CallDispositionDialog({
 
             {/* Waiting spinner */}
             <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
-              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              <OrbLoader state="connecting" />
               <p className="text-sm font-medium text-foreground">
                 {callStarting ? "Starting Cloud Call..." : `Waiting for ${leadName} to pick up...`}
               </p>
@@ -582,7 +585,7 @@ export function CallDispositionDialog({
                 disabled={callStarting || cancelling}
                 className="text-xs"
               >
-                {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}
+                {cancelling ? <ButtonOrb state="working" /> : "Cancel"}
               </Button>
             </div>
           </div>,
@@ -627,7 +630,7 @@ export function CallDispositionDialog({
                   finally { setRetrying(false); }
                 }}
               >
-                {retrying ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
+                {retrying ? <ButtonOrb state="working" onFilled /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
                 Redial
               </Button>
               <Button
@@ -972,6 +975,23 @@ export function CallDispositionDialog({
             </div>
           )}
 
+          {asksCahetRegistered && disposition && (
+            <label className="flex items-start gap-2 rounded-xl border border-border bg-muted/30 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={referToPartner}
+                onChange={(e) => setReferToPartner(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span className="text-xs text-foreground">
+                Refer to {REFERRAL_PARTNER_LABEL}
+                <span className="block text-[10px] text-muted-foreground">
+                  They get this lead in their Referrals tab and call it too. Your assignment doesn't change.
+                </span>
+              </span>
+            </label>
+          )}
+
           {disposition === "course_not_listed" && (
             <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 dark:border-teal-900/50 dark:bg-teal-950/20">
               <label className="block text-xs font-semibold text-teal-900 dark:text-teal-200 mb-2">
@@ -1087,7 +1107,7 @@ export function CallDispositionDialog({
                     disabled={!disposition || !visitCampusId || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2 bg-success hover:bg-success/90"
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <MapPin className="h-4 w-4" />}
                     Save & Schedule Visit
                   </Button>
                 )}
@@ -1097,7 +1117,7 @@ export function CallDispositionDialog({
                     disabled={!disposition || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2"
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                    {saving ? <ButtonOrb state="working" onFilled /> : <Clock className="h-4 w-4" />}
                     Save & Schedule Follow-up
                   </Button>
                 )}

@@ -275,7 +275,7 @@ or
               { inline_data: { mime_type: "image/jpeg", data: toBase64(challengeBytes) } },
             ],
           }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
+          generationConfig: { temperature: 0.1, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
         }),
       }
     );
@@ -343,7 +343,7 @@ async function handleGeminiFallback(body: any) {
             { inline_data: { mime_type: "image/jpeg", data: toBase64(punchBytes) } },
           ],
         }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 100 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } },
       }),
     }
   );

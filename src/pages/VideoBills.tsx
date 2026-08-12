@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Receipt, CheckCircle, IndianRupee } from "lucide-react";
+import { Receipt, CheckCircle, IndianRupee } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, type VideoBrand,
 } from "@/lib/videoBrands";
@@ -226,20 +227,20 @@ export default function VideoBills() {
                               {(!bill || stale) && (
                                 <Button size="sm" variant="outline" className="gap-1 h-7 text-xs" disabled={generating === key}
                                   onClick={() => handleGenerate(editor, brand)}>
-                                  {generating === key ? <Loader2 className="h-3 w-3 animate-spin" /> : <Receipt className="h-3 w-3" />}
+                                  {generating === key ? <ButtonOrb state="composing" /> : <Receipt className="h-3 w-3" />}
                                   {bill ? "Regenerate" : "Generate"}
                                 </Button>
                               )}
                               {bill?.status === "draft" && (
                                 <Button size="sm" className="gap-1 h-7 text-xs bg-info hover:bg-info/60" disabled={marking === bill.id}
                                   onClick={() => handleMark(bill, "approved")}>
-                                  {marking === bill.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />} Approve
+                                  {marking === bill.id ? <ButtonOrb state="composing" onFilled /> : <CheckCircle className="h-3 w-3" />} Approve
                                 </Button>
                               )}
                               {bill?.status === "approved" && (
                                 <Button size="sm" className="gap-1 h-7 text-xs bg-success hover:bg-success/90" disabled={marking === bill.id}
                                   onClick={() => handleMark(bill, "paid")}>
-                                  {marking === bill.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />} Mark Paid
+                                  {marking === bill.id ? <ButtonOrb state="composing" onFilled /> : <CheckCircle className="h-3 w-3" />} Mark Paid
                                 </Button>
                               )}
                             </div>

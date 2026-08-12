@@ -60,8 +60,9 @@ const Finance = () => {
   const canCreateFinance = can("finance", "create");
   const isSuperAdmin = role === "super_admin";
   const canManageSetup = isSuperAdmin || hasPermission("fee_structure:manage");
-  const canCloseDay = isSuperAdmin || role === "accountant";
+  const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
+  const [dayClosed, setDayClosed] = useState(false);
 
   const tabs = useMemo(() => {
     const all: { id: TabId; label: string; icon: typeof FileText; badge: number; show: boolean }[] = [
@@ -76,7 +77,7 @@ const Finance = () => {
   }, [pendingWaiverCount, pendingConcessionCount, canManageSetup]);
 
   // The cashier lives in Collect; everyone else opens on Receipts.
-  const defaultTab: TabId = role === "accountant" ? "collect" : "receipts";
+  const defaultTab: TabId = role === "accountant" || role === "office_admin" ? "collect" : "receipts";
   const urlTab = searchParams.get("tab") as TabId | null;
   const tab: TabId = tabs.some(t => t.id === urlTab) ? (urlTab as TabId) : defaultTab;
   const setTab = useCallback((next: TabId) => {
@@ -91,6 +92,11 @@ const Finance = () => {
 
   const fetchAll = async () => {
     setLoading(true);
+    // Cash-desk closed state for the current campus scope, so the header can
+    // show "Day Closed" instead of an active Close Day button. Re-runs after a
+    // close (onClosed=fetchAll) and on campus change.
+    (supabase.rpc as any)("is_day_closed", { _campus_id: selectedCampusId ?? null })
+      .then(({ data }: { data: boolean | null }) => setDayClosed(!!data));
     const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes, summaryRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       // v_all_payments unifies pre-admission lead_payments (token / application
@@ -102,6 +108,11 @@ const Finance = () => {
       // below stays unchanged.
       supabase.from("v_all_payments" as any).select("*").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
+      // Counts stay count:"planned" — a cheap planner estimate. src/test/
+      // hot-list-database-load.test.ts bans exact counts on this page because
+      // they force a full scan under RLS. The badge is therefore approximate
+      // (~45 against 49 actual); the panels themselves show real, RLS-filtered
+      // lists, which is where the precision has to be.
       supabase.from("offer_waivers").select("id", { count: "planned", head: true }).eq("status", "pending"),
       supabase.from("concessions").select("id", { count: "planned", head: true }).in("status", ["pending_principal", "pending_super_admin"]),
       // Header totals come from the server. Summing the .limit(200) ledger slice
@@ -195,9 +206,20 @@ const Finance = () => {
             </Button>
           )}
           {canCloseDay && (
-            <Button variant="outline" className="gap-2" onClick={() => setDayCloserOpen(true)}>
-              <Lock className="h-4 w-4" /> Close Day
-            </Button>
+            dayClosed ? (
+              <Button
+                variant="outline"
+                disabled
+                className="gap-2 border-emerald-300 bg-emerald-50 text-emerald-700 opacity-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+                title="Cash desk closed for today — reopens 9 AM tomorrow"
+              >
+                <Lock className="h-4 w-4" /> Day Closed
+              </Button>
+            ) : (
+              <Button variant="outline" className="gap-2" onClick={() => setDayCloserOpen(true)}>
+                <Lock className="h-4 w-4" /> Close Day
+              </Button>
+            )
           )}
           {canCreateFinance && (
             <Button className="gap-2" onClick={() => setTab("collect")}>

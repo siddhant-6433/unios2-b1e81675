@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TextField, SelectField, DatePickerField } from "@/components/ui/state-fields";
@@ -114,6 +115,69 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  // A student added here with no lead_id is cut off from the lead-scoped money:
+  // offer waivers hang off the lead's offer letter and payments are applied by
+  // provision_student_fees(lead_id). One real admission lost ₹27,000 of payments
+  // and a ₹10,000 waiver that way. So: look the phone up, and when the matched
+  // lead is holding money, make linking an explicit decision before saving.
+  const [leadMatch, setLeadMatch] = useState<
+    { id: string; name: string; stage: string; paid: number; waived: number } | null
+  >(null);
+  const [linkLeadId, setLinkLeadId] = useState<string | null>(null);
+  const [ignoreLead, setIgnoreLead] = useState(false);
+
+  useEffect(() => {
+    const digits = form.father_phone.replace(/\D/g, "").slice(-10);
+    if (digits.length < 10) { setLeadMatch(null); setLinkLeadId(null); setIgnoreLead(false); return; }
+
+    let cancelled = false;
+    (async () => {
+      const { data: leads } = await (supabase as any)
+        .from("leads")
+        .select("id, name, stage")
+        .or([`phone.eq.${digits}`, `phone.eq.+91${digits}`, `phone.eq.91${digits}`].join(","))
+        .limit(5);
+      if (cancelled || !leads?.length) { setLeadMatch(null); return; }
+
+      // Skip leads that already have a student — those are not this admission.
+      const { data: taken } = await (supabase as any)
+        .from("students").select("lead_id").in("lead_id", leads.map((l: any) => l.id));
+      const takenIds = new Set((taken || []).map((t: any) => t.lead_id));
+      const free = leads.filter((l: any) => !takenIds.has(l.id));
+      if (cancelled || !free.length) { setLeadMatch(null); return; }
+
+      const ids = free.map((l: any) => l.id);
+      const [{ data: pays }, { data: offers }] = await Promise.all([
+        (supabase as any).from("lead_payments").select("lead_id, amount").in("lead_id", ids).eq("status", "confirmed"),
+        (supabase as any).from("offer_letters").select("id, lead_id").in("lead_id", ids).eq("approval_status", "approved"),
+      ]);
+      let waivers: any[] = [];
+      if (offers?.length) {
+        const { data } = await (supabase as any)
+          .from("offer_waivers").select("offer_letter_id, amount")
+          .in("offer_letter_id", offers.map((o: any) => o.id)).eq("status", "approved");
+        waivers = data || [];
+      }
+      if (cancelled) return;
+
+      const scored = free.map((l: any) => {
+        const paid = (pays || []).filter((p: any) => p.lead_id === l.id)
+          .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+        const offerIds = (offers || []).filter((o: any) => o.lead_id === l.id).map((o: any) => o.id);
+        const waived = waivers.filter((w: any) => offerIds.includes(w.offer_letter_id))
+          .reduce((s: number, w: any) => s + Number(w.amount || 0), 0);
+        return { id: l.id, name: l.name, stage: l.stage, paid, waived };
+      }).sort((a, b) => (b.paid + b.waived) - (a.paid + a.waived));
+
+      setLeadMatch(scored[0]);
+    })();
+    return () => { cancelled = true; };
+  }, [form.father_phone]);
+
+  // Money on the matched lead ⇒ the choice can't be skipped.
+  const leadHasMoney = !!leadMatch && (leadMatch.paid > 0 || leadMatch.waived > 0);
+  const leadDecisionPending = leadHasMoney && !linkLeadId && !ignoreLead;
+
   // Office assistants and principals may add students only for their OWN assigned
   // campus (the students INSERT RLS policy enforces user_can_access_assigned_campus).
   // Restrict the picker so a scoped user can't pick a campus the DB would reject
@@ -146,6 +210,9 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     setStep(0);
     setDraftStatus("idle");
     setCampusesLoaded(false);
+    setLeadMatch(null);
+    setLinkLeadId(null);
+    setIgnoreLead(false);
 
     Promise.all([
       supabase.from("campuses").select("id, name, code").order("name"),
@@ -300,7 +367,10 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   }, [open, isCampusScoped, campusLocked, noCampusAssigned, allowedCampuses, form.campus_id]);
 
   const step0Valid = !!form.name && !!form.dob && !!form.gender && !!form.campus_id && !!form.institution_id && !!form.course_id;
-  const canSubmit  = step0Valid && !!form.session_id && (isSchool ? !!form.admission_date && !!form.joining_academic_year : !!form.semester);
+  // leadDecisionPending: a phone-matched lead is holding money and nobody has
+  // said whether it's the same candidate. Saving blind is how the money gets lost.
+  const canSubmit  = step0Valid && !!form.session_id && !leadDecisionPending
+    && (isSchool ? !!form.admission_date && !!form.joining_academic_year : !!form.semester);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -332,6 +402,8 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       mother_phone: form.mother_phone.trim() || null,
       guardian_name:  form.father_name.trim()  || null,
       guardian_phone: form.father_phone.trim() || null,
+      // Carries the candidate's payments and offer waivers onto this ledger.
+      lead_id: linkLeadId,
       fee_structure_version: form.fee_version,
       status: "active",
       created_by: user?.id || null,
@@ -544,6 +616,46 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               </div>
             </div>
 
+            {leadMatch && (
+              <div className={`rounded-lg border p-3 text-xs ${
+                leadDecisionPending
+                  ? "border-warning/40 bg-warning/5"
+                  : linkLeadId ? "border-success/40 bg-success/5" : "border-border bg-muted/30"
+              }`}>
+                <p className="font-semibold text-foreground">
+                  Existing lead on this number: {leadMatch.name?.trim() || "Unnamed"} · {leadMatch.stage?.replace(/_/g, " ")}
+                </p>
+                {leadHasMoney ? (
+                  <p className="mt-0.5 text-muted-foreground">
+                    Holding{leadMatch.paid > 0 ? ` ₹${leadMatch.paid.toLocaleString("en-IN")} in payments` : ""}
+                    {leadMatch.paid > 0 && leadMatch.waived > 0 ? " and" : ""}
+                    {leadMatch.waived > 0 ? ` ₹${leadMatch.waived.toLocaleString("en-IN")} in approved waivers` : ""}.
+                    Link them, or this money will not reach the fee ledger.
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-muted-foreground">
+                    Link so any future payments and offer waivers land on this student's ledger.
+                  </p>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={linkLeadId ? "default" : "outline"}
+                    onClick={() => { setLinkLeadId(leadMatch.id); setIgnoreLead(false); }}
+                  >
+                    {linkLeadId ? "Linked" : "Link this lead"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={ignoreLead ? "default" : "outline"}
+                    onClick={() => { setIgnoreLead(true); setLinkLeadId(null); }}
+                  >
+                    {ignoreLead ? "Not linked" : "Different person"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-[11px] font-semibold text-foreground mb-2">Mother</p>
               <div className="grid grid-cols-2 gap-3">
@@ -666,12 +778,24 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 {isSchool ? `Session: ${sessionYearLabel(selectedSession?.name) || "—"} · Admission year: ${form.joining_academic_year || "—"}` : `Current: ${form.semester || "—"}`}
               </p>
               {form.school_admission_no && <p className="text-muted-foreground font-mono">Admission No: {form.school_admission_no}</p>}
+              {linkLeadId && leadMatch && (
+                <p className="text-success">
+                  Linked to lead {leadMatch.name?.trim() || "Unnamed"} — their payments and waivers will post to this ledger.
+                </p>
+              )}
             </div>
+
+            {leadDecisionPending && (
+              <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs text-foreground">
+                A lead on this mobile is holding money. Go back to <b>Parent / Guardian</b> and choose whether
+                it is the same candidate before saving.
+              </div>
+            )}
 
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5"><ChevronLeft className="h-4 w-4" /> Back</Button>
               <Button onClick={handleSubmit} disabled={saving || !canSubmit} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-4 w-4" />}
                 Add Student
               </Button>
             </div>

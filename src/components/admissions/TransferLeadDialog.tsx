@@ -6,9 +6,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Loader2, ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft } from "lucide-react";
 
 interface TransferLeadDialogProps {
   open: boolean;
@@ -253,7 +254,7 @@ export function TransferLeadDialog({
             disabled={!selectedCounsellor || loading}
             variant={isUnassign ? "destructive" : "default"}
           >
-            {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {loading && <ButtonOrb state="working" onFilled />}
             {isUnassign ? `Unassign ${scopeDescription}` : `Transfer ${scopeDescription}`}
           </Button>
         </DialogFooter>

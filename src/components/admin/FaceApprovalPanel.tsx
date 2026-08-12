@@ -1,11 +1,10 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import {
-  UserCheck, Check, X, Loader2, Camera, Clock, Trash2, RotateCcw,
-} from "lucide-react";
+import { UserCheck, Check, X, Camera, Clock, Trash2, RotateCcw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,7 +140,7 @@ export default function FaceApprovalPanel() {
           {reg.status === "pending" && (
             <>
               <Button size="sm" onClick={() => handleApprove(reg.id)} disabled={processing === reg.id} className="flex-1 gap-1 h-8">
-                {processing === reg.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                {processing === reg.id ? <ButtonOrb state="working" onFilled /> : <Check className="h-3 w-3" />}
                 Approve
               </Button>
               <Button size="sm" variant="outline" onClick={() => handleReject(reg.id)} disabled={processing === reg.id} className="flex-1 gap-1 h-8">

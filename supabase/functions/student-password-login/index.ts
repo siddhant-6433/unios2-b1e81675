@@ -99,7 +99,16 @@ async function createSession(db: any, userId: string) {
   });
   if (magicError || !magicLink?.properties?.hashed_token) return null;
 
-  const { data: sessionData, error: verifyError } = await db.auth.verifyOtp({
+  // verifyOtp REPLACES the calling client's auth state, demoting `db` from
+  // service_role to this user. Harmless today only because nothing writes after
+  // this call — burn a throwaway client so appending one later can't silently
+  // match 0 rows under RLS.
+  const authClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { data: sessionData, error: verifyError } = await authClient.auth.verifyOtp({
     token_hash: magicLink.properties.hashed_token,
     type: "magiclink",
   });

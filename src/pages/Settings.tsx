@@ -2,10 +2,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import {
-  MapPin, Save, Loader2, Building2, Navigation, Radius, CalendarDays, Info, KeyRound, ShieldCheck, Trash2,
-} from "lucide-react";
+import { MapPin, Save, Building2, Navigation, Radius, CalendarDays, Info, KeyRound, ShieldCheck, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -268,14 +267,14 @@ const Settings = () => {
                 </p>
               </div>
               <Button onClick={registerPasskey} disabled={passkeySaving} className="gap-2 shrink-0">
-                {passkeySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                {passkeySaving ? <ButtonOrb state="working" onFilled /> : <KeyRound className="h-4 w-4" />}
                 Add passkey
               </Button>
             </div>
 
             {passkeysLoading ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <OrbLoader state="working" />
               </div>
             ) : passkeys.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border p-6 text-center">
@@ -304,7 +303,7 @@ const Settings = () => {
                       disabled={deletingPasskeyId === passkey.id}
                       className="gap-2 shrink-0 text-destructive hover:text-destructive"
                     >
-                      {deletingPasskeyId === passkey.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {deletingPasskeyId === passkey.id ? <ButtonOrb state="working" /> : <Trash2 className="h-3.5 w-3.5" />}
                       Remove
                     </Button>
                   </div>
@@ -325,7 +324,7 @@ const Settings = () => {
             </Card>
           ) : deadlinesLoading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <OrbLoader state="working" />
             </div>
           ) : (
             <div className="space-y-4">
@@ -375,7 +374,7 @@ const Settings = () => {
                           disabled={!hasChange || savingDeadline === key}
                           className="gap-2 shrink-0"
                         >
-                          {savingDeadline === key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                          {savingDeadline === key ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
                           Save
                         </Button>
                       </div>
@@ -398,7 +397,7 @@ const Settings = () => {
             </Card>
           ) : loading ? (
             <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <OrbLoader state="working" />
             </div>
           ) : (
             <div className="space-y-4">
@@ -526,7 +525,7 @@ const Settings = () => {
                             className="gap-2"
                           >
                             {saving === campus.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <ButtonOrb state="working" onFilled />
                             ) : (
                               <Save className="h-4 w-4" />
                             )}

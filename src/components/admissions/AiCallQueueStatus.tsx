@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Loader2, Clock, Play, CheckCircle2, AlertTriangle, ListChecks,
-  PauseCircle, Activity,
-} from "lucide-react";
+import { OrbLoader } from "@/components/ui/thinking-orb";
+import { Clock, Play, CheckCircle2, AlertTriangle, ListChecks, PauseCircle, Activity } from "lucide-react";
 
 interface QueueStatus {
   pending: number;
@@ -84,7 +82,7 @@ export function AiCallQueueStatus() {
     return (
       <Card className="border-border/60 shadow-none">
         <CardContent className="p-6 flex items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          <OrbLoader state="connecting" />
         </CardContent>
       </Card>
     );

@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import {
-  Sunrise, Flame, AlarmClock, CalendarCheck, MapPin, FileText,
-  IndianRupee, Loader2, ChevronDown, ChevronUp,
-} from "lucide-react";
+import { Sunrise, Flame, AlarmClock, CalendarCheck, MapPin, FileText, IndianRupee, ChevronDown, ChevronUp } from "lucide-react";
 
 interface BriefLead {
   id: string;
@@ -121,7 +119,7 @@ export function MorningBrief() {
     return (
       <Card className="rounded-2xl border-border/40">
         <CardContent className="p-5 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Preparing your morning brief…
+          <ButtonOrb state="connecting" /> Preparing your morning brief…
         </CardContent>
       </Card>
     );

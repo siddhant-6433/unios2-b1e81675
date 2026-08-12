@@ -3,10 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
+import { FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import { UpdeledRegistrationDetails } from "@/components/leads/UpdeledRegistrationDetails";
 import {
@@ -37,6 +38,7 @@ import {
   type FeeProposalChildLike,
 } from "@/lib/feeProposalOfferMapping";
 import { collectOfferFeeTermTotals, firstOfferFeeTerm, hasSchoolFeeOptions, SECURITY_DEPOSIT_TERM, type OfferFeeItemLike, type SchoolFeeSelection, type SchoolStudentType, type SchoolHostelType, type SchoolTransportZone } from "@/lib/offerFeeTerms";
+import { AbvmuDepositPanel } from "@/components/finance/AbvmuDepositPanel";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -1346,6 +1348,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
           <CahetRegistrationDetails registration={cahetRegistration} />
           <UpdeledRegistrationDetails registration={updeledRegistration} />
+          {/* ABVMU deposit challan — staff submit/track on the candidate's
+              behalf; self-hides when the course has no seat-reservation deposit. */}
+          <AbvmuDepositPanel leadId={leadId} onChanged={onSuccess} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -1834,7 +1839,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                 <div className="flex gap-2">
                   <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || registrationOfferBlocked} size="sm" className="gap-1.5"
                     title={registrationOfferBlocked ? registrationOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
+                    {saving ? <ButtonOrb state="composing" onFilled /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
                     setShowForm(false);
@@ -1858,7 +1863,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           )}
 
           {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <div className="flex justify-center py-8"><OrbLoader state="composing" /></div>
           ) : offers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">No offer letters yet</p>
           ) : (
@@ -1911,7 +1916,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                               title="Delete offer letter"
                             >
                               {deletingOfferId === offer.id
-                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                ? <ButtonOrb state="composing" onFilled />
                                 : <Trash2 className="h-3 w-3" />}
                               Delete
                             </button>
@@ -2066,7 +2071,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                 )}
                                 <div className="flex gap-2">
                                   <Button size="sm" className="text-xs h-7" disabled={waiverSaving} onClick={() => handleAddWaiver(offer.id)}>
-                                    {waiverSaving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                                    {waiverSaving && <ButtonOrb state="composing" onFilled />}
                                     {isSuperAdmin ? "Apply Waiver" : "Request Waiver"}
                                   </Button>
                                   <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingWaiverFor(null)}>
@@ -2160,7 +2165,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                         onClick={() => handleDecideEditRequest(req, "approved")}
                                         className="rounded bg-success hover:bg-success/90 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
                                       >
-                                        {editDecidingId === req.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                                        {editDecidingId === req.id ? <ButtonOrb state="composing" onFilled /> : "Approve"}
                                       </button>
                                       <button
                                         disabled={editDecidingId === req.id}
@@ -2251,7 +2256,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     size="sm" className="text-xs h-7" disabled={editSaving}
                                     onClick={() => handleSubmitEditRequest(offer.id)}
                                   >
-                                    {editSaving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                                    {editSaving && <ButtonOrb state="composing" onFilled />}
                                     {isSuperAdmin ? "Update" : "Request Edit"}
                                   </Button>
                                   <Button
@@ -2314,7 +2319,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                       disabled={regeneratingId === selectedOffer.id}
                     >
                       {regeneratingId === selectedOffer.id
-                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        ? <ButtonOrb state="composing" />
                         : <RefreshCw className="h-3 w-3" />}
                       Regenerate
                     </Button>
@@ -2445,7 +2450,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                       className="gap-1.5"
                     >
                       {regeneratingId === selectedOffer.id
-                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                        ? <><ButtonOrb state="composing" onFilled /> Generating…</>
                         : <><FileText className="h-3.5 w-3.5" /> Generate PDF</>}
                     </Button>
                   </div>

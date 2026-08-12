@@ -1,15 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
-  Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
-  Video, Mic, Play, Pause, CheckCheck,
-} from "lucide-react";
+import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
@@ -25,7 +22,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "certificate_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -54,6 +51,28 @@ interface CertificateApprovalItem {
   submitted_by_name: string | null;
   submitted_at: string | null;
   pdf_path: string | null;
+}
+
+// Paid students whose admission number is held by the mandatory-document gate.
+type PendingAnDocState = "verified" | "rejected" | "pending" | "missing";
+interface PendingAnDocStatus {
+  complete?: boolean;
+  required_total?: number;
+  verified?: number;
+  rejected?: number;
+  pending?: number;
+  missing?: number;
+  docs?: { key: string; label: string; state: PendingAnDocState }[];
+}
+interface PendingAnItem {
+  id: string; // lead_id (row key)
+  lead_id: string;
+  student_id: string;
+  name: string;
+  course: string | null;
+  pre_admission_no: string | null;
+  application_id: string | null;
+  doc_status: PendingAnDocStatus | null;
 }
 
 interface AbvmuDepositItem {
@@ -109,6 +128,21 @@ interface OfferApprovalItem {
   created_at: string;
   requested_by_name: string | null;
   application_id: string | null;
+}
+
+interface OfferEditItem {
+  id: string;
+  offer_letter_id: string;
+  lead_id: string;
+  lead_name: string;
+  course_name: string | null;
+  created_at: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  reason: string | null;
+  proposed_changes: { acceptance_deadline?: string; token_fee_amount?: number; course_id?: string };
+  current_deadline: string | null;
+  current_token_fee: number | null;
 }
 
 interface ContactChangeItem {
@@ -177,7 +211,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | CertificateApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -220,6 +254,7 @@ export default function Inbox() {
   const { role, profile, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<CategoryId | null>(null);
   const [items, setItems] = useState<InboxItem[]>([]);
@@ -231,7 +266,9 @@ export default function Inbox() {
     fee_concessions: 0,
     abvmu_deposits: 0,
     offer_approvals: 0,
+    offer_edits: 0,
     certificate_approvals: 0,
+    pending_an_generation: 0,
     contact_changes: 0,
     applications: 0,
     followups: 0,
@@ -284,12 +321,28 @@ export default function Inbox() {
       color: "text-info-foreground",
     },
     {
+      id: "offer_edits",
+      label: "Offer Letter Edits",
+      icon: FilePen,
+      count: counts.offer_edits,
+      roles: ["super_admin"],
+      color: "text-info-foreground",
+    },
+    {
       id: "certificate_approvals",
       label: "Certificate Approvals",
       icon: FileText,
       count: counts.certificate_approvals,
       roles: ["super_admin"],
       color: "text-emerald-600",
+    },
+    {
+      id: "pending_an_generation",
+      label: "Pending AN Generation",
+      icon: AlertTriangle,
+      count: counts.pending_an_generation,
+      roles: ["super_admin", "principal"],
+      color: "text-amber-600",
     },
     {
       id: "contact_changes",
@@ -451,6 +504,19 @@ export default function Inbox() {
             .select("id")
             .in("status", ["pending_principal", "pending_super_admin"])
         : Promise.resolve({ count: 0 }),
+
+      // Pending AN generation — super_admin + principal
+      (isSuperAdmin || isPrincipal)
+        ? supabase.rpc("list_pending_an_generation")
+        : Promise.resolve({ count: 0 }),
+
+      // Offer letter edit requests — super_admin only (they alone can decide)
+      isSuperAdmin
+        ? supabase
+            .from("offer_letter_edit_requests" as any)
+            .select("id")
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -471,6 +537,8 @@ export default function Inbox() {
       voice_messages: get(8),
       certificate_approvals: get(9),
       fee_concessions: get(10),
+      pending_an_generation: get(11),
+      offer_edits: get(12),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -480,10 +548,14 @@ export default function Inbox() {
   }, [fetchCounts]);
 
   useEffect(() => {
-    if (visibleCategories.length > 0 && !selected) {
-      setSelected(visibleCategories[0].id);
-    }
-  }, [visibleCategories.length]);
+    if (visibleCategories.length === 0 || selected) return;
+    // Deep-link: /inbox?category=<id> (e.g. from a notification) wins over first-visible.
+    const wanted = searchParams.get("category") as CategoryId | null;
+    const target = wanted && visibleCategories.some((c) => c.id === wanted)
+      ? wanted
+      : visibleCategories[0].id;
+    setSelected(target);
+  }, [visibleCategories.length, searchParams]);
 
   // ── Item loading ──────────────────────────────────────────────────────────
 
@@ -693,6 +765,37 @@ export default function Inbox() {
             application_id: null,
           } as OfferApprovalItem));
         commitItems(cat, nextItems);
+      } else if (cat === "offer_edits") {
+        const { data, error } = await supabase
+          .from("offer_letter_edit_requests" as any)
+          .select(`
+            id, offer_letter_id, reason, proposed_changes,
+            requested_by_name, requested_by_role, created_at,
+            offer_letters!offer_letter_id (
+              lead_id, acceptance_deadline, token_fee_amount,
+              leads!lead_id ( name ),
+              courses!course_id ( name )
+            )
+          `)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        const nextItems = (data || []).map((r: any) => ({
+            id: r.id,
+            offer_letter_id: r.offer_letter_id,
+            lead_id: r.offer_letters?.lead_id || "",
+            lead_name: r.offer_letters?.leads?.name || "—",
+            course_name: r.offer_letters?.courses?.name || null,
+            created_at: r.created_at || null,
+            requested_by_name: r.requested_by_name,
+            requested_by_role: r.requested_by_role,
+            reason: r.reason,
+            proposed_changes: r.proposed_changes || {},
+            current_deadline: r.offer_letters?.acceptance_deadline || null,
+            current_token_fee: r.offer_letters?.token_fee_amount ?? null,
+          } as OfferEditItem));
+        commitItems(cat, nextItems);
       } else if (cat === "fee_concessions") {
         const { data, error } = await supabase
           .from("concessions")
@@ -747,6 +850,20 @@ export default function Inbox() {
             submitted_at: r.pgdm_certificate_submitted_at,
             pdf_path: r.pgdm_certificate_pdf_path,
           } as CertificateApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "pending_an_generation") {
+        const { data, error } = await supabase.rpc("list_pending_an_generation");
+        if (error) throw error;
+        const nextItems = ((data || []) as any[]).map((r: any) => ({
+            id: r.lead_id,
+            lead_id: r.lead_id,
+            student_id: r.student_id,
+            name: r.name || "—",
+            course: r.course,
+            pre_admission_no: r.pre_admission_no,
+            application_id: r.application_id,
+            doc_status: r.admission_doc_status || null,
+          } as PendingAnItem));
         commitItems(cat, nextItems);
       } else if (cat === "contact_changes") {
         const { data, error } = await supabase
@@ -1027,6 +1144,44 @@ export default function Inbox() {
     }
   };
 
+  const decideOfferEdit = async (req: OfferEditItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      rejection_reason = r || undefined;
+    }
+    setProcessing(req.id);
+    try {
+      const { error } = await supabase
+        .from("offer_letter_edit_requests" as any)
+        .update({
+          status: decision,
+          reviewed_by: user?.id,
+          reviewed_at: new Date().toISOString(),
+          ...(rejection_reason ? { rejection_reason } : {}),
+        })
+        .eq("id", req.id);
+      if (error) throw error;
+      // Approved deadline is written back to offer_letters by the apply trigger;
+      // regenerate the PDF so it reflects the new value (fire-and-forget).
+      if (decision === "approved") {
+        supabase.functions
+          .invoke("generate-offer-letter", { body: { offer_letter_id: req.offer_letter_id } })
+          .catch(() => {});
+      }
+      toast({ title: decision === "approved" ? "Edit approved" : "Edit rejected" });
+      setSelectedItem(null);
+      loadItems("offer_edits");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const approveCertificate = async (cert: CertificateApprovalItem) => {
     if (!isSuperAdmin) return;
     const notes = window.prompt("Approval notes (optional):") ?? undefined;
@@ -1043,6 +1198,33 @@ export default function Inbox() {
       fetchCounts();
     } catch (e: any) {
       toast({ title: "Approval failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Super-admin override: generate the admission number despite the document gate.
+  const bypassAn = async (p: PendingAnItem) => {
+    if (!isSuperAdmin) return;
+    const reason = window.prompt("Reason for generating the admission number despite the document check:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({ title: "Reason required", description: "A reason is needed to override the document check.", variant: "destructive" });
+      return;
+    }
+    setProcessing(p.id);
+    try {
+      const { data, error } = await (supabase as any).rpc("admission_bypass_generate_an", {
+        _lead_id: p.lead_id,
+        _reason: reason.trim(),
+      });
+      if (error) throw error;
+      toast({ title: "Admission number generated", description: data ? `AN: ${data}` : "Issued." });
+      setSelectedItem(null);
+      loadItems("pending_an_generation");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Couldn't generate AN", description: e.message, variant: "destructive" });
     } finally {
       setProcessing(null);
     }
@@ -1268,6 +1450,22 @@ export default function Inbox() {
       );
     }
 
+    if (selected === "offer_edits") {
+      const r = item as OfferEditItem;
+      return (
+        <button key={r.id} className={baseClass} onClick={() => setSelectedItem(r)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{r.lead_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{r.requested_by_name || "Staff"}</p>
+            </div>
+            <span className="text-[10px] text-info-foreground font-medium shrink-0">Edit</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(r.created_at)}</p>
+        </button>
+      );
+    }
+
     if (selected === "fee_concessions") {
       const c = item as FeeConcessionItem;
       return (
@@ -1301,6 +1499,26 @@ export default function Inbox() {
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
             {c.submitted_by_name ? `by ${c.submitted_by_name} · ` : ""}{fmtTime(c.submitted_at)}
+          </p>
+        </button>
+      );
+    }
+
+    if (selected === "pending_an_generation") {
+      const p = item as PendingAnItem;
+      const ds = p.doc_status || {};
+      const outstanding = (ds.missing || 0) + (ds.rejected || 0) + (ds.pending || 0);
+      return (
+        <button key={p.id} className={baseClass} onClick={() => setSelectedItem(p)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{p.pre_admission_no || "PAN pending"} · {p.course || "—"}</p>
+            </div>
+            <span className="text-[10px] text-amber-600 font-medium shrink-0">{ds.verified ?? 0}/{ds.required_total ?? 0} verified</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {outstanding > 0 ? `${outstanding} document${outstanding === 1 ? "" : "s"} pending` : "Documents complete"}
           </p>
         </button>
       );
@@ -1471,7 +1689,7 @@ export default function Inbox() {
                 disabled={!isSuperAdmin || processing === c.id}
                 onClick={() => decideAbvmuDeposit(c, "approved")}
               >
-                {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+                {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
               </Button>
               <Button
                 size="sm"
@@ -1565,7 +1783,7 @@ export default function Inbox() {
               onClick={() => decideAllWaivers(g)}
             >
               {processing != null ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <CheckCheck className="h-4 w-4 mr-1.5" />
               )}
@@ -1615,7 +1833,7 @@ export default function Inbox() {
               onClick={() => decideOfferApproval(o, "approved")}
             >
               {processing === o.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -1638,6 +1856,89 @@ export default function Inbox() {
                 size="sm"
                 className="w-full"
                 onClick={() => navigate(`/admissions/${o.lead_id}`)}
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                View Lead Profile
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (selected === "offer_edits") {
+      const r = selectedItem as OfferEditItem;
+      const pc = r.proposed_changes || {};
+      const fmtFee = (n: number | null | undefined) =>
+        n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{r.lead_name}</h3>
+            {r.course_name && <p className="text-sm text-muted-foreground">{r.course_name}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row
+              label="Requested By"
+              value={`${r.requested_by_name || "Staff"}${r.requested_by_role ? ` (${r.requested_by_role})` : ""}`}
+            />
+            <Row label="Requested On" value={fmtDate(r.created_at)} />
+            {r.reason && <Row label="Reason" value={r.reason} />}
+          </div>
+
+          <div className="rounded-xl border border-info/30 bg-info/5 divide-y divide-border">
+            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-info-foreground">
+              Proposed Changes
+            </div>
+            {pc.acceptance_deadline && (
+              <Row
+                label="Acceptance Deadline"
+                value={`${fmtDate(r.current_deadline)} → ${fmtDate(pc.acceptance_deadline)}`}
+              />
+            )}
+            {pc.token_fee_amount != null && (
+              <Row
+                label="Token Fee"
+                value={`${fmtFee(r.current_token_fee)} → ${fmtFee(pc.token_fee_amount)}`}
+              />
+            )}
+            {!pc.acceptance_deadline && pc.token_fee_amount == null && (
+              <Row label="Changes" value="See reason" />
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === r.id}
+              onClick={() => decideOfferEdit(r, "approved")}
+            >
+              {processing === r.id ? (
+                <ButtonOrb state="working" onFilled />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === r.id}
+              onClick={() => decideOfferEdit(r, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {r.lead_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => navigate(`/admissions/${r.lead_id}`)}
               >
                 <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                 View Lead Profile
@@ -1683,7 +1984,7 @@ export default function Inbox() {
               disabled={!isSuperAdmin || processing === c.id}
               onClick={() => decideConcession(c, true)}
             >
-              {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+              {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
             </Button>
             <Button
               size="sm"
@@ -1733,7 +2034,7 @@ export default function Inbox() {
             disabled={!isSuperAdmin || processing === c.id}
             onClick={() => approveCertificate(c)}
           >
-            {processing === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve Certificate</>}
+            {processing === c.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve Certificate</>}
           </Button>
 
           <Button
@@ -1747,6 +2048,76 @@ export default function Inbox() {
           <p className="text-[10px] text-muted-foreground text-center">
             To correct details, open in Student Services and use Regenerate.
           </p>
+        </div>
+      );
+    }
+
+    if (selected === "pending_an_generation") {
+      const p = selectedItem as PendingAnItem;
+      const ds = p.doc_status || {};
+      const docs = ds.docs || [];
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{p.name}</h3>
+            <p className="text-sm text-muted-foreground">{p.pre_admission_no || "PAN pending"} · {p.course || "—"}</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-2">
+              Mandatory documents — {ds.verified ?? 0} of {ds.required_total ?? 0} verified
+            </p>
+            <div className="space-y-1.5">
+              {docs.length === 0 && (
+                <p className="text-xs text-muted-foreground">No mandatory-document breakdown available.</p>
+              )}
+              {docs.map((d) => (
+                <div key={d.key} className="flex items-center justify-between text-sm">
+                  <span className="text-foreground truncate">{d.label}</span>
+                  <span className={cn(
+                    "text-[11px] font-medium shrink-0 ml-2 capitalize",
+                    d.state === "verified" ? "text-success"
+                      : d.state === "rejected" ? "text-destructive"
+                      : d.state === "missing" ? "text-muted-foreground"
+                      : "text-amber-600",
+                  )}>
+                    {d.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {p.application_id && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => navigate(`/applications/${p.application_id}`)}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Open document review
+            </Button>
+          )}
+
+          {isSuperAdmin ? (
+            <>
+              <Button
+                size="sm"
+                className="w-full bg-amber-600/90 hover:bg-amber-600 text-white"
+                disabled={processing === p.id}
+                onClick={() => bypassAn(p)}
+              >
+                {processing === p.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Bypass & Generate AN</>}
+              </Button>
+              <p className="text-[10px] text-muted-foreground text-center">
+                Use only when a document flag is incorrect — the override is recorded.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground text-center">
+              Only a super admin can override the document check and generate the admission number.
+            </p>
+          )}
         </div>
       );
     }
@@ -1781,7 +2152,7 @@ export default function Inbox() {
               onClick={() => decideContactChange(c, "approved")}
             >
               {processing === c.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -1905,7 +2276,7 @@ export default function Inbox() {
               onClick={() => markWhatsAppRead(w)}
             >
               {processing === w.phone ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                <ButtonOrb state="working" />
               ) : (
                 <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
               )}
@@ -2002,7 +2373,7 @@ export default function Inbox() {
               onClick={() => decideVideo(v, "approved")}
             >
               {processing === v.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="working" onFilled />
               ) : (
                 <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
               )}
@@ -2129,13 +2500,13 @@ export default function Inbox() {
                 {items.length} item{items.length !== 1 ? "s" : ""}
               </p>
             </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            {loading && <ButtonOrb state="working" />}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
           {loading && items.length === 0 ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="searching" />
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">

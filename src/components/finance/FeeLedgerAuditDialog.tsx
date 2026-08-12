@@ -4,8 +4,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, History } from "lucide-react";
+import { History } from "lucide-react";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface AuditRow {
@@ -71,7 +72,7 @@ export function FeeLedgerAuditDialog({ open, onOpenChange, studentId }: Props) {
 
         {loading && (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
+            <OrbLoader state="solving" />
           </div>
         )}
 

@@ -2,11 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
-import {
-  Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
-  CreditCard, Banknote, Receipt, AlertCircle, UserCheck, UserPlus,
-} from "lucide-react";
+import { Search, RefreshCw, Download, CheckCircle2, Clock, CreditCard, Banknote, Receipt, AlertCircle, UserCheck, UserPlus } from "lucide-react";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -806,7 +804,7 @@ export default function TransactionHistoryPanel() {
                 className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
                 title="Verify pending payments with EaseBuzz (per-app, uses pending_txnid)"
               >
-                {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {reconciling ? <ButtonOrb state="solving" /> : <CheckCircle2 className="h-4 w-4" />}
                 Reconcile Pending
               </button>
             )}
@@ -820,7 +818,7 @@ export default function TransactionHistoryPanel() {
               className="flex items-center gap-2 rounded-xl border border-info/20 bg-info/5 px-3 py-2 text-sm font-medium text-info-foreground hover:bg-info/10 transition-colors disabled:opacity-50"
               title="Pull EaseBuzz transactions by date range and match to applications via UDF1 — recovers UPI-Intent webhook misses"
             >
-              {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {reconciling ? <ButtonOrb state="solving" /> : <CheckCircle2 className="h-4 w-4" />}
               Reconcile via EaseBuzz (UDF1)
             </button>
             <button
@@ -829,7 +827,7 @@ export default function TransactionHistoryPanel() {
               className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-50"
               title="Verify stored ICICI merchant transaction IDs and sweep stale ICICI lead-payment intents"
             >
-              {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {reconciling ? <ButtonOrb state="solving" /> : <CheckCircle2 className="h-4 w-4" />}
               Reconcile ICICI
             </button>
           </>
@@ -855,7 +853,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingApp ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="solving" />
             </div>
           ) : errorApp ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">
@@ -948,7 +946,7 @@ export default function TransactionHistoryPanel() {
                             }`}
                           >
                             {togglingId === t.application_id
-                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              ? <ButtonOrb state="solving" onFilled />
                               : t.applicant_type === "existing"
                               ? <UserCheck className="h-3 w-3" />
                               : <UserPlus className="h-3 w-3" />
@@ -1001,7 +999,7 @@ export default function TransactionHistoryPanel() {
                               title="Verify this pending application against ICICI STATUS using the stored or pasted merchant transaction number"
                             >
                               {iciciVerifyingId === t.application_id
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ? <ButtonOrb state="solving" />
                                 : <CheckCircle2 className="h-3.5 w-3.5" />}
                               Verify ICICI
                             </button>
@@ -1012,7 +1010,7 @@ export default function TransactionHistoryPanel() {
                               title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
                             >
                               {markingPaidId === t.application_id
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ? <ButtonOrb state="solving" onFilled />
                                 : <CheckCircle2 className="h-3.5 w-3.5" />}
                               Mark Paid by UTR
                             </button>
@@ -1043,7 +1041,7 @@ export default function TransactionHistoryPanel() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           {loadingStudent ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <OrbLoader state="solving" />
             </div>
           ) : errorStudent ? (
             <div className="flex items-center gap-3 px-6 py-8 text-destructive text-sm">

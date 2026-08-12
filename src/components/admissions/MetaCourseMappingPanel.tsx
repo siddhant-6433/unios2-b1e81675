@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 
 interface PendingMapping {
   id: string;
@@ -136,7 +137,7 @@ export function MetaCourseMappingPanel() {
                 onClick={() => handleSave(m)}
                 className="gap-1.5 h-8 text-xs bg-warning hover:bg-warning/60"
               >
-                {saving[m.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                {saving[m.id] ? <ButtonOrb state="working" onFilled /> : <Check className="h-3.5 w-3.5" />}
                 Save
               </Button>
             </div>

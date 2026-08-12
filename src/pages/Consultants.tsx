@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -7,11 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/state-fields";
-import {
-  Plus, Search, Loader2, Users, Phone, Mail,
-  IndianRupee, MapPin, ChevronRight,
-  FileText, RotateCcw, CheckCircle2, GitMerge
-} from "lucide-react";
+import { Plus, Search, Users, Phone, Mail, IndianRupee, MapPin, ChevronRight, FileText, RotateCcw, CheckCircle2, GitMerge } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { CourseCommissions } from "@/components/consultant/CourseCommissions";
 import { LeadCommissions } from "@/components/consultant/LeadCommissions";
@@ -907,7 +904,7 @@ const Consultants = () => {
                   />
                 </div>
                 <Button size="sm" onClick={recordFeeRemittance} disabled={remittanceSaving} className="gap-1.5">
-                  {remittanceSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  {remittanceSaving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />}
                   Record
                 </Button>
               </div>
@@ -935,7 +932,7 @@ const Consultants = () => {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={resetForm}>Cancel</Button>
               <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />}
                 {editingId ? "Update" : "Add"} Consultant
               </Button>
             </div>
@@ -1074,15 +1071,15 @@ const Consultants = () => {
                   Skip
                 </Button>
                 <Button variant="outline" onClick={() => saveAdminOnboarding("in_progress", false)} disabled={saving} className="gap-2">
-                  {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save Draft
+                  {saving && <ButtonOrb state="working" />} Save Draft
                 </Button>
                 {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
                   <Button onClick={() => goToOnboardingStep(onboardingStep + 1)} disabled={saving} className="gap-2">
-                    {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save & Continue
+                    {saving && <ButtonOrb state="working" onFilled />} Save & Continue
                   </Button>
                 ) : (
                   <Button onClick={() => saveAdminOnboarding("completed", true, ONBOARDING_STEPS.length - 1)} disabled={saving} className="gap-2">
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
+                    {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="h-4 w-4" />} Complete Onboarding
                   </Button>
                 )}
               </div>
@@ -1134,7 +1131,7 @@ const Consultants = () => {
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => { setMergeGroup(null); setMergeKeepId(""); }} disabled={merging}>Cancel</Button>
               <Button onClick={doMerge} disabled={merging || !mergeKeepId} className="gap-1.5">
-                {merging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
+                {merging ? <ButtonOrb state="working" onFilled /> : <GitMerge className="h-4 w-4" />}
                 Merge {(mergeGroup || []).length - 1} into selected
               </Button>
             </div>

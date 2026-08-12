@@ -3,9 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { TextField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
-import { Loader2, UserCheck } from "lucide-react";
+import { UserCheck } from "lucide-react";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
@@ -97,7 +98,7 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Save Score
+              {saving ? <ButtonOrb state="working" onFilled /> : <UserCheck className="h-4 w-4" />} Save Score
             </Button>
           </div>
         </div>

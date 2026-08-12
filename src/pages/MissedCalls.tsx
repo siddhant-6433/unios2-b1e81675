@@ -18,11 +18,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Phone, PhoneMissed, CheckCircle2, Loader2, ExternalLink,
-  Clock, MessageSquare, RefreshCw, User, UserPlus, X,
-} from "lucide-react";
+import { Phone, PhoneMissed, CheckCircle2, ExternalLink, Clock, MessageSquare, RefreshCw, User, UserPlus, X } from "lucide-react";
 import { SelectField } from "@/components/ui/state-fields";
 import { Checkbox } from "@/components/ui/checkbox";
 import { recordCallDisposition } from "@/lib/callDisposition";
@@ -469,7 +467,7 @@ export default function MissedCalls() {
       {/* List */}
       {loading ? (
         <div className="p-12 flex items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="connecting" />
         </div>
       ) : calls.length === 0 ? (
         <Card>
@@ -562,7 +560,7 @@ export default function MissedCalls() {
                         className="bg-cyan-600 hover:bg-cyan-700 text-white gap-1.5"
                       >
                         {callingNow && activeMc?.id === mc.id
-                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ? <ButtonOrb state="working" onFilled />
                           : <Phone className="h-3.5 w-3.5" />}
                         Cloud Call
                       </Button>
@@ -607,7 +605,7 @@ export default function MissedCalls() {
               disabled={assigning || !assignCounsellorId}
               className="gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white"
             >
-              {assigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              {assigning ? <ButtonOrb state="working" onFilled /> : <UserPlus className="h-3.5 w-3.5" />}
               Assign
             </Button>
             <Button

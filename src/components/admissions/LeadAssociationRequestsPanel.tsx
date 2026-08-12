@@ -1,11 +1,12 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, Clock, ExternalLink, Loader2, X } from "lucide-react";
+import { Check, Clock, ExternalLink, X } from "lucide-react";
 
 type AssociationRequest = {
   id: string;
@@ -165,7 +166,7 @@ export function LeadAssociationRequestsPanel({ requesterType }: Props) {
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
                           <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-success hover:bg-success/5" onClick={() => review(request, true)} disabled={processing === request.id}>
-                            {processing === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                            {processing === request.id ? <ButtonOrb state="working" /> : <Check className="h-3.5 w-3.5" />}
                           </Button>
                           <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => review(request, false)} disabled={processing === request.id}>
                             <X className="h-3.5 w-3.5" />

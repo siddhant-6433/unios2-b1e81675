@@ -3,13 +3,14 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Loader2, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X, Paperclip, Image as ImageIcon } from "lucide-react";
+import { Sparkles, ChevronDown, ExternalLink, GraduationCap, Phone, Check, X, Paperclip, Image as ImageIcon } from "lucide-react";
 
 // voice_knowledge_gaps may not have generated TS types yet — cast via `supabase as any`.
 // Lead context shared by gap + mined cards: name, current stage, and the
@@ -372,7 +373,7 @@ export function NavyaKnowledgeContent() {
         <TabsContent value="pending" className="mt-4 space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+              <ButtonOrb state="connecting" /> Loading…
             </div>
           ) : gaps.length === 0 ? (
             <Card>
@@ -453,7 +454,7 @@ export function NavyaKnowledgeContent() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button size="sm" onClick={() => saveAndTeach(gap)} disabled={savingId === gap.id}>
-                        {savingId === gap.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {savingId === gap.id ? <ButtonOrb state="connecting" onFilled /> : <Sparkles className="h-4 w-4" />}
                         Save &amp; Teach
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => dismiss(gap)} disabled={savingId === gap.id}>
@@ -513,7 +514,7 @@ export function NavyaKnowledgeContent() {
         <TabsContent value="calls" className="mt-4 space-y-3">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+              <ButtonOrb state="connecting" /> Loading…
             </div>
           ) : calls.length === 0 ? (
             <Card>
@@ -529,7 +530,7 @@ export function NavyaKnowledgeContent() {
         <TabsContent value="mined" className="mt-4 space-y-3">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+              <ButtonOrb state="connecting" /> Loading…
             </div>
           ) : mined.length === 0 ? (
             <Card>
@@ -778,7 +779,7 @@ function CallCard({ call, onCoached }: { call: CallRecord; onCoached: () => void
                           />
                           <div className="flex items-center gap-2">
                             <Button size="sm" onClick={() => suggest(idx)} disabled={savingIdx === idx}>
-                              {savingIdx === idx ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                              {savingIdx === idx ? <ButtonOrb state="connecting" onFilled /> : <Sparkles className="h-4 w-4" />}
                               Save
                             </Button>
                             <Button size="sm" variant="ghost" onClick={() => setOpenIdx(null)}>

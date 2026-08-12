@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,11 +26,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  FileText, Loader2, Upload, ExternalLink, Trash2, ShieldCheck, Car, Heart,
-  Wind, Smartphone, BookOpen, BadgeCheck, CreditCard, AlertTriangle,
-  ChevronRight, MoreVertical, Pencil,
-} from "lucide-react";
+import { FileText, Upload, ExternalLink, Trash2, ShieldCheck, Car, Heart, Wind, Smartphone, BookOpen, BadgeCheck, CreditCard, AlertTriangle, ChevronRight, MoreVertical, Pencil } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 type DocType =
@@ -490,7 +487,7 @@ const UploadDialog = ({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           {!form ? (
             <Button onClick={upload} disabled={!file || uploading || extracting} className="gap-2">
-              {(uploading || extracting) && <Loader2 className="h-4 w-4 animate-spin" />}
+              {(uploading || extracting) && <ButtonOrb state="working" onFilled />}
               {extracting ? "Extracting…" : uploading ? "Uploading…" : "Upload & extract"}
             </Button>
           ) : (

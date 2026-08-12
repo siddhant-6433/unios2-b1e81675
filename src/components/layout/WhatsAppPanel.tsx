@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
-import { CheckCheck, Loader2, X } from "lucide-react";
+import { CheckCheck, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
@@ -296,7 +297,7 @@ export function WhatsAppPanel() {
           <div className="max-h-[360px] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <ButtonOrb state="connecting" />
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">

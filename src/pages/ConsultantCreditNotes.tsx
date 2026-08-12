@@ -7,6 +7,7 @@ import { Fragment, useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -286,7 +287,7 @@ export default function ConsultantCreditNotes() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)} disabled={saving}>Cancel</Button>
             <Button onClick={handleCreate} disabled={saving} className="gap-1.5">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {saving ? <ButtonOrb state="working" onFilled /> : <Plus className="h-4 w-4" />}
               Create
             </Button>
           </DialogFooter>

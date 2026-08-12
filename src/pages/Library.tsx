@@ -1,30 +1,9 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  AlertTriangle,
-  Barcode,
-  BookOpen,
-  Building2,
-  CheckCircle2,
-  Clock,
-  Download,
-  FileSpreadsheet,
-  FileSearch,
-  Library as LibraryIcon,
-  Loader2,
-  Plus,
-  Printer,
-  RefreshCw,
-  RotateCcw,
-  Search,
-  Settings,
-  ShieldCheck,
-  Trash2,
-  UserPlus,
-  Users,
-} from "lucide-react";
+import { AlertTriangle, Barcode, BookOpen, Building2, CheckCircle2, Clock, Download, FileSpreadsheet, FileSearch, Library as LibraryIcon, Plus, Printer, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { format, isBefore, startOfToday } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { normalizeIsbn, findDuplicateReason as findDuplicateReasonPure, rememberSeen, emptySeen } from "@/lib/libraryDuplicate";
+import { detectHeaderRow, forwardFill, resolveColumns, parseAmount, parseIntLoose, splitPlacePublisher, cleanAuthorName, normalizePublisher } from "@/lib/libraryImport";
+import { CatalogEntityManager } from "@/components/library/CatalogEntityManager";
 
 type LibraryBook = {
   id: string;
@@ -165,7 +147,12 @@ type DigitizationRecord = {
   accession_no: string | null;
   title: string | null;
   authors_text: string | null;
+  cover_image_url: string | null;
   publisher: string | null;
+  place: string | null;
+  edition: string | null;
+  pages: number | null;
+  volume: string | null;
   published_year: number | null;
   category: string | null;
   subject: string | null;
@@ -176,6 +163,7 @@ type DigitizationRecord = {
   purchase_price: number | null;
   import_row: Record<string, unknown> | null;
   approved_item_id: string | null;
+  enrichment_status: string | null;
   status: string;
   confidence: number | null;
   suggested_metadata: any;
@@ -188,6 +176,10 @@ type DigitizationReviewEdit = {
   authors_text: string;
   isbn: string;
   publisher: string;
+  place: string;
+  edition: string;
+  pages: string;
+  volume: string;
   published_year: string;
   category: string;
   subject: string;
@@ -198,28 +190,11 @@ type DigitizationReviewEdit = {
   purchase_price: string;
 };
 
-const tabKeys = ["dashboard", "catalog", "circulation", "inventory", "digitization", "members", "reports", "settings"];
+const tabKeys = ["dashboard", "catalog", "circulation", "inventory", "digitization", "authors", "publishers", "members", "reports", "settings"];
 const today = startOfToday();
 
 function authorsLabel(authors?: string[] | null) {
   return authors?.length ? authors.join(", ") : "Unknown author";
-}
-
-function normalizeIsbn(value: string) {
-  return value.replace(/[^0-9Xx]/g, "");
-}
-
-function normalizeHeader(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function rowValue(row: Record<string, unknown>, aliases: string[]) {
-  const entries = Object.entries(row);
-  for (const alias of aliases.map(normalizeHeader)) {
-    const match = entries.find(([key]) => normalizeHeader(key) === alias);
-    if (match && String(match[1] ?? "").trim()) return String(match[1]).trim();
-  }
-  return "";
 }
 
 function numberOrNull(value: string) {
@@ -318,6 +293,7 @@ const Library = () => {
   const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize;
 
   const [loading, setLoading] = useState(true);
+  const initializedRef = useRef(false);
   const [books, setBooks] = useState<LibraryBook[]>([]);
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loans, setLoans] = useState<LibraryLoan[]>([]);
@@ -327,6 +303,7 @@ const Library = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [branches, setBranches] = useState<LibraryBranch[]>([]);
   const [branchCourses, setBranchCourses] = useState<LibraryBranchCourse[]>([]);
+  const [branchInstitutions, setBranchInstitutions] = useState<{ branch_id: string; institution_id: string }[]>([]);
   const [librarySettings, setLibrarySettings] = useState<LibrarySetting[]>([]);
   const [staffAssignments, setStaffAssignments] = useState<LibraryStaffAssignment[]>([]);
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
@@ -362,11 +339,18 @@ const Library = () => {
   const [inventoryForm, setInventoryForm] = useState({ accession_no: "", status: "available", shelf_location: "", rack: "" });
   const [digitizeForm, setDigitizeForm] = useState({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
   const [reviewEdits, setReviewEdits] = useState<Record<string, DigitizationReviewEdit>>({});
+  const [selectedDigitization, setSelectedDigitization] = useState<Set<string>>(new Set());
+  const [enrichFilter, setEnrichFilter] = useState<"all" | "enriched" | "no_match" | "not_tried" | "missing_cover">("all");
+  const [publisherEntities, setPublisherEntities] = useState<{ id: string; name: string; normalized_name: string }[]>([]);
+  const [enrichCron, setEnrichCron] = useState<{ enabled: boolean; minutes: number }>({ enabled: false, minutes: 30 });
+  const [bulkEnrich, setBulkEnrich] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
   const fetchLibrary = async () => {
-    setLoading(true);
-    const [institutionRes, courseRes, branchRes, branchCourseRes, settingsRes, assignmentRes, bookRes, itemRes, loanRes, memberRes, digitizationRes, roleRes] = await Promise.all([
+    // Only show the full-page loader on first load; refetches after an action stay silent so the
+    // page doesn't unmount/remount (which would reset the scroll position to the top).
+    if (!initializedRef.current) setLoading(true);
+    const [institutionRes, courseRes, branchRes, branchCourseRes, settingsRes, assignmentRes, bookRes, itemRes, loanRes, memberRes, digitizationRes, roleRes, pubEntityRes, branchInstRes] = await Promise.all([
       (supabase as any).from("institutions").select("id, name, code, campus_id, type").order("name"),
       (supabase as any).from("courses").select("id, name, code, department_id, departments(institution_id)").eq("is_active", true).order("name"),
       (supabase as any).from("library_branches").select("*").order("name"),
@@ -387,6 +371,8 @@ const Library = () => {
       (supabase as any).from("library_members").select("*").order("display_name").limit(200),
       (supabase as any).from("library_digitization_records").select("*").order("created_at", { ascending: false }).limit(200),
       (supabase as any).from("user_roles").select("user_id, role").eq("role", "librarian"),
+      (supabase as any).from("library_publishers").select("id, name, normalized_name").order("name").limit(2000),
+      (supabase as any).from("library_branch_institutions").select("branch_id, institution_id"),
     ]);
 
     if (institutionRes.data) setInstitutions(institutionRes.data);
@@ -400,6 +386,8 @@ const Library = () => {
     if (loanRes.data) setLoans(loanRes.data);
     if (memberRes.data) setMembers(memberRes.data);
     if (digitizationRes.data) setDigitization(digitizationRes.data);
+    if (pubEntityRes.data) setPublisherEntities(pubEntityRes.data);
+    if (branchInstRes.data) setBranchInstitutions(branchInstRes.data);
     const librarianUserIds = (roleRes.data || []).map((row: any) => row.user_id).filter(Boolean);
     if (librarianUserIds.length) {
       const { data: profileRows } = await (supabase as any)
@@ -413,6 +401,7 @@ const Library = () => {
     } else {
       setStaffProfiles([]);
     }
+    initializedRef.current = true;
     setLoading(false);
   };
 
@@ -475,6 +464,13 @@ const Library = () => {
     }
   }, [selectableBranches, selectedBranchId]);
 
+  // Load the enrichment cron status when a super admin opens Settings.
+  useEffect(() => {
+    if (activeTab === "settings" && role === "super_admin") fetchEnrichCron();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, role]);
+
+
   useEffect(() => {
     if (!canCreateLibrary) return;
     if (!visibleInstitutions.length) {
@@ -498,7 +494,15 @@ const Library = () => {
     || selectedUserAssignment?.can_manage_settings === true;
   const selectedScopeCampusId = selectedBranch?.campus_id || selectedInstitution?.campus_id || (libraryCampusId !== "all" ? libraryCampusId : "");
   const selectedScopeInstitutionId = selectedBranch?.institution_id || selectedInstitutionId;
-  const selectedInstitutionCourses = courses.filter((course) => course.departments?.institution_id === selectedScopeInstitutionId);
+  // A branch serves its own institution plus any explicitly mapped extras (shared libraries).
+  const selectedServedInstitutionIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (selectedBranch?.institution_id) ids.add(selectedBranch.institution_id);
+    else if (selectedScopeInstitutionId) ids.add(selectedScopeInstitutionId);
+    for (const row of branchInstitutions) if (row.branch_id === selectedBranchId) ids.add(row.institution_id);
+    return ids;
+  }, [selectedBranch, selectedScopeInstitutionId, branchInstitutions, selectedBranchId]);
+  const selectedInstitutionCourses = courses.filter((course) => course.departments?.institution_id && selectedServedInstitutionIds.has(course.departments.institution_id));
   const selectedBranchCourseRows = branchCourses.filter((row) => row.branch_id === selectedBranchId && row.active);
   const selectedBranchCourseIds = new Set(selectedBranchCourseRows.map((row) => row.course_id));
   const selectedBranchCourseCount = selectedBranchId ? selectedBranchCourseIds.size : 0;
@@ -535,6 +539,10 @@ const Library = () => {
       authors_text: record.authors_text || metadataAuthors,
       isbn: record.isbn || metadata.isbn_13 || metadata.isbn_10 || "",
       publisher: record.publisher || metadata.publisher || "",
+      place: record.place || "",
+      edition: record.edition || metadata.edition || "",
+      pages: String(record.pages || ""),
+      volume: record.volume || "",
       published_year: String(record.published_year || metadata.published_year || ""),
       category: record.category || metadata.category || "",
       subject: record.subject || metadata.subject || "",
@@ -547,6 +555,17 @@ const Library = () => {
   };
 
   const reviewEdit = (record: DigitizationRecord) => reviewEdits[record.id] || digitizationValues(record);
+
+  // Live preview of which publisher entity a raw value will resolve to on approval.
+  const publisherByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of publisherEntities) if (p.normalized_name) m.set(p.normalized_name, p.name);
+    return m;
+  }, [publisherEntities]);
+  const resolvePublisher = (name: string): { key: string; matchName: string | null } => {
+    const key = normalizePublisher(name);
+    return { key, matchName: key ? publisherByKey.get(key) ?? null : null };
+  };
 
   const setReviewEdit = (record: DigitizationRecord, key: keyof DigitizationReviewEdit, value: string) => {
     setReviewEdits((current) => ({
@@ -573,6 +592,19 @@ const Library = () => {
       accession: byAccession?.accession_no || "",
       isbn: byIsbn?.title || "",
     };
+  };
+
+  // Resolves the record's institution, then delegates to the pure duplicate checker.
+  const findDuplicateReason = (
+    input: { isbn?: string | null; accession?: string | null; barcode?: string | null; branchId: string },
+    seen?: ReturnType<typeof emptySeen>,
+  ): string | null => {
+    const branch = branches.find((row) => row.id === input.branchId);
+    return findDuplicateReasonPure(
+      { ...input, institutionId: branch?.institution_id ?? null },
+      { items, books, queue: digitization },
+      seen,
+    );
   };
 
   const filteredItems = useMemo(() => {
@@ -621,6 +653,14 @@ const Library = () => {
   const lowCopyTitles = books.filter((book) => scopedBookIds.has(book.id) && filteredItems.filter((item) => item.book_id === book.id && item.status === "available").length === 0);
   const damagedOrLost = filteredItems.filter((item) => item.status === "damaged" || item.status === "lost");
   const pendingDigitization = filteredDigitization.filter((record) => ["captured", "matched", "needs_review"].includes(record.status));
+  // Review queue after applying the auto-fetch filter (the visible/selectable list).
+  const reviewList = filteredDigitization.filter((r) => {
+    if (enrichFilter === "enriched") return r.enrichment_status === "enriched";
+    if (enrichFilter === "no_match") return r.enrichment_status === "no_match";
+    if (enrichFilter === "not_tried") return !r.enrichment_status;
+    if (enrichFilter === "missing_cover") return !r.cover_image_url;
+    return true;
+  });
 
   const requireLibraryScope = () => {
     if (!scopeReady) {
@@ -763,6 +803,33 @@ const Library = () => {
     }
   };
 
+  // Add/remove an extra institution this library serves (shared-library config).
+  const handleToggleServedInstitution = async (institutionId: string, served: boolean) => {
+    if (!canManageSelectedLibrary || !selectedBranchId || !selectedBranch) return;
+    if (institutionId === selectedBranch.institution_id) return; // owner is always served
+    setSaving(`served-${institutionId}`);
+    try {
+      if (served) {
+        const { error } = await (supabase as any)
+          .from("library_branch_institutions")
+          .upsert({ branch_id: selectedBranchId, institution_id: institutionId }, { onConflict: "branch_id,institution_id" });
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase as any)
+          .from("library_branch_institutions")
+          .delete()
+          .eq("branch_id", selectedBranchId)
+          .eq("institution_id", institutionId);
+        if (error) throw error;
+      }
+      await fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Served-institution update failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const handleSaveLibraryRules = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!canManageSelectedLibrary || !selectedBranchId) return;
@@ -815,7 +882,7 @@ const Library = () => {
         .from("library_books")
         .insert({
           title: bookForm.title.trim(),
-          authors: bookForm.authors.split(",").map((a) => a.trim()).filter(Boolean),
+          authors: bookForm.authors.split(",").map((a) => cleanAuthorName(a)).filter(Boolean),
           isbn_13: isbn.length === 13 ? isbn : null,
           isbn_10: isbn.length === 10 ? isbn : null,
           publisher: bookForm.publisher.trim() || null,
@@ -825,6 +892,10 @@ const Library = () => {
         .select("id")
         .single();
       if (bookError) throw bookError;
+
+      // Link reusable author/publisher entities (mirrors approval); best-effort, non-fatal.
+      await (supabase as any).rpc("library_sync_book_authors", { _book_id: book.id, _authors: bookForm.authors.split(",").map((a) => cleanAuthorName(a)).filter(Boolean) });
+      await (supabase as any).rpc("library_sync_book_publisher", { _book_id: book.id, _name: bookForm.publisher.trim() || null });
 
       const { error: itemError } = await (supabase as any).from("library_items").insert({
         book_id: book.id,
@@ -936,6 +1007,11 @@ const Library = () => {
     try {
       const branchId = await ensureDefaultBranch();
       const isbn = normalizeIsbn(digitizeForm.isbn || digitizeForm.scanned_barcode);
+      const duplicateReason = findDuplicateReason({ isbn, barcode: digitizeForm.scanned_barcode, branchId });
+      if (duplicateReason && !window.confirm(`${duplicateReason}.\n\nCapture it anyway (it will be flagged as a duplicate)?`)) {
+        setSaving(null);
+        return;
+      }
       let suggested: any = {};
       let confidence = 0.2;
       if (isbn) {
@@ -953,10 +1029,11 @@ const Library = () => {
         raw_ocr_text: digitizeForm.raw_ocr_text.trim() || null,
         suggested_metadata: suggested,
         confidence,
-        status: Object.keys(suggested).length ? "matched" : "needs_review",
+        status: duplicateReason ? "duplicate" : (Object.keys(suggested).length ? "matched" : "needs_review"),
+        notes: duplicateReason || null,
       });
       if (error) throw error;
-      toast({ title: "Digitization record captured", description: Object.keys(suggested).length ? "Metadata matched and queued for review." : "Queued for librarian review." });
+      toast({ title: duplicateReason ? "Captured as duplicate" : "Digitization record captured", description: duplicateReason || (Object.keys(suggested).length ? "Metadata matched and queued for review." : "Queued for librarian review.") });
       setDigitizeForm({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
       fetchLibrary();
     } catch (err: any) {
@@ -974,8 +1051,25 @@ const Library = () => {
       const XLSX = await import("xlsx");
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
       const sheetName = workbook.SheetNames[0];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "" }).slice(0, 1000);
-      if (!rows.length) throw new Error("No rows found in the selected file.");
+      // Read as array-of-arrays so we can find the real header row and forward-fill
+      // ditto/blank cells before mapping columns. defval keeps blank cells positional.
+      const grid = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false }).slice(0, 20000);
+      if (!grid.length) throw new Error("No rows found in the selected file.");
+
+      const headerIdx = detectHeaderRow(grid.map((r) => (r || []).map((c) => (c ?? "").toString())));
+      const headerRow = (grid[headerIdx] || []).map((c) => (c ?? "").toString());
+      const cols = resolveColumns(headerRow);
+      if (cols.title == null && cols.accession == null) {
+        throw new Error("Could not find an Accession or Title column. Check the file's header row.");
+      }
+      const width = headerRow.length;
+      const body = grid.slice(headerIdx + 1).map((r) => (r || []).map((c) => (c ?? "").toString()));
+      // Forward-fill ditto/blank cells, but never propagate the per-row accession or remark.
+      const exempt = new Set<number>();
+      if (cols.accession != null) exempt.add(cols.accession);
+      if (cols.remark != null) exempt.add(cols.remark);
+      const filled = forwardFill(body, width, exempt);
+      const cell = (row: string[], field: string) => (cols[field] != null ? (row[cols[field]] ?? "").toString().trim() : "");
 
       const { data: batch, error: batchError } = await (supabase as any)
         .from("library_digitization_batches")
@@ -989,50 +1083,74 @@ const Library = () => {
       if (batchError) throw batchError;
 
       const records = [];
-      for (const row of rows) {
-        const isbn = normalizeIsbn(rowValue(row, ["ISBN", "ISBN13", "ISBN 13", "Book ISBN"]));
+      const seen = emptySeen();
+      let dupCount = 0;
+      for (const row of filled) {
+        const accession = cell(row, "accession");
+        const author = cell(row, "author");
+        const title = cell(row, "title");
+        if (!accession && !title && !author) continue; // skip blank/spacer rows
+        const isbn = normalizeIsbn(cell(row, "isbn"));
+        const barcode = cell(row, "barcode") || null;
+        const duplicateReason = findDuplicateReason({ isbn, accession, barcode, branchId }, seen);
+        if (duplicateReason) dupCount += 1;
+        rememberSeen(seen, { isbn, accession, barcode });
+        // ISBN-less registers never hit the network; only look up when an ISBN is present.
         let suggested: any = {};
         let confidence = isbn ? 0.35 : 0.2;
-        if (isbn) {
+        if (isbn && !duplicateReason) {
           const { data } = await supabase.functions.invoke("library-book-lookup", { body: { isbn } });
           if (data?.book) {
             suggested = data.book;
             confidence = data.confidence || 0.82;
           }
         }
-        const title = rowValue(row, ["Title", "Book Title", "Name"]);
+        const { place, publisher } = splitPlacePublisher(cell(row, "placePublisher"));
+        const remark = cell(row, "remark");
+        const authorsText = cleanAuthorName(author) || (Array.isArray(suggested.authors) ? suggested.authors.join(", ") : null);
         records.push({
           batch_id: batch.id,
           branch_id: branchId,
           captured_by: user?.id || null,
           source: "csv_import",
-          accession_no: rowValue(row, ["Accession No", "Accession Number", "Accession", "Acc No"]),
-          scanned_barcode: rowValue(row, ["Barcode", "Book Barcode"]) || null,
+          accession_no: accession || null,
+          scanned_barcode: barcode,
           isbn: isbn || null,
           title: title || suggested.title || null,
-          authors_text: rowValue(row, ["Author", "Authors", "Writer"]) || (Array.isArray(suggested.authors) ? suggested.authors.join(", ") : null),
-          publisher: rowValue(row, ["Publisher"]) || suggested.publisher || null,
-          published_year: numberOrNull(rowValue(row, ["Year", "Published Year", "Publication Year"])) || suggested.published_year || null,
-          category: rowValue(row, ["Category", "Class", "Classification"]) || suggested.category || null,
-          subject: rowValue(row, ["Subject"]) || suggested.subject || null,
-          language: rowValue(row, ["Language"]) || suggested.language || null,
-          shelf_location: rowValue(row, ["Shelf", "Shelf Location", "Location"]),
-          rack: rowValue(row, ["Rack", "Rack No"]),
-          condition: rowValue(row, ["Condition"]) || "good",
-          purchase_price: numberOrNull(rowValue(row, ["Price", "Purchase Price", "Cost"])),
-          import_row: row,
+          authors_text: authorsText,
+          publisher: publisher || suggested.publisher || null,
+          place: place || null,
+          edition: cell(row, "edition") || suggested.edition || null,
+          pages: parseIntLoose(cell(row, "pages")),
+          volume: cell(row, "volume") || null,
+          published_year: parseIntLoose(cell(row, "year")) ?? suggested.published_year ?? null,
+          category: cell(row, "category") || suggested.category || null,
+          subject: cell(row, "subject") || suggested.subject || null,
+          language: cell(row, "language") || suggested.language || null,
+          shelf_location: cell(row, "shelf"),
+          rack: cell(row, "rack"),
+          condition: cell(row, "condition") || "good",
+          purchase_price: parseAmount(cell(row, "cost")),
+          import_row: Object.fromEntries(headerRow.map((h, i) => [h || `col${i}`, row[i] ?? ""])),
           suggested_metadata: Object.keys(suggested).length ? suggested : {
             title,
-            authors: rowValue(row, ["Author", "Authors", "Writer"]) ? rowValue(row, ["Author", "Authors", "Writer"]).split(",").map((name) => name.trim()).filter(Boolean) : [],
+            authors: authorsText ? authorsText.split(",").map((name) => name.trim()).filter(Boolean) : [],
           },
           confidence,
-          status: Object.keys(suggested).length ? "matched" : "needs_review",
+          status: duplicateReason ? "duplicate" : (Object.keys(suggested).length ? "matched" : "needs_review"),
+          notes: [duplicateReason, remark ? `Remark: ${remark}` : null].filter(Boolean).join(" · ") || null,
         });
       }
 
-      const { error } = await (supabase as any).from("library_digitization_records").insert(records);
-      if (error) throw error;
-      toast({ title: "Import queued", description: `${records.length} book rows were added to the digitization review queue.` });
+      if (!records.length) throw new Error("No importable rows found (all rows were blank).");
+
+      // Chunk inserts so a 2,600+ row register doesn't exceed the request payload limit.
+      const CHUNK = 500;
+      for (let i = 0; i < records.length; i += CHUNK) {
+        const { error } = await (supabase as any).from("library_digitization_records").insert(records.slice(i, i + CHUNK));
+        if (error) throw error;
+      }
+      toast({ title: "Import queued", description: `${records.length} book rows added${dupCount ? `, ${dupCount} flagged as duplicates` : ""}.` });
       fetchLibrary();
     } catch (err: any) {
       toast({ title: "Library import failed", description: err.message, variant: "destructive" });
@@ -1079,6 +1197,10 @@ const Library = () => {
         _rack: values.rack.trim() || null,
         _condition: values.condition.trim() || "good",
         _purchase_price: numberOrNull(values.purchase_price),
+        _edition: values.edition.trim() || null,
+        _pages: numberOrNull(values.pages),
+        _volume: values.volume.trim() || null,
+        _place: values.place.trim() || null,
       });
       if (error) throw error;
       toast({ title: "Book approved", description: "Catalog title and physical copy were created." });
@@ -1127,6 +1249,202 @@ const Library = () => {
       fetchLibrary();
     } catch (err: any) {
       toast({ title: "Duplicate update failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // A record is worth enriching if it's missing a cover or any of the key metadata fields.
+  const recordNeedsEnrichment = (r: DigitizationRecord) => {
+    const blank = (v: unknown) => v == null || String(v).trim() === "";
+    return blank(r.cover_image_url) || blank(r.isbn) || blank(r.publisher)
+      || blank(r.category) || blank(r.subject) || blank(r.language);
+  };
+
+  // Core enrichment: look up a record, fill only BLANK columns, pull a cover. No toast/refetch —
+  // returns what it did so single and bulk callers can present it. `prefer` picks the lookup source.
+  const enrichRecordOnce = async (
+    record: DigitizationRecord,
+    prefer?: "open_library",
+  ): Promise<{ matched: boolean; filled: number; cover: boolean; overlay: Partial<DigitizationReviewEdit> }> => {
+    const markStatus = async (enrichment_status: string) => {
+      await (supabase as any).from("library_digitization_records").update({ enrichment_status }).eq("id", record.id);
+    };
+    const values = reviewEdit(record);
+    const isbn = normalizeIsbn(values.isbn);
+    const title = values.title.trim();
+    if (!isbn && !title) { await markStatus("no_match"); return { matched: false, filled: 0, cover: false, overlay: {} }; }
+
+    const { data, error } = await supabase.functions.invoke("library-book-lookup", {
+      body: { isbn: isbn || undefined, title: title || undefined, author: values.authors_text.split(",")[0]?.trim() || undefined, prefer },
+    });
+    const book = data?.book;
+    if (error || !book) { await markStatus("no_match"); return { matched: false, filled: 0, cover: false, overlay: {} }; }
+
+    const blank = (v: unknown) => v == null || String(v).trim() === "";
+    const upd: Record<string, unknown> = {};
+    const overlay: Partial<DigitizationReviewEdit> = {};
+    const bookIsbn = normalizeIsbn(book.isbn_13 || book.isbn_10 || "");
+    if (blank(record.isbn) && bookIsbn) { upd.isbn = bookIsbn; overlay.isbn = bookIsbn; }
+    if (blank(record.title) && book.title) { upd.title = book.title; overlay.title = book.title; }
+    if (blank(record.authors_text) && Array.isArray(book.authors) && book.authors.length) {
+      const a = book.authors.map((x: string) => cleanAuthorName(x)).filter(Boolean).join(", ");
+      if (a) { upd.authors_text = a; overlay.authors_text = a; }
+    }
+    if (blank(record.publisher) && book.publisher) { upd.publisher = book.publisher; overlay.publisher = book.publisher; }
+    if (blank(record.category) && book.category) { upd.category = book.category; overlay.category = book.category; }
+    if (blank(record.subject) && book.subject) { upd.subject = book.subject; overlay.subject = book.subject; }
+    if (blank(record.language) && book.language) { upd.language = book.language; overlay.language = book.language; }
+    if (blank(record.published_year) && book.published_year) { upd.published_year = book.published_year; overlay.published_year = String(book.published_year); }
+    upd.suggested_metadata = { ...(record.suggested_metadata || {}), ...book };
+    upd.enrichment_status = "enriched";
+
+    const { error: updErr } = await (supabase as any).from("library_digitization_records").update(upd).eq("id", record.id);
+    if (updErr) throw updErr;
+
+    let cover = false;
+    if (book.cover_url && blank(record.cover_image_url)) {
+      const cap = await supabase.functions.invoke("library-cover-capture", {
+        body: { target: "record", id: record.id, source_url: book.cover_url },
+      });
+      cover = !!cap.data?.ok;
+    }
+    return { matched: true, filled: Object.keys(overlay).length, cover, overlay };
+  };
+
+  const handleAutofillRecord = async (record: DigitizationRecord) => {
+    if (!canDigitize) return;
+    const values = reviewEdit(record);
+    if (!normalizeIsbn(values.isbn) && !values.title.trim()) {
+      toast({ title: "Need a title or ISBN", description: "Add a title (or ISBN) before auto-filling.", variant: "destructive" });
+      return;
+    }
+    setSaving(`cover-${record.id}`);
+    try {
+      const res = await enrichRecordOnce(record);
+      if (!res.matched) throw new Error("No match found online");
+      // Reflect filled values in the review form without dropping unsaved edits.
+      setReviewEdits((cur) => ({ ...cur, [record.id]: { ...reviewEdit(record), ...res.overlay } }));
+      toast({ title: "Enriched from web", description: `${res.filled} field(s) filled${res.cover ? " + cover" : ""}.` });
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Auto-fill failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // Enrich a set of pending records that still need data. Batched with small concurrency and
+  // prefer=open_library (no API key / no daily quota) so a large queue doesn't hit Google limits.
+  const handleBulkEnrich = async (setSize = 50) => {
+    if (!canDigitize) return;
+    const queue = filteredDigitization.filter((r) => ["captured", "matched", "needs_review"].includes(r.status) && recordNeedsEnrichment(r)).slice(0, setSize);
+    if (!queue.length) {
+      toast({ title: "Nothing to enrich", description: "All pending records in view already have covers and metadata." });
+      return;
+    }
+    setBulkEnrich({ done: 0, total: queue.length });
+    let filledFields = 0, matched = 0, covers = 0;
+    try {
+      const CONCURRENCY = 4;
+      for (let i = 0; i < queue.length; i += CONCURRENCY) {
+        const batch = queue.slice(i, i + CONCURRENCY);
+        const results = await Promise.allSettled(batch.map((r) => enrichRecordOnce(r, "open_library")));
+        for (const res of results) {
+          if (res.status === "fulfilled" && res.value.matched) { matched += 1; filledFields += res.value.filled; if (res.value.cover) covers += 1; }
+        }
+        setBulkEnrich({ done: Math.min(i + CONCURRENCY, queue.length), total: queue.length });
+      }
+      toast({ title: "Bulk enrich complete", description: `${matched}/${queue.length} matched · ${filledFields} fields filled · ${covers} covers.` });
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Bulk enrich stopped", description: err.message, variant: "destructive" });
+      fetchLibrary();
+    } finally {
+      setBulkEnrich(null);
+    }
+  };
+
+  // Super-admin: schedule / run the server-side enrichment batch.
+  const fetchEnrichCron = async () => {
+    try {
+      const { data } = await (supabase as any).rpc("library_get_enrich_cron");
+      if (data?.[0]) setEnrichCron({ enabled: !!data[0].enabled, minutes: Number(data[0].minutes) || 30 });
+    } catch { /* non-fatal */ }
+  };
+  const handleSetEnrichCron = async (enabled: boolean, minutes: number) => {
+    setSaving("enrich-cron");
+    try {
+      const { error } = await (supabase as any).rpc("library_set_enrich_cron", { _enabled: enabled, _minutes: minutes });
+      if (error) throw error;
+      setEnrichCron({ enabled, minutes });
+      toast({ title: enabled ? `Auto-fill scheduled every ${minutes} min` : "Auto-fill schedule turned off" });
+    } catch (err: any) {
+      toast({ title: "Schedule update failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+  const handleRunEnrichNow = async () => {
+    setSaving("enrich-now");
+    try {
+      const { data, error } = await (supabase as any).functions.invoke("library-enrich-batch", { body: { limit: 150 } });
+      if (error) throw error;
+      toast({ title: "Batch run complete", description: `${data?.matched ?? 0} matched · ${data?.covers ?? 0} covers · ${data?.remaining ?? 0} left` });
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Batch run failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleUploadCover = async (record: DigitizationRecord, file: File | null) => {
+    if (!file || !canDigitize) return;
+    setSaving(`cover-${record.id}`);
+    try {
+      const image_base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read file"));
+        reader.readAsDataURL(file);
+      });
+      const { data, error } = await supabase.functions.invoke("library-cover-capture", {
+        body: { target: "record", id: record.id, image_base64 },
+      });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || "Upload failed");
+      toast({ title: "Cover uploaded" });
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Cover upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const toggleDigitizationSelected = (id: string) => {
+    setSelectedDigitization((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteDigitization = async () => {
+    if (!canDigitize || selectedDigitization.size === 0) return;
+    const ids = [...selectedDigitization];
+    if (!window.confirm(`Permanently delete ${ids.length} digitization record(s)? This cannot be undone.`)) return;
+    setSaving("bulk-delete");
+    try {
+      const { data, error } = await (supabase as any).rpc("library_delete_digitization_records", { _record_ids: ids });
+      if (error) throw error;
+      const deleted = Number(data ?? 0);
+      toast({ title: `${deleted} record(s) deleted`, description: deleted < ids.length ? `${ids.length - deleted} skipped (no access)` : undefined });
+      setSelectedDigitization(new Set());
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
     } finally {
       setSaving(null);
     }
@@ -1326,7 +1644,7 @@ const Library = () => {
                   <Input label="Code" value={newLibrary.code} placeholder="LIB-A" onChange={(code) => setNewLibrary((p) => ({ ...p, code }))} />
                 </div>
                 <Button type="submit" disabled={!newLibraryInstitutionId || saving === "library"} className="w-full">
-                  {saving === "library" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                  {saving === "library" ? <ButtonOrb state="working" onFilled /> : <Plus className="mr-2 h-4 w-4" />}
                   Add Library
                 </Button>
               </form>
@@ -1342,6 +1660,8 @@ const Library = () => {
           <TabsTrigger value="circulation">Issue / Return</TabsTrigger>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           <TabsTrigger value="digitization">Digitization</TabsTrigger>
+          <TabsTrigger value="authors">Authors</TabsTrigger>
+          <TabsTrigger value="publishers">Publishers</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -1384,7 +1704,7 @@ const Library = () => {
                     <Input label="Rack" value={bookForm.rack} onChange={(rack) => setBookForm((p) => ({ ...p, rack }))} />
                   </div>
                   <Button type="submit" disabled={!scopeReady || saving === "catalog"} className="w-full">
-                    {saving === "catalog" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                    {saving === "catalog" ? <ButtonOrb state="working" onFilled /> : <Plus className="mr-2 h-4 w-4" />}
                     Save Catalog Record
                   </Button>
                 </form>
@@ -1395,6 +1715,7 @@ const Library = () => {
         </TabsContent>
 
         <TabsContent value="circulation" className="grid gap-4 xl:grid-cols-2">
+          {canCirculate && !scopeReady && <div className="xl:col-span-2"><ScopeNotice action="issue or return books" /></div>}
           <Card>
             <CardHeader><CardTitle className="text-base">Issue Book</CardTitle></CardHeader>
             <CardContent>
@@ -1412,7 +1733,7 @@ const Library = () => {
                   </p>
                 </div>
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "issue"} className="w-full">
-                  {saving === "issue" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookOpen className="mr-2 h-4 w-4" />}
+                  {saving === "issue" ? <ButtonOrb state="working" onFilled /> : <BookOpen className="mr-2 h-4 w-4" />}
                   Issue
                 </Button>
               </form>
@@ -1424,7 +1745,7 @@ const Library = () => {
               <form onSubmit={handleReturn} className="flex gap-2">
                 <input value={returnAccession} disabled={!canCirculate || !scopeReady} onChange={(e) => setReturnAccession(e.target.value)} placeholder="Accession or barcode" className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm" />
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "return"}>
-                  {saving === "return" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                  {saving === "return" ? <ButtonOrb state="working" onFilled /> : <RotateCcw className="mr-2 h-4 w-4" />}
                   Return
                 </Button>
               </form>
@@ -1434,6 +1755,7 @@ const Library = () => {
         </TabsContent>
 
         <TabsContent value="inventory" className="space-y-4">
+          {canInventory && !scopeReady && <ScopeNotice action="run a shelf audit" />}
           <Card>
             <CardHeader><CardTitle className="text-base">Shelf Audit</CardTitle></CardHeader>
             <CardContent>
@@ -1443,7 +1765,7 @@ const Library = () => {
                 <Input label="Shelf" value={inventoryForm.shelf_location} disabled={!canInventory || !scopeReady} onChange={(shelf_location) => setInventoryForm((p) => ({ ...p, shelf_location }))} />
                 <Input label="Rack" value={inventoryForm.rack} disabled={!canInventory || !scopeReady} onChange={(rack) => setInventoryForm((p) => ({ ...p, rack }))} />
                 <Button type="submit" disabled={!canInventory || !scopeReady || saving === "inventory"} className="self-end">
-                  {saving === "inventory" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  {saving === "inventory" ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                   Update
                 </Button>
               </form>
@@ -1454,6 +1776,7 @@ const Library = () => {
 
         <TabsContent value="digitization" className="grid gap-4 xl:grid-cols-[420px_1fr]">
           <div className="space-y-4">
+            {canDigitize && !scopeReady && <ScopeNotice action="capture, import, or print labels" />}
             <Card>
               <CardHeader><CardTitle className="text-base">Capture Offline Record</CardTitle></CardHeader>
               <CardContent>
@@ -1466,7 +1789,7 @@ const Library = () => {
                     <textarea value={digitizeForm.raw_ocr_text} disabled={!canDigitize || !scopeReady} onChange={(e) => setDigitizeForm((p) => ({ ...p, raw_ocr_text: e.target.value }))} className="mt-1.5 min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
                   </label>
                   <Button type="submit" disabled={!canDigitize || !scopeReady || saving === "digitize"} className="w-full">
-                    {saving === "digitize" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Barcode className="mr-2 h-4 w-4" />}
+                    {saving === "digitize" ? <ButtonOrb state="working" onFilled /> : <Barcode className="mr-2 h-4 w-4" />}
                     Capture
                   </Button>
                 </form>
@@ -1494,7 +1817,7 @@ const Library = () => {
                       e.currentTarget.value = "";
                     }}
                   />
-                  {saving === "library-import" ? <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" /> : <FileSpreadsheet className="mx-auto mb-2 h-5 w-5" />}
+                  {saving === "library-import" ? <ButtonOrb state="composing" className="mx-auto mb-2" /> : <FileSpreadsheet className="mx-auto mb-2 h-5 w-5" />}
                   Select Excel or CSV file
                 </label>
               </CardContent>
@@ -1518,23 +1841,79 @@ const Library = () => {
             </Card>
           </div>
           <Card>
-            <CardHeader><CardTitle className="text-base">Review Queue</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+              <CardTitle className="text-base">Review Queue</CardTitle>
+              {canDigitize && filteredDigitization.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    value={enrichFilter}
+                    onChange={(e) => { setEnrichFilter(e.target.value as typeof enrichFilter); setSelectedDigitization(new Set()); }}
+                    className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                  >
+                    <option value="all">All ({filteredDigitization.length})</option>
+                    <option value="enriched">Auto-fetch ✓ ({filteredDigitization.filter((r) => r.enrichment_status === "enriched").length})</option>
+                    <option value="no_match">Auto-fetch failed ({filteredDigitization.filter((r) => r.enrichment_status === "no_match").length})</option>
+                    <option value="not_tried">Not tried ({filteredDigitization.filter((r) => !r.enrichment_status).length})</option>
+                    <option value="missing_cover">Missing cover ({filteredDigitization.filter((r) => !r.cover_image_url).length})</option>
+                  </select>
+                  <Button type="button" variant="outline" size="sm" disabled={!!bulkEnrich} onClick={() => handleBulkEnrich(50)}>
+                    {bulkEnrich ? <ButtonOrb state="working" /> : <FileSearch className="mr-2 h-4 w-4" />}
+                    {bulkEnrich ? `Enriching ${bulkEnrich.done}/${bulkEnrich.total}…` : "Auto-fill next 50"}
+                  </Button>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border"
+                      checked={reviewList.length > 0 && selectedDigitization.size === reviewList.length}
+                      ref={(el) => { if (el) el.indeterminate = selectedDigitization.size > 0 && selectedDigitization.size < reviewList.length; }}
+                      onChange={(e) => setSelectedDigitization(e.target.checked ? new Set(reviewList.map((r) => r.id)) : new Set())}
+                    />
+                    Select all
+                  </label>
+                  <Button type="button" variant="destructive" size="sm" disabled={selectedDigitization.size === 0 || saving === "bulk-delete"} onClick={handleBulkDeleteDigitization}>
+                    {saving === "bulk-delete" ? <ButtonOrb state="working" onFilled /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    Delete selected{selectedDigitization.size > 0 ? ` (${selectedDigitization.size})` : ""}
+                  </Button>
+                </div>
+              )}
+            </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {filteredDigitization.length === 0 ? <EmptyRow text="No digitization records yet" /> : filteredDigitization.map((record) => {
+                {reviewList.length === 0 ? <EmptyRow text={filteredDigitization.length === 0 ? "No digitization records yet" : "No records match this filter"} /> : reviewList.map((record) => {
                   const values = reviewEdit(record);
                   const signals = duplicateSignals(record);
                   const canApproveRecord = canCatalog && ["captured", "matched", "needs_review"].includes(record.status);
                   return (
                     <div key={record.id} className="rounded-xl border border-border p-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
+                        <div className="flex items-start gap-2">
+                          {canDigitize && (
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 rounded border-border"
+                              checked={selectedDigitization.has(record.id)}
+                              onChange={() => toggleDigitizationSelected(record.id)}
+                            />
+                          )}
+                          {record.cover_image_url ? (
+                            <img src={record.cover_image_url} alt="" className="h-14 w-10 shrink-0 rounded border border-border object-cover" />
+                          ) : (
+                            <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded border border-dashed border-border text-muted-foreground"><BookOpen className="h-4 w-4" /></div>
+                          )}
+                          <div>
                           <p className="text-sm font-medium text-foreground">{values.title || record.isbn || record.scanned_barcode || "Untitled capture"}</p>
                           <p className="text-xs text-muted-foreground">
                             {record.source} · {record.isbn || "no ISBN"} · {new Date(record.created_at).toLocaleDateString("en-IN")}
                           </p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          {record.enrichment_status === "enriched" && (
+                            <Badge className="border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Auto-fetch ✓</Badge>
+                          )}
+                          {record.enrichment_status === "no_match" && (
+                            <Badge className="border-transparent bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Auto-fetch failed</Badge>
+                          )}
                           {record.confidence != null && <Badge variant="secondary">{Math.round(Number(record.confidence) * 100)}%</Badge>}
                           <Badge variant={record.status === "needs_review" ? "destructive" : "outline"}>{record.status.replace(/_/g, " ")}</Badge>
                         </div>
@@ -1550,7 +1929,21 @@ const Library = () => {
                         <Input label="Title" value={values.title} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "title", value)} />
                         <Input label="Authors" value={values.authors_text} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "authors_text", value)} />
                         <Input label="ISBN" value={values.isbn} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "isbn", value)} />
-                        <Input label="Publisher" value={values.publisher} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "publisher", value)} />
+                        <Input label="Place" value={values.place} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "place", value)} />
+                        <div>
+                          <Input label="Publisher" value={values.publisher} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "publisher", value)} />
+                          {values.publisher.trim() && (() => {
+                            const r = resolvePublisher(values.publisher);
+                            if (r.matchName && r.matchName !== values.publisher.trim()) {
+                              return <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">↳ Resolves to: {r.matchName}</p>;
+                            }
+                            if (r.matchName) return <p className="mt-1 text-[11px] text-muted-foreground">↳ Matches existing publisher</p>;
+                            return <p className="mt-1 text-[11px] text-muted-foreground">↳ New publisher on approval</p>;
+                          })()}
+                        </div>
+                        <Input label="Edition" value={values.edition} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "edition", value)} />
+                        <Input label="Volume" value={values.volume} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "volume", value)} />
+                        <Input label="Pages" value={values.pages} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "pages", value)} />
                         <Input label="Year" value={values.published_year} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "published_year", value)} />
                         <Input label="Category" value={values.category} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "category", value)} />
                         <Input label="Subject" value={values.subject} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "subject", value)} />
@@ -1561,16 +1954,24 @@ const Library = () => {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button type="button" variant="outline" size="sm" disabled={!canApproveRecord || saving === `accession-${record.id}`} onClick={() => handleGenerateAccession(record)}>
-                          {saving === `accession-${record.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Barcode className="mr-2 h-4 w-4" />}
+                          {saving === `accession-${record.id}` ? <ButtonOrb state="working" /> : <Barcode className="mr-2 h-4 w-4" />}
                           Generate Accession
                         </Button>
                         <Button type="button" size="sm" disabled={!canApproveRecord || !values.title.trim() || saving === `approve-${record.id}`} onClick={() => handleApproveDigitization(record)}>
-                          {saving === `approve-${record.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                          {saving === `approve-${record.id}` ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                           Approve to Catalog
                         </Button>
                         <Button type="button" variant="outline" size="sm" disabled={!canDigitize || !canApproveRecord || saving === `duplicate-${record.id}`} onClick={() => handleMarkDuplicate(record)}>
                           Mark Duplicate
                         </Button>
+                        <Button type="button" variant="outline" size="sm" disabled={!canDigitize || saving === `cover-${record.id}`} onClick={() => handleAutofillRecord(record)}>
+                          {saving === `cover-${record.id}` ? <ButtonOrb state="working" /> : <FileSearch className="mr-2 h-4 w-4" />}
+                          Auto-fill from web
+                        </Button>
+                        <label className={`inline-flex cursor-pointer items-center rounded-md border border-input px-3 text-sm font-medium h-9 ${!canDigitize || saving === `cover-${record.id}` ? "pointer-events-none opacity-50" : "hover:bg-accent"}`}>
+                          Upload cover
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { handleUploadCover(record, e.target.files?.[0] || null); e.currentTarget.value = ""; }} />
+                        </label>
                         <Button type="button" variant="outline" size="sm" disabled={!canDigitize || !canApproveRecord || saving === `reject-${record.id}`} onClick={() => handleRejectDigitization(record)}>
                           <Trash2 className="mr-2 h-4 w-4" />
                           Reject
@@ -1582,6 +1983,22 @@ const Library = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="authors">
+          <CatalogEntityManager
+            nounSingular="author" nounPlural="authors" canManage={canCatalog} active={activeTab === "authors"}
+            listRpc="library_list_authors" dupPairsRpc="library_author_duplicate_pairs"
+            mergeRpc="library_merge_authors" renameRpc="library_rename_author"
+          />
+        </TabsContent>
+
+        <TabsContent value="publishers">
+          <CatalogEntityManager
+            nounSingular="publisher" nounPlural="publishers" canManage={canCatalog} active={activeTab === "publishers"}
+            listRpc="library_list_publishers" dupPairsRpc="library_publisher_duplicate_pairs"
+            mergeRpc="library_merge_publishers" renameRpc="library_rename_publisher"
+          />
         </TabsContent>
 
         <TabsContent value="members">
@@ -1629,6 +2046,53 @@ const Library = () => {
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-4">
+          {role === "super_admin" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileSearch className="h-4 w-4" />
+                  Automatic metadata enrichment (super admin)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Runs the "Auto-fill from web" batch on the server for never-tried pending records across all
+                  libraries (prefers Open Library — no quota). Fills blank fields + fetches covers, ~150 records per run.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border"
+                      checked={enrichCron.enabled}
+                      disabled={saving === "enrich-cron"}
+                      onChange={(e) => handleSetEnrichCron(e.target.checked, enrichCron.minutes)}
+                    />
+                    <span className="font-medium text-foreground">Run automatically</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    Every
+                    <select
+                      value={enrichCron.minutes}
+                      disabled={saving === "enrich-cron"}
+                      onChange={(e) => handleSetEnrichCron(enrichCron.enabled, Number(e.target.value))}
+                      className="rounded-lg border border-input bg-background px-2 py-1.5 text-sm"
+                    >
+                      <option value={30}>30 minutes</option>
+                      <option value={60}>60 minutes</option>
+                    </select>
+                  </label>
+                  <Button type="button" variant="outline" size="sm" disabled={saving === "enrich-now"} onClick={handleRunEnrichNow}>
+                    {saving === "enrich-now" ? <ButtonOrb state="working" /> : <FileSearch className="mr-2 h-4 w-4" />}
+                    Run now
+                  </Button>
+                  <Badge variant={enrichCron.enabled ? "outline" : "secondary"}>
+                    {enrichCron.enabled ? `Scheduled · every ${enrichCron.minutes} min` : "Off"}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-3 text-base">
@@ -1707,7 +2171,7 @@ const Library = () => {
                   <Input label="Renewals" name="renewals_allowed" type="number" min={0} defaultValue={selectedLibrarySetting?.renewals_allowed || 1} disabled={!canManageSelectedLibrary} />
                   <div className="flex items-end">
                     <Button type="submit" disabled={!canManageSelectedLibrary || saving === "library-rules"} className="w-full">
-                      {saving === "library-rules" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                      {saving === "library-rules" ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                       Save Rules
                     </Button>
                   </div>
@@ -1719,6 +2183,50 @@ const Library = () => {
               )}
             </CardContent>
           </Card>
+          {canManageSelectedLibrary && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Building2 className="h-4 w-4" />
+                  Served Institutions for {selectedBranch?.name || "Selected Library"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!selectedBranchId ? (
+                  <EmptyRow text="Select a library to configure which institutions it serves" />
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      A shared library serves students of more than one institution on the same campus. The owning
+                      institution is always served; tick others to let their students borrow (then enable their courses below).
+                    </p>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {institutions
+                        .filter((inst) => inst.campus_id === selectedBranch?.campus_id)
+                        .map((inst) => {
+                          const isOwner = inst.id === selectedBranch?.institution_id;
+                          const served = isOwner || selectedServedInstitutionIds.has(inst.id);
+                          return (
+                            <label key={inst.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-sm">
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium text-foreground">{inst.name}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{isOwner ? "Owning institution" : inst.code}</span>
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={served}
+                                disabled={isOwner || saving === `served-${inst.id}`}
+                                onChange={(e) => handleToggleServedInstitution(inst.id, e.target.checked)}
+                              />
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -1817,7 +2325,7 @@ const Library = () => {
                     ))}
                   </div>
                   <Button type="submit" disabled={!staffForm.user_id || saving === "staff"} className="self-end">
-                    {saving === "staff" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                    {saving === "staff" ? <ButtonOrb state="working" onFilled /> : <UserPlus className="mr-2 h-4 w-4" />}
                     Assign
                   </Button>
                 </form>
@@ -1851,7 +2359,7 @@ const Library = () => {
                           disabled={saving === `staff-${assignment.id}`}
                           onClick={() => handleRemoveStaff(assignment)}
                         >
-                          {saving === `staff-${assignment.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          {saving === `staff-${assignment.id}` ? <ButtonOrb state="working" /> : <Trash2 className="mr-2 h-4 w-4" />}
                           Remove
                         </Button>
                       )}
@@ -1897,9 +2405,16 @@ function CatalogSearch({ query, setQuery, items, canHold }: { query: string; set
         <div className="divide-y divide-border rounded-xl border border-border">
           {items.length === 0 ? <EmptyRow text="No catalog matches" /> : items.map((item) => (
             <div key={item.id} className="flex items-center justify-between gap-3 p-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{item.library_books?.title || "Untitled book"}</p>
-                <p className="truncate text-xs text-muted-foreground">{authorsLabel(item.library_books?.authors)} · {item.accession_no} · {item.shelf_location || "unshelved"}</p>
+              <div className="flex min-w-0 items-center gap-3">
+                {item.library_books?.cover_url ? (
+                  <img src={item.library_books.cover_url} alt="" className="h-12 w-9 shrink-0 rounded border border-border object-cover" />
+                ) : (
+                  <div className="flex h-12 w-9 shrink-0 items-center justify-center rounded border border-dashed border-border text-muted-foreground"><BookOpen className="h-4 w-4" /></div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{item.library_books?.title || "Untitled book"}</p>
+                  <p className="truncate text-xs text-muted-foreground">{authorsLabel(item.library_books?.authors)} · {item.accession_no} · {item.shelf_location || "unshelved"}</p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={item.status === "available" ? "outline" : item.status === "issued" ? "secondary" : "destructive"}>{item.status.replace(/_/g, " ")}</Badge>
@@ -1949,6 +2464,16 @@ function ReportAction({ title, count, disabled, onClick }: { title: string; coun
 
 function EmptyRow({ text }: { text: string }) {
   return <div className="px-4 py-10 text-center text-sm text-muted-foreground">{text}</div>;
+}
+
+// Shown at the top of scope-gated tabs so it's obvious why actions are disabled.
+function ScopeNotice({ action }: { action: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>Select a <span className="font-semibold">Library</span> above to {action}. These actions stay disabled while “All libraries” is selected.</span>
+    </div>
+  );
 }
 
 function Input({

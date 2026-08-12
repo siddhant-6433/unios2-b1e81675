@@ -3,14 +3,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check
-} from "lucide-react";
+import { Users, UserPlus, FileSpreadsheet, Search, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Switch } from "@/components/ui/switch";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -116,8 +115,8 @@ function timeAgo(dateStr: string): string {
 function AdminLazyFallback() {
   return (
     <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      Loading...
+      <ButtonOrb state="working" className="mr-2" />
+      Loading…
     </div>
   );
 }
@@ -499,7 +498,7 @@ const AdminPanel = () => {
   if (authLoading || !roleLoaded) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <OrbLoader state="working" />
       </div>
     );
   }
@@ -702,7 +701,7 @@ const AdminPanel = () => {
               <div className="rounded-xl bg-card card-shadow overflow-x-auto">
                 {publishersLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    <OrbLoader state="working" />
                   </div>
                 ) : publishers.length === 0 ? (
                   <div className="py-12 text-center text-sm text-muted-foreground">
@@ -826,7 +825,7 @@ const AdminPanel = () => {
             <div className="rounded-xl bg-card card-shadow overflow-x-auto" style={{ display: userSubTab === "publishers" ? "none" : undefined }}>
               {loading ? (
                 <div className="flex items-center justify-center py-16">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <OrbLoader state="working" />
                 </div>
               ) : subFiltered.length === 0 ? (
                 <div className="py-16 text-center">
@@ -916,7 +915,7 @@ const AdminPanel = () => {
                                   <option value="none">No Role</option>
                                   {ALL_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                                 </select>
-                                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                                {isSaving && <ButtonOrb state="working" />}
                                 <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
                               </div>
                             ) : (
@@ -1003,7 +1002,7 @@ const AdminPanel = () => {
                                         title="Restore to main user list"
                                       >
                                         {archivingUser === user.user_id
-                                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          ? <ButtonOrb state="working" onFilled />
                                           : <ArchiveRestore className="h-3.5 w-3.5" />}
                                       </button>
                                     ) : user.login_disabled ? (
@@ -1014,7 +1013,7 @@ const AdminPanel = () => {
                                         title="Archive inactive user"
                                       >
                                         {archivingUser === user.user_id
-                                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          ? <ButtonOrb state="working" />
                                           : <Archive className="h-3.5 w-3.5" />}
                                       </button>
                                     ) : null
@@ -1136,7 +1135,7 @@ const AdminPanel = () => {
                     onClick={() => campusEditUser && handleCampusChange(campusEditUser.profileId, campusEditUser.selected)}
                     disabled={savingCampus}
                   >
-                    {savingCampus && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {savingCampus && <ButtonOrb state="working" />}
                     Save
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -1158,7 +1157,7 @@ const AdminPanel = () => {
                     disabled={deleting}
                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   >
-                    {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {deleting && <ButtonOrb state="working" />}
                     Delete User
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -1186,7 +1185,7 @@ const AdminPanel = () => {
                       ? "bg-warning text-white hover:bg-warning/60"
                       : "bg-success text-white hover:bg-success/90"}
                   >
-                    {togglingLogin && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {togglingLogin && <ButtonOrb state="working" />}
                     {disableTarget?.nextDisabled ? "Disable login" : "Enable login"}
                   </AlertDialogAction>
                 </AlertDialogFooter>

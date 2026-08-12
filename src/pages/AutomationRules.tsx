@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,10 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Zap, Plus, ArrowRight, MessageSquare, CalendarCheck, Clock, Trash2,
-  Mail, Bell, UserPlus, Edit, Thermometer, X,
-} from "lucide-react";
+import { Zap, Plus, ArrowRight, MessageSquare, CalendarCheck, Clock, Trash2, Mail, Bell, UserPlus, Edit, Thermometer, X } from "lucide-react";
 
 interface Rule {
   id: string;
@@ -630,7 +628,7 @@ const AutomationRules = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={!formName.trim() || formActions.length === 0 || saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />} Create Rule
+              {saving ? <ButtonOrb state="working" onFilled /> : <Zap className="h-4 w-4" />} Create Rule
             </Button>
           </DialogFooter>
         </DialogContent>

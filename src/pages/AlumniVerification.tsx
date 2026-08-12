@@ -2,12 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent } from "@/components/ui/card";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
-import {
-  Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
-  ScrollText, Award, BookOpen,
-} from "lucide-react";
+import { Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users, ScrollText, Award, BookOpen } from "lucide-react";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import alumniHero from "@/assets/alumni-hero.jpg";
 
@@ -122,16 +120,23 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
     // Establish a real Supabase session so subsequent DB calls are authenticated.
     // RLS on alumni_verification_requests is scoped to authenticated callers
     // whose auth phone matches the row — anonymous reads/updates are blocked.
-    if (data?.token?.access_token && data?.token?.refresh_token) {
-      const { error: sessErr } = await supabase.auth.setSession({
-        access_token: data.token.access_token,
-        refresh_token: data.token.refresh_token,
-      });
-      if (sessErr) {
-        setLoading(false);
-        toast({ title: "Sign-in failed", description: sessErr.message, variant: "destructive" });
-        return;
-      }
+    // Stop here if no session was issued. Proceeding would run every subsequent
+    // call as `anon`, and the failure would only surface much later at the
+    // alumni_verification_requests insert (anon has no SELECT policy, and
+    // .insert().select() needs SELECT visibility on the new row).
+    if (!data?.token?.access_token || !data?.token?.refresh_token) {
+      setLoading(false);
+      toast({ title: "Sign-in failed", description: "Verified, but no session was issued. Please try again.", variant: "destructive" });
+      return;
+    }
+    const { error: sessErr } = await supabase.auth.setSession({
+      access_token: data.token.access_token,
+      refresh_token: data.token.refresh_token,
+    });
+    if (sessErr) {
+      setLoading(false);
+      toast({ title: "Sign-in failed", description: sessErr.message, variant: "destructive" });
+      return;
     }
     setLoading(false);
     onVerified(fullPhone);
@@ -151,7 +156,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
           <label className="text-sm font-medium text-foreground">Your WhatsApp Number</label>
           <PhoneInput value={phone} onChange={setPhone} isdCode={isdCode} onIsdChange={setIsdCode} />
           <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || (isdCode === "+91" ? phone.length !== 10 : phone.length < 7)}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+            {loading ? <ButtonOrb state="working" onFilled /> : <Phone className="h-4 w-4" />}
             Send OTP via WhatsApp
           </Button>
         </div>
@@ -162,7 +167,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
             placeholder="Enter 6-digit OTP" maxLength={6}
             className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-lg tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary/20" />
           <Button className="w-full gap-2" onClick={handleVerifyOtp} disabled={loading || otp.length < 4}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+            {loading ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
             Verify OTP
           </Button>
           <button onClick={() => { setOtpSent(false); setOtp(""); }} className="w-full text-xs text-muted-foreground hover:text-foreground">Change number</button>
@@ -907,7 +912,7 @@ export default function AlumniVerification() {
                 </div>
 
                 <Button className="w-full gap-2" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  {submitting ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
                   Submit & Proceed to Payment (&#8377; {currentService.fee})
                 </Button>
               </div>
@@ -952,7 +957,7 @@ export default function AlumniVerification() {
                     </div>
                   )}
                   <Button className="w-full gap-2 py-3 text-sm" onClick={handlePayNow} disabled={paymentLoading}>
-                    {paymentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                    {paymentLoading ? <ButtonOrb state="working" onFilled /> : <Shield className="h-4 w-4" />}
                     Pay &#8377; {currentService.fee.toLocaleString("en-IN")} via Secure Gateway
                   </Button>
                   <p className="text-[10px] text-muted-foreground">

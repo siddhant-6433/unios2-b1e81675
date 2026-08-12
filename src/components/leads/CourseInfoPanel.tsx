@@ -196,7 +196,8 @@ export function CourseInfoPanel({ courseId }: Props) {
           <Badge variant="outline" className="text-[9px] font-mono">{course.code}</Badge>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        {/* 2-up so the panel also reads at the Cloud Dialer rail's 380px */}
+        <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg bg-muted/30 px-3 py-2">
             <span className="text-[10px] text-muted-foreground">Duration</span>
             <p className="text-xs font-semibold text-foreground">

@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,10 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Loader2, Video, ExternalLink, CheckCircle, Users, Plus, Pencil,
-  Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X, BellRing,
-} from "lucide-react";
+import { Video, ExternalLink, CheckCircle, Users, Plus, Pencil, Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X, BellRing } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
   type VideoBrand, type VideoContentType, type VideoStatus,
@@ -550,11 +548,11 @@ export default function VideoApprovals() {
                   <div className="flex gap-2 pt-2 border-t border-border">
                     <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
                             onClick={handleSendForCorrection} disabled={acting}>
-                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Send for correction
+                      {acting ? <ButtonOrb state="working" /> : <RotateCcw className="h-4 w-4" />} Send for correction
                     </Button>
                     <Button className="flex-1 gap-1.5 bg-success hover:bg-success/90"
                             onClick={handleApprove} disabled={acting}>
-                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} Approve
+                      {acting ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />} Approve
                     </Button>
                   </div>
                 </>
@@ -566,12 +564,12 @@ export default function VideoApprovals() {
                   {(selected.status === "approved" || selected.status === "published") && (
                     <Button variant="outline" className="flex-1 gap-1.5 text-warning-foreground hover:bg-warning/5"
                             onClick={handleRevoke} disabled={acting}>
-                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Revoke approval
+                      {acting ? <ButtonOrb state="working" /> : <Undo2 className="h-4 w-4" />} Revoke approval
                     </Button>
                   )}
                   <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
                           onClick={handleDelete} disabled={acting}>
-                    {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete video
+                    {acting ? <ButtonOrb state="working" /> : <Trash2 className="h-4 w-4" />} Delete video
                   </Button>
                 </div>
               )}
@@ -620,7 +618,7 @@ export default function VideoApprovals() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditorForm(null)}>Cancel</Button>
             <Button onClick={handleSaveEditor} disabled={savingEditor} className="gap-2">
-              {savingEditor ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} Save
+              {savingEditor ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />} Save
             </Button>
           </DialogFooter>
         </DialogContent>

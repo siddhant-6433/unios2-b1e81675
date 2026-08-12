@@ -2,11 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
-import {
-  Calendar, MapPin, User, CheckCircle2, XCircle, Clock, Footprints,
-  AlertCircle, Filter, RefreshCw, Loader2, ChevronRight, PhoneCall,
-} from "lucide-react";
+import { Calendar, MapPin, User, CheckCircle2, XCircle, Clock, Footprints, AlertCircle, Filter, RefreshCw, ChevronRight, PhoneCall } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -302,7 +300,7 @@ export default function VisitMonitor() {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <OrbLoader state="searching" />
         </div>
       ) : tabRows.length === 0 ? (
         <div className="rounded-xl border border-border bg-card flex flex-col items-center gap-2 py-16 text-muted-foreground">

@@ -70,10 +70,10 @@ function normalizePlivoCallerId(value: string | null | undefined, defaultCountry
 }
 
 function firstPlivoCallerIdFromEnv(): string {
+  // ponytail: dedicated cloud-dialer number; AI number is PLIVO_AI_PHONE_NUMBER
   const raws = [
-    Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS"),
     Deno.env.get("PLIVO_DIALER_PHONE_NUMBER"),
-    Deno.env.get("PLIVO_PHONE_NUMBER"),
+    Deno.env.get("PLIVO_AI_PHONE_NUMBER"),
   ];
   for (const raw of raws) {
     for (const part of String(raw || "").split(/[,;\n]+/)) {
@@ -102,6 +102,11 @@ interface ActiveCall extends CallContext {
   agentTurnStartAtMsList?: number[]; // matching agent-started timestamps
   voiceSwitchCount?: number;      // cascade EL→Sarvam fallbacks during this call
   agentProvider?: "gemini-live" | "cascade" | "cartesia-cascade"; // which path was used end-to-end
+  lastUsageMetadata?: {           // cumulative Live-API session tokens, flushed at hangup
+    promptTokenCount?: number;
+    responseTokenCount?: number;
+    totalTokenCount?: number;
+  };
 }
 const activeCallContexts = new Map<string, ActiveCall>();
 
@@ -2050,6 +2055,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
       // data is now a parsed JSON object
       const msg = data as any;
 
+      // Live API reports cumulative session tokens on serverContent messages.
+      // This is the single largest Gemini spend we have (native audio is the
+      // priciest tier) and it was entirely unmeasured. Keep the latest value;
+      // it's flushed once at session end rather than per message.
+      if (msg.usageMetadata) callCtx.lastUsageMetadata = msg.usageMetadata;
+
       // Setup complete acknowledgement
       if (msg.setupComplete) {
         console.log(`[${callId}] Gemini setup complete — ready for audio`);
@@ -2229,6 +2240,34 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   plivoWs.onclose = () => {
     console.log(`[${callId}] Plivo disconnected, closing Gemini`);
     if (geminiWs.readyState === WebSocket.OPEN) geminiWs.close();
+
+    // Flush this session's token usage before the context is dropped.
+    // ponytail: one insert per call, not per turn — the Live API's counts are
+    // cumulative, so the last message already has the session total.
+    const usage = callCtx.lastUsageMetadata;
+    if (usage) {
+      const model = getVoiceSettings().geminiModel || GEMINI_MODEL;
+      const prompt = usage.promptTokenCount ?? 0;
+      const output = usage.responseTokenCount ?? 0;
+      console.log(`[gemini-usage] voice-agent-live ${model} prompt=${prompt} output=${output}`);
+      fetch(`${SUPABASE_URL}/rest/v1/gemini_usage_log`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          source: "voice-agent-live",
+          model,
+          prompt_tokens: prompt,
+          output_tokens: output,
+          total_tokens: usage.totalTokenCount ?? prompt + output,
+        }),
+      }).catch(() => { /* telemetry never breaks hangup */ });
+    }
+
     activeCallContexts.delete(callId);
 
     // Log call completion
@@ -4234,6 +4273,10 @@ Then call set_call_disposition.`;
       generationConfig: {
         temperature: cascadeSettings.cascadeTemperature,
         maxOutputTokens: cascadeSettings.cascadeMaxTokens,
+        // Mid-call reply: thinking is billed at the output rate AND spent out
+        // of cascadeMaxTokens (default 150) before a word is emitted, so it
+        // costs money and latency on the one path where latency is audible.
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
     const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
@@ -4705,6 +4748,10 @@ caller who hangs up without a next step is a FAILED qualification.`;
       generationConfig: {
         temperature: cascadeSettings.cascadeTemperature,
         maxOutputTokens: cascadeSettings.cascadeMaxTokens,
+        // Mid-call reply: thinking is billed at the output rate AND spent out
+        // of cascadeMaxTokens (default 150) before a word is emitted, so it
+        // costs money and latency on the one path where latency is audible.
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
     // Try the primary model first; if Gemini returns 503/429 (high-demand

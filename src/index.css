@@ -178,7 +178,7 @@
     opacity: 0;
   }
 
-  /* Skeleton placeholders that are loading areas: use the fluted glass sweep */
+  /* Clip skeleton placeholders so any inner sweep stays inside the radius. */
   .animate-pulse[class*="rounded"][class*="bg-muted"]:empty {
     position: relative;
     overflow: hidden;
@@ -211,28 +211,35 @@
     transform: scale(0.98);
   }
 
-  /* ── Skeleton → flutes globally ──
-     Any element with animate-pulse that has no text content (loading placeholder)
-     gets the flutes gradient instead of plain opacity pulse. */
-  .animate-pulse[class*="rounded"][class*="bg-"] {
-    background: linear-gradient(135deg,
-      hsl(var(--muted)),
-      hsl(var(--primary) / 0.04),
-      hsl(var(--muted))
-    ) !important;
-    background-size: 200% 200% !important;
-    animation: flutes 3s ease infinite !important;
-  }
+  /* Removed: a global `.animate-pulse[class*="rounded"][class*="bg-"]` override
+     that forced a grey gradient background with !important. Its comment claimed
+     to target text-free loading placeholders, but the selector had no such
+     condition — it matched URGENT badges, live-call dots and the recorder ring,
+     silently overriding their bg-warning/bg-success. Its animation named a
+     keyframe (`flutes`) that never existed, so it never even animated. Skeletons
+     are served by .blade-skeleton / PageLoader; status pulses keep
+     Tailwind's native animate-pulse. */
 
   /* ── Page content entrance ──
-     Main content areas fade-slide in on mount */
-  main, [role="main"], .animate-fade-in {
-    animation: razorsense-slide-up 0.32s cubic-bezier(0, 0, 0.2, 1) both;
+     Main content areas fade-slide in on mount. The keyframe is `rs-slide-up`
+     (tailwind.config.ts); this used to say `razorsense-slide-up`, which is not
+     defined anywhere, so the entrance never ran. */
+  main, [role="main"] {
+    animation: rs-slide-up 0.32s cubic-bezier(0, 0, 0.2, 1) both;
   }
 
   /* ── Tab content transitions ── */
   [role="tabpanel"] {
-    animation: razorsense-slide-up 0.24s cubic-bezier(0, 0, 0.2, 1) both;
+    animation: rs-slide-up 0.24s cubic-bezier(0, 0, 0.2, 1) both;
+  }
+
+  /* Both entrance animations above were dead until the keyframe name was fixed,
+     so they had never been reduced-motion tested. Scoped to just these two —
+     a blanket override would silently change every other animation in the app. */
+  @media (prefers-reduced-motion: reduce) {
+    main, [role="main"], [role="tabpanel"] {
+      animation: none;
+    }
   }
 
   /* ── Dialog/sheet overlay backdrop ── */
@@ -243,25 +250,8 @@
 }
 
 @layer components {
-  /* RazorSense thinking dots — replaces Loader2 spinners globally */
-  .rs-thinking {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-  .rs-thinking::before,
-  .rs-thinking::after,
-  .rs-thinking span {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.5;
-    animation: rs-dot-bounce 1.2s ease-in-out infinite;
-  }
-  .rs-thinking::after { animation-delay: 0.16s; }
-  .rs-thinking span { animation-delay: 0.32s; }
+  /* Removed: .rs-thinking (dotted "thinking" indicator). Zero consumers — the
+     job is ThinkingOrb's now (src/components/ui/thinking-orb.tsx). */
 
   /* Calendar dropdown month/year — pill-styled select overlay */
   .rdp-dropdown-styled {
@@ -294,15 +284,14 @@
     background: hsl(var(--accent));
   }
 
-  /* RazorSense success checkmark flash */
-  .rs-success-flash {
-    animation: rs-success-pulse 0.6s cubic-bezier(0, 0, 0.2, 1);
-  }
-}
+  /* Removed: .rs-success-flash. `rs-success-pulse` is a tailwind.config.ts
+     keyframe, and Tailwind only emits @keyframes for keyframes an `animate-*`
+     utility actually uses — nothing did, so this rule named a keyframe absent
+     from the build. Progress now uses `animate-rs-success-pulse` directly,
+     which makes Tailwind emit it.
 
-@keyframes rs-dot-bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
-  40% { transform: scale(1); opacity: 0.8; }
+     Also removed: @keyframes rs-dot-bounce, whose only consumer was
+     .rs-thinking above. */
 }
 
 @layer utilities {
@@ -366,19 +355,25 @@
     opacity: 0;
   }
 
-  /* ── Skeleton shimmer — clean loading placeholder ──
-     ponytail: the real RzpGlass is a 925-line WebGL shader. CSS can't
-     replicate pixel displacement without looking cheap. This is a
-     standard shimmer sweep for loading skeletons only. */
-  .flutes {
-    background: linear-gradient(
-      90deg,
-      hsl(var(--muted)) 0%,
-      hsl(214 20% 91%) 40%,
-      hsl(var(--muted)) 80%
-    );
-    background-size: 200% 100%;
-    animation: shimmer-sweep 1.8s ease-in-out infinite;
+  /* ── Loading surfaces: don't paint until the wait is real ──
+     Lazy child chunks resolve in ~25-70ms locally, so their fallbacks used to
+     flash for less than a perceptible frame — visual noise, not feedback.
+     A 220ms delay with `both` fill holds opacity 0 through the delay, so a fast
+     resolve unmounts the element before it ever paints. Slower than 220ms and
+     it fades in deliberately. Pure CSS: no state, no timers, works inside
+     <Suspense> where a fallback has nowhere to keep a hook.
+
+     Put this on the CONTAINER, never on a .blade-skeleton element — both set
+     the `animation` shorthand and an element runs only one, so combining them
+     silently kills the skeleton's pulse.
+
+     ponytail: delay only. A minimum-visible-duration needs JS and deliberately
+     slows fast loads — add it only if flicker shows up in practice. */
+  .load-delayed {
+    animation: blade-fade-in 200ms cubic-bezier(0.3, 0, 0.2, 1) 220ms both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .load-delayed { animation-duration: 1ms; }
   }
 
   /* ── Blade indeterminate progress bar (from progressBarTokens.ts) ──
@@ -448,11 +443,6 @@
 /* ── Blade keyframes (ported from razorpay/blade source) ── */
 
 /* Skeleton shimmer: light band sweeps left to right */
-@keyframes shimmer-sweep {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
 /* Skeleton: fade in on first render */
 @keyframes blade-fade-in {
   from { opacity: 0; }

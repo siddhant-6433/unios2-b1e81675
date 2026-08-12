@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
-import { Flame, Trophy, ArrowRight, Loader2 } from "lucide-react";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { Flame, Trophy, ArrowRight } from "lucide-react";
 
 interface LeaderRow {
   counsellor_id: string;
@@ -83,7 +84,7 @@ export function CahetSprintLeaderboard() {
 
         {loading ? (
           <div className="py-6 text-center text-xs text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin inline mr-1" /> Loading…
+            <ButtonOrb state="searching" /> Loading…
           </div>
         ) : rows.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted-foreground">

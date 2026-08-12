@@ -19,6 +19,9 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Called with the reason text when the counsellor chooses to override. */
   onCallAnyway: (reason: string) => Promise<void> | void;
+  /** Called when the counsellor is working an urgent list and snoozes the
+   *  guard for this session (no per-lead reason). Logged for TL review. */
+  onSnooze: () => Promise<void> | void;
 }
 
 /**
@@ -29,7 +32,7 @@ interface Props {
  * give TLs the audit trail to coach without adding friction for legit
  * cases.
  */
-export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, onCallAnyway }: Props) {
+export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, onCallAnyway, onSnooze }: Props) {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showReason, setShowReason] = useState(false);
@@ -46,6 +49,16 @@ export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, on
       setSubmitting(false);
       setReason("");
       setShowReason(false);
+      onOpenChange(false);
+    }
+  };
+
+  const handleSnooze = async () => {
+    setSubmitting(true);
+    try {
+      await onSnooze();
+    } finally {
+      setSubmitting(false);
       onOpenChange(false);
     }
   };
@@ -96,6 +109,17 @@ export function DirectDialGuardDialog({ open, counts, leadName, onOpenChange, on
             </div>
           )}
         </div>
+
+        {!showReason && (
+          <button
+            type="button"
+            onClick={handleSnooze}
+            disabled={submitting}
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+          >
+            Working an urgent list? Snooze this for 2 hours
+          </button>
+        )}
 
         {showReason && (
           <div className="space-y-2">

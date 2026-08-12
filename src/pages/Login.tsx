@@ -6,9 +6,10 @@ const RazorSense = lazy(() =>
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Mail, Loader2, ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
+import { Mail, ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput, parsePhone } from "@/components/ui/phone-input";
+import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { COUNTRIES } from "@/components/apply/countries";
 import uniosLogo from "@/assets/unios-logo.png";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
@@ -354,15 +355,19 @@ const Login = () => {
       }
       if (data?.error) throw new Error(data.error);
 
-      // Sign in with the custom token returned by the edge function
-      if (data?.token) {
-        const { error: signInError } = await supabase.auth.setSession({
-          access_token: data.token.access_token,
-          refresh_token: data.token.refresh_token,
-        });
-        if (signInError) throw signInError;
-        navigate("/");
+      // Sign in with the custom token returned by the edge function.
+      // A verified-but-tokenless response means the OTP was right but no session
+      // could be minted — without this guard the spinner just stopped and the
+      // user was left staring at the form with no explanation.
+      if (!data?.token) {
+        throw new Error("Verified, but we could not sign you in. Please try again or contact support.");
       }
+      const { error: signInError } = await supabase.auth.setSession({
+        access_token: data.token.access_token,
+        refresh_token: data.token.refresh_token,
+      });
+      if (signInError) throw signInError;
+      navigate("/");
     } catch (error: unknown) {
       toast({ title: "Error", description: getErrorMessage(error, "Verification failed"), variant: "destructive" });
     } finally {
@@ -519,7 +524,7 @@ const Login = () => {
                 disabled={submitting || !devEmail || !devPassword}
                 className="w-full rounded-xl bg-warning py-3 text-sm font-medium text-white hover:bg-warning transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In (Dev)"}
+                {submitting ? <ButtonOrb state="connecting" onFilled /> : "Sign In (Dev)"}
               </button>
             </form>
           )}
@@ -552,7 +557,7 @@ const Login = () => {
                 </div>
               ) : waSignInState === "waiting" ? (
                 <div className="rounded-xl bg-success/50/5 border border-success/35/20 p-5 text-center">
-                  <Loader2 className="h-7 w-7 text-success mx-auto mb-3 animate-spin" />
+                  <ButtonOrb state="connecting" className="mx-auto mb-3" />
                   <p className="text-sm font-medium text-foreground">Waiting for WhatsApp</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Send the prefilled message from WhatsApp to finish signing in.
@@ -570,7 +575,7 @@ const Login = () => {
                   disabled={submitting}
                   className="w-full rounded-xl bg-success py-3 text-sm font-medium text-white hover:bg-success/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
+                  {submitting ? <ButtonOrb state="connecting" onFilled /> : <WhatsAppIcon className="h-4 w-4" />}
                   Continue with WhatsApp
                 </button>
               )}
@@ -631,7 +636,7 @@ const Login = () => {
                   <span className="text-xs font-normal text-muted-foreground">Google account</span>
                 </span>
                 {submitting ? (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                  <ButtonOrb state="connecting" />
                 ) : (
                   <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -653,7 +658,7 @@ const Login = () => {
                   <span className="text-xs font-normal text-muted-foreground">Face ID, fingerprint, or security key</span>
                 </span>
                 {submitting ? (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                  <ButtonOrb state="connecting" />
                 ) : (
                   <KeyRound className="h-4 w-4 shrink-0 text-primary" />
                 )}
@@ -698,7 +703,7 @@ const Login = () => {
                 disabled={submitting || !studentUsername.trim() || !studentPassword}
                 className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                {submitting ? <ButtonOrb state="connecting" onFilled /> : <KeyRound className="h-4 w-4" />}
                 Sign in
               </button>
             </form>
@@ -712,7 +717,7 @@ const Login = () => {
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <ButtonOrb state="connecting" onFilled />
               ) : (
                 <>
                   <svg className="h-4 w-4" viewBox="0 0 24 24">
@@ -763,7 +768,7 @@ const Login = () => {
                   disabled={submitting || !email.trim()}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send Magic Link"}
+                  {submitting ? <ButtonOrb state="connecting" onFilled /> : "Send Magic Link"}
                 </button>
               </form>
             )
@@ -784,7 +789,7 @@ const Login = () => {
               <form onSubmit={handleWhatsAppVerifyOtp} className="space-y-4">
                 <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
                   {submitting
-                    ? <Loader2 className="h-6 w-6 text-primary mx-auto mb-2 animate-spin" />
+                    ? <OrbLoader state="searching" />
                     : <ShieldCheck className="h-6 w-6 text-primary mx-auto mb-2" />}
                   <p className="text-xs text-muted-foreground">
                     {submitting ? "Sending OTP to " : "OTP sent to "}
@@ -812,7 +817,7 @@ const Login = () => {
                   disabled={submitting || otp.length !== 6 || isOtpExpired}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Sign In"}
+                  {submitting ? <ButtonOrb state="connecting" onFilled /> : "Verify & Sign In"}
                 </button>
                 <button
                   type="button"
@@ -846,7 +851,7 @@ const Login = () => {
                   disabled={submitting || !phoneValid}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send WhatsApp OTP"}
+                  {submitting ? <ButtonOrb state="connecting" onFilled /> : "Send WhatsApp OTP"}
                 </button>
               </form>
             )}

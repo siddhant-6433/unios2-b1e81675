@@ -10,9 +10,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Handshake, Loader2, School } from "lucide-react";
+import { Handshake, School } from "lucide-react";
 
 type OwnerType = "consultant" | "academic_partner" | "none";
 
@@ -216,7 +217,7 @@ export function ExternalOwnerDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || loadingOptions || (ownerType !== "none" && !selectedOwnerId)}>
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {saving && <ButtonOrb state="working" onFilled />}
             Save Owner
           </Button>
         </DialogFooter>

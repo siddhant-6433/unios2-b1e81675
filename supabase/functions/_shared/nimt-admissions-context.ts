@@ -314,6 +314,36 @@ async function loadCuratedCourseFacts(
   }
 }
 
+// Live counselling rounds/deadlines scraped by the counselling-watch cron.
+// Stale briefs are worse than none — round dates expire — so drop anything
+// older than the window even if the scrape kept the last good summary.
+const COUNSELLING_FRESHNESS_DAYS = 7;
+
+async function loadCounsellingUpdates(admin: SupabaseLike): Promise<string> {
+  const cutoff = new Date(Date.now() - COUNSELLING_FRESHNESS_DAYS * 86_400_000).toISOString();
+  const { data } = await admin
+    .from("counselling_sources")
+    .select("label,url,scope,summary,fetched_at")
+    .eq("is_active", true)
+    .not("summary", "is", null)
+    .gte("fetched_at", cutoff);
+
+  const blocks = (data || []).map((row: any) =>
+    [
+      `Source: ${row.label} (${row.url}) — checked ${String(row.fetched_at).slice(0, 10)}`,
+      row.scope ? `Covers: ${row.scope}` : "",
+      row.summary,
+    ].filter(Boolean).join("\n")
+  );
+  if (!blocks.length) return "";
+
+  return [
+    "LIVE COUNSELLING UPDATES (official portals, scraped — highest priority for round/date questions):",
+    "Use these dates verbatim for counselling round, registration, seat allocation, and reporting deadlines. Never state a round date that is not listed here; if the student asks about a date not covered, say the team will confirm.",
+    ...blocks,
+  ].join("\n");
+}
+
 export async function loadVerifiedAdmissionsContext(
   admin: SupabaseLike,
   courseId: string | null,
@@ -325,6 +355,7 @@ export async function loadVerifiedAdmissionsContext(
   const facts = await loadCuratedCourseFacts(admin, course?.id || courseId);
   const feeContext = await loadFeeContext(admin, course?.id || courseId, knowledge);
   const eligibilityContext = await loadEligibilityContext(admin, course, knowledge);
+  const counsellingContext = await loadCounsellingUpdates(admin);
 
   const curated = facts?.curated ? facts : null;
   const val = (key: string) => {
@@ -335,7 +366,7 @@ export async function loadVerifiedAdmissionsContext(
   const lines = [
     "VERIFIED ADMISSIONS CONTEXT",
     curated
-      ? "Source priority: CURATED COURSE FACTS below are authoritative — quote them verbatim for eligibility, duration, entrance exam, affiliation, seats and first-year fee. Everything after them is background only and must never contradict them."
+      ? "Source priority: CURATED COURSE FACTS below are authoritative for eligibility, duration, entrance exam, affiliation, seats and first-year fee — quote them verbatim and never contradict them from the background sections. LIVE COUNSELLING UPDATES, where present, remain authoritative for round and deadline DATES."
       : "Source priority: fee_structures/fee_structure_items + eligibility_rules first; web-chat-server/knowledge.ts second; static fallback last. No curated facts exist for this course.",
     `Official fee page: ${FEE_STRUCTURE_URL}`,
     course ? `Course from DB: ${course.name || course.code} (${course.code || "no code"})` : "",
@@ -364,6 +395,7 @@ export async function loadVerifiedAdmissionsContext(
     knowledge?.placementHighlights ? `Placements: ${knowledge.placementHighlights}` : "",
     `Institution overview from knowledge.ts: ${NIMT_OVERVIEW}`,
     `Campus reference from knowledge.ts: ${Object.entries(CAMPUS_INFO).map(([name, info]) => `${name}: ${info}`).join(" | ")}`,
+    counsellingContext,
   ].filter(Boolean);
 
   return lines.join("\n");

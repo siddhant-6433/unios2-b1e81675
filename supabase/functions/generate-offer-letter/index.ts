@@ -40,6 +40,16 @@ async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImag
   }
 }
 
+// Per-portal logo PNG (uploaded to public-assets/branding/). Drawn in the
+// default navy header band. Keep in sync with generate-payment-receipt.
+const LOGO_BY_SLUG: Record<string, string> = {
+  nimt:     "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_grn: "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_he:  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  beacon:   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/beacon-logo.png",
+  mirai:    "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/mirai-logo.png",
+};
+
 const fmtINR = (n: number) =>
   "Rs. " + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -345,11 +355,21 @@ async function newPage(ctx: Ctx) {
   } else {
     // Default branded header band when no letterhead is supplied.
     ctx.page.drawRectangle({ x: 0, y: ctx.height - 70, width: ctx.width, height: 70, color: COLORS.sectionBg });
+    // Institution logo on the left of the band; shift the name/address right.
+    let textX = ctx.margin;
+    const logo = ctx.branding?._logo;
+    if (logo) {
+      const logoMaxH = 46, logoMaxW = 160;
+      let logoH = logoMaxH, logoW = logoMaxH * (logo.width / logo.height);
+      if (logoW > logoMaxW) { logoW = logoMaxW; logoH = logoW / (logo.width / logo.height); }
+      ctx.page.drawImage(logo, { x: ctx.margin, y: ctx.height - 35 - logoH / 2, width: logoW, height: logoH });
+      textX = ctx.margin + logoW + 14;
+    }
     ctx.page.drawText(ctx.branding?.name || "NIMT Educational Institutions", {
-      x: ctx.margin, y: ctx.height - 36, size: 14, font: ctx.bold, color: COLORS.sectionFg,
+      x: textX, y: ctx.height - 36, size: 14, font: ctx.bold, color: COLORS.sectionFg,
     });
     ctx.page.drawText(ctx.branding?.address || "", {
-      x: ctx.margin, y: ctx.height - 54, size: 8, font: ctx.font, color: rgb(0.85, 0.88, 0.95),
+      x: textX, y: ctx.height - 54, size: 8, font: ctx.font, color: rgb(0.85, 0.88, 0.95),
     });
     topReserve    = 90;
     bottomReserve = 50;
@@ -642,6 +662,11 @@ interface BuildOpts {
   // deduction rows in the fee table; the displayed Net Offer Fee is
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
+  // Super-admin-approved ABVMU/university seat-reservation deposit already
+  // paid by the candidate. Provisional credit against the first-year due
+  // (no receipt until the university remits). Rendered as a distinct
+  // deduction line below the fee table — it is a payment, not a waiver.
+  abvmuCredit?: number;
   cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
   updeledRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
 }
@@ -704,12 +729,14 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   const lh    = await fetchImage(pdf, opts.branding?.letterhead_url ?? null);
   const ftr   = await fetchImage(pdf, opts.branding?.footer_url ?? null);
   const sig   = await fetchImage(pdf, opts.branding?.signature_url ?? null);
+  // Logo for the default navy band (only needed when there's no full letterhead).
+  const logo  = lh ? null : await fetchImage(pdf, LOGO_BY_SLUG[opts.branding?.slug] || LOGO_BY_SLUG.nimt);
 
   const ctx: Ctx = {
     pdf, page: undefined as any, font, bold,
     width: 595, height: 842, margin: 36,
     y: 0, contentStart: 0, contentEnd: 0,
-    branding: { ...(opts.branding || {}), _lh: lh, _footer: ftr },
+    branding: { ...(opts.branding || {}), _lh: lh, _footer: ftr, _logo: logo },
     hasLetterhead: !!lh,
     appId: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no,
     sessionName: opts.sessionName,
@@ -892,6 +919,22 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   ctx.y -= 8;
 
+  // ── ABVMU deposit already paid to university ───────────────────────────
+  // A payment the candidate made directly to ABVMU (seat-reservation
+  // deposit), approved by super-admin. It reduces the programme fee due but
+  // is NOT a waiver, so it renders as its own labelled line rather than a
+  // column in the fee table. Receipt is issued later on remittance.
+  const abvmuCredit = Math.max(0, Number(opts.abvmuCredit || 0));
+  if (abvmuCredit > 0) {
+    const netAfterAbvmu = Math.max(0, totalApplicable - abvmuCredit);
+    drawParagraph(ctx,
+      `Less: ABVMU deposit already paid to university (provisional — receipt on remittance): - ${fmtINR(abvmuCredit)}`,
+      { size: 9.5, bold: true, color: COLORS.accent });
+    drawParagraph(ctx,
+      `Net Programme Fee Due (after ABVMU deposit adjustment): ${fmtINR(netAfterAbvmu)}`,
+      { size: 9.5, bold: true, gapAfter: 8 });
+  }
+
   // ── Token + acceptance deadline ────────────────────────────────────────
   drawSection(ctx, "ADMISSION CONFIRMATION");
   const tokenPrePaid = Number(opts.tokenAlreadyPaid || 0);
@@ -1042,7 +1085,7 @@ Deno.serve(async (req) => {
         student_type, hostel_type, transport_zone,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
-        courses:course_id ( name, code, duration_years ),
+        courses:course_id ( name, code, duration_years, departments:department_id ( institution_id ) ),
         campuses:campus_id ( name, address )
       `)
       .eq("id", offer_letter_id)
@@ -1203,6 +1246,25 @@ Deno.serve(async (req) => {
       _lead_id: offer.lead_id, _doc_type: "offer_letter",
     });
 
+    // Mirai Experiential School shares the GZ2 campus with NIMT departments and
+    // uses program_category 'school' like every other NIMT school, so neither
+    // the campus pin nor program_categories can single it out in lead_branding.
+    // Scope by the course's owning institution: swap in Mirai identity + logo
+    // and drop the NIMT letterhead so the navy band (with the mirai logo) shows.
+    const MIRAI_INSTITUTION_ID = "d8c95a30-ecc6-4b41-8bed-987c960dc44a";
+    const isMiraiCourse = (course?.departments as any)?.institution_id === MIRAI_INSTITUTION_ID;
+    const brandingResolved = isMiraiCourse
+      ? {
+          ...(branding || {}),
+          slug: "mirai",
+          name: "Mirai Experiential School",
+          address: "D00/BLK, Ansal Avantika, Ghaziabad, 201002, Uttar Pradesh",
+          signatory_name: "Head of School, Mirai Experiential School",
+          letterhead_url: null,
+          footer_url: null,
+        }
+      : branding;
+
     // Approved year-wise waivers attached to this offer. Sorted by term
     // so Year 1 renders before Year 2 in the fee table.
     const { data: waiverRows } = await admin
@@ -1215,6 +1277,17 @@ Deno.serve(async (req) => {
       term: String(w.term || ""),
       amount: Number(w.amount || 0),
     }));
+
+    // Super-admin-approved ABVMU deposit already paid to the university.
+    // Provisional credit against the course due (matches
+    // lead_abvmu_approved_credit — only 'approved', not 'settled', claims).
+    const { data: abvmuRows } = await admin
+      .from("abvmu_deposit_claims")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .eq("status", "approved");
+    const abvmuCredit = ((abvmuRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
     const { data: cahetRegistrationRow } = await admin
       .from("cahet_registrations")
@@ -1300,7 +1373,7 @@ Deno.serve(async (req) => {
       campus,
       yearItems,
       feeItems,
-      branding,
+      branding: brandingResolved,
       totalCourseFee,
       tokenAmount,
       tokenAlreadyPaid,
@@ -1308,6 +1381,7 @@ Deno.serve(async (req) => {
       sessionName,
       applicationId,
       waivers,
+      abvmuCredit,
       cahetRegistration: cahetRegistration || null,
       updeledRegistration: updeledRegistration || null,
     });
