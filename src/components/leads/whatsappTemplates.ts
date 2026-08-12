@@ -10,6 +10,10 @@ import {
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
 import {
+  loadWhatsAppTemplateCatalog,
+  type CatalogTemplate,
+} from "@/lib/whatsappTemplateCatalog";
+import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
@@ -243,6 +247,9 @@ export interface WhatsAppTemplateCatalogue {
   allowedKeys: Set<string> | null;
   visibleTemplates: WhatsAppPickerTemplate[];
   templateComponentsByKey: Record<string, WhatsAppTemplateComponent[]>;
+  /** Curated Meta rows keyed by template name — arity, header format and
+   *  sendable media URL for the send path. */
+  catalogByKey: Map<string, CatalogTemplate>;
 }
 
 /**
@@ -259,6 +266,7 @@ export function useWhatsAppTemplates(enabled: boolean): WhatsAppTemplateCatalogu
   const [dynamicTemplates, setDynamicTemplates] = useState<WhatsAppPickerTemplate[]>([]);
   const [metaTemplateOverrides, setMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>>>({});
   const [templateComponentsByKey, setTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  const [catalogByKey, setCatalogByKey] = useState<Map<string, CatalogTemplate>>(new Map());
 
   useEffect(() => {
     if (!enabled) return;
@@ -331,35 +339,27 @@ export function useWhatsAppTemplates(enabled: boolean): WhatsAppTemplateCatalogu
       });
       setMetaTemplateOverrides(overrides);
       setTemplateComponentsByKey(componentsByKey);
-      const dynamic = ((approvedRows || []) as Array<{
-        name: string;
-        components?: WhatsAppTemplateComponent[] | null;
-        placeholder_count?: number | null;
-        has_media?: boolean | null;
-        header_format?: string | null;
-      }>)
-        .filter((row) =>
-          row.name &&
-          keys.has(row.name) &&
-          !knownKeys.has(row.name) &&
-          row.placeholder_count === 0 &&
-          row.has_media !== true &&
-          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
-          !hasDynamicUrlButton(row.components)
-        )
-        .map((row) => {
-          const setting = settingsByKey.get(row.name);
-          const body = row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name;
-          return {
-            key: row.name,
-            label: setting?.display_name || row.name.replace(/_/g, " "),
-            description: setting?.description || "Approved Meta template",
-            badge: null,
-            followUpMsg: null,
-            buildParams: () => [],
-            preview: templateTextPreviewFromComponents(row.components) || body,
-          };
-        });
+      // Every curated approved template is selectable, including ones with
+      // placeholders and media headers. The old filter required
+      // placeholder_count === 0 and no media, which hid 20 of the 26 curated
+      // templates — counsellors only ever saw the hardcoded list, which is why
+      // the pickers looked "fake". Values for the placeholders come from
+      // course_facts via buildTemplateParams; anything unresolved is asked for
+      // rather than invented.
+      const catalog = await loadWhatsAppTemplateCatalog({ curatedOnly: true });
+      if (cancelled) return;
+      setCatalogByKey(catalog.byKey);
+      const dynamic: WhatsAppPickerTemplate[] = catalog.templates
+        .filter((entry) => !knownKeys.has(entry.key))
+        .map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          description: entry.description,
+          badge: null,
+          followUpMsg: null,
+          buildParams: () => [],
+          preview: entry.preview,
+        }));
       setDynamicTemplates(dynamic);
     })();
     return () => { cancelled = true; };
@@ -371,7 +371,7 @@ export function useWhatsAppTemplates(enabled: boolean): WhatsAppTemplateCatalogu
     return [...configuredTemplates, ...dynamicTemplates].filter(t => allowedKeys.has(t.key));
   }, [allowedKeys, dynamicTemplates, metaTemplateOverrides]);
 
-  return { allowedKeys, visibleTemplates, templateComponentsByKey };
+  return { allowedKeys, visibleTemplates, templateComponentsByKey, catalogByKey };
 }
 
 /** Substitutes {{n}} placeholders in a template preview with the built params. */
@@ -395,6 +395,13 @@ export interface SendWhatsAppTemplateArgs {
   campusName?: string;
   courseDuration?: number;
   courseType?: string;
+  /** Curated Meta row for this template, when one exists. Supplies the real
+   *  arity and the sendable header media URL. */
+  catalogEntry?: CatalogTemplate;
+  /** Positional params resolved from course_facts + counsellor input. Wins over
+   *  the template's hardcoded buildParams, which invented values like
+   *  "the pending amount". */
+  params?: string[];
 }
 
 /**
@@ -403,7 +410,7 @@ export interface SendWhatsAppTemplateArgs {
  * via whatsapp-send, followed by the optional follow-up message.
  */
 export async function sendWhatsAppTemplate(
-  { template, lead, courseName, campusName, courseDuration, courseType }: SendWhatsAppTemplateArgs,
+  { template, lead, courseName, campusName, courseDuration, courseType, catalogEntry, params: curatedParams }: SendWhatsAppTemplateArgs,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -427,13 +434,34 @@ export async function sendWhatsAppTemplate(
         return { ok: false, error: body?.error || `HTTP ${response.status}` };
       }
     } else {
-      const params = template.buildParams(lead, courseName, campusName, courseDuration, courseType);
+      // Curated params win; buildParams is the fallback for local-only keys.
+      const params = curatedParams
+        ?? template.buildParams(lead, courseName, campusName, courseDuration, courseType);
       // Build button_urls for templates with dynamic URL buttons
       let button_urls: string[] | undefined;
       if (template.key === "course_info_video") {
         const campusQuery = encodeURIComponent((campusName || "NIMT Greater Noida").replace(/\s+/g, "+"));
         button_urls = [campusQuery, "nimt"];
       }
+
+      // Meta requires header media on every send of an IMAGE/VIDEO/DOCUMENT
+      // template, and its own header_handle is not a usable link (131053), so
+      // the sendable URL comes from whatsapp_template_settings.media_url.
+      const headerPayload: Record<string, string> = {};
+      if (catalogEntry?.needsMediaHeader) {
+        if (!catalogEntry.mediaUrl) {
+          return { ok: false, error: `"${catalogEntry.label}" sends a ${catalogEntry.headerFormat.toLowerCase()} header. Add its URL in Template Manager → Picker.` };
+        }
+        if (catalogEntry.headerFormat === "DOCUMENT") {
+          headerPayload.header_document_url = catalogEntry.mediaUrl;
+          headerPayload.header_document_filename = `${catalogEntry.label}.pdf`;
+        } else if (catalogEntry.headerFormat === "VIDEO") {
+          headerPayload.header_video_url = catalogEntry.mediaUrl;
+        } else {
+          headerPayload.header_image_url = catalogEntry.mediaUrl;
+        }
+      }
+
       const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: authHeaders,
@@ -444,6 +472,7 @@ export async function sendWhatsAppTemplate(
           lead_id: lead.id,
           ...(button_urls ? { button_urls } : {}),
           ...(template.headerImageUrl ? { header_image_url: template.headerImageUrl } : {}),
+          ...headerPayload,
         }),
       });
       const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));

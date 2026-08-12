@@ -1,0 +1,465 @@
+{
+ "BALLB-GN": {
+  "duration": "5 Years (10 Semesters)",
+  "eligibility": "10+2 with 45% marks for Gen. 42% marks for OBC and 40% marks for SC/ST.",
+  "fee_first_year": "1,10,000",
+  "affiliation": "CCS University Meerut, Bar Coucil of India",
+  "entrance_exam": "CLAT, LSAT Scores Preferred. Entrance is not mandatory.",
+  "subjects": "10 + 2 Any Stream",
+  "age": "No Restriction",
+  "intake_seats": "120"
+ },
+ "BBA-GN": {
+  "duration": "3 Years (6 Semesters)",
+  "eligibility": "10+2 (All streams) with 45% marks for Gen./OBC and 40% marks for SC/ST.",
+  "fee_first_year": "75,000",
+  "intake_seats": "120",
+  "affiliation": "Chaudhary Charan Singh University | All India Council for Technical Education",
+  "entrance_exam": "CUET UG Accepted. Entrance not mandatory.",
+  "subjects": "10 + 2 Any Stream",
+  "age": "No Restriction"
+ },
+ "BCA-GN": {
+  "duration": "3 Years (6 Semesters)",
+  "eligibility": "10+2 with 45% marks for GEN/OBC and for SC/ST 40% marks (Art with maths)/Ag/Bio/Science/Commerce) Maths mandatory at High School Or Intermediate.",
+  "fee_first_year": "75,000",
+  "intake_seats": "120",
+  "affiliation": "Chaudhary Charan Singh University | All India Council for Technical Education",
+  "entrance_exam": "CUET UG Accepted. Entrance not mandatory.",
+  "subjects": "10 + 2 Any Stream",
+  "age": "No Restriction"
+ },
+ "BED-GN": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Arts/Science/Humanities graduates: min 50% (45% SC/ST). B.E./B.Tech: min 55%.",
+  "fee_first_year": "51,250",
+  "affiliation": "Chaudhary Charan Singh University | National Council for Teacher Education",
+  "entrance_exam": "UP B.Ed Joint Entrance Examination (JEE B.Ed UP).",
+  "age": "No Restriction",
+  "intake_seats": "100",
+  "subjects": "Any Graduate"
+ },
+ "BED-GZ": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Arts/Science/Humanities graduates: min 50% (45% SC/ST). B.E./B.Tech: min 55%.",
+  "fee_first_year": "51,250",
+  "affiliation": "Chaudhary Charan Singh University | National Council for Teacher Education",
+  "entrance_exam": "UP B.Ed Joint Entrance Examination (JEE B.Ed UP).",
+  "age": "No Restriction",
+  "intake_seats": "100",
+  "subjects": "Any Graduate"
+ },
+ "BED-KT": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Arts/Science/Humanities graduates: min 50% (45% SC/ST). B.E./B.Tech: min 55%.",
+  "fee_first_year": "27,000",
+  "affiliation": "University of Rajasthan | National Council for Teacher Education",
+  "entrance_exam": "PTET",
+  "age": "No Restriction",
+  "intake_seats": "100",
+  "subjects": "Any Graduate"
+ },
+ "BMRIT-GN": {
+  "age": "Minimum age for admission is 17 years on or before 31st December of admission year. No upper age limit.",
+  "duration": "4 Years (3 Years + 1 Year Internship)",
+  "eligibility": "10+2 with Physics, Chemistry, Biology and English pass. Minimum 50% PCB aggregate; 40% for SC/ST/OBC-NCL/PwD. ISCO Code 3211.",
+  "entrance_exam": "UP 2026-27: CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
+  "fee_first_year": "92,000",
+  "affiliation": "Atal Bihari Vajpayee Medical University, Lucknow",
+  "subjects": "Physics, Chemistry & Biology",
+  "intake_seats": "50"
+ },
+ "BPT-GN": {
+  "age": "Minimum age for admission is 17 years on or before 31st December of admission year. No upper age limit.",
+  "duration": "5 Years (4 academic years + 1-year compulsory internship)",
+  "eligibility": "10+2 or equivalent with Physics, Chemistry, Biology (or Botany & Zoology) and English pass. Minimum 50% PCB aggregate; 40% for SC/ST/OBC-NCL/PwD. Minimum age 17.",
+  "entrance_exam": "UP 2026-27: CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
+  "fee_first_year": "92,000",
+  "intake_seats": "50",
+  "affiliation": "Atal Bihari Vajpayee Medical University, Lucknow",
+  "subjects": "Physics, Chemistry & Biology"
+ },
+ "BSCN-GN": {
+  "age": "1. Minimum age for admission is 17 years on or before 31st December of admission year. 2. The maximum age limit for admission is 35 years for Unreserved (UR), OBC, EWS, SC and ST, however the maximum age for candidates with Physical Disability (PD/PwD) will be 40 years. (As per INC regulation).",
+  "duration": "4 Years (8 Semesters)",
+  "eligibility": "10+2 with Physics, Chemistry, Biology and English. Minimum 45% aggregate from any recognised board. Minimum age 17 on 31 Dec. Must be medically fit.",
+  "fee_first_year": "Rs 1,53,000 per year (first year fee)",
+  "affiliation": "Atal Bihari Vajpayee Medical University, Lucknow | Indian Nursing Council",
+  "entrance_exam": "CNET (Combined Nursing Entrance Test)",
+  "subjects": "Physics, Chemistry, Biology, English",
+  "intake_seats": "40"
+ },
+ "DAOTT-GN": {
+  "duration": "2.5 Years (5 semesters)",
+  "eligibility": "10+2 with Operation Theatre relevant subjects. ISCO Code 3259.",
+  "fee_first_year": "Stetho Batch total fee Rs 1,85,000 across 5 semesters: Sem 1 Rs 40,000, Sem 2 Rs 40,000, Sem 3 Rs 40,000, Sem 4 Rs 40,000, Sem 5 Rs 25,000.",
+  "intake_seats": "30",
+  "affiliation": "Uttar Pradesh State Medical Faculty, Lucknow",
+  "age": "17 years completed (or turning 17 by December 31 of the year of enrollment)",
+  "entrance_exam": "Admission on the basis of merit of Secondary (10+2).",
+  "subjects": "Physics, Chemistry, Biology or Mathematics"
+ },
+ "DELED-GZ": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Candidates must hold a Bachelor’s degree with a minimum of 50% marks (45% for SC/ST/OBC/PH) and be between 18 and 35 years old as of July 1st of the admission year",
+  "affiliation": "Examination Regulatory Authority Uttar Pradesh | National Council for Teacher Education",
+  "entrance_exam": "Admission via UP D.El.Ed Counselling",
+  "age": "No Restriction",
+  "fee_first_year": "41000",
+  "intake_seats": "50",
+  "subjects": "Any Graduate"
+ },
+ "DPHARMA-GN": {
+  "duration": "2 Years",
+  "eligibility": "A pass in the 10+2 (science academic stream) examination with Physics, Chemistry, and Biology or Mathematics, or an equivalent qualification approved by the PCI",
+  "fee_first_year": "95,000",
+  "affiliation": "Pharmacy Council of India | Board of Technical Education, Uttar Pradesh",
+  "entrance_exam": "JEECUP",
+  "subjects": "Physics, Chemistry, Biology or Mathematics",
+  "age": "17 years completed (or turning 17 by December 31 of the year of enrollment)",
+  "intake_seats": "60"
+ },
+ "GNM-GN": {
+  "age": "The minimum age for admission shall be 17 years on 31st December of the year in which admission is sought. The maximum age limit is 35 years. For ANM/ for LHV, there is no age bar.",
+  "duration": "3 Years + 6-month Internship",
+  "eligibility": "10+2 with English, scoring at least 40% aggregate and individualy for English from a recognized board (State Open Schools and NIOS are accepted)",
+  "fee_first_year": "1,18,000",
+  "affiliation": "Uttar Pradesh State Medical Faculty | Indian Nursing Council",
+  "entrance_exam": "UP GNM Entrance Test (UPGET)",
+  "subjects": "10+2 (English Subject Mandatory with Any Stream) OR ANM",
+  "intake_seats": "30"
+ },
+ "LLB-GN": {
+  "duration": "3 Years (6 Semesters)",
+  "eligibility": "Candidates need a graduation or post-graduation degree with at least 45% marks (40% for SC/ST, 42% or as per state rules for OBC) to be eligible",
+  "fee_first_year": "44,250",
+  "affiliation": "Chaudhary Charan Singh University | Bar Council of India",
+  "entrance_exam": "None",
+  "age": "No Restriction",
+  "intake_seats": "60",
+  "subjects": "Any Graduate"
+ },
+ "LLB-KT": {
+  "duration": "3 Years (6 Semesters)",
+  "eligibility": "Candidates need a graduation or post-graduation degree with at least 45% marks (40% for SC/ST, 42% or as per state rules for OBC) to be eligible",
+  "fee_first_year": "44,250",
+  "affiliation": "Dr. Bhimrao Ambedkar Law University, Jaipur | Bar Council of India",
+  "entrance_exam": "None",
+  "age": "No Restriction",
+  "intake_seats": "120",
+  "subjects": "Any Graduate"
+ },
+ "MBA-GN": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Requires a minimum 3-year bachelor's degree from a recognized university with at least 50% marks (45% for reserved categories)",
+  "fee_first_year": "1,30,000",
+  "affiliation": "Dr. A.P.J. Abdul Kalam Technical University, Lucknow | All India Council for Technical Education",
+  "entrance_exam": "CUET PG, CAT, MAT, GMAT Accepted. Entrance is not mandatory.",
+  "age": "No Restriction",
+  "intake_seats": "60",
+  "subjects": "Any Graduate"
+ },
+ "MMRIT-GN": {
+  "age": "Minimum age for admission is 17 years on or before 31st December of admission year. No upper age limit.",
+  "eligibility": "Candidates with B.Sc. in Medical Radiology & Imaging Technology / B.Sc. in Medical Technology Radio Diagnosis & Imaging / B.Sc. Radiology Technology / B.Sc. in Radiography / B.Sc. Medical Technology (X-ray) with minimum 50% aggregate.",
+  "fee_first_year": "80000",
+  "affiliation": "Atal Bihari Vajpayee Medical University, Lucknow",
+  "duration": "2 Years (4 Semester)",
+  "entrance_exam": "Combined Paramedical Masters Entrance",
+  "subjects": "B.Sc MRIT or equivalent B.Sc",
+  "intake_seats": "20"
+ },
+ "MPT-GN": {
+  "age": "Minimum age for admission is 17 years on or before 31st December of admission year. No upper age limit.",
+  "eligibility": "Candidates with Bachelor of Physiotherapy (BPT) with 6 months compulsory internship with minimum 50% aggregate.",
+  "fee_first_year": "80000",
+  "affiliation": "Atal Bihari Vajpayee Medical University, Lucknow",
+  "duration": "2 Years (4 Semester)",
+  "entrance_exam": "Combined Paramedical Masters Entrance",
+  "subjects": "BPT with 6 months internship",
+  "intake_seats": "20"
+ },
+ "PGDM-GN": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Bachelor's degree (3-year minimum) with minimum 50% (45% reserved).",
+  "fee_first_year": "2,25,000",
+  "affiliation": "All India Council for Technical Education",
+  "entrance_exam": "CUET PG, CAT, MAT, GMAT Accepted. Entrance is not mandatory.",
+  "age": "No Restriction",
+  "intake_seats": "60",
+  "subjects": "Any Graduate"
+ },
+ "PGDM-KT": {
+  "duration": "2 Years (4 Semesters)",
+  "eligibility": "Bachelor's degree (3-year minimum) with minimum 50% (45% reserved).",
+  "fee_first_year": "2,25,000",
+  "affiliation": "All India Council for Technical Education",
+  "entrance_exam": "CUET PG, CAT, MAT, GMAT Accepted. Entrance is not mandatory.",
+  "age": "No Restriction",
+  "intake_seats": "60",
+  "subjects": "Any Graduate"
+ },
+ "BSA-G1": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade Kindergarten, Minimum Age : 6 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "800/month"
+ },
+ "BSA-G10": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 9, Minimum Age : 14 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "1450/month"
+ },
+ "BSA-G2": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 1, Minimum Age : 7 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "950/month"
+ },
+ "BSA-G3": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 2, Minimum Age : 8 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "950/month"
+ },
+ "BSA-G4": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 3, Minimum Age : 9 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "950/month"
+ },
+ "BSA-G5": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 4, Minimum Age : 10 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "950/month"
+ },
+ "BSA-G6": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 5, Minimum Age : 10 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "1450/month"
+ },
+ "BSA-G7": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 6, Minimum Age : 11 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "1450/month"
+ },
+ "BSA-G8": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 7, Minimum Age : 12 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "1450/month"
+ },
+ "BSA-G9": {
+  "duration": "Academic Session is from April to March next year",
+  "eligibility": "Qualified Grade 8, Minimum Age : 13 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "1450/month"
+ },
+ "BSAV-G1": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade Kindergarten, Minimum Age : 6 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "4,667/month"
+ },
+ "BSAV-G10": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 9, Minimum Age : 14 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "6,000/month"
+ },
+ "BSAV-G11": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade Kindergarten, No age restriction",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "7,500/month"
+ },
+ "BSAV-G12": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade Kindergarten, No age restriction",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "7,500/month"
+ },
+ "BSAV-G2": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 1, Minimum Age : 7 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "4,667/month"
+ },
+ "BSAV-G3": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 2, Minimum Age : 8 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "4,667/month"
+ },
+ "BSAV-G4": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 3, Minimum Age : 9 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "4,667/month"
+ },
+ "BSAV-G5": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 4, Minimum Age : 10 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "4,667/month"
+ },
+ "BSAV-G6": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 5, Minimum Age : 10 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "5,000/month"
+ },
+ "BSAV-G7": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 6, Minimum Age : 11 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "5,000/month"
+ },
+ "BSAV-G8": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 7, Minimum Age : 12 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "5,000/month"
+ },
+ "BSAV-G9": {
+  "duration": "Academic Session is from April to March next year",
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "eligibility": "Qualified Grade 8, Minimum Age : 12 years",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "5,000/month"
+ },
+ "DPT-GN": {
+  "affiliation": "Uttar Pradesh State Medical Faculty, Lucknow",
+  "duration": "2 Years (Annual)",
+  "entrance_exam": "None",
+  "subjects": "Physics, Chemistry, Biology or Mathematics",
+  "fee_first_year": "95000"
+ },
+ "MES-MYP1": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 10 Years",
+  "age": "Minimum age: 11 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "MES-MYP2": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 11 Years",
+  "age": "Minimum age: 12 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "MES-MYP3": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 12 Years",
+  "age": "Minimum age: 13 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "MES-PYP1": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 6 Years",
+  "age": "Minimum age: 6 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "23,800/month"
+ },
+ "MES-PYP2": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 7 Years",
+  "age": "Minimum age: 7 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "23,800/month"
+ },
+ "MES-PYP3": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 8 Years",
+  "age": "Minimum age: 8 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "23,800/month"
+ },
+ "MES-PYP4": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 9 Years",
+  "age": "Minimum age: 9 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "23,800/month"
+ },
+ "MES-PYP5": {
+  "duration": "1 year (annual)",
+  "eligibility": "Approximate Age: 10 Years",
+  "age": "Minimum age: 10 years plus",
+  "entrance_exam": "Interaction and age-appropriate assessment",
+  "fee_first_year": "23,800/month"
+ },
+ "BSA-LKG": {
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSA-NUR": {
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSA-TOD": {
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSA-UKG": {
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSAV-LKG": {
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSAV-NUR": {
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSAV-TOD": {
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "BSAV-UKG": {
+  "affiliation": "CBSE. Affiliation No 2131310",
+  "duration": "1 Year",
+  "entrance_exam": "Interaction and age-appropriate assessment"
+ },
+ "MES-EYP1": {
+  "age": "Minimum age: 3 years plus",
+  "duration": "1 Year",
+  "eligibility": "Minimum age: 3 years plus"
+ },
+ "MES-EYP2": {
+  "age": "Minimum age: 4 years plus",
+  "duration": "1 Year",
+  "eligibility": "Minimum age: 4 years plus"
+ },
+ "MES-EYP3": {
+  "age": "Minimum age: 5 years plus",
+  "duration": "1 Year",
+  "eligibility": "Minimum age: 5 years plus"
+ },
+ "MES-MON": {
+  "age": "Minimum age: 2 years plus",
+  "duration": "1 Year",
+  "eligibility": "Minimum age: 2 years plus"
+ },
+ "MES-TOD": {
+  "age": "Minimum age: 2 years plus"
+ }
+}

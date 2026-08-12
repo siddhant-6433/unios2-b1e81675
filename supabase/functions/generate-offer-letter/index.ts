@@ -643,7 +643,9 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
 interface BuildOpts {
   offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string; admission_mode?: string | null; entrance_exam_name?: string | null };
   lead: { name: string; phone: string | null; email: string | null; application_id: string | null; pre_admission_no: string | null };
-  course: { name: string; code?: string | null; duration_years?: number | null } | null;
+  course: { name: string; code?: string | null; duration_years?: number | null;
+            /** Curated duration from course_facts — preferred over duration_years. */
+            duration_text?: string | null } | null;
   campus: { name: string; address?: string | null } | null;
   yearItems: { term: string; total: number }[];
   feeItems: FeeStructureItem[];
@@ -769,7 +771,8 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   drawSection(ctx, "PROGRAMME DETAILS");
   drawKVGrid(ctx, [
     { label: "Programme",         value: opts.course?.name || "-" },
-    { label: "Duration",          value: isDaott ? "2.5 years (5 semesters)" : opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
+    { label: "Duration",          value: opts.course?.duration_text
+        || (opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-") },
     { label: "Campus",            value: opts.campus?.name || "-" },
     { label: "Academic Session",  value: opts.sessionName || "-" },
     { label: "Applicant Name",    value: applicantName },
@@ -1100,6 +1103,14 @@ Deno.serve(async (req) => {
 
     const lead: any = offer.leads;
     const course: any = offer.courses;
+    // course_facts is the single source of truth for what a student is told.
+    // Before this the PDF printed "4 years" from an int column, with a
+    // hardcoded DAOTT exception standing in for the nuance it couldn't express.
+    if (course && offer.course_id) {
+      const { data: facts } = await admin
+        .from("course_facts").select("duration").eq("course_id", offer.course_id).maybeSingle();
+      if (facts?.duration) course.duration_text = facts.duration;
+    }
     const campus: any = offer.campuses;
 
     // Programme fee breakdown from fee_structure_items. Keep both the grouped

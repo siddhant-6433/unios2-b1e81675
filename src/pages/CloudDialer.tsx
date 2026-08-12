@@ -41,6 +41,7 @@ import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -362,7 +363,47 @@ export default function CloudDialer() {
     display_name: "the admissions team",
     phone: null,
   };
-  const mostUsedTemplates = dialerBootstrap?.most_used_templates ?? [];
+  // These keys are scraped out of activity free-text by a regex in
+  // cloud_dialer_bootstrap, and the nudge buttons fire them with no params at
+  // all. A template needing 4 placeholders then failed with Meta 132000 every
+  // time. Only offer one-tap sends for templates Meta says take no parameters;
+  // anything else belongs in the full picker where the values can be filled.
+  const rawMostUsedTemplates = dialerBootstrap?.most_used_templates ?? [];
+  const [zeroParamTemplateKeys, setZeroParamTemplateKeys] = useState<Set<string> | null>(null);
+  // Curated first-year fee per course. The queue RPCs return courses.fee_per_year
+  // (numeric), which can't express "800/month" or the DAOTT semester breakdown —
+  // 29 of 48 curated fees aren't plain numbers. Prefer the curated text.
+  const [curatedFeeByCourse, setCuratedFeeByCourse] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await (supabase as any)
+        .from("course_facts").select("course_id, fee_first_year").not("fee_first_year", "is", null);
+      if (cancelled || !data) return;
+      setCuratedFeeByCourse(new Map((data as Array<{ course_id: string; fee_first_year: string }>)
+        .map((r) => [r.course_id, r.fee_first_year])));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: false });
+      if (cancelled) return;
+      setZeroParamTemplateKeys(
+        new Set(loaded.templates.filter(t => t.paramSlots.length === 0).map(t => t.key)),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const mostUsedTemplates = useMemo(
+    // Until the catalog loads, show nothing rather than buttons that would fail.
+    () => (zeroParamTemplateKeys ? rawMostUsedTemplates.filter(t => zeroParamTemplateKeys.has(t.key)) : []),
+    [rawMostUsedTemplates, zeroParamTemplateKeys],
+  );
   const slaWindowHours = useMemo(
     () => dialerBootstrap?.source_sla_hours ?? {},
     [dialerBootstrap],
@@ -388,9 +429,10 @@ export default function CloudDialer() {
       campus_name: r.campus_name || "—",
       bucket: r.bucket,
       attempt_count: r.attempt_count || 0,
-      course_fee: r.course_fee_per_year
-        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
-        : undefined,
+      course_fee: (r.course_id && curatedFeeByCourse.get(r.course_id))
+        || (r.course_fee_per_year
+          ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+          : undefined),
       // Phase 1 + 2 fields. The RPC populates these from migration
       // 20260610160000 (cloud_dialer_queue_extras) onward; before that
       // they're undefined and the dependent badges/callouts simply don't
@@ -439,9 +481,10 @@ export default function CloudDialer() {
       campus_name: r.campus_name || "—",
       bucket: "Call List",
       attempt_count: r.attempt_count || 0,
-      course_fee: r.course_fee_per_year
-        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
-        : undefined,
+      course_fee: (r.course_id && curatedFeeByCourse.get(r.course_id))
+        || (r.course_fee_per_year
+          ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+          : undefined),
       assigned_at: r.assigned_at ?? null,
       first_contact_at: r.first_contact_at ?? null,
     })).filter(l => l.phone);
@@ -470,9 +513,10 @@ export default function CloudDialer() {
       campus_name: r.campus_name || "—",
       bucket: r.bucket || (queueSource === "fresh" ? "New Lead" : (STAGE_LABELS[r.stage] || r.stage)),
       attempt_count: r.attempt_count || 0,
-      course_fee: r.course_fee_per_year
-        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
-        : undefined,
+      course_fee: (r.course_id && curatedFeeByCourse.get(r.course_id))
+        || (r.course_fee_per_year
+          ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+          : undefined),
     })).filter((lead) => lead.phone);
     const buckets = (listPayload.buckets || [])
       .filter((bucket: any) => bucket.count > 0)

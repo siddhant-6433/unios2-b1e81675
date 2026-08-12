@@ -104,8 +104,11 @@ const ACTIVITY_TYPES = [
 
 const WA_TEMPLATES = [
   { key: "lead_welcome", label: "Lead Welcome" },
-  { key: "visit_confirmed", label: "Visit Confirmation" },
-  { key: "visit_reminder", label: "Visit Reminder" },
+  // These must be whatsapp-send's *internal keys*, not the Meta template names.
+  // They were "visit_confirmed" / "visit_reminder" (the Meta names), so every
+  // rule using them came back 400 "Unknown template".
+  { key: "visit_confirmation", label: "Visit Confirmation" },
+  { key: "visit_reminder_24hr", label: "Visit Reminder" },
   { key: "application_received", label: "Application Received" },
   { key: "fee_reminder", label: "Fee Reminder" },
   { key: "course_info_video_v2", label: "Course Info" },

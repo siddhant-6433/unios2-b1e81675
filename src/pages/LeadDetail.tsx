@@ -1737,6 +1737,7 @@ const LeadDetail = () => {
         campusName={campusName}
         courseDuration={courseDuration}
         courseType={courseType}
+        courseId={lead.course_id || undefined}
         onSuccess={() => fetchAll(true)}
       />
       <AddSecondaryCounsellorDialog

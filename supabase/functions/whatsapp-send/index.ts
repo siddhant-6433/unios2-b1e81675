@@ -77,6 +77,12 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // backwards compatibility with callers, AutomationRules, and the inbox UI.
   application_received: { name: "application_submitted_v2", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
+  // Sent by zoho-books-poll when a consultant payout is disbursed. Was missing
+  // from this map, so every payout notification 400'd with "Unknown template".
+  consultant_payout_disbursed: {
+    name: "consultant_payout_disbursed",
+    params: ["consultant_name", "amount", "candidate_name", "reference", "payout_date"],
+  },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
   // Body-link replacement for course_info_video. Params resolved per-lead by
@@ -633,7 +639,86 @@ Deno.serve(async (req) => {
 
     const phoneRoute = getRouteForTemplate(template_key);
     const channelRoute: WhatsAppChannelRoute = phoneRoute === "default" ? "admissions" : phoneRoute;
-    const effectiveHeaderImageUrl = header_image_url || templateDef.headerImageUrl;
+
+    // Header media falls back to whatsapp_template_settings.media_url so a
+    // caller that doesn't know about a template's header still sends a valid
+    // one. Meta's own header_handle is not usable as a send link (131053), so
+    // this is the only place a sendable URL lives for catalog templates.
+    const { data: templateSettings } = await admin
+      .from("whatsapp_template_settings")
+      .select("media_url")
+      .eq("template_key", template_key)
+      .maybeSingle();
+    const settingsMediaUrl = (templateSettings as any)?.media_url?.trim() || null;
+
+    // Mutable so the settings fallback below can fill whichever header the
+    // template actually needs.
+    let resolvedHeaderImageUrl: string | null = header_image_url || templateDef.headerImageUrl || null;
+    let resolvedHeaderVideoUrl: string | null = header_video_url || null;
+    let resolvedHeaderDocumentUrl: string | null = header_document_url || null;
+
+    // ── Parameter guard ───────────────────────────────────────────────────────
+    // Until now nothing ever compared params.length against the template's real
+    // arity — templateDef.params was pure documentation. Callers passing the
+    // wrong count burned a Meta call and came back 132000 / 132012 (96 failures
+    // in 10 days: application_submitted, application_received, and every dialer
+    // nudge that fires a 4-param template with zero params).
+    //
+    // Ground truth is Meta's own placeholder_count, mirrored in
+    // whatsapp_templates by the sync. We only hard-fail when we have that row —
+    // the hardcoded params arrays are unverified, so a mismatch against them is
+    // a warning, not a rejection. Runs after the repair shims above so padded
+    // params are counted as sent.
+    const suppliedParamCount = Array.isArray(params) ? params.length : 0;
+    const { data: metaTemplate } = await admin
+      .from("whatsapp_templates")
+      .select("placeholder_count, has_media, header_format")
+      .eq("name", templateDef.name)
+      .eq("status", "APPROVED")
+      .maybeSingle();
+
+    if (metaTemplate && typeof (metaTemplate as any).placeholder_count === "number") {
+      const expected = (metaTemplate as any).placeholder_count as number;
+      if (expected !== suppliedParamCount) {
+        console.error(
+          `Template param mismatch: ${template_key} -> ${templateDef.name} expects ${expected}, got ${suppliedParamCount}`,
+        );
+        return new Response(
+          JSON.stringify({
+            error: `Template "${template_key}" expects ${expected} parameter(s), received ${suppliedParamCount}`,
+            expected_params: templateDef.params,
+            expected_count: expected,
+            received_count: suppliedParamCount,
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const headerFormat = String((metaTemplate as any).header_format || "").toUpperCase();
+      // Fall back to the configured media before failing, so callers that know
+      // nothing about headers (dialer nudges, automation rules, crons) still
+      // send a valid message.
+      if (settingsMediaUrl && !resolvedHeaderDocumentUrl && !resolvedHeaderVideoUrl && !resolvedHeaderImageUrl) {
+        if (headerFormat === "DOCUMENT") resolvedHeaderDocumentUrl = settingsMediaUrl;
+        else if (headerFormat === "VIDEO") resolvedHeaderVideoUrl = settingsMediaUrl;
+        else if (headerFormat === "IMAGE") resolvedHeaderImageUrl = settingsMediaUrl;
+      }
+
+      const headerSupplied = !!(resolvedHeaderDocumentUrl || resolvedHeaderVideoUrl || resolvedHeaderImageUrl);
+      if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) && !headerSupplied) {
+        return new Response(
+          JSON.stringify({
+            error: `Template "${template_key}" needs a ${headerFormat.toLowerCase()} header. Add its URL in Template Manager → Picker.`,
+            header_format: headerFormat,
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    } else if (templateDef.params.length !== suppliedParamCount) {
+      console.warn(
+        `Template param count differs from the local map for ${template_key}: map says ${templateDef.params.length}, got ${suppliedParamCount}. No Meta row to verify against — sending anyway.`,
+      );
+    }
 
     // Build template components
     const waPhone = phone.replace(/[^0-9]/g, "");
@@ -643,26 +728,26 @@ Deno.serve(async (req) => {
 
     // Header component (media templates). Document headers are used for PDF
     // receipts; video is retained for existing callers.
-    if (header_document_url) {
+    if (resolvedHeaderDocumentUrl) {
       components.push({
         type: "header",
         parameters: [{
           type: "document",
           document: {
-            link: header_document_url,
+            link: resolvedHeaderDocumentUrl,
             ...(header_document_filename ? { filename: header_document_filename } : {}),
           },
         }],
       });
-    } else if (header_video_url) {
+    } else if (resolvedHeaderVideoUrl) {
       components.push({
         type: "header",
-        parameters: [{ type: "video", video: { link: header_video_url } }],
+        parameters: [{ type: "video", video: { link: resolvedHeaderVideoUrl } }],
       });
-    } else if (effectiveHeaderImageUrl) {
+    } else if (resolvedHeaderImageUrl) {
       components.push({
         type: "header",
-        parameters: [{ type: "image", image: { link: effectiveHeaderImageUrl } }],
+        parameters: [{ type: "image", image: { link: resolvedHeaderImageUrl } }],
       });
     }
 

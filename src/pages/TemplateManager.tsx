@@ -81,11 +81,22 @@ const TemplateManager = () => {
     name: string;
     duration_years: number | null;
     type: string | null;
-    marketing_eligibility: string | null;
     video_url: string | null;
     slug: string | null;
     maps_cid: string | null;
+    // Curated single source of truth (public.course_facts). Edited here, read by
+    // the website, the counsellor Course tab, WhatsApp templates and Navya.
+    fact_duration: string | null;
+    fact_eligibility: string | null;
+    fact_entrance_exam: string | null;
+    fact_affiliation: string | null;
+    fact_fee_first_year: string | null;
   };
+  const FACT_FIELDS = {
+    fact_duration: "duration", fact_eligibility: "eligibility",
+    fact_entrance_exam: "entrance_exam", fact_affiliation: "affiliation",
+    fact_fee_first_year: "fee_first_year",
+  } as const;
   const [courseRows, setCourseRows] = useState<CourseRow[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [courseEdits, setCourseEdits] = useState<Record<string, Partial<CourseRow>>>({});
@@ -94,11 +105,25 @@ const TemplateManager = () => {
 
   const fetchCourses = async () => {
     setCoursesLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("courses")
-      .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug, maps_cid")
-      .order("code");
-    if (!error && data) setCourseRows(data as CourseRow[]);
+    const [{ data, error }, { data: factRows }] = await Promise.all([
+      (supabase as any)
+        .from("courses")
+        .select("id, code, name, duration_years, type, video_url, slug, maps_cid")
+        .order("code"),
+      (supabase as any)
+        .from("course_facts")
+        .select("course_id, duration, eligibility, entrance_exam, affiliation, fee_first_year"),
+    ]);
+    if (!error && data) {
+      const factsById = new Map<string, any>(((factRows || []) as any[]).map((f) => [f.course_id, f]));
+      setCourseRows((data as CourseRow[]).map((c) => {
+        const f = factsById.get(c.id) || {};
+        return { ...c,
+          fact_duration: f.duration ?? null, fact_eligibility: f.eligibility ?? null,
+          fact_entrance_exam: f.entrance_exam ?? null, fact_affiliation: f.affiliation ?? null,
+          fact_fee_first_year: f.fee_first_year ?? null };
+      }));
+    }
     setCoursesLoading(false);
   };
 
@@ -106,7 +131,24 @@ const TemplateManager = () => {
     const edits = courseEdits[id];
     if (!edits) return;
     setSavingCourseId(id);
-    const { error } = await (supabase as any).from("courses").update(edits).eq("id", id);
+    // Curated facts live in course_facts; everything else stays on courses.
+    const factPatch: Record<string, unknown> = {};
+    const coursePatch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(edits)) {
+      const factCol = (FACT_FIELDS as Record<string, string>)[k];
+      if (factCol) factPatch[factCol] = v === "" ? null : v;
+      else coursePatch[k] = v;
+    }
+    let error: { message: string } | null = null;
+    if (Object.keys(coursePatch).length) {
+      ({ error } = await (supabase as any).from("courses").update(coursePatch).eq("id", id));
+    }
+    if (!error && Object.keys(factPatch).length) {
+      ({ error } = await (supabase as any).from("course_facts").upsert(
+        { course_id: id, ...factPatch, verified_at: new Date().toISOString() },
+        { onConflict: "course_id" },
+      ));
+    }
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
     } else {
@@ -125,10 +167,9 @@ const TemplateManager = () => {
   const previewCourseTemplate = (c: CourseRow) => {
     const e = courseEdits[c.id] || {};
     const merged = { ...c, ...e } as CourseRow;
-    const duration = merged.duration_years
-      ? `${merged.duration_years} year${merged.duration_years === 1 ? "" : "s"} (${merged.type || "—"})`
-      : "—";
-    const eligibility = merged.marketing_eligibility || "(falls back to eligibility_rules.notes)";
+    const duration = merged.fact_duration
+      || (merged.duration_years ? `${merged.duration_years} year${merged.duration_years === 1 ? "" : "s"} (${merged.type || "—"})` : "—");
+    const eligibility = merged.fact_eligibility || "(no curated eligibility yet)";
     const courseUrl = merged.slug
       ? `https://www.nimt.ac.in/courses/${merged.slug}#admissions`
       : "https://www.nimt.ac.in/courses";
@@ -137,7 +178,7 @@ const TemplateManager = () => {
 `Hi <student>, here are the details for ${merged.name} at NIMT:
 • Duration: ${duration}
 • Eligibility: ${eligibility}
-• Accreditation: (resolved from approval_letters)
+• Accreditation: ${merged.fact_affiliation || "(resolved from courses.affiliations)"}
 
 Buttons:
   ▶ Watch course video → ${videoUrl}
@@ -148,8 +189,9 @@ Buttons:
   useEffect(() => { fetchCourses(); }, []);
 
   // ── Template Visibility tab state ────────────────────────────────────────
-  // whatsapp_template_settings.show_in_lead_picker drives the visible list
-  // in the lead-page SendWhatsAppDialog. Admin toggles each here.
+  // whatsapp_template_settings.show_in_lead_picker is the curated list for every
+  // counsellor-facing picker: lead page, cloud dialer and WhatsApp inbox replies
+  // all read it through src/lib/whatsappTemplateCatalog.
   type WaSetting = {
     template_key: string;
     display_name: string;
@@ -159,6 +201,9 @@ Buttons:
     created_at: string | null;
     updated_at: string | null;
     last_used_at?: string | null;
+    /** Sendable header media URL; required when header_format is IMAGE/VIDEO/DOCUMENT. */
+    media_url?: string | null;
+    header_format?: string | null;
   };
   type WaVisibilitySort = "date_added_desc" | "date_added_asc" | "date_used_desc" | "date_used_asc" | "name_asc" | "name_desc";
   const [waSettings, setWaSettings] = useState<WaSetting[]>([]);
@@ -171,16 +216,22 @@ Buttons:
     setWaSettingsLoading(true);
     const { data, error } = await (supabase as any)
       .from("whatsapp_template_settings")
-      .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at")
+      .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at, media_url")
       .order("created_at", { ascending: false });
     if (!error && data) {
       const settingsRows = (data as WaSetting[]);
       const settingsByKey = new Map(settingsRows.map((setting) => [setting.template_key, setting]));
       const { data: approvedTemplates } = await (supabase as any)
         .from("whatsapp_templates")
-        .select("name, category, created_at, status_updated_at")
+        .select("name, category, created_at, status_updated_at, header_format")
         .eq("status", "APPROVED")
         .order("created_at", { ascending: false });
+      // header_format decides whether a row needs a media URL at all.
+      const headerFormatByName = new Map<string, string>(
+        ((approvedTemplates || []) as Array<{ name: string; header_format?: string | null }>)
+          .filter((t) => t.name)
+          .map((t) => [t.name, String(t.header_format || "NONE").toUpperCase()]),
+      );
       const { data: usedRows } = await (supabase as any)
         .from("whatsapp_messages")
         .select("template_key, created_at")
@@ -210,13 +261,49 @@ Buttons:
           updated_at: template.status_updated_at || template.created_at || null,
         } satisfies WaSetting));
       const mergedSettings = [...settingsRows, ...missingApprovedSettings];
-      setWaSettings(mergedSettings.map((setting) => (
-        setting.template_key === "bpt_bmrit_cahet_deadline"
-          ? { ...setting, description: cahetDeadlineDescription(), last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
-          : { ...setting, last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
-      )));
+      setWaSettings(mergedSettings.map((setting) => ({
+        ...setting,
+        ...(setting.template_key === "bpt_bmrit_cahet_deadline" ? { description: cahetDeadlineDescription() } : {}),
+        last_used_at: lastUsedByTemplate.get(setting.template_key) || null,
+        header_format: headerFormatByName.get(setting.template_key) || "NONE",
+      })));
     }
     setWaSettingsLoading(false);
+  };
+
+  /**
+   * Attach the sendable header file for a media template. Meta's own
+   * header_handle can't be reused as a send link (131053), so without this the
+   * template is approved but unsendable — which is how the Clinical Training &
+   * Placement Report ended up looking "unavailable".
+   */
+  const saveWaMediaUrl = async (templateKey: string, mediaUrl: string) => {
+    const current = waSettings.find((setting) => setting.template_key === templateKey);
+    if (mediaUrl && /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/.test(mediaUrl)) {
+      toast({
+        title: "That URL won't work",
+        description: "Meta's own header link is rejected at send time (131053). Upload the file somewhere public and paste that URL.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .upsert({
+        template_key: templateKey,
+        display_name: current?.display_name || displayNameForWaTemplate(templateKey),
+        description: current?.description || null,
+        category: current?.category || "general",
+        show_in_lead_picker: current?.show_in_lead_picker ?? false,
+        media_url: mediaUrl || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "template_key" });
+    if (error) {
+      toast({ title: "Could not save file URL", description: error.message, variant: "destructive" });
+      return;
+    }
+    setWaSettings(prev => prev.map(s => s.template_key === templateKey ? { ...s, media_url: mediaUrl || null } : s));
+    toast({ title: mediaUrl ? "Header file saved" : "Header file cleared" });
   };
 
   const toggleWaSetting = async (templateKey: string, next: boolean) => {
@@ -230,6 +317,7 @@ Buttons:
         description: current?.description || null,
         category: current?.category || "general",
         show_in_lead_picker: next,
+        media_url: current?.media_url || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: "template_key" });
     if (error) {
@@ -446,9 +534,12 @@ Buttons:
                   Course data sent in WhatsApp templates
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-                  These five fields feed the <span className="font-mono">course_info_v1</span> template body (Duration,
-                  Eligibility, Accreditation, the video button, and the fees-and-apply button). Edit them here so
-                  outbound messages match reality. Preview shows the rendered template.
+                  This is the <span className="font-medium text-foreground">single source of truth</span> for course
+                  information. What you type here is exactly what the <span className="font-medium text-foreground">website</span>,
+                  the <span className="font-medium text-foreground">counsellor Course tab</span>, the
+                  {" "}<span className="font-mono">course_info</span> WhatsApp templates and
+                  {" "}<span className="font-medium text-foreground">Navya</span> all show. Curated fields save to
+                  {" "}<span className="font-mono">course_facts</span>; video URL, slug and Maps CID stay on the course record.
                 </p>
               </div>
               <Button variant="outline" size="sm" className="gap-2" onClick={fetchCourses} disabled={coursesLoading}>
@@ -466,8 +557,11 @@ Buttons:
                   <tr>
                     <th className="text-left px-3 py-2 font-medium">Code</th>
                     <th className="text-left px-3 py-2 font-medium">Course name</th>
-                    <th className="text-left px-3 py-2 font-medium">Duration</th>
-                    <th className="text-left px-3 py-2 font-medium min-w-[220px]">Marketing eligibility</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[150px]">Duration</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[240px]">Eligibility</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[170px]">Entrance exam</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[190px]">Affiliation</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[120px]">1st-year fee</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[200px]">Video URL</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[180px]">Slug</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[180px]">Maps CID (optional)</th>
@@ -484,16 +578,47 @@ Buttons:
                       <tr key={c.id} className="border-t border-border align-top">
                         <td className="px-3 py-2 font-mono text-foreground whitespace-nowrap">{c.code}</td>
                         <td className="px-3 py-2 text-foreground">{c.name}</td>
-                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
-                          {c.duration_years ? `${c.duration_years}y` : "—"} {c.type ? `(${c.type})` : ""}
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.fact_duration || ""}
+                            onChange={(ev) => set("fact_duration", ev.target.value)}
+                            placeholder={c.duration_years ? `${c.duration_years} years` : "3 Years (6 Semesters)"}
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
+                          />
                         </td>
                         <td className="px-3 py-2">
                           <textarea
-                            value={merged.marketing_eligibility || ""}
-                            onChange={(ev) => set("marketing_eligibility", ev.target.value)}
+                            value={merged.fact_eligibility || ""}
+                            onChange={(ev) => set("fact_eligibility", ev.target.value)}
                             rows={2}
                             placeholder="10+2 with PCB, min 50%…"
                             className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <textarea
+                            value={merged.fact_entrance_exam || ""}
+                            onChange={(ev) => set("fact_entrance_exam", ev.target.value)}
+                            rows={2}
+                            placeholder="CUET UG accepted. Not mandatory."
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <textarea
+                            value={merged.fact_affiliation || ""}
+                            onChange={(ev) => set("fact_affiliation", ev.target.value)}
+                            rows={2}
+                            placeholder="Chaudhary Charan Singh University | AICTE"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.fact_fee_first_year || ""}
+                            onChange={(ev) => set("fact_fee_first_year", ev.target.value)}
+                            placeholder="75,000"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -563,9 +688,13 @@ Buttons:
                   Template Visibility
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-                  Toggle which templates counsellors see when they tap <span className="font-mono">Send WhatsApp</span> on a lead.
+                  This is the curated list: every approved Meta template is listed here, and the ones you switch on are
+                  exactly what counsellors can pick on the <span className="font-medium text-foreground">lead page</span>,
+                  the <span className="font-medium text-foreground">cloud dialer</span> and
+                  {" "}<span className="font-medium text-foreground">WhatsApp inbox replies</span>.
                   Auto-fired templates (missed_call, nimt_followup_v1, offer_letter_acceptance) are off by default — they're sent
                   by the system on disposition / offer issuance, not by hand.
+                  Templates with an image, video or PDF header also need a file URL below, or the send is rejected.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -608,6 +737,7 @@ Buttons:
                     <th className="text-left px-3 py-2 font-medium">Description</th>
                     <th className="text-left px-3 py-2 font-medium">Date added</th>
                     <th className="text-left px-3 py-2 font-medium">Date used</th>
+                    <th className="text-left px-3 py-2 font-medium">Header file</th>
                     <th className="text-center px-3 py-2 font-medium">Show in picker</th>
                   </tr>
                 </thead>
@@ -621,7 +751,31 @@ Buttons:
                       </td>
                       <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.created_at)}</td>
-                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.last_used_at)}</td>
+                      <td className="px-3 py-2">
+                        {s.header_format && s.header_format !== "NONE" && s.header_format !== "TEXT" ? (
+                          <div className="min-w-[220px]">
+                            <input
+                              type="url"
+                              defaultValue={s.media_url || ""}
+                              onBlur={(e) => {
+                                const next = e.target.value.trim();
+                                if (next !== (s.media_url || "")) void saveWaMediaUrl(s.template_key, next);
+                              }}
+                              placeholder={`Public ${s.header_format.toLowerCase()} URL`}
+                              className={`h-8 w-full rounded-md border px-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-ring/20 ${
+                                s.media_url ? "border-input" : "border-destructive/40 bg-destructive/5"
+                              }`}
+                            />
+                            {!s.media_url && (
+                              <p className="mt-0.5 text-[10px] text-destructive">
+                                Required — this template sends a {s.header_format.toLowerCase()}.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-center">
                         <button
                           role="switch"
@@ -642,7 +796,7 @@ Buttons:
                     </tr>
                   ))}
                   {visibleWaSettings.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
+                    <tr><td colSpan={8} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
                   )}
                 </tbody>
               </table>

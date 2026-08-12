@@ -16,12 +16,85 @@ import { recordOutboundConversationAction } from "../_shared/whatsapp-conversati
 import {
   FEE_STRUCTURE_URL,
   loadVerifiedAdmissionsContext,
+  renderCourseFactsBlock,
 } from "../_shared/nimt-admissions-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// ─── AI failure visibility ──────────────────────────────────────────────────
+// A failed AI dispatch used to write nothing at all, so a total outage (e.g. the
+// Gemini billing 403 of 2026-08-02) was invisible in the inbox for days. Write a
+// failed outbound row so the existing red "Message failed" bubble renders.
+//
+// ponytail: dedup is "one failed bubble per inbound turn" — the buffer worker
+// retries every 2 min, so without it a stuck conversation grows hundreds of
+// bubbles. Keyed off the newest inbound message rather than a new table.
+async function recordAiFailureBubble(
+  admin: { from: (table: string) => any },
+  args: {
+    phone: string;
+    leadId: string | null;
+    provider: "meta" | "plivo";
+    businessPhoneNumberId: string | null;
+    businessNumber: string | null;
+    reason: string;
+    detail?: unknown;
+    content?: string | null;
+  },
+): Promise<void> {
+  const waPhone = digits(args.phone);
+  if (!waPhone) return;
+
+  try {
+    const { data: lastInbound } = await admin
+      .from("whatsapp_messages")
+      .select("created_at")
+      .eq("phone", waPhone)
+      .eq("direction", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Already flagged this turn? Stay quiet.
+    if (lastInbound?.created_at) {
+      const { data: existingFailure } = await admin
+        .from("whatsapp_messages")
+        .select("id")
+        .eq("phone", waPhone)
+        .eq("direction", "outbound")
+        .eq("template_key", "ai_auto_reply")
+        .eq("status", "failed")
+        .gt("created_at", lastInbound.created_at)
+        .limit(1)
+        .maybeSingle();
+      if (existingFailure?.id) return;
+    }
+
+    await admin.from("whatsapp_messages").insert({
+      lead_id: args.leadId,
+      direction: "outbound",
+      phone: waPhone,
+      message_type: "text",
+      content: args.content || null,
+      template_key: "ai_auto_reply",
+      status: "failed",
+      is_read: true,
+      provider: args.provider,
+      business_phone_number_id: args.businessPhoneNumberId,
+      business_phone_number: args.businessNumber,
+      status_error: {
+        error: { code: "ai_reply_failed", message: args.reason },
+        ...(args.detail === undefined ? {} : { detail: args.detail }),
+      },
+    });
+  } catch (err) {
+    // Never let the failure recorder mask the original failure.
+    console.error("recordAiFailureBubble failed:", err);
+  }
+}
 
 // ─── NIMT Knowledge Base ────────────────────────────────────────────────────
 
@@ -32,7 +105,7 @@ Tagline: "Where Ambition Meets Action"
 
 APPROVALS & AFFILIATIONS:
 Approved by: AICTE, UGC, Bar Council of India (BCI), NCTE, Indian Nursing Council (INC), Pharmacy Council of India (PCI)
-Affiliated to: AKTU, GGSIPU, ABVMU (Atal Bihari Vajpayee Medical University), ALU (Dr. Bhimrao Ambedkar Law University), CCSU, University of Rajasthan
+(Per-programme affiliation is listed against each course below — use that, it is what admissions has verified.)
 
 RANKINGS & RECOGNITION:
 - #1 in UP — EW Higher Education Rankings
@@ -48,125 +121,14 @@ Highest package: INR 18.75 LPA | Average: INR 5.40 LPA
 Top recruiters: Fortis, KPMG, Cognizant, ICICI Bank, Wipro, HCL, Dell, Airtel, Kotak Mahindra, Infosys, Deloitte, TCS
 
 CAMPUSES:
-1. Greater Noida (Main) — Plot No. 41, Knowledge Park-1, Near Pari Chowk, Greater Noida, UP 201310. Houses: PGDM, MBA, BPT, BSc Nursing, BCA, BA LLB, LLB, D Pharma, BMRIT, GNM. On-campus parent hospital for clinical training.
-2. Ghaziabad Arthala — Near Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007. NIMT Institute of Technology and Management. BBA, B.Ed, PGDM, MBA.
+1. Greater Noida (Main) — Plot No. 41, Knowledge Park-1, Near Pari Chowk, Greater Noida, UP 201310. On-campus parent hospital for clinical training.
+2. Ghaziabad Arthala — Near Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007. NIMT Institute of Technology and Management.
 3. Ghaziabad Avantika — Ansal Avantika Colony, Shastri Nagar, Ghaziabad 201015. NIMT Beacon School (CBSE), B.Ed institutions.
 4. Ghaziabad Avantika II — Avantika Extension Colony, Ghaziabad. Residential and day school campus.
-5. Kotputli Jaipur — SP-3-1, RIICO Industrial Area, Keshwana, Kotputli, Jaipur 303108. 20-acre campus. Law, Management, Pharmacy, B.Ed. Affiliated to University of Rajasthan.
+5. Kotputli Jaipur — SP-3-1, RIICO Industrial Area, Keshwana, Kotputli, Jaipur 303108. 20-acre campus.
 
 COURSES:
-
-B.Sc Nursing:
-- Duration: 4 Years (8 Semesters) + 6-month paid internship (Rs 10,000/month stipend)
-- Campus: Greater Noida, Kotputli (Jaipur)
-- Approved by: Indian Nursing Council (INC) | Affiliated to ABVMU
-- Eligibility: 10+2 with Physics, Chemistry, Biology and English. Min 45%. Age 17+. Medically fit.
-- Entrance: UPCNET / CPNET / merit-based
-- Placements: Highest Rs 10 LPA, Average Rs 3 LPA. ~98% placement rate.
-- Clinical training at NIMT's own parent hospital + GIMS, Navin Hospital, Manipal Hospital, VIMHANS Delhi, IHBAS Delhi
-
-GNM (General Nursing & Midwifery):
-- Duration: 3 Years + 6-month Internship
-- Campus: Greater Noida
-- UNIQUE: Open to Arts and Commerce students — Science NOT mandatory
-- Eligibility: 10+2 from ANY stream. Min 40%. Age 17-35.
-- Entrance: UP GNM Entrance Test (UPGET) / merit-based
-
-BPT (Bachelor of Physiotherapy):
-- Duration: 5 Years (4 academic years + 1-year compulsory internship)
-- Campus: Greater Noida
-- Eligibility: 10+2 PCB/Botany & Zoology with English pass. Min 50% PCB aggregate (40% SC/ST/OBC-NCL/PwD). Age 17+.
-- Admission: UP 2026-27 through CAHET counselling by ABVMU Lucknow; NEET UG exempt this year.
-- NCAHP category: Physiotherapy Professional, ISCO Code 2264.
-- Clinical training at NIMT hospital. 1-year internship rotations: Orthopaedics, Neurology, Surgery, Medicine, Physiotherapy.
-
-MBA:
-- Duration: 2 Years (4 Semesters) | AKTU affiliated | AICTE approved
-- Campus: Greater Noida, Ghaziabad
-- Specialisations: Finance, Marketing, HR, Operations, IT, International Business, Insurance & Banking, Agri Business
-- Eligibility: Bachelor's degree, min 50% (45% SC/ST/OBC). Valid CAT/MAT/XAT/CMAT/GMAT/SNAP/NMAT score.
-- Placements: Highest INR 18.75 LPA, Average INR 5.40 LPA. Ranked 34th B-School.
-
-PGDM:
-- Duration: 2 Years (4 Semesters), Full-time Residential | AICTE approved
-- Campus: Greater Noida, Ghaziabad, Kotputli (Jaipur)
-- Ranked #8 in India. 60 students per campus — small batches.
-- Specialisations: HR, Marketing, Operations, International Business, Insurance & Banking, Foreign Trade, Agri Business
-- Eligibility: Bachelor's degree, min 50% (45% reserved). Valid CAT/MAT/XAT/CMAT score.
-
-BA LLB / LLB:
-- BA LLB: 5 Years integrated | LLB: 3 Years
-- Campus: Greater Noida (main), Kotputli (Jaipur)
-- Approved by Bar Council of India (BCI) | #57 Law in India (India Today 2025)
-- BA LLB Eligibility: 12th pass, min 45%. Entrance: CLAT, LSAT, ULSAT.
-- LLB Eligibility: Graduation any stream, min 45% (40% SC/ST/OBC). Merit-based / CLAT PG.
-- Features: Moot Court room, Legal Aid clinic, MoU with CLAT Consortium
-
-B.Ed:
-- Duration: 2 Years (4 Semesters) | NCTE recognised
-- Campus: Greater Noida (affiliated to CCSU), Ghaziabad Arthala, Kotputli Jaipur (NIMT Mahila B.Ed College — women's, University of Rajasthan)
-- Eligibility: Arts/Science/Humanities graduates, min 50% (45% SC/ST). B.E./B.Tech: min 55%.
-- Entrance: UP B.Ed JEE (Greater Noida/Ghaziabad), PTET (Kotputli)
-
-BCA:
-- Duration: 3 Years (6 Semesters) | Campus: Greater Noida
-- Eligibility: 12th with Mathematics, min 45-50%.
-- Entrance: Merit-based / JEECUP
-- Technologies: C, C++, Java, Python, Web Dev, SQL, Cloud, Mobile Apps, Cybersecurity basics
-
-BBA:
-- Duration: 3 Years (6 Semesters) | Campus: Greater Noida, Ghaziabad Arthala
-- Specialisations: Finance, Marketing, HR, Strategy & Entrepreneurship, International Business, Supply Chain
-- Eligibility: 12th any stream, min 45%.
-- Entrance: Merit-based (Class 12 marks). 120 student intake.
-
-BMRIT (B.Sc Medical Radiology & Imaging Technology):
-- Duration: 4 Years (including internship) | Campus: Greater Noida
-- Eligibility: 10+2 PCB with English pass, min 50% PCB aggregate (40% SC/ST/OBC-NCL/PwD).
-- Admission: UP 2026-27 through CAHET counselling by ABVMU Lucknow; NEET UG exempt this year.
-- ISCO Code: 3211.
-- Training in X-ray, CT scan, MRI, Ultrasound, Nuclear Medicine at NIMT hospital.
-
-D Pharma:
-- Duration: 2 Years + 3-month practical training | Campus: Greater Noida
-- Approved by Pharmacy Council of India (PCI)
-- Eligibility: 10+2 Science with PCB or PCM, min 50%.
-- Entrance: JEECUP / merit-based. Pathway to B Pharma lateral entry.
-
-NIMT Beacon School (K-12):
-- CBSE affiliated | Campuses: Ghaziabad Arthala, Avantika / Avantika II
-- Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450
-- Arthala admission fee: Rs 0 for new and existing parents
-- Smart classrooms, science labs, computer labs, sports, transport
-- Day boarding with lunch: Rs 4,000/month. Boarding options available.
-- Admission: Age-appropriate interaction/assessment
-
-Mirai Experiential School (IB World School):
-- IB PYP and MYP programmes | Campus: Ghaziabad
-- Inquiry-based, experiential learning. Small class sizes. Bilingual (English + Hindi).
-- Only IB World School in the region.
-- Admission: Age-appropriate interaction
-
-FEE STRUCTURE (First Year / Annual Fee):
-Canonical fee page: https://nimt.ac.in/admissions/fees/
-- B.Sc Nursing: ₹1,53,000/year | Greater Noida campus
-- GNM: ₹1,18,000/year | Greater Noida campus
-- BPT (Physiotherapy): ₹92,000/year | Greater Noida campus
-- MBA: ₹1,30,000/year | Greater Noida campus
-- PGDM: ₹2,25,000/year | Greater Noida & Kotputli campuses
-- BA LLB (5-year integrated): ₹1,10,000/year | Greater Noida campus
-- LLB (3-year): ₹44,250/year | Greater Noida & Kotputli campuses
-- B.Ed: ₹56,000/year (Greater Noida & Ghaziabad) | ₹27,000/year (Kotputli)
-- BCA: ₹75,000/year | Greater Noida campus
-- BBA: ₹75,000/year | Greater Noida & Ghaziabad campuses
-- BMRIT: ₹92,000/year | Greater Noida campus
-- D.Pharma: ₹95,000/year | Greater Noida campus
-- DPT (Diploma Physiotherapy): ₹62,000/year | Greater Noida campus
-- D.El.Ed: ₹45,000/year | Ghaziabad campus
-- OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total ₹1,85,000 across 5 semesters | Sem 1 ₹40,000, Sem 2 ₹40,000, Sem 3 ₹40,000, Sem 4 ₹40,000, Sem 5 ₹25,000 | Greater Noida campus | ISCO Code 3259
-- MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
-- MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
-Note: These are first-year fees. Full year-wise programme fees are published at https://nimt.ac.in/admissions/fees/. Merit scholarships, category scholarships and education loan support may reduce the payable amount.
+{{COURSE_FACTS}}
 
 ADMISSIONS:
 - Apply online: https://uni.nimt.ac.in/apply/nimt (also: apply.nimt.ac.in)
@@ -191,6 +153,24 @@ FACILITIES:
 - Cafeteria, gym, sports grounds
 - Wi-Fi campus, transport facility
 	`;
+
+/**
+ * The COURSES: section of the knowledge base is no longer hardcoded — it is
+ * rendered from public.course_facts at request time. Three copies of those
+ * per-course figures used to exist (here, web-chat-server/knowledge.ts and
+ * voice-agent/knowledge.ts) and they drifted from the database and each other.
+ *
+ * If the DB block can't be loaded we say so explicitly rather than silently
+ * dropping the course list, so the model deflects to a counsellor instead of
+ * inventing figures.
+ */
+function renderKnowledgeBase(courseFactsBlock: string): string {
+  return KNOWLEDGE_BASE.replace(
+    "{{COURSE_FACTS}}",
+    courseFactsBlock
+      || "(Course details unavailable right now — do NOT state any course duration, eligibility, entrance exam, seats or fee. Tell the student a counsellor will confirm, and share +91 9555192192.)",
+  );
+}
 
 type SupabaseAdminClient = ReturnType<typeof createClient<Record<string, unknown>>>;
 const sendWhatsAppText = rawSendWhatsAppText as unknown as (
@@ -500,6 +480,7 @@ function buildSystemPrompt(
   verifiedAdmissionsContext: string,
   goldenAnswersContext: string,
   leadStage: string | null,
+  courseFactsBlock: string,
 ): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
@@ -606,7 +587,7 @@ ${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContex
 ${replyExamplesContext ? `\n\nORGANISATION REPLY EXAMPLES:\nUse these as examples of how NIMT counsellors answer similar WhatsApp queries. Do not copy personal details, phone numbers, emails, or promises from examples. Verified course brief and knowledge base override examples if they conflict.\n${replyExamplesContext}` : ""}
 
 KNOWLEDGE BASE:
-${KNOWLEDGE_BASE}`;
+${renderKnowledgeBase(courseFactsBlock)}`;
 }
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
@@ -853,6 +834,8 @@ Deno.serve(async (req) => {
     ]);
 
     // Call Gemini with dynamic system prompt
+    // Course figures come from course_facts, not from a constant in this file.
+    const courseFactsBlock = await renderCourseFactsBlock(admin);
     const systemPrompt = buildSystemPrompt(
       hasName,
       hasCourse,
@@ -861,6 +844,7 @@ Deno.serve(async (req) => {
       verifiedAdmissionsContext,
       goldenAnswersContext,
       lead_stage,
+      courseFactsBlock,
     );
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`;
     const geminiBody = JSON.stringify({
@@ -887,9 +871,31 @@ Deno.serve(async (req) => {
       geminiRes = await fetch(geminiUrl, { method: "POST", headers: geminiHeaders, body: geminiBody });
     }
 
+    const aiFailureChannel = {
+      phone,
+      leadId,
+      provider: sendProvider,
+      businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+      businessNumber: channelKey,
+    };
+
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error("Gemini error:", errText);
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        reason: `AI generation failed (${geminiRes.status})`,
+        detail: errText.slice(0, 1000),
+      });
+      await logWhatsAppAutomationEvent(admin, {
+        phone,
+        businessNumber: channelKey,
+        provider: sendProvider,
+        leadId,
+        eventType: "send_failed",
+        decision: "ai_generation_failed",
+        reason: JSON.stringify({ error: "AI generation failed", detail: errText.slice(0, 1000) }),
+      });
       return new Response(JSON.stringify({ error: "AI generation failed", detail: errText }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -900,6 +906,10 @@ Deno.serve(async (req) => {
     const rawReply = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawReply) {
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        reason: "AI returned an empty response",
+      });
       return new Response(JSON.stringify({ error: "empty AI response" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1136,6 +1146,13 @@ Deno.serve(async (req) => {
 
     if (!sendResult.ok) {
       console.error("WhatsApp AI send failed:", sendResult.raw || sendResult.error);
+      await recordAiFailureBubble(admin, {
+        ...aiFailureChannel,
+        businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+        reason: sendResult.error || "WhatsApp send failed",
+        detail: sendResult.raw,
+        content: finalReply,
+      });
       await logWhatsAppAutomationEvent(admin, {
         phone,
         businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,

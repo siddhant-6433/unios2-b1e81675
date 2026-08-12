@@ -320,3 +320,109 @@ export const ADMISSIONS_INFO = `How to Apply:
 Application Fee: Rs 500-1,000 (varies by course)
 Applications: January-July | Admission deadline: September | Academic year: August/September
 Helpline: +91 9555192192 | apply.nimt.ac.in`;
+
+// ── Curated course facts (single source of truth) ───────────────────────────
+// public.course_facts is the authority for duration, eligibility, entrance
+// exam, affiliation, seats and first-year fee. The COURSE_KNOWLEDGE map below
+// keeps only qualitative colour (highlights, careers, why-NIMT, practical
+// exposure); its factual fields are no longer used for answers, because three
+// copies of them existed here, in voice-agent/knowledge.ts and in
+// whatsapp-ai-reply's KNOWLEDGE_BASE, and they drifted from the database.
+
+export interface CuratedCourseFacts {
+  course_name: string;
+  duration?: string | null;
+  eligibility?: string | null;
+  entrance_exam?: string | null;
+  affiliation?: string | null;
+  intake_seats?: string | null;
+  fee_first_year?: string | null;
+}
+
+let courseFactsCache: { at: number; rows: CuratedCourseFacts[] } | null = null;
+const COURSE_FACTS_TTL_MS = 5 * 60_000;
+
+/** Fetch every course's curated facts via PostgREST. Returns [] on failure. */
+export async function fetchCuratedCourseFacts(
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<CuratedCourseFacts[]> {
+  if (courseFactsCache && Date.now() - courseFactsCache.at < COURSE_FACTS_TTL_MS) {
+    return courseFactsCache.rows;
+  }
+  if (!supabaseUrl || !serviceKey) return [];
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/course_facts` +
+        `?select=duration,eligibility,entrance_exam,affiliation,intake_seats,fee_first_year,courses!inner(name,is_active)` +
+        `&courses.is_active=not.is.false&limit=200`,
+      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+    );
+    if (!res.ok) return courseFactsCache?.rows ?? [];
+    const raw = await res.json();
+    const rows: CuratedCourseFacts[] = (Array.isArray(raw) ? raw : [])
+      .filter((r: any) => r?.courses?.name)
+      .map((r: any) => ({
+        course_name: r.courses.name,
+        duration: r.duration, eligibility: r.eligibility, entrance_exam: r.entrance_exam,
+        affiliation: r.affiliation, intake_seats: r.intake_seats, fee_first_year: r.fee_first_year,
+      }));
+    courseFactsCache = { at: Date.now(), rows };
+    return rows;
+  } catch {
+    return courseFactsCache?.rows ?? [];
+  }
+}
+
+const normaliseName = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** Best-effort match of a free-text course name to its curated facts. */
+export function matchCuratedCourse(
+  rows: CuratedCourseFacts[],
+  course: string | null | undefined,
+): CuratedCourseFacts | null {
+  const needle = normaliseName(course || "");
+  if (!needle) return null;
+  for (const r of rows) {
+    const hay = normaliseName(r.course_name);
+    if (hay === needle || hay.includes(needle) || needle.includes(hay)) return r;
+  }
+  return null;
+}
+
+/** Render curated facts for a system prompt. */
+export function renderCuratedCourseFacts(rows: CuratedCourseFacts[]): string {
+  const lines = rows.map((r) => {
+    const bits = [
+      r.duration && `Duration: ${r.duration}`,
+      r.eligibility && `Eligibility: ${r.eligibility}`,
+      r.entrance_exam && `Entrance: ${r.entrance_exam}`,
+      r.affiliation && `Affiliation: ${r.affiliation}`,
+      r.intake_seats && `Seats: ${r.intake_seats}`,
+      r.fee_first_year && `First-year fee: ${r.fee_first_year}`,
+    ].filter(Boolean);
+    return bits.length ? `${r.course_name}\n  ${bits.join("\n  ")}` : "";
+  }).filter(Boolean).sort();
+  if (!lines.length) return "";
+  return [
+    "COURSES (AUTHORITATIVE — curated by admissions).",
+    "These override anything stated elsewhere. If a course is not listed, say you will check with admissions rather than guessing.",
+    "",
+    ...lines,
+  ].join("\n");
+}
+
+/**
+ * Highlights minus any factual claim.
+ *
+ * COURSE_KNOWLEDGE's `highlights` mix genuine colour ("On-campus parent
+ * hospital", "1,200+ recruiters") with restated facts ("Affiliated to ABVMU",
+ * "Approved by INC", duration and fee figures). The facts belong to
+ * course_facts; leaving copies here is what let the two drift. Strip anything
+ * that asserts an affiliation, approval, duration, eligibility or fee and keep
+ * the rest.
+ */
+export function qualitativeHighlights(highlights: string[]): string[] {
+  const FACTUAL = /(affiliated\s+to|approved\s+by|recognis(?:ed|ed)\s+by|recognized\s+by|eligibility|entrance\s+exam|₹|rs\.?\s*\d|\d+\s*%|\byears?\b\s*(?:programme|program|course|duration)|duration\s*:)/i;
+  return (highlights || []).filter((h) => !FACTUAL.test(h));
+}

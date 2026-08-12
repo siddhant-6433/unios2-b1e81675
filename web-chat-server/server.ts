@@ -26,6 +26,10 @@ import {
   CAMPUS_INFO,
   COURSE_KNOWLEDGE,
   FEE_STRUCTURE,
+  fetchCuratedCourseFacts,
+  matchCuratedCourse,
+  renderCuratedCourseFacts,
+  qualitativeHighlights,
   ADMISSIONS_INFO,
   getCourseKnowledge,
 } from "./knowledge.ts";
@@ -326,22 +330,31 @@ async function logKnowledgeGap(gap: KnowledgeGap): Promise<void> {
 
 // ── Knowledge context builder ───────────────────────────────────────────────
 
-function buildKnowledgeContext(course: string): string {
+async function buildKnowledgeContext(course: string): Promise<string> {
+  // Facts come from course_facts; COURSE_KNOWLEDGE supplies only qualitative
+  // colour (highlights, careers, practical exposure, placement).
+  const factRows = await fetchCuratedCourseFacts(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const facts = matchCuratedCourse(factRows, course);
   const ck = getCourseKnowledge(course);
-  const courseSpecific = ck
+
+  const courseSpecific = (facts || ck)
     ? `\nCourse Details for ${course}:\n` +
-      `Highlights: ${ck.highlights.join("; ")}\n` +
-      `Eligibility: ${ck.eligibility}\n` +
-      `Entrance: ${ck.entrance}\n` +
-      `Duration: ${ck.duration}\n` +
-      `Campus: ${ck.campus}\n` +
-      (ck.fee ? `Fee: ${ck.fee}\n` : "") +
-      `Careers: ${ck.careers}\n` +
-      `Practical Exposure: ${ck.practicalExposure}\n` +
-      (ck.placementHighlights ? `Placement: ${ck.placementHighlights}\n` : "")
+      (facts?.duration ? `Duration: ${facts.duration}\n` : ck?.duration ? `Duration: ${ck.duration}\n` : "") +
+      (facts?.eligibility ? `Eligibility: ${facts.eligibility}\n` : ck?.eligibility ? `Eligibility: ${ck.eligibility}\n` : "") +
+      (facts?.entrance_exam ? `Entrance: ${facts.entrance_exam}\n` : ck?.entrance ? `Entrance: ${ck.entrance}\n` : "") +
+      (facts?.affiliation ? `Affiliation: ${facts.affiliation}\n` : "") +
+      (facts?.intake_seats ? `Seats: ${facts.intake_seats}\n` : "") +
+      (facts?.fee_first_year ? `First-year fee: ${facts.fee_first_year}\n` : ck?.fee ? `Fee: ${ck.fee}\n` : "") +
+      (ck ? `Campus: ${ck.campus}\n` +
+            `Highlights: ${qualitativeHighlights(ck.highlights).join("; ")}\n` +
+            `Careers: ${ck.careers}\n` +
+            `Practical Exposure: ${ck.practicalExposure}\n` +
+            (ck.placementHighlights ? `Placement: ${ck.placementHighlights}\n` : "")
+          : "")
     : "";
 
-  return `${NIMT_OVERVIEW}\n\n${FEE_STRUCTURE}\n\n${ADMISSIONS_INFO}${courseSpecific}`;
+  const allFacts = renderCuratedCourseFacts(factRows);
+  return `${NIMT_OVERVIEW}\n\n${allFacts || FEE_STRUCTURE}\n\n${ADMISSIONS_INFO}${courseSpecific}`;
 }
 
 // ── System prompt ───────────────────────────────────────────────────────────
@@ -532,7 +545,7 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
   trackEngagement(session.leadId, session.lead.mobile, "chat_open", { course: session.lead.course });
 
   // Build knowledge context based on student's course interest
-  const knowledge = buildKnowledgeContext(session.lead.course);
+  const knowledge = await buildKnowledgeContext(session.lead.course);
   let currentLang = "en";
   let systemPrompt = buildSystemPrompt(knowledge, currentLang);
 

@@ -79,7 +79,9 @@ const COLORS = {
 type LoanLetterOpts = {
   offer: any;
   lead: any;
-  course: { name?: string | null; code?: string | null; duration_years?: number | null } | null;
+  course: { name?: string | null; code?: string | null; duration_years?: number | null;
+            /** Curated duration from course_facts — preferred over duration_years. */
+            duration_text?: string | null } | null;
   campus: any;
   applicationId: string | null;
   bankDetails: {
@@ -356,7 +358,8 @@ async function buildLoanLetterPdf(opts: LoanLetterOpts): Promise<Uint8Array> {
     { label: "Application ID", value: opts.applicationId || opts.lead?.application_id || "-" },
     { label: "Loan Reference Letter No.", value: loanReferenceNo },
     { label: "Programme", value: opts.course?.name || "-" },
-    { label: "Duration", value: opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
+    { label: "Duration", value: opts.course?.duration_text
+        || (opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-") },
     { label: "Campus", value: opts.campus?.name || "-" },
     { label: "Academic Session", value: opts.sessionName || "-" },
     { label: "Admission Mode", value: opts.offer?.admission_mode === "entrance"
@@ -490,6 +493,14 @@ Deno.serve(async (req) => {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Curated duration from course_facts — the same wording the student saw on
+    // the website, the offer letter and over WhatsApp.
+    if (offer.courses && offer.course_id) {
+      const { data: facts } = await admin
+        .from("course_facts").select("duration").eq("course_id", offer.course_id).maybeSingle();
+      if (facts?.duration) (offer.courses as any).duration_text = facts.duration;
+    }
+
     if (offer.approval_status !== "approved") {
       return new Response(JSON.stringify({ error: "Offer is not approved yet" }), {
         status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },

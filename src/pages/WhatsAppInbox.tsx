@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -34,9 +34,40 @@ import {
   type WhatsAppTemplateDefinition,
 } from "@/lib/whatsappTemplateRender";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import { describeWhatsAppError } from "@/lib/whatsappErrorText";
+import {
+  fetchWhatsAppReplyStateCounts,
+  invalidateWhatsAppReplyStateCounts,
+} from "@/lib/actionBadgeCounts";
+import {
+  buildTemplateParams,
+  loadWhatsAppTemplateCatalog,
+  resolveCourseTemplateFields,
+  templateUsesCourseFields,
+  type CatalogTemplate,
+} from "@/lib/whatsappTemplateCatalog";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
+
+/**
+ * whatsapp_automation_events.reason is a JSON string for AI failures
+ * (`{"error":"AI generation failed","detail":"<provider payload>"}`) and a plain
+ * string for send failures. Pull out the short bit either way.
+ */
+function summariseAutomationReason(reason: unknown): string | null {
+  if (typeof reason !== "string" || !reason.trim()) return null;
+  try {
+    const parsed = JSON.parse(reason);
+    const detail = typeof parsed?.detail === "string" ? parsed.detail : "";
+    const nested = detail ? (() => { try { return JSON.parse(detail); } catch { return null; } })() : null;
+    const nestedMessage = typeof nested?.error?.message === "string" ? nested.error.message : null;
+    const headline = typeof parsed?.error === "string" ? parsed.error : null;
+    return [headline, nestedMessage].filter(Boolean).join(" — ").slice(0, 200) || null;
+  } catch {
+    return reason.slice(0, 200);
+  }
+}
 
 const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
   lead_welcome:
@@ -790,6 +821,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateParamOverrides, setTemplateParamOverrides] = useState<Record<string, string>>({});
+  // The approved Meta templates an admin curated for pickers. Empty until loaded,
+  // and empty means we fall back to INBOX_TEMPLATES rather than showing nothing.
+  const [catalogTemplates, setCatalogTemplates] = useState<CatalogTemplate[]>([]);
+  const [catalogByKey, setCatalogByKey] = useState<Map<string, CatalogTemplate>>(new Map());
+  const [courseOptions, setCourseOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [templateCourseId, setTemplateCourseId] = useState<string | null>(null);
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
@@ -802,7 +839,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // Multi-number inbox: which business number's conversations to show.
   // "primary" = the most-used phone_number_id + legacy NULL rows; any other
   // distinct phone_number_id is shown as its own inbox.
-  const [businessNumber, setBusinessNumber] = useState<string>("primary");
+  // ?inbox=all lets the header's "N need reply" pill land on the same population
+  // it counted. Without it the pill spans every WhatsApp number while the inbox
+  // opens on one — which is exactly the "10 unreplied vs 30 shown" confusion.
+  const [businessNumber, setBusinessNumber] = useState<string>(
+    () => (searchParams.get("inbox") === "all" ? "all" : "primary"),
+  );
   const [detectedInboxChannels, setDetectedInboxChannels] = useState<{ id: string; label: string; n: number }[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
@@ -851,6 +893,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // whatsapp-ai-reply edge function before it auto-replies. Cast to `any` until
   // the generated Supabase types include whatsapp_ai_mode.
   const [aiMode, setAiMode] = useState<"ai" | "human" | null>(null);
+  const [aiHealthIssue, setAiHealthIssue] = useState<{ since: string | null; reason: string | null } | null>(null);
+  const [replyStateCounts, setReplyStateCounts] = useState<
+    { needsReply: number; awaitingThem: number; unreadMessages: number; total: number } | null
+  >(null);
+  const [replyStateFilter, setReplyStateFilter] = useState<"needs_reply" | "awaiting" | "all">("needs_reply");
+  const [aiHealthDismissed, setAiHealthDismissed] = useState(false);
   const [aiModeSaving, setAiModeSaving] = useState(false);
   const [showCopilotPanel, setShowCopilotPanel] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
@@ -1348,6 +1396,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 .join(","),
             );
           }
+        } else if (!isHrScope && businessNumber === "primary") {
+          // The "primary" tab means UNATTRIBUTED conversations — every named
+          // channel (9667641872, 9599675267, 9555192192, 8130107839) is its own
+          // inbox in the dropdown, and matchesInbox rejects them here via
+          // isKnownAdmissionsPhoneConversation.
+          //
+          // No server filter was applied for this tab, so the query pulled the
+          // newest 120 rows across every channel and the client then threw away
+          // ~80% of them. Harmless while the list was unfiltered; fatal once
+          // "Needs Reply" narrowed it, because the named channels dominate
+          // recent inbound and the page came back with nothing to show.
+          q = q.is("business_phone_number_id", null);
+        }
+
+        // Reply state has to be filtered server-side. Filtering it client-side
+        // over the loaded page meant "Needs Reply" could show an empty list
+        // while its own count said 1325 — page one is ordered by recency, and
+        // recent traffic is mostly outbound marketing, so none of the waiting
+        // conversations were in it.
+        if (!isOutboundMode && replyStateFilter === "needs_reply") {
+          q = q.eq("last_direction", "inbound");
+        } else if (!isOutboundMode && replyStateFilter === "awaiting") {
+          q = q.eq("last_direction", "outbound");
         }
 
         if (role === "counsellor" && profile?.id) {
@@ -1421,7 +1492,106 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     setConversationCursor(null);
     setHasMoreConversations(true);
     void fetchConversationPage(true, null);
-  }, [role, profile?.id, counsellorFilter, businessNumber]);
+  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter]);
+
+  // Server-side reply-state totals. The list only holds the first 120 rows, so
+  // any count derived from it is a count of page one — which is how the inbox
+  // could say "All caught up" while the header showed pending work.
+  useEffect(() => {
+    if (demoMode) return;
+    if (role === "counsellor" && !profile?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await fetchWhatsAppReplyStateCounts({
+        p_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
+        // "primary" is the unattributed inbox (no business_phone_number_id), so
+        // the counts must be scoped the same way the list is — otherwise the
+        // chips advertise conversations that live on a different tab.
+        p_business_key: isHrScope || businessNumber === "all"
+          ? null
+          : businessNumber === "primary" ? "unattributed" : businessNumber,
+        p_include_outbound_only: isOutboundMode,
+      });
+      if (cancelled || error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      setReplyStateCounts(row ? {
+        needsReply: Number(row.needs_reply || 0),
+        awaitingThem: Number(row.awaiting_them || 0),
+        unreadMessages: Number(row.unread_messages || 0),
+        total: Number(row.total || 0),
+      } : null);
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode, role, profile?.id, businessNumber, isOutboundMode, messages.length]);
+
+  // Course list for the template course picker.
+  useEffect(() => {
+    if (demoMode) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("courses")
+        .select("id, name")
+        .neq("is_active", false)
+        .order("name");
+      if (!cancelled && data) setCourseOptions(data as Array<{ id: string; name: string }>);
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode]);
+
+  // Load the curated Meta template catalog once. Historical message bubbles also
+  // read it, so it is not gated on the picker being open.
+  useEffect(() => {
+    if (demoMode) return;
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: true });
+      if (cancelled) return;
+      setCatalogTemplates(loaded.templates);
+      setCatalogByKey(loaded.byKey);
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode]);
+
+  // ── Auto-reply health ─────────────────────────────────────────────────────
+  // Navya went silent for three days in Aug 2026 (Gemini billing 403) and the
+  // inbox looked completely normal throughout. Compare the newest ai_reply_sent
+  // against the newest send_failed so an outage is obvious on arrival.
+  useEffect(() => {
+    if (demoMode) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: lastSent }, { data: lastFailed }] = await Promise.all([
+        supabase.from("whatsapp_automation_events" as any)
+          .select("created_at").eq("event_type", "ai_reply_sent")
+          .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("whatsapp_automation_events" as any)
+          .select("created_at, reason").eq("event_type", "send_failed")
+          .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      if (cancelled) return;
+
+      const failedAt = (lastFailed as any)?.created_at;
+      const sentAt = (lastSent as any)?.created_at;
+      if (!failedAt || (sentAt && sentAt >= failedAt)) {
+        setAiHealthIssue(null);
+        return;
+      }
+      // Only shout once the gap is real — a single transient failure is noise.
+      const silentMinutes = sentAt
+        ? (Date.parse(failedAt) - Date.parse(sentAt)) / 60_000
+        : Number.POSITIVE_INFINITY;
+      if (silentMinutes < 30) {
+        setAiHealthIssue(null);
+        return;
+      }
+      setAiHealthIssue({
+        since: sentAt || null,
+        reason: summariseAutomationReason((lastFailed as any)?.reason),
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode]);
 
   // Discover all business-number channels in the background. The main inbox
   // only loads the first page for speed, so the selector cannot depend on
@@ -1950,6 +2120,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
       setReply("");
       setReplyMedia(null);
+      // This conversation just left "Needs Reply" — drop the cached counts so
+      // the header pill and the chips decrement instead of waiting out the TTL.
+      invalidateWhatsAppReplyStateCounts();
     }
     setSending(false);
   };
@@ -2112,19 +2285,56 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
     }
 
-    // Meta-approved templates via whatsapp-send
-    let params: string[] = render?.params
-      .filter(param => param.required)
-      .map(param => param.value) || [];
+    // Meta-approved templates via whatsapp-send.
+    //
+    // This used to be a switch that hardcoded params per key — and the values it
+    // hardcoded were placeholder sentences ("the scheduled date", "the pending
+    // amount", "the due date", "N/A"), which went out to students as written.
+    // It also sent nimt_followup_v2 with 2 params for a 4-placeholder template.
+    // Now the values come from the rendered template, whose Required variables
+    // the picker forces the counsellor to fill.
+    const catalogEntry = catalogByKey.get(selectedTemplate);
+    let params: string[];
+    if (catalogEntry) {
+      params = buildTemplateParams(catalogEntry, {
+        ...templateRenderContext,
+        student_name: templateRenderContext.student_name || leadName,
+        course_name: templateRenderContext.course_name || courseName,
+        campus_name: templateRenderContext.campus_name || campusName,
+        lead_source: templateRenderContext.lead_source || leadSource,
+      }, templateParamOverrides).params;
+    } else {
+      params = render?.params.filter(param => param.required).map(param => param.value) || [];
+      if (selectedTemplate === "lead_welcome" && !params.length) params = [leadName, courseName, leadSource];
+    }
+
     let buttonUrls: string[] | undefined;
-    switch (selectedTemplate) {
-      case "lead_welcome": params = params.length ? params : [leadName, courseName, leadSource]; break;
-      case "visit_confirmation": params = [leadName, "the scheduled date", campusName]; buttonUrls = ["1820424915210710582"]; break;
-      case "visit_reminder_24hr": params = [leadName, "tomorrow", campusName]; break;
-      case "application_received": params = [leadName, "N/A"]; break;
-      case "fee_reminder": params = [leadName, "the pending amount", "the due date"]; break;
-      case "course_details": params = [leadName, courseName]; break;
-      case "nimt_followup_v2": params = [leadName, "soon"]; break;
+    // visit_confirmation carries a maps CID suffix on its URL button; without it
+    // Meta rejects with 131008 "Required parameter is missing".
+    if (selectedTemplate === "visit_confirmation") buttonUrls = ["1820424915210710582"];
+
+    // Header media. Meta requires it on every send of an IMAGE/VIDEO/DOCUMENT
+    // template, and its own header_handle is not a usable link (131053), so the
+    // sendable URL comes from whatsapp_template_settings.media_url.
+    const headerPayload: Record<string, string> = {};
+    if (catalogEntry?.needsMediaHeader) {
+      if (!catalogEntry.mediaUrl) {
+        toast({
+          title: "Template needs a file",
+          description: `"${catalogEntry.label}" sends a ${catalogEntry.headerFormat.toLowerCase()} header. Add its URL in Template Manager → Picker.`,
+          variant: "destructive",
+        });
+        setSendingTemplate(false);
+        return;
+      }
+      if (catalogEntry.headerFormat === "DOCUMENT") {
+        headerPayload.header_document_url = catalogEntry.mediaUrl;
+        headerPayload.header_document_filename = `${catalogEntry.label}.pdf`;
+      } else if (catalogEntry.headerFormat === "VIDEO") {
+        headerPayload.header_video_url = catalogEntry.mediaUrl;
+      } else {
+        headerPayload.header_image_url = catalogEntry.mediaUrl;
+      }
     }
 
     const { data, error } = await invokeEdge<any>("whatsapp-send", {
@@ -2135,6 +2345,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         lead_id: conv?.lead_id || null,
         clear_unread_after_send: true,
         rendered_template: render,
+        ...headerPayload,
         ...(buttonUrls ? { button_urls: buttonUrls } : {}),
       },
     });
@@ -2146,14 +2357,17 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         detail = typeof errBody === "string" ? errBody : errBody?.error || errBody?.meta_error || errBody?.message || JSON.stringify(errBody);
       }
       console.error("whatsapp-send template error:", { error, errBody, data });
-      appendTemplateBubble("failed", { message: detail });
+      // ponytail: no local failure bubble. whatsapp-send already writes a failed
+      // whatsapp_messages row when Meta rejects, so faking one here showed the
+      // failure twice after refetch. When the function 4xxs before sending,
+      // nothing was sent and nothing belongs in the thread — the toast is enough.
       toast({ title: "Failed to send template", description: detail, variant: "destructive" });
     } else if (data?.error) {
-      appendTemplateBubble("failed", { message: data.error });
       toast({ title: "Failed to send template", description: data.error, variant: "destructive" });
     } else {
       appendTemplateBubble("sent", null, data?.message_id || null);
       toast({ title: "Template sent" });
+      invalidateWhatsAppReplyStateCounts();
       setSelectedTemplate(null);
       setShowTemplatePicker(false);
       setTemplateParamOverrides({});
@@ -2172,21 +2386,38 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const selectedConv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
     || conversations.find(c => c.phone === selectedPhone);
 
+  // The real, curated Meta list wins over the hardcoded INBOX_TEMPLATES entries:
+  // same key means same template, but the catalog carries Meta's actual body text
+  // and arity. Hardcoded entries with no Meta row (kb_* free-text helpers) stay.
+  const availableTemplates = useMemo<WhatsAppTemplateDefinition[]>(() => {
+    if (!catalogTemplates.length) return INBOX_TEMPLATES;
+    const catalogKeys = new Set(catalogTemplates.map(t => t.key));
+    return [
+      ...catalogTemplates,
+      ...INBOX_TEMPLATES.filter(t => !catalogKeys.has(t.key)),
+    ];
+  }, [catalogTemplates]);
+
   const selectedTemplateDef = selectedTemplate
-    ? INBOX_TEMPLATES.find(t => t.key === selectedTemplate) || null
+    ? availableTemplates.find(t => t.key === selectedTemplate) || null
     : null;
 
+  // Only values we genuinely know. visit_date / amount / due_date / application_id
+  // used to be pre-filled with placeholder sentences ("the pending amount", "the
+  // due date"), which made renderWhatsAppTemplate treat them as resolved and
+  // shipped them to students verbatim. Leaving them null marks the variable
+  // Required, so the picker asks before the send is allowed.
   const templateRenderContext = {
     student_name: selectedCourseInfo?.student_name || selectedConv?.lead_name || null,
     course_name: selectedCourseInfo?.course_name || selectedConv?.course_name || null,
     course_label: selectedCourseInfo?.course_name || selectedConv?.course_name || null,
     lead_source: selectedConv?.lead_source || "WhatsApp enquiry",
-    campus_name: selectedCourseInfo?.campus_name || "NIMT campus",
-    visit_date: "the scheduled date",
-    followup_date: "soon",
-    application_id: "N/A",
-    amount: "the pending amount",
-    due_date: "the due date",
+    campus_name: selectedCourseInfo?.campus_name || null,
+    visit_date: null,
+    followup_date: null,
+    application_id: null,
+    amount: null,
+    due_date: null,
     duration: selectedCourseInfo?.duration || null,
     eligibility: selectedCourseInfo?.eligibility || null,
     approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
@@ -2200,7 +2431,25 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     ? renderWhatsAppTemplate(selectedTemplateDef, templateRenderContext, templateParamOverrides)
     : null;
 
-  const visibleTemplates = INBOX_TEMPLATES
+  const selectedTemplateCatalogEntry = selectedTemplate ? catalogByKey.get(selectedTemplate) : undefined;
+
+  const applyTemplateCourse = async (courseId: string) => {
+    setTemplateCourseId(courseId || null);
+    if (!courseId) return;
+    const resolved = await resolveCourseTemplateFields(
+      courseId,
+      selectedCourseInfo?.student_name || selectedConv?.lead_name || null,
+    );
+    if (!Object.keys(resolved).length) {
+      toast({ title: "Could not load course details", description: "Fill the fields manually.", variant: "destructive" });
+      return;
+    }
+    // Overrides win over context in renderWhatsAppTemplate, so this both fills
+    // the inputs and updates the preview bubble.
+    setTemplateParamOverrides(prev => ({ ...prev, ...resolved }));
+  };
+
+  const visibleTemplates = availableTemplates
     .filter(t => {
       if (!templateSearch.trim()) return true;
       const q = templateSearch.toLowerCase();
@@ -2262,18 +2511,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       });
       return;
     }
-    if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); return; }
+    if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); setTemplateCourseId(null); return; }
     let cancelled = false;
     (async () => {
       const { data } = await (supabase.rpc as any)("fn_resolve_course_info_params", {
         p_lead_id: selectedConv.lead_id,
       });
       if (!cancelled) setSelectedCourseInfo(data && typeof data === "object" ? data as Record<string, string> : null);
+
+      // Preselect the course the lead actually enquired about, so the dropdown
+      // is a correction rather than a chore. Leads with no course get an empty
+      // picker instead of blank variables.
+      const { data: leadRow } = await supabase
+        .from("leads").select("course_id").eq("id", selectedConv.lead_id).maybeSingle();
+      if (!cancelled) setTemplateCourseId((leadRow as any)?.course_id || null);
     })();
     return () => { cancelled = true; };
   }, [selectedConv?.lead_id]);
 
   const getTemplateDefinition = (templateKey: string): WhatsAppTemplateDefinition | null => {
+    // Prefer Meta's own body text so old bubbles render what was actually sent
+    // rather than the paraphrase someone typed into TEMPLATE_MESSAGE_TEXTS.
+    const catalogTemplate = catalogByKey.get(templateKey);
+    if (catalogTemplate) return catalogTemplate;
     const knownTemplate = INBOX_TEMPLATES.find(t => t.key === templateKey);
     if (knownTemplate) return knownTemplate;
     const preview = TEMPLATE_MESSAGE_TEXTS[templateKey];
@@ -2302,11 +2562,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       course_label: selectedCourseInfo?.course_name || selectedConv?.course_name || "your selected course",
       lead_source: selectedConv?.lead_source || "WhatsApp enquiry",
       campus_name: selectedCourseInfo?.campus_name || "NIMT campus",
-      visit_date: "the scheduled date",
-      followup_date: "soon",
-      application_id: "N/A",
-      amount: "the pending amount",
-      due_date: "the due date",
+      // Display-only reconstruction of an older bubble. Values we never stored
+      // render as "…" rather than as invented specifics — showing "the pending
+      // amount" here implies that string was actually sent to the student.
+      visit_date: "…",
+      followup_date: "…",
+      application_id: "…",
+      amount: "…",
+      due_date: "…",
       duration: selectedCourseInfo?.duration || "course duration",
       eligibility: selectedCourseInfo?.eligibility || "eligibility criteria",
       approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
@@ -2511,7 +2774,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return c.has_inbound === true;
   });
 
+  // The demarcation the inbox was missing: they spoke last and nobody answered.
+  // Matches whatsapp_reply_state_counts.needs_reply exactly.
+  const isNeedsReply = (c: Conversation) =>
+    c.last_direction === "inbound" && c.lead_stage !== "dnc";
+
   const filtered = modeFiltered.filter(c => {
+    if (!isOutboundMode) {
+      if (replyStateFilter === "needs_reply" && !isNeedsReply(c)) return false;
+      if (replyStateFilter === "awaiting" && c.last_direction !== "outbound") return false;
+    }
     if (opsFilter === "reply_window" && !isReplyWindowConversation(c)) return false;
     if (opsFilter === "handoff" && !isHandoffConversation(c)) return false;
     if (opsFilter === "sla" && !isSlaBreached(c)) return false;
@@ -2537,6 +2809,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     }
     return true;
   }).sort((a, b) => {
+    // Waiting-on-us first, then those still inside the 24h free-reply window
+    // (where a plain text reply is possible), then by recency.
+    const aNeeds = isNeedsReply(a) ? 1 : 0;
+    const bNeeds = isNeedsReply(b) ? 1 : 0;
+    if (aNeeds !== bNeeds) return bNeeds - aNeeds;
     const aReplyNow = isReplyWindowConversation(a) ? 1 : 0;
     const bReplyNow = isReplyWindowConversation(b) ? 1 : 0;
     if (aReplyNow !== bReplyNow) return bReplyNow - aReplyNow;
@@ -2625,6 +2902,28 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
   return (
     <div className="animate-fade-in overflow-hidden">
+      {aiHealthIssue && !aiHealthDismissed && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Auto-replies are not going out</p>
+            <p className="mt-0.5 text-muted-foreground">
+              {aiHealthIssue.since
+                ? `No AI reply has been sent since ${new Date(aiHealthIssue.since).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.`
+                : "No AI reply has been sent recently."}
+              {aiHealthIssue.reason ? ` Last error: ${aiHealthIssue.reason}` : ""}
+            </p>
+            <p className="mt-0.5 text-muted-foreground">Reply manually until this is fixed.</p>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 text-[11px] font-semibold underline"
+            onClick={() => setAiHealthDismissed(true)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="mb-3 hidden items-center justify-between gap-3 sm:flex">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
@@ -2633,11 +2932,15 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
               : (isHrScope ? "HR WhatsApp Inbox" : "WhatsApp Inbox")}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
+            {/* Driven by the server totals, not the ≤120 loaded rows — the old
+                version could read "All caught up" purely because page one was clean. */}
             {isOutboundMode
               ? `${filtered.length} outbound-only conversation${filtered.length !== 1 ? "s" : ""} (no reply received)`
-              : totalUnreadMsgs > 0 || totalUnrepliedConvs > 0
-                ? `${totalUnreadMsgs} unread message${totalUnreadMsgs !== 1 ? "s" : ""} · ${totalUnrepliedConvs} unreplied conversation${totalUnrepliedConvs !== 1 ? "s" : ""}`
-                : "All caught up"}
+              : replyStateCounts
+                ? replyStateCounts.needsReply > 0
+                  ? `${replyStateCounts.needsReply} conversation${replyStateCounts.needsReply !== 1 ? "s" : ""} waiting on you · ${replyStateCounts.unreadMessages} unread message${replyStateCounts.unreadMessages !== 1 ? "s" : ""}`
+                  : "All caught up"
+                : "Loading…"}
           </p>
         </div>
         <div className="flex min-w-0 items-center gap-2">
@@ -2700,7 +3003,34 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         <div className="flex h-screen min-h-[620px] sm:h-[calc(100vh-168px)]">
           {/* Conversation list */}
           <div className={`w-full bg-white sm:w-80 lg:w-96 border-r border-slate-200 flex flex-col ${selectedPhone ? "hidden sm:flex" : "flex"}`}>
-            {/* Filter pills */}
+            {/* Reply state — the primary split. Counts come from the server RPC
+                so they match the header pill instead of only the loaded page. */}
+            {!isOutboundMode && (
+              <div className="flex gap-1 px-3 py-2 border-b border-border">
+                {([
+                  { key: "needs_reply" as const, label: "Needs Reply", count: replyStateCounts?.needsReply },
+                  { key: "awaiting" as const, label: "Awaiting Them", count: replyStateCounts?.awaitingThem },
+                  { key: "all" as const, label: "All", count: replyStateCounts?.total },
+                ]).map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setReplyStateFilter(f.key)}
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                      replyStateFilter === f.key
+                        ? "bg-success/10 text-success ring-1 ring-success/30"
+                        : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {f.label}
+                    {typeof f.count === "number" && (
+                      <span className="ml-1 opacity-70">{f.count}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Category pills */}
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
                 { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnreadMsgs, color: "bg-primary/10 text-primary border-primary/30" },
@@ -2708,7 +3038,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
                 { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
                 { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreadMsgs, color: "bg-warning/5 text-warning-foreground border-warning/20" },
-              ]).map((t) => (
+              // matchesInbox drops every job_applicant row outside HR scope, so
+              // the Jobs tab is structurally always 0 in admissions.
+              ]).filter((t) => t.key !== "jobs" || isHrScope).map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setInboxTab(t.key)}
@@ -2852,7 +3184,18 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         <button
                           key={`${c.phone}:${c.business_phone_number_id || ""}`}
                           onClick={() => setSelectedPhone(c.phone)}
-                            className={`w-full text-left px-3 py-2.5 border-b border-slate-100 transition-colors ${selectedPhone === c.phone ? "bg-[#f0f2f5]" : "hover:bg-[#f5f6f6]"}`}
+                            // Waiting-on-us rows are tinted with a left accent so
+                            // replied and unreplied threads are distinguishable at
+                            // a glance. Read state alone was not enough: opening a
+                            // thread clears unread_count for the whole conversation,
+                            // so an unanswered lead looked identical to a done one.
+                            className={`w-full text-left px-3 py-2.5 border-b border-slate-100 transition-colors ${
+                              selectedPhone === c.phone
+                                ? "bg-[#f0f2f5]"
+                                : isNeedsReply(c)
+                                  ? "border-l-2 border-l-destructive/60 bg-destructive/[0.035] hover:bg-destructive/[0.06]"
+                                  : "hover:bg-[#f5f6f6]"
+                            }`}
                           >
                           <div className="flex items-start justify-between gap-2">
                             <Avatar className="mt-0.5 h-10 w-10 shrink-0 bg-slate-100">
@@ -2862,7 +3205,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             </Avatar>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5">
-                                <span className={`text-sm truncate ${c.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>
+                                <span className={`text-sm truncate ${c.unread_count > 0 || isNeedsReply(c) ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>
                                   {getDisplayName(c)}
                                 </span>
                                 {isStaffConv(c) && (
@@ -2892,19 +3235,28 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                   <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
                                 )}
                               </p>
-                              <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-slate-800" : "text-slate-500"}`}>
+                              <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 || isNeedsReply(c) ? "font-medium text-slate-800" : "text-slate-500"}`}>
                                 {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{getConversationPreview(c).replace(/\\n/g, " ")}
                               </p>
                             </div>
                             <div className="flex shrink-0 flex-col items-end gap-1">
-                              <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-success font-semibold" : "text-muted-foreground"}`}>
+                              <span className={`text-[10px] whitespace-nowrap ${isNeedsReply(c) ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
                                 {formatTime(c.last_message_at)}
                               </span>
-                              {c.unread_count > 0 && (
-                                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[10px] font-bold text-white">
+                              {c.unread_count > 0 ? (
+                                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-white">
                                   {c.unread_count}
                                 </span>
-                              )}
+                              ) : isNeedsReply(c) ? (
+                                // Read, but still nobody has replied. Without this
+                                // the row looked finished the moment it was opened.
+                                <span
+                                  className="flex h-5 items-center justify-center rounded-full border border-destructive/50 px-1.5 text-[9px] font-semibold text-destructive"
+                                  title="They messaged last — no reply sent yet"
+                                >
+                                  Reply
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                         </button>
@@ -3339,13 +3691,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     const renderedTemplate = getRenderedMessageTemplate(m);
                     const isOutbound = m.direction === "outbound";
                     const failedMessage = m.status === "failed";
-                    const statusErrorText = typeof m.status_error?.error?.message === "string"
-                      ? m.status_error.error.message
-                      : typeof m.status_error?.meta_error === "string"
-                        ? m.status_error.meta_error
-                        : typeof m.status_error?.message === "string"
-                          ? m.status_error.message
-                          : null;
+                    const failure = failedMessage ? describeWhatsAppError(m.status_error) : null;
                     return (
                     <div key={m.id}>
                       {showDateChip && (
@@ -3420,14 +3766,19 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             <div className="flex items-start gap-2">
                               <AlertOctagon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                               <div className="min-w-0 flex-1">
-                                <p className="font-semibold">Message failed</p>
-                                {statusErrorText && <p className="mt-0.5 break-words">{statusErrorText}</p>}
+                                <p className="font-semibold">
+                                  {failure?.ourFault ? "Not sent — needs a fix" : "Not delivered"}
+                                </p>
+                                {failure?.text && <p className="mt-0.5 break-words">{failure.text}</p>}
+                                {failure?.code && (
+                                  <p className="mt-0.5 text-[10px] opacity-60">Meta code {failure.code}</p>
+                                )}
                               </div>
-                              {statusErrorText && (
+                              {failure?.raw && (
                                 <button
                                   type="button"
                                   className="shrink-0 text-[10px] font-semibold underline"
-                                  onClick={() => navigator.clipboard.writeText(statusErrorText)}
+                                  onClick={() => navigator.clipboard.writeText(failure.raw!)}
                                 >
                                   Copy
                                 </button>
@@ -3633,6 +3984,31 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           </div>
 
                           <div className="border-l bg-white p-3">
+                            {/* Course-driven templates (course_info_v1..v4) need
+                                duration, eligibility, approval, course URL and
+                                video URL — five fields we already hold on the
+                                course. Pick a course and they fill themselves;
+                                it defaults to whatever the lead enquired about. */}
+                            {selectedTemplateCatalogEntry && templateUsesCourseFields(selectedTemplateCatalogEntry) && (
+                              <div className="mb-3">
+                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Course
+                                </p>
+                                <select
+                                  value={templateCourseId || ""}
+                                  onChange={e => applyTemplateCourse(e.target.value)}
+                                  className="h-8 w-full rounded-md border border-input px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                >
+                                  <option value="">Select a course…</option>
+                                  {courseOptions.map(course => (
+                                    <option key={course.id} value={course.id}>{course.name}</option>
+                                  ))}
+                                </select>
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  Fills duration, eligibility, approval and links from the course record.
+                                </p>
+                              </div>
+                            )}
                             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Template variables
                             </p>
