@@ -133,7 +133,27 @@ Deno.serve(async (req) => {
       });
     }
 
-    const portal = resolveApplyPortal(lead, applications || []);
+    // Mirai shares the GZ2/Avantika campus with the College of Education (B.Ed),
+    // so the portal must be decided by the selected course's owning institution,
+    // not the campus (mirrors generate-offer-letter). Resolve it here and pass in.
+    const MIRAI_INSTITUTION_ID = "d8c95a30-ecc6-4b41-8bed-987c960dc44a";
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const courseIds = Array.from(new Set(
+      (applications || [])
+        .flatMap((a: any) => (Array.isArray(a.course_selections) ? a.course_selections : []))
+        .map((c: any) => c?.course_id)
+        .filter((id: any) => typeof id === "string" && UUID_RE.test(id)),
+    ));
+    let isMiraiInstitution = false;
+    if (courseIds.length) {
+      const { data: courseRows } = await db.from("courses")
+        .select("id, departments:department_id ( institution_id )")
+        .in("id", courseIds);
+      isMiraiInstitution = (courseRows || [])
+        .some((c: any) => c.departments?.institution_id === MIRAI_INSTITUTION_ID);
+    }
+
+    const portal = resolveApplyPortal(lead, applications || [], { isMiraiInstitution });
     const url = buildApplyPortalUrl(PORTAL_BASE, portal, tokenRow.token);
     return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at, portal });
   } catch (err: any) {

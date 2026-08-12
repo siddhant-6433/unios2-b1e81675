@@ -40,15 +40,26 @@ describe("generate-apply-link portal routing", () => {
     )).toBe("mirai");
   });
 
-  it("routes Mirai campus leads to the Mirai apply portal before the school fallback", () => {
+  it("routes Mirai-institution courses to the Mirai apply portal before the school fallback", () => {
+    expect(resolveApplyPortal(
+      { portal_brand: null, lead_institution_type: "school" },
+      [{ flags: [], program_category: "school" }],
+      { isMiraiInstitution: true },
+    )).toBe("mirai");
+  });
+
+  it("keeps a B.Ed lead on the shared GZ2/Avantika campus on the NIMT apply portal", () => {
+    // GZ2 is shared with the College of Education — the campus id must NOT force
+    // Mirai. Without a Mirai course/source, a B.Ed lead resolves to NIMT.
     expect(resolveApplyPortal(
       {
         portal_brand: null,
-        lead_institution_type: "school",
+        lead_institution_type: "college",
         campus_id: "c0000002-0000-0000-0000-000000000001",
       },
-      [{ flags: [], program_category: "school" }],
-    )).toBe("mirai");
+      [{ flags: [], program_category: "undergraduate", course_selections: [{ course_name: "B.Ed", campus_name: "Ghaziabad Campus 2 (Avantika)" }] }],
+      { isMiraiInstitution: false },
+    )).toBe("nimt");
   });
 
   it("routes Mirai landing pages and course selections to the Mirai apply portal", () => {
