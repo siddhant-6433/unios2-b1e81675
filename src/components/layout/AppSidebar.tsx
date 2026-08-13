@@ -24,7 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
-import { canSeePolicyItem, isAcademicPartnerPortalRole, type AccessState } from "@/lib/accessPolicy";
+import { canSeePolicyItem, isAcademicPartnerPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -34,11 +34,6 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useCampus } from "@/contexts/CampusContext";
 
-type AppRole =
-  | "super_admin" | "campus_admin" | "principal" | "admission_head"
-  | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_admin" | "office_assistant" | "school_coordinator" | "hostel_warden" | "consultant" | "academic_partner" | "academic_partner_offer_letter" | "student" | "parent"
-  | "ib_coordinator" | "video_editor" | "librarian";
 
 type MenuItem = {
   title: string;
@@ -118,6 +113,14 @@ const marketingSubMenu: MenuItem[] = [
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
 ];
 
+// Teaching workspace. Kept separate from academicsSubMenu, which is the
+// Library group despite the name — /attendance already lives in mainMenu, so
+// it is deliberately not repeated here.
+const teachingSubMenu: MenuItem[] = [
+  { title: "My Classes", url: "/my-classes", icon: GraduationCap, permission: "students:view" },
+  { title: "Timetable", url: "/timetable", icon: CalendarDays, permission: "timetable:view" },
+];
+
 const academicsSubMenu: MenuItem[] = [
   { title: "Library Dashboard", url: "/library?tab=dashboard", icon: Library, permission: "library:view" },
   { title: "Catalog", url: "/library?tab=catalog", icon: BookOpen, permission: "library:view" },
@@ -142,6 +145,9 @@ const ibAcademicsSubMenu: MenuItem[] = [
 ];
 
 const hrSubMenu: MenuItem[] = [
+  // hr:self, not hr:view — every employee sees their own record; only HR sees
+  // everyone else's. For the non_teaching role this is the entire app.
+  { title: "My HR", url: "/my-hr", icon: UserCheck, permission: "hr:self" },
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
   { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
   { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
@@ -175,19 +181,6 @@ const managementMenu: MenuItem[] = [
   { title: "Video Bills", url: "/video-bills", icon: Receipt, permission: "video_bills:view" },
 ];
 
-const roleLabels: Record<string, string> = {
-  super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
-  faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
-  counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
-  consultant: "Consultant",
-  academic_partner: "Academic Partner",
-  academic_partner_offer_letter: "Academic Partner + Offers",
-  ib_coordinator: "IB Coordinator",
-  video_editor: "Video Editor",
-  librarian: "Librarian",
-};
-
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -200,7 +193,7 @@ export function AppSidebar() {
   const { campuses, selectedCampusId, setSelectedCampusId } = useCampus();
 
   const displayName = profile?.display_name || "User";
-  const roleLabel = role ? (roleLabels[role] || role) : "User";
+  const roleLabel = role ? labelForRole(role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
   const { permissions } = usePermissions();
@@ -335,12 +328,14 @@ export function AppSidebar() {
   }
   );
   const visibleMarketing = isPartnerPortalRole ? [] : marketingSubMenu.filter(canSee);
+  const visibleTeaching = teachingSubMenu.filter(canSee);
   const visibleAcademics = academicsSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = !isPartnerPortalRole && admissionSubMenu.some(item => isActive(item.url));
   const isMarketingActive = !isPartnerPortalRole && marketingSubMenu.some(item => isActive(item.url));
+  const isTeachingActive = teachingSubMenu.some(item => isActive(item.url));
   const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
   const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
@@ -499,6 +494,39 @@ export function AppSidebar() {
                     <CollapsibleContent>
                       <SidebarMenuSub>
                         {visibleMarketing.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Academics — teaching workspace */}
+              {visibleTeaching.length > 0 && (
+                <Collapsible defaultOpen={isTeachingActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isTeachingActive}>
+                        <span className="flex items-center gap-3">
+                          <GraduationCap className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>Academics</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleTeaching.map((item) => (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
                               <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>

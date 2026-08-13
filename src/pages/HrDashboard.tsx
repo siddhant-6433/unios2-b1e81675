@@ -38,7 +38,9 @@ const HrDashboard = () => {
     const today = new Date().toISOString().slice(0, 10);
 
     const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes, jobAppRes] = await Promise.all([
-      supabase.from("profiles").select("user_id, display_name, role", { count: "planned" })
+      // Roles live in user_roles, not profiles — `profiles.role` does not exist,
+      // so this select used to 400 and the employee headcount silently read 0.
+      supabase.from("user_roles").select("user_id, role", { count: "planned" })
         .not("role", "in", "(student,parent)"),
       supabase.from("employee_attendance").select("user_id, punch_in, punch_out, selfie_url")
         .eq("date", today).order("punch_in", { ascending: false }).limit(50),

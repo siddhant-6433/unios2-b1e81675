@@ -3,14 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { LogOut, Settings, User, ChevronDown, Trophy, Flame, TrendingUp } from "lucide-react";
-
-const roleLabels: Record<string, string> = {
-  super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
-  faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
-  counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
-  consultant: "Consultant", ib_coordinator: "IB Coordinator",
-};
+import { roleLabel as labelForRole } from "@/lib/accessPolicy";
 
 interface LeaderboardRow {
   counsellor_id: string;
@@ -119,13 +112,30 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
 }
 
 export function HeaderProfile() {
-  const { profile, role, signOut } = useAuth();
+  const { user, profile, role, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [jobTitle, setJobTitle] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Designation is what the employee is called (ID card, navbar); role is what
+  // UniOs lets them touch. IdCardCenter already prints `job_title || roleLabel`
+  // — match it here. Fetched locally rather than in AuthContext so students,
+  // parents and applicants (no employee_profiles row) don't pay for the query.
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    supabase
+      .from("employee_profiles")
+      .select("job_title")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => { if (!cancelled) setJobTitle(data?.job_title || null); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
   const displayName = profile?.display_name || "User";
-  const roleLabel = role ? (roleLabels[role] || role) : "User";
+  const roleLabel = jobTitle || (role ? labelForRole(role) : "User");
   const initials = displayName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   const isCounsellor = role === "counsellor";
 

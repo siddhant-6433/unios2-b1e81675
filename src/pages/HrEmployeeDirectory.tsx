@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ROLE_LABELS } from "@/lib/accessPolicy";
 
 interface Employee {
   user_id: string;
@@ -20,14 +21,7 @@ interface Employee {
   avatar_url: string | null;
 }
 
-const roleLabels: Record<string, string> = {
-  super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
-  faculty: "Faculty", teacher: "Teacher", counsellor: "Counsellor",
-  accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_admin: "Office Admin",
-  office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
-  ib_coordinator: "IB Coordinator", librarian: "Librarian",
-};
+const roleLabels = ROLE_LABELS as Record<string, string>;
 
 const HrEmployeeDirectory = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -39,13 +33,32 @@ const HrEmployeeDirectory = () => {
 
   const fetchEmployees = async () => {
     setLoading(true);
-    const { data } = await supabase
+    // `profiles` has no role column — roles live in user_roles. The old
+    // single-table select referenced profiles.role and 400'd, so this page
+    // rendered permanently empty.
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id, role")
+      .not("role", "in", "(student,parent)");
+
+    const ids = [...new Set((roles || []).map(r => r.user_id))];
+    if (ids.length === 0) {
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: profiles } = await supabase
       .from("profiles")
-      .select("user_id, display_name, phone, role, department, institution, campus, avatar_url")
-      .not("role", "in", "(student,parent)")
+      .select("user_id, display_name, phone, department, institution, campus, avatar_url")
+      .in("user_id", ids)
       .order("display_name");
 
-    if (data) setEmployees(data as Employee[]);
+    const roleByUser = new Map((roles || []).map(r => [r.user_id, r.role as string]));
+    setEmployees((profiles || []).map(p => ({
+      ...p,
+      role: roleByUser.get(p.user_id) || "",
+    })) as Employee[]);
     setLoading(false);
   };
 
