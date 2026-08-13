@@ -97,6 +97,19 @@ const emptyBank: BankDetails = {
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
 const EmployeeProfileDialog = ({
   open, onClose, onSuccess, userId, employeeProfileId, userName, readOnly = false,
 }: EmployeeProfileDialogProps) => {
@@ -107,6 +120,7 @@ const EmployeeProfileDialog = ({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoStage, setPhotoStage] = useState<"processing" | "uploading" | null>(null);
   const [isNew, setIsNew] = useState(true);
   const { toast } = useToast();
   const { can } = usePermissions();
@@ -238,9 +252,30 @@ const EmployeeProfileDialog = ({
 
     setUploadingPhoto(true);
     try {
+      // Same white-background treatment student and applicant photos get, via
+      // the shared process-passport-photo function. If Gemini is down or out of
+      // quota we still store the original — a photo beats no photo, and the
+      // toast says which one landed.
+      setPhotoStage("processing");
+      const original = await fileToDataUrl(file);
+      let processed = original;
+      let bgRemoved = false;
+      try {
+        const { data: fn, error: fnErr } = await supabase.functions.invoke("process-passport-photo", {
+          body: { image: original },
+        });
+        if (!fnErr && fn?.processedImage) {
+          processed = fn.processedImage as string;
+          bgRemoved = true;
+        }
+      } catch {
+        // fall through to the original
+      }
+
+      setPhotoStage("uploading");
       // Shrunk client-side: these render at 40–96px and Supabase's image
       // transformation quota is metered.
-      const blob = await downscaleImage(file, { maxEdge: 800 });
+      const blob = await downscaleImage(await dataUrlToBlob(processed), { maxEdge: 800 });
       const path = `${profile.id}/photo.jpg`;
       const { error: upErr } = await supabase.storage
         .from("employee-photos")
@@ -260,7 +295,12 @@ const EmployeeProfileDialog = ({
       if (!data?.length) throw new Error("You don't have permission to edit this employee.");
 
       set("photo_url", url);
-      toast({ title: "Photo updated" });
+      toast({
+        title: "Photo updated",
+        description: bgRemoved
+          ? "Background replaced with plain white."
+          : "Saved as-is — background removal was unavailable.",
+      });
       onSuccess?.();
     } catch (err) {
       toast({
@@ -270,6 +310,7 @@ const EmployeeProfileDialog = ({
       });
     } finally {
       setUploadingPhoto(false);
+      setPhotoStage(null);
     }
   };
 
@@ -409,39 +450,47 @@ const EmployeeProfileDialog = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 pb-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
-            <label className={`relative group ${editable ? "cursor-pointer" : ""}`} title={editable ? "Change photo" : undefined}>
-              {profile.photo_url ? (
-                <img
-                  src={profile.photo_url}
-                  alt={profile.display_name || userName}
-                  className="h-12 w-12 rounded-xl object-cover border border-border"
-                />
-              ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                  {initials}
-                </div>
-              )}
-              {editable && (
-                <>
-                  <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {uploadingPhoto ? <ButtonOrb state="working" onFilled /> : <Camera className="h-4 w-4 text-background" />}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    disabled={uploadingPhoto}
-                    onChange={handlePhoto}
-                  />
-                </>
-              )}
-            </label>
+            {profile.photo_url ? (
+              <img
+                src={profile.photo_url}
+                alt={profile.display_name || userName}
+                className="h-14 w-14 rounded-xl object-cover border border-border bg-white"
+              />
+            ) : (
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                {initials}
+              </div>
+            )}
             <div>
               <h2 className="text-lg font-semibold text-foreground">Employee Profile</h2>
               <p className="text-xs text-muted-foreground">
                 {profile.display_name || userName}
                 {!linkedUserId && <span className="ml-2 text-muted-foreground/70">· no login linked</span>}
               </p>
+              {editable && (
+                <label
+                  className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    uploadingPhoto || !profile.id
+                      ? "text-muted-foreground/60 cursor-not-allowed"
+                      : "text-foreground hover:bg-muted cursor-pointer"
+                  }`}
+                  title={profile.id ? undefined : "Save the profile once before adding a photo"}
+                >
+                  {uploadingPhoto ? <ButtonOrb state="working" /> : <Camera className="h-3.5 w-3.5" />}
+                  {photoStage === "processing"
+                    ? "Removing background…"
+                    : photoStage === "uploading"
+                      ? "Uploading…"
+                      : profile.photo_url ? "Change photo" : "Add photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={uploadingPhoto || !profile.id}
+                    onChange={handlePhoto}
+                  />
+                </label>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">

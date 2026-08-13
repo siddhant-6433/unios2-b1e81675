@@ -39,6 +39,18 @@ interface Employee {
 
 const roleLabels = ROLE_LABELS as Record<string, string>;
 
+// Roles that hold a login but are not on the payroll. Consultants and academic
+// partners are external parties with their own portals; publishers are library
+// vendors. They must not appear in an employee headcount.
+const NON_EMPLOYEE_ROLES = [
+  "student",
+  "parent",
+  "consultant",
+  "academic_partner",
+  "academic_partner_offer_letter",
+  "publisher",
+] as const;
+
 // PostgREST caps every response at 1000 rows; raising the client limit does
 // nothing. Page through instead of silently losing staff past the first 1000.
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
@@ -80,7 +92,6 @@ const HrEmployeeDirectory = () => {
         (from, to) => supabase
           .from("user_roles")
           .select("user_id, role")
-          .not("role", "in", "(student,parent)")
           .range(from, to),
       ),
       fetchAll<{ id: string; user_id: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null }>(
@@ -97,11 +108,18 @@ const HrEmployeeDirectory = () => {
         .eq("verification_status", "pending"),
     ]);
 
+    // Fetch every role, then partition here rather than filtering in the query:
+    // we need to tell "external party" apart from "staff with no role row", and
+    // a NOT IN filter collapses both to undefined.
+    const excluded = new Set<string>(NON_EMPLOYEE_ROLES);
+    const nonEmployees = new Set(roles.filter((r) => excluded.has(r.role)).map((r) => r.user_id));
+    const employeeRoles = roles.filter((r) => !excluded.has(r.role));
+
     // Staff auth accounts, plus anyone an employee_profiles row points at, so
     // an employee whose user_roles row is missing still shows a name.
     const ids = [...new Set([
-      ...roles.map((r) => r.user_id),
-      ...emps.map((e) => e.user_id).filter((id): id is string => Boolean(id)),
+      ...employeeRoles.map((r) => r.user_id),
+      ...emps.map((e) => e.user_id).filter((id): id is string => Boolean(id) && !nonEmployees.has(id!)),
     ])];
 
     const staff = ids.length
@@ -115,12 +133,15 @@ const HrEmployeeDirectory = () => {
         )
       : [];
 
-    const roleByUser = new Map(roles.map((r) => [r.user_id, r.role]));
+    const roleByUser = new Map(employeeRoles.map((r) => [r.user_id, r.role]));
     const profileByUser = new Map(staff.map((s) => [s.user_id, s]));
 
     // employee_profiles wins where both exist — it's the record HR maintains.
-    const claimed = new Set(emps.map((e) => e.user_id).filter(Boolean));
-    const merged: Employee[] = emps.map((e) => {
+    // A row linked to a consultant or partner login is dropped: that person is
+    // not on the payroll however the row got created.
+    const employeeRows = emps.filter((e) => !(e.user_id && nonEmployees.has(e.user_id)));
+    const claimed = new Set(employeeRows.map((e) => e.user_id).filter(Boolean));
+    const merged: Employee[] = employeeRows.map((e) => {
       const p = e.user_id ? profileByUser.get(e.user_id) : undefined;
       return {
         employeeProfileId: e.id,
