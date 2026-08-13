@@ -274,18 +274,28 @@ const HrEmployeeDirectory = () => {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground">{emp.name}</p>
+                  {/* Designation is the HR job title; role is a UniOs access level.
+                      They were previously collapsed into one line, so a role read as
+                      a designation whenever job_title was empty. */}
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-muted-foreground capitalize">
-                      {emp.jobTitle || (emp.role || "").replace(/_/g, " ") || "—"}
-                    </span>
+                    {emp.jobTitle ? (
+                      <span className="text-xs text-muted-foreground truncate">{emp.jobTitle}</span>
+                    ) : (
+                      <span className="text-xs italic text-muted-foreground/50">No designation set</span>
+                    )}
                     {emp.department && (
                       <>
                         <span className="text-muted-foreground/40">·</span>
-                        <span className="text-xs text-muted-foreground">{emp.department}</span>
+                        <span className="text-xs text-muted-foreground truncate">{emp.department}</span>
                       </>
                     )}
                   </div>
                 </div>
+                {emp.role && (
+                  <Badge variant="secondary" className="shrink-0 text-[11px] font-normal">
+                    {roleLabels[emp.role] || emp.role.replace(/_/g, " ")}
+                  </Badge>
+                )}
                 {emp.phone && (
                   <a
                     href={`tel:${emp.phone}`}

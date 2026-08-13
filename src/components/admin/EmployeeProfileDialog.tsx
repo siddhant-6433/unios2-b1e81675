@@ -14,6 +14,7 @@ import { useOrgUnits } from "@/hooks/useOrgUnits";
 import { downscaleImage } from "@/lib/downscaleImage";
 import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
@@ -444,9 +445,12 @@ const EmployeeProfileDialog = ({
   const tabCls = "rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-3xl max-h-[90vh] rounded-2xl bg-card card-shadow mx-4 animate-fade-in flex flex-col overflow-hidden">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      {/* Radix portals this to <body>. The hand-rolled `fixed inset-0` version it
+          replaced was positioned by the nearest transformed ancestor instead of the
+          viewport — the HR directory page carries `animate-fade-in`, whose keyframes
+          set a transform — so the modal opened near the bottom of a long list. */}
+      <DialogContent className="max-w-3xl max-h-[90vh] p-0 gap-0 flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 pb-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
@@ -462,7 +466,7 @@ const EmployeeProfileDialog = ({
               </div>
             )}
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Employee Profile</h2>
+              <DialogTitle className="text-lg font-semibold text-foreground">Employee Profile</DialogTitle>
               <p className="text-xs text-muted-foreground">
                 {profile.display_name || userName}
                 {!linkedUserId && <span className="ml-2 text-muted-foreground/70">· no login linked</span>}
@@ -765,8 +769,8 @@ const EmployeeProfileDialog = ({
             </Tabs>
           </fieldset>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
