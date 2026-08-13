@@ -16,6 +16,7 @@ import { Search, Phone, Building2, Upload, ClipboardCheck, Users } from "lucide-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ROLE_LABELS } from "@/lib/accessPolicy";
 
 const EmployeeProfileDialog = lazy(() => import("@/components/admin/EmployeeProfileDialog"));
 const BulkEmployeeImportDialog = lazy(() =>
@@ -36,14 +37,7 @@ interface Employee {
   photoUrl: string | null;
 }
 
-const roleLabels: Record<string, string> = {
-  super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
-  faculty: "Faculty", teacher: "Teacher", counsellor: "Counsellor",
-  accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_admin: "Office Admin",
-  office_assistant: "Office Assistant", school_coordinator: "School Coordinator", hostel_warden: "Hostel Warden",
-  ib_coordinator: "IB Coordinator", librarian: "Librarian",
-};
+const roleLabels = ROLE_LABELS as Record<string, string>;
 
 // PostgREST caps every response at 1000 rows; raising the client limit does
 // nothing. Page through instead of silently losing staff past the first 1000.
@@ -79,14 +73,14 @@ const HrEmployeeDirectory = () => {
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
-
-    const [staff, emps, pending] = await Promise.all([
-      fetchAll<{ user_id: string; display_name: string; phone: string; role: string; department: string | null; avatar_url: string | null }>(
+    // `profiles` has no role column — roles live in user_roles. Selecting
+    // profiles.role 400s and leaves this page permanently empty.
+    const [roles, emps, pending] = await Promise.all([
+      fetchAll<{ user_id: string; role: string }>(
         (from, to) => supabase
-          .from("profiles")
-          .select("user_id, display_name, phone, role, department, avatar_url")
+          .from("user_roles")
+          .select("user_id, role")
           .not("role", "in", "(student,parent)")
-          .order("display_name")
           .range(from, to),
       ),
       fetchAll<{ id: string; user_id: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null }>(
@@ -103,27 +97,51 @@ const HrEmployeeDirectory = () => {
         .eq("verification_status", "pending"),
     ]);
 
+    // Staff auth accounts, plus anyone an employee_profiles row points at, so
+    // an employee whose user_roles row is missing still shows a name.
+    const ids = [...new Set([
+      ...roles.map((r) => r.user_id),
+      ...emps.map((e) => e.user_id).filter((id): id is string => Boolean(id)),
+    ])];
+
+    const staff = ids.length
+      ? await fetchAll<{ user_id: string; display_name: string | null; phone: string | null; department: string | null; avatar_url: string | null }>(
+          (from, to) => supabase
+            .from("profiles")
+            .select("user_id, display_name, phone, department, avatar_url")
+            .in("user_id", ids)
+            .order("display_name")
+            .range(from, to),
+        )
+      : [];
+
+    const roleByUser = new Map(roles.map((r) => [r.user_id, r.role]));
+    const profileByUser = new Map(staff.map((s) => [s.user_id, s]));
+
     // employee_profiles wins where both exist — it's the record HR maintains.
-    const byUser = new Map(emps.filter((e) => e.user_id).map((e) => [e.user_id!, e]));
-    const merged: Employee[] = emps.map((e) => ({
-      employeeProfileId: e.id,
-      userId: e.user_id ?? undefined,
-      name: e.display_name || (e.user_id ? staff.find((s) => s.user_id === e.user_id)?.display_name : "") || "Unnamed",
-      phone: e.mobile_number || (e.user_id ? staff.find((s) => s.user_id === e.user_id)?.phone ?? null : null),
-      role: e.user_id ? staff.find((s) => s.user_id === e.user_id)?.role ?? null : null,
-      jobTitle: e.job_title,
-      department: departmentName(e.department_id),
-      campusId: e.campus_id,
-      photoUrl: e.photo_url,
-    }));
+    const claimed = new Set(emps.map((e) => e.user_id).filter(Boolean));
+    const merged: Employee[] = emps.map((e) => {
+      const p = e.user_id ? profileByUser.get(e.user_id) : undefined;
+      return {
+        employeeProfileId: e.id,
+        userId: e.user_id ?? undefined,
+        name: e.display_name || p?.display_name || "Unnamed",
+        phone: e.mobile_number || p?.phone || null,
+        role: e.user_id ? roleByUser.get(e.user_id) ?? null : null,
+        jobTitle: e.job_title,
+        department: departmentName(e.department_id),
+        campusId: e.campus_id,
+        photoUrl: e.photo_url,
+      };
+    });
 
     for (const s of staff) {
-      if (byUser.has(s.user_id)) continue;
+      if (claimed.has(s.user_id)) continue;
       merged.push({
         userId: s.user_id,
         name: s.display_name || "Unnamed",
         phone: s.phone,
-        role: s.role,
+        role: roleByUser.get(s.user_id) ?? null,
         jobTitle: null,
         department: s.department,
         campusId: null,

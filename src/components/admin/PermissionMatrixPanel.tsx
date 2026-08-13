@@ -5,7 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, X, Search, Shield } from "lucide-react";
+import { Check, X, Search, Shield, Plus, Trash2 } from "lucide-react";
+import { ALL_APP_ROLES, ROLE_LABELS } from "@/lib/accessPolicy";
 
 interface Permission {
   id: string;
@@ -27,22 +28,9 @@ interface UserOverride {
   granted: boolean;
 }
 
-const ROLES = [
-  "campus_admin", "principal", "admission_head", "counsellor", "accountant",
-  "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden",
-  "ib_coordinator", "librarian", "consultant", "academic_partner", "academic_partner_offer_letter", "student", "parent",
-];
-
-const ROLE_LABELS: Record<string, string> = {
-  campus_admin: "Campus Admin", principal: "Principal", admission_head: "Adm. Head",
-  counsellor: "Counsellor", accountant: "Accountant", faculty: "Faculty",
-  teacher: "Teacher", data_entry: "Data Entry", office_admin: "Office Admin", office_assistant: "Office Asst.",
-  school_coordinator: "School Coord.", hostel_warden: "Hostel", ib_coordinator: "IB Coord.", consultant: "Consultant",
-  librarian: "Librarian",
-  academic_partner: "Acad. Partner",
-  academic_partner_offer_letter: "Partner + Offers",
-  student: "Student", parent: "Parent",
-};
+// super_admin is omitted deliberately — it short-circuits every check, so a
+// column of permanently-on checkboxes would be a lie.
+const ROLES = ALL_APP_ROLES.filter(r => r !== "super_admin");
 
 const MODULE_LABELS: Record<string, string> = {
   dashboard: "Dashboard", search: "Search", students: "Students", attendance: "Attendance",
@@ -68,6 +56,7 @@ export function PermissionMatrixPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [filterModule, setFilterModule] = useState("");
+  const [newPerm, setNewPerm] = useState<{ module: string; action: string; description: string } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -144,6 +133,51 @@ export function PermissionMatrixPanel() {
     }
   };
 
+  // Creating/deleting the permission itself, not a grant. A permission only
+  // does anything once some code gates on `module:action` — so this is for
+  // wiring up a gate that already exists in the app, not for inventing one.
+  const createPermission = async () => {
+    if (!newPerm) return;
+    const module = newPerm.module.trim().toLowerCase().replace(/\s+/g, "_");
+    const action = newPerm.action.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!module || !action) {
+      toast({ title: "Module and action are required", variant: "destructive" });
+      return;
+    }
+    setSaving("new");
+    const { data, error } = await supabase
+      .from("permissions" as any)
+      .insert({ module, action, description: newPerm.description.trim() || null })
+      .select()
+      .single();
+    setSaving(null);
+    if (error) {
+      toast({ title: "Could not add permission", description: error.message, variant: "destructive" });
+      return;
+    }
+    setPermissions(prev => [...prev, data as any].sort((a, b) =>
+      a.module.localeCompare(b.module) || a.action.localeCompare(b.action)));
+    setNewPerm(null);
+    toast({ title: `Added ${module}:${action}` });
+  };
+
+  const deletePermission = async (perm: Permission) => {
+    const granted = ROLES.filter(r => rpSet.has(`${r}::${perm.id}`));
+    if (granted.length && !confirm(
+      `${perm.module}:${perm.action} is still granted to ${granted.length} role(s). Delete it and revoke everywhere?`
+    )) return;
+    setSaving(perm.id);
+    // role_permissions and user_permission_overrides cascade on permission_id.
+    const { error } = await supabase.from("permissions" as any).delete().eq("id", perm.id);
+    setSaving(null);
+    if (error) {
+      toast({ title: "Could not delete permission", description: error.message, variant: "destructive" });
+      return;
+    }
+    setPermissions(prev => prev.filter(p => p.id !== perm.id));
+    setRolePerms(prev => prev.filter(rp => rp.permission_id !== perm.id));
+  };
+
   if (loading) return <PageLoader />;
 
   return (
@@ -151,19 +185,61 @@ export function PermissionMatrixPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Permission Matrix</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Configure module access per role. Super Admin always has full access.</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Configure module access per role. Super Admin always has full access.
+            New <em>roles</em> need a migration (app_role is a database enum); permissions can be added here.
+          </p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={filterModule}
-            onChange={e => setFilterModule(e.target.value)}
-            placeholder="Filter modules..."
-            className="rounded-lg border border-input bg-background py-1.5 pl-9 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20 w-48"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={filterModule}
+              onChange={e => setFilterModule(e.target.value)}
+              placeholder="Filter modules..."
+              className="rounded-lg border border-input bg-background py-1.5 pl-9 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20 w-48"
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => setNewPerm(newPerm ? null : { module: "", action: "", description: "" })}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Permission
+          </Button>
         </div>
       </div>
+
+      {newPerm && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 p-3">
+          <input
+            autoFocus
+            value={newPerm.module}
+            onChange={e => setNewPerm({ ...newPerm, module: e.target.value })}
+            placeholder="module (e.g. marks)"
+            className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs w-44 focus:outline-none focus:ring-1 focus:ring-ring/20"
+          />
+          <span className="text-muted-foreground text-xs">:</span>
+          <input
+            value={newPerm.action}
+            onChange={e => setNewPerm({ ...newPerm, action: e.target.value })}
+            placeholder="action (e.g. publish)"
+            className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs w-44 focus:outline-none focus:ring-1 focus:ring-ring/20"
+          />
+          <input
+            value={newPerm.description}
+            onChange={e => setNewPerm({ ...newPerm, description: e.target.value })}
+            placeholder="What it unlocks"
+            className="flex-1 min-w-[200px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20"
+          />
+          <Button size="sm" className="h-8 text-xs" onClick={createPermission} disabled={saving === "new"}>
+            {saving === "new" ? <ButtonOrb state="working" onFilled /> : "Add"}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setNewPerm(null)}>Cancel</Button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-border overflow-auto max-h-[calc(100vh-300px)]">
         <table className="w-full text-xs">
@@ -214,6 +290,14 @@ export function PermissionMatrixPanel() {
                     <td className="px-3 py-1.5 text-muted-foreground border-b border-border/30 sticky left-0 bg-card z-10 pl-8">
                       <span className="text-[10px]">{p.action}</span>
                       {p.description && <span className="text-[9px] text-muted-foreground/60 ml-1.5">— {p.description}</span>}
+                      <button
+                        onClick={() => deletePermission(p)}
+                        disabled={saving === p.id}
+                        title={`Delete ${p.module}:${p.action} entirely`}
+                        className="ml-1.5 align-middle text-muted-foreground/40 hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </button>
                     </td>
                     {ROLES.map(r => {
                       const key = `${r}::${p.id}`;

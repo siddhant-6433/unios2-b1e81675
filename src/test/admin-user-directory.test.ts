@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
+import { ALL_APP_ROLES, ROLE_LABELS } from "@/lib/accessPolicy";
 
 const migration = readFileSync("supabase/migrations/20260712000000_admin_user_directory_paginated.sql", "utf8");
 const phoneRecovery = readFileSync(
@@ -45,7 +46,11 @@ describe("admin user directory", () => {
   it("keeps the counsellor role in the panel role list and its read-model guards", () => {
     expect(migration).toContain("p.deleted_at IS NULL");
     expect(migration).toContain("p.archived_at IS NULL");
-    expect(adminPanel).toContain('{ value: "counsellor", label: "Counsellor" }');
+    // The role dropdown is derived from accessPolicy's single source of truth
+    // rather than a hand-maintained copy in AdminPanel, so assert against that.
+    expect(adminPanel).toContain("ALL_APP_ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }))");
+    expect(ALL_APP_ROLES).toContain("counsellor");
+    expect(ROLE_LABELS.counsellor).toBe("Counsellor");
   });
 
   it("surfaces soft-deleted/archived phone holders via digit-normalized recovery search", () => {

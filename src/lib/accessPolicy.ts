@@ -2,6 +2,47 @@ import type { Database } from "@/integrations/supabase/types";
 
 export type AppRole = Database["public"]["Enums"]["app_role"];
 
+// Single source of truth for the role list and its display labels.
+//
+// ROLE_LABELS is a `Record<AppRole, string>`, so adding a value to the
+// app_role enum and regenerating types.ts breaks the build here until the label
+// is filled in. Every role dropdown, permission matrix column and sidebar label
+// reads from these two — previously there were four hand-maintained copies and
+// `publisher` / `video_editor` had already fallen out of most of them.
+export const ROLE_LABELS: Record<AppRole, string> = {
+  super_admin: "Super Admin",
+  campus_admin: "Campus Admin",
+  principal: "Principal",
+  admission_head: "Admission Head",
+  counsellor: "Counsellor",
+  accountant: "Accountant",
+  faculty: "Faculty",
+  teacher: "Teacher",
+  data_entry: "Data Entry",
+  office_admin: "Office Administrator",
+  office_assistant: "Office Assistant",
+  school_coordinator: "School Coordinator",
+  non_teaching: "Non-Teaching Staff",
+  hostel_warden: "Hostel Warden",
+  librarian: "Librarian",
+  ib_coordinator: "IB Coordinator",
+  video_editor: "Video Editor",
+  publisher: "Publisher",
+  consultant: "Consultant",
+  academic_partner: "Academic Partner",
+  academic_partner_offer_letter: "Academic Partner + Offers",
+  student: "Student",
+  parent: "Parent",
+};
+
+// Display order (roughly seniority, then external roles, then families).
+export const ALL_APP_ROLES = Object.keys(ROLE_LABELS) as AppRole[];
+
+export function roleLabel(role: string | null | undefined): string {
+  if (!role) return "";
+  return ROLE_LABELS[role as AppRole] ?? role;
+}
+
 export type AccessRedirect =
   | "/login"
   | "/student"
@@ -99,6 +140,9 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/search", permission: "search:view", staffOnly: true },
   { path: "/students", permission: "students:view", staffOnly: true },
   { path: "/attendance", permission: "attendance:view", staffOnly: true },
+  { path: "/my-classes", permission: "students:view", staffOnly: true },
+  { path: "/timetable", permission: "timetable:view", staffOnly: true },
+  { path: "/my-hr", permission: "hr:self", staffOnly: true },
   { path: "/finance", permission: "finance:view", staffOnly: true },
   { path: "/collections", permission: "finance:view", staffOnly: true },
   { path: "/fee-structures", permission: "courses_fees:view", staffOnly: true },

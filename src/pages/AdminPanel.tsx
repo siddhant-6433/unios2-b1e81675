@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Switch } from "@/components/ui/switch";
 import type { Database } from "@/integrations/supabase/types";
+import { ALL_APP_ROLES, ROLE_LABELS } from "@/lib/accessPolicy";
 
 const EligibilityConfigPanel = lazy(() => import("@/components/admin/EligibilityConfigPanel"));
 const PermissionMatrixPanel = lazy(() =>
@@ -24,6 +25,7 @@ const SetPasswordDialog = lazy(() => import("@/components/admin/SetPasswordDialo
 const UserPermissionsDialog = lazy(() => import("@/components/admin/UserPermissionsDialog"));
 const TeamManagement = lazy(() => import("@/components/admin/TeamManagement"));
 const CourseCampusMaster = lazy(() => import("@/components/admin/CourseCampusMaster"));
+const ClassTeacherPanel = lazy(() => import("@/components/admin/ClassTeacherPanel"));
 const FinancialGroupsPanel = lazy(() => import("@/components/admin/FinancialGroupsPanel"));
 const PaymentGatewaysPanel = lazy(() => import("@/components/admin/PaymentGatewaysPanel"));
 const ConsultantFeeManagementPanel = lazy(() => import("@/components/admin/ConsultantFeeManagementPanel"));
@@ -36,27 +38,8 @@ const TransferAccountDialog = lazy(() =>
 
 type AppRole = Database["public"]["Enums"]["app_role"];
 
-const ALL_ROLES: { value: AppRole; label: string }[] = [
-  { value: "super_admin", label: "Super Admin" },
-  { value: "campus_admin", label: "Campus Admin" },
-  { value: "principal", label: "Principal" },
-  { value: "admission_head", label: "Admission Head" },
-  { value: "counsellor", label: "Counsellor" },
-  { value: "accountant", label: "Accountant" },
-  { value: "faculty", label: "Faculty" },
-  { value: "teacher", label: "Teacher" },
-  { value: "data_entry", label: "Data Entry" },
-  { value: "office_admin", label: "Office Administrator" },
-  { value: "office_assistant", label: "Office Assistant" },
-  { value: "school_coordinator", label: "School Coordinator" },
-  { value: "hostel_warden", label: "Hostel Warden" },
-  { value: "librarian", label: "Librarian" },
-  { value: "consultant", label: "Consultant" },
-  { value: "academic_partner", label: "Academic Partner" },
-  { value: "academic_partner_offer_letter", label: "Academic Partner + Offers" },
-  { value: "student", label: "Student" },
-  { value: "parent", label: "Parent" },
-];
+const ALL_ROLES: { value: AppRole; label: string }[] =
+  ALL_APP_ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }));
 
 const PARTNER_PORTAL_ROLES: AppRole[] = ["academic_partner", "academic_partner_offer_letter"];
 
@@ -545,6 +528,9 @@ const AdminPanel = () => {
           </TabsTrigger>
           <TabsTrigger value="course-campus" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Course & Campus
+          </TabsTrigger>
+          <TabsTrigger value="class-teachers" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Class Teachers
           </TabsTrigger>
           <TabsTrigger value="eligibility" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Eligibility Config
@@ -1216,6 +1202,10 @@ const AdminPanel = () => {
 
         <TabsContent value="course-campus" className="mt-6">
           <Suspense fallback={<AdminLazyFallback />}><CourseCampusMaster /></Suspense>
+        </TabsContent>
+
+        <TabsContent value="class-teachers" className="mt-6">
+          <Suspense fallback={<AdminLazyFallback />}><ClassTeacherPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="eligibility" className="mt-6">

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_APP_ROLES,
+  ROLE_LABELS,
   canSeePolicyItem,
   canUsePermission,
+  roleLabel,
   decideBlockedRoleAccess,
   decidePermissionAccess,
   decidePortalRoleAccess,
@@ -215,5 +218,82 @@ describe("accessPolicy", () => {
       reason: "wrong_role",
       redirectTo: "/forbidden",
     });
+  });
+
+  it("labels every app_role exactly once", () => {
+    // ROLE_LABELS is Record<AppRole, string>, so a new enum value that reaches
+    // types.ts without a label is a type error, not a silent "school_coordinator"
+    // rendered as raw snake_case. These four consumers used to keep their own
+    // copies and publisher/video_editor had already fallen out of most of them.
+    expect(new Set(ALL_APP_ROLES).size).toBe(ALL_APP_ROLES.length);
+    for (const role of ALL_APP_ROLES) expect(ROLE_LABELS[role]).toBeTruthy();
+    expect(ALL_APP_ROLES).toContain("non_teaching");
+    expect(ALL_APP_ROLES).toContain("publisher");
+    expect(ALL_APP_ROLES).toContain("video_editor");
+    expect(roleLabel("non_teaching")).toBe("Non-Teaching Staff");
+    expect(roleLabel(null)).toBe("");
+    expect(roleLabel("something_new")).toBe("something_new");
+  });
+
+  it("gives teacher, coordinator and non-teaching staff the right pages", () => {
+    const teacher = state({
+      role: "teacher",
+      realRole: "teacher",
+      permissions: ["dashboard:view", "students:view", "attendance:view", "attendance:mark",
+        "marks:view", "marks:enter", "timetable:view", "library:view", "hr:self"],
+    });
+    expect(decidePermissionAccess(teacher, "students:view").allowed).toBe(true);
+    expect(decidePermissionAccess(teacher, "library:view").allowed).toBe(true);
+    // Class scoping is enforced by RLS (teaches_student), not by this permission.
+    expect(decidePermissionAccess(teacher, "finance:view").allowed).toBe(false);
+    expect(decidePermissionAccess(teacher, "user_management:view").allowed).toBe(false);
+    expect(decidePermissionAccess(teacher, "timetable:edit").allowed).toBe(false);
+    expect(decidePermissionAccess(teacher, "hr:view").allowed).toBe(false);
+
+    const coordinator = state({
+      role: "school_coordinator",
+      realRole: "school_coordinator",
+      permissions: ["dashboard:view", "students:view", "students:create", "attendance:view",
+        "attendance:mark", "marks:view", "marks:enter", "marks:publish", "timetable:view",
+        "timetable:edit", "timetable:substitute", "finance:view", "courses_fees:view", "hr:self"],
+    });
+    expect(decidePermissionAccess(coordinator, "courses_fees:view").allowed).toBe(true);
+    expect(decidePermissionAccess(coordinator, "timetable:edit").allowed).toBe(true);
+    expect(decidePermissionAccess(coordinator, "user_management:view").allowed).toBe(false);
+    // ID Card Center is a role allow-list, not a permission.
+    expect(canSeePolicyItem(coordinator, { url: "/id-card-center", roles: ["school_coordinator"] })).toBe(true);
+    expect(canSeePolicyItem(teacher, { url: "/id-card-center", roles: ["school_coordinator"] })).toBe(false);
+
+    const nonTeaching = state({
+      role: "non_teaching",
+      realRole: "non_teaching",
+      permissions: ["hr:self"],
+    });
+    expect(decidePermissionAccess(nonTeaching, "hr:self").allowed).toBe(true);
+    for (const locked of ["hr:view", "students:view", "finance:view", "dashboard:view", "attendance:view"]) {
+      expect(decidePermissionAccess(nonTeaching, locked).allowed).toBe(false);
+    }
+    // Still staff — must not be bounced to a student/parent/applicant portal.
+    expect(decideStaffAppAccess(nonTeaching, "/my-hr").allowed).toBe(true);
+  });
+
+  it("routes the new academic and self-service pages off the right permissions", () => {
+    const teacher = state({
+      role: "teacher", realRole: "teacher",
+      permissions: ["students:view", "timetable:view", "attendance:view", "attendance:mark", "hr:self"],
+    });
+    for (const url of ["/my-classes", "/timetable", "/attendance", "/my-hr"]) {
+      expect(canSeePolicyItem(teacher, { url })).toBe(true);
+    }
+    // The full HR module stays behind hr:view — hr:self must not unlock it.
+    expect(canSeePolicyItem(teacher, { url: "/hr" })).toBe(false);
+    expect(canSeePolicyItem(teacher, { url: "/hr-leave" })).toBe(false);
+    expect(canSeePolicyItem(teacher, { url: "/finance" })).toBe(false);
+
+    const nonTeaching = state({ role: "non_teaching", realRole: "non_teaching", permissions: ["hr:self"] });
+    expect(canSeePolicyItem(nonTeaching, { url: "/my-hr" })).toBe(true);
+    for (const url of ["/my-classes", "/timetable", "/attendance", "/hr", "/students", "/"]) {
+      expect(canSeePolicyItem(nonTeaching, { url })).toBe(false);
+    }
   });
 });
