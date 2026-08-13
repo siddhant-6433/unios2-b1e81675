@@ -4043,6 +4043,54 @@ export type Database = {
           },
         ]
       }
+      class_teachers: {
+        Row: {
+          active: boolean
+          batch_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          section: string | null
+          session_id: string | null
+          teacher_user_id: string
+        }
+        Insert: {
+          active?: boolean
+          batch_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          section?: string | null
+          session_id?: string | null
+          teacher_user_id: string
+        }
+        Update: {
+          active?: boolean
+          batch_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          section?: string | null
+          session_id?: string | null
+          teacher_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_teachers_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_teachers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "admission_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_periods: {
         Row: {
           active: boolean
@@ -10072,6 +10120,57 @@ export type Database = {
             columns: ["floor_id"]
             isOneToOne: false
             referencedRelation: "hostel_floors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      holidays: {
+        Row: {
+          campus_id: string | null
+          created_at: string
+          created_by: string | null
+          holiday_date: string
+          id: string
+          institution_id: string | null
+          kind: string
+          name: string
+          notes: string | null
+        }
+        Insert: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name: string
+          notes?: string | null
+        }
+        Update: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date?: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "holidays_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "holidays_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
             referencedColumns: ["id"]
           },
         ]
@@ -30362,6 +30461,22 @@ export type Database = {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
       }
+      hr_staff_directory: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          campus: string
+          department: string
+          designation: string
+          display_name: string
+          photo_url: string
+          user_id: string
+          work_email: string
+        }[]
+      }
+      teaches_student: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
       insert_lead: {
         Args: {
           _cahet_registered?: boolean
@@ -31732,6 +31847,7 @@ export type Database = {
         | "librarian"
         | "academic_partner_offer_letter"
         | "school_coordinator"
+        | "non_teaching"
       consultant_payout_model:
         | "commission_pct_first_year"
         | "commission_fixed"
@@ -31967,6 +32083,7 @@ export const Constants = {
         "librarian",
         "academic_partner_offer_letter",
         "school_coordinator",
+        "non_teaching",
       ],
       consultant_payout_model: [
         "commission_pct_first_year",

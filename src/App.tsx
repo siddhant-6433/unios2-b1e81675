@@ -51,6 +51,9 @@ const GlobalSearch         = lazy(() => import("./pages/GlobalSearch"));
 const Students             = lazy(() => import("./pages/Students"));
 const StudentProfile       = lazy(() => import("./pages/StudentProfile"));
 const Attendance           = lazy(() => import("./pages/Attendance"));
+const MyClasses            = lazy(() => import("./pages/MyClasses"));
+const Timetable            = lazy(() => import("./pages/Timetable"));
+const MyHr                 = lazy(() => import("./pages/MyHr"));
 const Finance              = lazy(() => import("./pages/Finance"));
 const Login                = lazy(() => import("./pages/Login"));
 const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
@@ -335,6 +338,13 @@ const App = () => (
                       <Route path="/students" element={<RequirePermission module="students" action="view"><Students /></RequirePermission>} />
                       <Route path="/students/:admissionNo" element={<RequirePermission module="students" action="view"><StudentProfile /></RequirePermission>} />
                       <Route path="/attendance" element={<RequirePermission module="attendance" action="view"><Attendance /></RequirePermission>} />
+
+                      {/* Academics — teacher / school coordinator */}
+                      <Route path="/my-classes" element={<RequirePermission module="students" action="view"><MyClasses /></RequirePermission>} />
+                      <Route path="/timetable" element={<RequirePermission module="timetable" action="view"><Timetable /></RequirePermission>} />
+
+                      {/* HR self-service — every staff role, and the whole app for non_teaching */}
+                      <Route path="/my-hr" element={<RequirePermission module="hr" action="self"><MyHr /></RequirePermission>} />
 
                       {/* Finance — accountant / admin only */}
                       <Route path="/finance" element={<RequirePermission module="finance" action="view"><Finance /></RequirePermission>} />

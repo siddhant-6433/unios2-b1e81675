@@ -3,6 +3,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePermission } from "@/contexts/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 import { Check, X, Clock, Users, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,8 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const Attendance = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const canMark = usePermission("attendance", "mark");
   const { toast } = useToast();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [batchId, setBatchId] = useState("");
@@ -33,16 +35,31 @@ const Attendance = () => {
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [attendanceDates, setAttendanceDates] = useState<Map<string, string>>(new Map());
 
-  useEffect(() => { fetchBatches(); }, []);
+  useEffect(() => { fetchBatches(); }, [role]);
   useEffect(() => { if (batchId) fetchAttendance(); }, [batchId, date]);
   useEffect(() => { if (batchId) fetchMonthSummary(); }, [batchId, calMonth, calYear]);
 
+  // Teachers only see the classes they are assigned to — the same set RLS
+  // scopes them to via teaches_student(). Showing every batch would just render
+  // a dropdown of classes whose students come back empty.
   const fetchBatches = async () => {
     const { data } = await supabase.from("batches").select("id, name").order("name");
-    if (data && data.length > 0) {
-      setBatches(data);
-      setBatchId(data[0].id);
+    let visible = data || [];
+
+    if (role === "teacher" || role === "faculty") {
+      const [ct, sa] = await Promise.all([
+        supabase.from("class_teachers").select("batch_id").eq("active", true),
+        supabase.from("subject_allocations").select("batch_id").eq("active", true),
+      ]);
+      const mine = new Set([
+        ...((ct.data as { batch_id: string }[]) || []).map((r) => r.batch_id),
+        ...((sa.data as { batch_id: string | null }[]) || []).map((r) => r.batch_id).filter(Boolean) as string[],
+      ]);
+      visible = visible.filter((b) => mine.has(b.id));
     }
+
+    setBatches(visible);
+    if (visible.length > 0) setBatchId(visible[0].id);
     setLoading(false);
   };
 
@@ -60,10 +77,13 @@ const Attendance = () => {
       return;
     }
 
+    // Matched on student + date only, not batch: a student who changed batch
+    // mid-year still has one row per day, and re-inserting would collide with
+    // da_uniq_student_date_subject_period.
     const { data: existing } = await supabase.from("daily_attendance")
       .select("id, student_id, status")
       .eq("date", date)
-      .eq("batch_id", batchId);
+      .in("student_id", students.map(s => s.id));
 
     const existingMap = new Map((existing || []).map(a => [a.student_id, a]));
 
@@ -106,20 +126,46 @@ const Attendance = () => {
     }));
   };
 
+  // Update rows that already exist, insert the rest. The previous
+  // delete-then-insert-the-whole-batch could not work for a teacher — DELETE on
+  // daily_attendance is restricted to super_admin/campus_admin, so the delete
+  // silently removed nothing and the insert then collided with
+  // da_uniq_student_date_subject_period. It also threw away period/subject
+  // columns set by anyone else on the same day.
   const saveAttendance = async () => {
     setSaving(true);
-    const upsertData = records.map(r => ({
-      student_id: r.student_id,
-      batch_id: batchId,
-      date,
-      status: r.status,
-      marked_by: user?.id || null,
-    }));
 
-    await supabase.from("daily_attendance").delete().eq("date", date).eq("batch_id", batchId);
-    const { error } = await supabase.from("daily_attendance").insert(upsertData);
+    const existing = records.filter(r => r.id);
+    const fresh = records.filter(r => !r.id);
+
+    const results = await Promise.all([
+      ...existing.map(r =>
+        supabase.from("daily_attendance")
+          .update({ status: r.status, marked_by: user?.id || null })
+          .eq("id", r.id!)
+          .select("id")),
+      ...(fresh.length
+        ? [supabase.from("daily_attendance").insert(fresh.map(r => ({
+            student_id: r.student_id,
+            batch_id: batchId,
+            date,
+            status: r.status,
+            marked_by: user?.id || null,
+          }))).select("id")]
+        : []),
+    ]);
+
+    const error = results.find(r => r.error)?.error;
+    // An RLS-filtered update "succeeds" with zero rows — treat that as a failure
+    // rather than telling the user their marking was saved.
+    const silentlyDropped = !error && results.some(r => (r.data?.length ?? 0) === 0);
 
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
+    else if (silentlyDropped) toast({
+      title: "Not saved",
+      description: "You don't have permission to mark attendance for this class.",
+      variant: "destructive",
+    });
     else toast({ title: "Attendance saved" });
 
     setSaving(false);
@@ -275,8 +321,8 @@ const Attendance = () => {
                 <div className="rounded-xl bg-card card-shadow overflow-hidden">
                   <div className="divide-y divide-border">
                     {records.map((student) => (
-                      <div key={student.student_id} onClick={() => toggleStatus(student.student_id)}
-                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                      <div key={student.student_id} onClick={() => canMark && toggleStatus(student.student_id)}
+                        className={`flex items-center gap-3 px-4 py-3 transition-colors ${canMark ? "cursor-pointer hover:bg-muted/30" : ""}`}>
                         {/* Colored Avatar */}
                         <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shrink-0 ${getColors(student.student_name)}`}>
                           {student.student_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
@@ -298,12 +344,14 @@ const Attendance = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-end">
-                  <Button onClick={saveAttendance} disabled={saving} className="gap-2 rounded-lg">
-                    {saving ? <ButtonOrb state="working" onFilled /> : <Check className="h-4 w-4" />}
-                    Save Attendance
-                  </Button>
-                </div>
+                {canMark && (
+                  <div className="flex justify-end">
+                    <Button onClick={saveAttendance} disabled={saving} className="gap-2 rounded-lg">
+                      {saving ? <ButtonOrb state="working" onFilled /> : <Check className="h-4 w-4" />}
+                      Save Attendance
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
