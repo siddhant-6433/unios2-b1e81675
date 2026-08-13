@@ -13,6 +13,55 @@ import { normalizeStudentImportDate } from "./studentImportDate";
 
 export { normalizeHeader, resolveColumns };
 
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+};
+
+/**
+ * Dates as they actually arrive from an HR export.
+ *
+ * Keka writes `01-Jul-2012`, which the shared student-import parser rejects — it
+ * only knows ISO and dd/mm/yyyy. Silently dropping every joining date would break
+ * payroll pro-rating for anyone who joined mid-month, so month names are handled
+ * here before falling back to the shared parser.
+ */
+export function normalizeEmployeeDate(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+
+  // Excel serial dates. A sheet read without `raw: false` yields 41091 rather than
+  // "01-Jul-2012"; treating that as junk silently drops every joining date. The
+  // epoch is 1899-12-30 because Excel wrongly believes 1900 was a leap year.
+  // Bounded to 1970-2100 so a genuine number like an employee code isn't read as a date.
+  if (/^\d{4,5}$/.test(value)) {
+    const serial = Number(value);
+    if (serial >= 25569 && serial <= 73415) {
+      const d = new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    }
+    return "";
+  }
+
+  // 01-Jul-2012 / 1 July 2012 / 01/Jul/2012
+  const named = value.match(/^(\d{1,2})[-/\s]([A-Za-z]{3,9})[-/\s](\d{4})$/);
+  if (named) {
+    const month = MONTHS[named[2].slice(0, 4).toLowerCase()] ?? MONTHS[named[2].slice(0, 3).toLowerCase()];
+    if (month) {
+      const day = Number(named[1]);
+      const year = Number(named[3]);
+      if (day >= 1 && day <= 31) {
+        const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        // Round-trip through the shared parser so impossible dates (31 Feb) still fail.
+        return normalizeStudentImportDate(iso);
+      }
+    }
+    return "";
+  }
+
+  return normalizeStudentImportDate(value);
+}
+
 /** Import fields -> accepted column headings. Order matters: first match wins. */
 export const EMPLOYEE_COLUMN_ALIASES: Record<string, string[]> = {
   employee_number: ["Employee Number", "Employee No", "Emp No", "Emp Code", "Employee ID", "Emp ID", "Staff ID", "Code"],
@@ -33,8 +82,11 @@ export const EMPLOYEE_COLUMN_ALIASES: Record<string, string[]> = {
   date_of_joining: ["Date of Joining", "DOJ", "Joining Date", "Join Date"],
   job_title: ["Job Title", "Designation", "Position", "Role"],
   department: ["Department", "Dept"],
-  campus: ["Campus", "Location", "Branch"],
-  institution: ["Institution", "School", "College"],
+  campus: ["Campus", "Location", "Branch", "Work Location"],
+  institution: ["Institution", "School", "College", "Business Unit"],
+  legal_entity: ["Legal Entity", "Employer", "Company"],
+  sub_department: ["Sub Department", "Sub-Department"],
+  reports_to_name: ["Reporting To", "Reports To", "Manager"],
   worker_type: ["Worker Type", "Employment Type", "Employee Type"],
   time_type: ["Time Type", "Work Type"],
   employment_status: ["Employment Status", "Status"],
@@ -165,6 +217,7 @@ export function buildEmployeeRows(
     for (const f of [
       "employee_number", "gender", "marital_status", "blood_group", "nationality",
       "personal_email", "job_title", "department", "campus", "institution",
+      "legal_entity", "sub_department", "reports_to_name",
       "worker_type", "time_type", "employment_status",
       "bank_account_holder_name", "bank_account_number", "bank_name", "bank_branch",
     ]) {
@@ -182,7 +235,7 @@ export function buildEmployeeRows(
 
     for (const [field, label] of [["date_of_joining", "Date of joining"], ["date_of_birth", "Date of birth"]] as const) {
       if (!raw[field]) continue;
-      const iso = normalizeStudentImportDate(raw[field]);
+      const iso = normalizeEmployeeDate(raw[field]);
       if (iso) values[field] = iso;
       else warnings.push(`${label} "${raw[field]}" is not a recognised date — dropped`);
     }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  splitName, normalizePhone, detectEmployeeHeaderRow, buildEmployeeRows,
+  splitName, normalizePhone, detectEmployeeHeaderRow, buildEmployeeRows, normalizeEmployeeDate,
   resolveColumns, EMPLOYEE_COLUMN_ALIASES, failedRowsCsv,
 } from "./employeeImport";
 
@@ -18,6 +18,38 @@ describe("splitName", () => {
     });
     // "Mr" alone must not be swallowed as the salutation of an empty name.
     expect(splitName("Mr").first_name).toBe("Mr");
+  });
+});
+
+describe("normalizeEmployeeDate", () => {
+  it("parses the dd-MMM-yyyy form Keka exports", () => {
+    // The whole reason this exists: the shared student parser rejects these, and
+    // silently dropping joining dates breaks payroll pro-rating.
+    expect(normalizeEmployeeDate("01-Jul-2012")).toBe("2012-07-01");
+    expect(normalizeEmployeeDate("29-Jun-2024")).toBe("2024-06-29");
+    expect(normalizeEmployeeDate("8 September 2023")).toBe("2023-09-08");
+    expect(normalizeEmployeeDate("15/Apr/2024")).toBe("2024-04-15");
+  });
+
+  it("still handles the formats the shared parser knows", () => {
+    expect(normalizeEmployeeDate("2024-04-16")).toBe("2024-04-16");
+    expect(normalizeEmployeeDate("16/04/2024")).toBe("2024-04-16");
+  });
+
+  it("decodes Excel serial dates", () => {
+    // 41091 is what "01-Jul-2012" becomes when a sheet is read without raw:false.
+    expect(normalizeEmployeeDate("41091")).toBe("2012-07-01");
+    expect(normalizeEmployeeDate("45390")).toBe("2024-04-08");
+    // Out-of-range numbers are not dates — an employee code must not become one.
+    expect(normalizeEmployeeDate("1234")).toBe("");
+    expect(normalizeEmployeeDate("99999")).toBe("");
+  });
+
+  it("rejects impossible and unparseable dates rather than inventing one", () => {
+    expect(normalizeEmployeeDate("31-Feb-2024")).toBe("");
+    expect(normalizeEmployeeDate("01-Xyz-2024")).toBe("");
+    expect(normalizeEmployeeDate("")).toBe("");
+    expect(normalizeEmployeeDate(null)).toBe("");
   });
 });
 

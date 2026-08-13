@@ -76,7 +76,10 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     setDirty((d) => new Set(d).add(id));
   };
 
-  const isReady = (r: PendingEmployee) => Boolean(r.display_name?.trim() && r.campus_id && r.institution_id);
+  // Institution is deliberately NOT required: non-academic staff — drivers, maids,
+  // accountants, HR — belong to a campus but to no institution, and demanding one
+  // would strand them in this queue permanently.
+  const isReady = (r: PendingEmployee) => Boolean(r.display_name?.trim() && r.campus_id);
 
   const selectedRows = useMemo(() => rows.filter((r) => selected.has(r.id)), [rows, selected]);
   const readyCount = rows.filter(isReady).length;
@@ -309,7 +312,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
                     <button
-                      title={isReady(r) ? "Verify" : "Set a campus and institution first"}
+                      title={isReady(r) ? "Verify" : "Set a campus first"}
                       disabled={busy || !isReady(r)}
                       onClick={() => save([r.id], true)}
                       className="p-1 text-muted-foreground hover:text-emerald-600 disabled:opacity-30"

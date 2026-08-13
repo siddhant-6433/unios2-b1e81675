@@ -72,6 +72,7 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
   // mapping[field] = header string, or NONE when deliberately unmapped.
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [existingKeys, setExistingKeys] = useState<Set<string>>(new Set());
+  const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
 
   // Applied to every row that didn't carry its own campus/institution. HR
   // usually imports one campus at a time, so this is the common path.
@@ -97,6 +98,12 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
   // doesn't create a second copy of everyone. Paginated: the PostgREST response
   // is capped at 1000 rows and a silent truncation here would look like "no
   // duplicates found".
+  useEffect(() => {
+    if (!open) return;
+    supabase.from("legal_entities").select("id, name").then(({ data }) =>
+      setEntities((data as { id: string; name: string }[]) ?? []));
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     (async () => {
@@ -127,10 +134,13 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
       // xlsx is already a dependency and reads CSV too, so one code path
       // handles both. Dynamic import keeps it out of the main bundle.
       const XLSX = await import("xlsx");
-      const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false, raw: false });
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       if (!sheet) throw new Error("The file has no sheets.");
-      const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: false, defval: "" })
+      // `raw: false` belongs on sheet_to_json, not read(). Without it every date
+      // cell arrives as an Excel serial number (41091) instead of "01-Jul-2012",
+      // and every joining date is silently dropped as unparseable.
+      const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: false, defval: "", raw: false })
         .map((r) => (r as unknown[]).map((c) => (c ?? "").toString()));
 
       const headerIdx = detectEmployeeHeaderRow(rows);
@@ -192,6 +202,12 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
           org.matchByName(org.institutionsFor(campusId), v.institution) || defaultInstitutionId || null;
         const departmentId = org.matchByName(org.departmentsFor(institutionId), v.department) || null;
 
+        // Keka's legal entity arrives as a name in any casing.
+        const entityName = (v.legal_entity || "").trim().toLowerCase();
+        const legalEntityId = entityName
+          ? entities.find((e) => e.name.toLowerCase() === entityName)?.id ?? null
+          : null;
+
         const row: Record<string, unknown> = {
           user_id: null,
           verification_status: "pending",
@@ -199,6 +215,13 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
           campus_id: campusId,
           institution_id: institutionId,
           department_id: departmentId,
+          legal_entity_id: legalEntityId,
+          // Preserved verbatim: these are HR concepts, not the academic
+          // campus/department they superficially resemble.
+          work_location: v.campus || null,
+          hr_department: v.department || null,
+          hr_sub_department: v.sub_department || null,
+          reports_to_name: v.reports_to_name || null,
         };
         for (const c of PROFILE_COLUMNS) row[c] = v[c] || null;
         return { row, bank: r };
