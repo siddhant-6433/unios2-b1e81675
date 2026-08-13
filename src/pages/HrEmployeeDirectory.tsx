@@ -216,14 +216,14 @@ const HrEmployeeDirectory = () => {
           value={roleFilter}
           onValueChange={setRoleFilter}
           options={[{ value: "all", label: "All Roles" }, ...roles.map((r) => ({ value: r, label: roleLabels[r] || r }))]}
-          hideLabel
+          ariaLabel="Filter by role"
           placeholder="All Roles"
         />
         <SelectField
           value={campusFilter}
           onValueChange={setCampusFilter}
           options={[{ value: "all", label: "All Campuses" }, ...org.campuses.map((c) => ({ value: c.id, label: c.name }))]}
-          hideLabel
+          ariaLabel="Filter by campus"
           placeholder="All Campuses"
         />
       </div>

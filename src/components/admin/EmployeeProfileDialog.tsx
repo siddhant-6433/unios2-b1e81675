@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useOrgUnits } from "@/hooks/useOrgUnits";
@@ -14,6 +15,8 @@ import { downscaleImage } from "@/lib/downscaleImage";
 import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
+
+type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
 interface EmployeeProfileDialogProps {
   open: boolean;
@@ -127,8 +130,7 @@ const EmployeeProfileDialog = ({
       const [empRes, profileRes] = await Promise.all([
         empQuery,
         userId
-          ? (supabase.from("profiles") as never as ReturnType<typeof supabase.from>)
-              .select("display_name, phone, salutation").eq("user_id", userId).maybeSingle()
+          ? supabase.from("profiles").select("display_name, phone, salutation").eq("user_id", userId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
       ]);
 
@@ -136,7 +138,7 @@ const EmployeeProfileDialog = ({
         toast({ title: "Error", description: empRes.error.message, variant: "destructive" });
       }
 
-      const empData = empRes.data as Record<string, never> | null;
+      const empData = empRes.data as EmployeeProfileRow | null;
       const baseProfile = profileRes.data as { display_name?: string; phone?: string; salutation?: string } | null;
       const resolvedUserId = (empData?.user_id as string | null) ?? userId ?? null;
       setLinkedUserId(resolvedUserId);

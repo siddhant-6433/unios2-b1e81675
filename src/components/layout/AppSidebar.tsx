@@ -11,7 +11,7 @@ import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, LogOut, CreditCard,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
-  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
+  ChevronDown, Phone, Calendar, CalendarDays, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt, FileMinus2,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
