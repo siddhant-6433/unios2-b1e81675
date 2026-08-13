@@ -21276,6 +21276,7 @@ export type Database = {
           legal_entity_id: string
           locked_at: string | null
           locked_by: string | null
+          name: string | null
           note: string | null
           paid_at: string | null
           period_end: string
@@ -21290,6 +21291,7 @@ export type Database = {
           legal_entity_id: string
           locked_at?: string | null
           locked_by?: string | null
+          name?: string | null
           note?: string | null
           paid_at?: string | null
           period_end: string
@@ -21304,6 +21306,7 @@ export type Database = {
           legal_entity_id?: string
           locked_at?: string | null
           locked_by?: string | null
+          name?: string | null
           note?: string | null
           paid_at?: string | null
           period_end?: string
@@ -34630,6 +34633,22 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      payroll_uncovered_employees: {
+        Args: {
+          _legal_entity_id: string
+          _period_end: string
+          _period_start: string
+        }
+        Returns: {
+          campus_id: string
+          department_id: string
+          designation: string
+          employee_name: string
+          employee_number: string
+          employee_profile_id: string
+          worker_type: string
+        }[]
+      }
       pending_followups_payload: {
         Args: {
           p_page?: number
@@ -34650,7 +34669,15 @@ export type Database = {
         }
         Returns: Json
       }
-      populate_payroll_cycle: { Args: { _cycle_id: string }; Returns: number }
+      populate_payroll_cycle: {
+        Args: {
+          _campus_ids?: string[]
+          _cycle_id: string
+          _department_ids?: string[]
+          _worker_types?: string[]
+        }
+        Returns: number
+      }
       preview_call_list_assignment: {
         Args: { _include_terminal?: boolean; _list_id: string }
         Returns: Json

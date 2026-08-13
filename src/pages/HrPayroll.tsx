@@ -30,6 +30,15 @@ interface Cycle {
   period_start: string;
   period_end: string;
   status: "draft" | "processing" | "locked" | "paid";
+  /** Set when a month is paid in several runs ("Teaching staff", "Kotputli"). */
+  name: string | null;
+}
+
+interface Uncovered {
+  employee_profile_id: string;
+  employee_name: string | null;
+  designation: string | null;
+  worker_type: string | null;
 }
 
 interface Line {
@@ -84,6 +93,9 @@ export default function HrPayroll() {
   const [components, setComponents] = useState<SalaryComponent[]>([]);
   const [rates, setRates] = useState<StatutoryRates | null>(null);
   const [unassigned, setUnassigned] = useState(0);
+  const [uncovered, setUncovered] = useState<Uncovered[]>([]);
+  const [workerType, setWorkerType] = useState("");
+  const [runName, setRunName] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -119,7 +131,7 @@ export default function HrPayroll() {
     if (!entityId) return;
     const { data } = await supabase
       .from("payroll_cycles")
-      .select("id, legal_entity_id, period_start, period_end, status")
+      .select("id, legal_entity_id, period_start, period_end, status, name")
       .eq("legal_entity_id", entityId)
       .order("period_start", { ascending: false })
       .limit(36);
@@ -144,10 +156,24 @@ export default function HrPayroll() {
     setLines(all);
   }, []);
 
+  /**
+   * Who is still unpaid for this month across every run. Partial payroll makes
+   * "did we miss anyone?" the easy mistake, so the answer is always on screen.
+   */
+  const fetchUncovered = useCallback(async (cycle: Cycle) => {
+    const { data } = await supabase.rpc("payroll_uncovered_employees", {
+      _legal_entity_id: cycle.legal_entity_id,
+      _period_start: cycle.period_start,
+      _period_end: cycle.period_end,
+    });
+    setUncovered((data as Uncovered[]) ?? []);
+  }, []);
+
   const open = async (cycle: Cycle) => {
     setOpenCycle(cycle);
     setLines([]);
-    await fetchLines(cycle.id);
+    setUncovered([]);
+    await Promise.all([fetchLines(cycle.id), fetchUncovered(cycle)]);
   };
 
   const createCycle = async () => {
@@ -160,18 +186,17 @@ export default function HrPayroll() {
     setBusy("create");
     const { data, error } = await supabase
       .from("payroll_cycles")
-      .insert({ legal_entity_id: entityId, period_start: start, period_end: end })
-      .select("id, legal_entity_id, period_start, period_end, status")
+      .insert({ legal_entity_id: entityId, period_start: start, period_end: end,
+                name: runName.trim() || null })
+      .select("id, legal_entity_id, period_start, period_end, status, name")
       .single();
     setBusy(null);
 
     if (error) {
-      toast({
-        title: error.code === "23505" ? "That month already exists" : "Could not create the cycle",
-        description: error.message, variant: "destructive",
-      });
+      toast({ title: "Could not create the run", description: error.message, variant: "destructive" });
       return;
     }
+    setRunName("");
     await fetchCycles();
     await open(data as Cycle);
   };
@@ -180,16 +205,22 @@ export default function HrPayroll() {
   const populate = async () => {
     if (!openCycle) return;
     setBusy("populate");
-    const { data, error } = await supabase.rpc("populate_payroll_cycle", { _cycle_id: openCycle.id });
+    const { data, error } = await supabase.rpc("populate_payroll_cycle", {
+      _cycle_id: openCycle.id,
+      _worker_types: workerType ? [workerType] : undefined,
+    });
     setBusy(null);
     if (error) {
       toast({ title: "Could not load employees", description: error.message, variant: "destructive" });
       return;
     }
     await fetchLines(openCycle.id);
+    await fetchUncovered(openCycle);
     toast({
       title: `${data ?? 0} employees added`,
-      description: (data ?? 0) === 0 ? "Everyone eligible is already on this cycle." : undefined,
+      description: (data ?? 0) === 0
+        ? "Everyone matching is already covered by this run or another one this month."
+        : undefined,
     });
   };
 
@@ -261,7 +292,7 @@ export default function HrPayroll() {
     }
     const { data, error } = await supabase
       .from("payroll_cycles").update(patch).eq("id", openCycle.id)
-      .select("id, legal_entity_id, period_start, period_end, status").single();
+      .select("id, legal_entity_id, period_start, period_end, status, name").single();
     setBusy(null);
 
     if (error || !data) {
@@ -312,8 +343,15 @@ export default function HrPayroll() {
               ariaLabel="Legal entity"
               placeholder="Legal entity"
             />
+            <input
+              value={runName}
+              onChange={(e) => setRunName(e.target.value)}
+              placeholder="Run name (optional)"
+              title="Name a run when paying a month in parts, e.g. “Teaching staff”"
+              className="w-44 rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm"
+            />
             <Button size="sm" onClick={createCycle} disabled={busy === "create"}>
-              <Plus className="h-4 w-4 mr-1.5" /> New month
+              <Plus className="h-4 w-4 mr-1.5" /> New run
             </Button>
           </div>
         </div>
@@ -331,7 +369,7 @@ export default function HrPayroll() {
         <div className="rounded-xl bg-card card-shadow overflow-hidden">
           {cycles.length === 0 ? (
             <div className="px-4 py-12 text-center text-muted-foreground text-sm">
-              No payroll cycles yet. “New month” creates one for the previous month.
+              No payroll runs yet. “New run” creates one for the previous month.
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -342,7 +380,10 @@ export default function HrPayroll() {
                   className="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/30 transition-colors"
                 >
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-foreground">{monthLabel(c.period_start)}</p>
+                    <p className="text-sm font-medium text-foreground">
+                      {monthLabel(c.period_start)}
+                      {c.name && <span className="text-muted-foreground font-normal"> · {c.name}</span>}
+                    </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {c.period_start} → {c.period_end}
                     </p>
@@ -368,7 +409,10 @@ export default function HrPayroll() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{monthLabel(openCycle.period_start)}</h1>
+            <h1 className="text-2xl font-bold text-foreground">
+              {monthLabel(openCycle.period_start)}
+              {openCycle.name && <span className="text-muted-foreground font-normal"> · {openCycle.name}</span>}
+            </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               {lines.length} employees · {openCycle.period_start} → {openCycle.period_end}
             </p>
@@ -380,8 +424,20 @@ export default function HrPayroll() {
 
         {editable && (
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={workerType}
+              onChange={(e) => setWorkerType(e.target.value)}
+              aria-label="Limit this run to a worker type"
+              className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs"
+            >
+              <option value="">Everyone not yet covered</option>
+              <option value="Permanent">Permanent only</option>
+              <option value="Contract">Contract only</option>
+              <option value="Probation">Probation only</option>
+              <option value="Intern">Interns only</option>
+            </select>
             <Button size="sm" variant="outline" onClick={populate} disabled={busy !== null}>
-              <RefreshCw className="h-4 w-4 mr-1.5" /> Load active employees
+              <RefreshCw className="h-4 w-4 mr-1.5" /> Load employees
             </Button>
             <Button size="sm" variant="outline" onClick={computeAll} disabled={busy !== null || lines.length === 0}>
               <Calculator className="h-4 w-4 mr-1.5" /> Calculate
@@ -414,6 +470,28 @@ export default function HrPayroll() {
           </div>
         ))}
       </div>
+
+      {uncovered.length > 0 ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex items-start gap-2 text-xs">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p>
+                <strong>{uncovered.length}</strong> employees are not on any run for
+                {" "}{monthLabel(openCycle.period_start)} yet.
+              </p>
+              <p className="text-muted-foreground mt-1">
+                {uncovered.slice(0, 8).map((u) => u.employee_name || "Unnamed").join(", ")}
+                {uncovered.length > 8 && ` +${uncovered.length - 8} more`}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : lines.length > 0 && (
+        <p className="text-[11px] text-emerald-700">
+          Everyone employed in {monthLabel(openCycle.period_start)} is covered by a run.
+        </p>
+      )}
 
       {noSalary > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
