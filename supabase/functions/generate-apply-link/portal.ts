@@ -16,7 +16,6 @@ type PortalApplication = {
 };
 
 const VALID_PORTALS = new Set<ApplyPortalId>(["nimt", "beacon", "mirai"]);
-const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
 
 export function normalizeApplyPortalId(value: unknown): ApplyPortalId | null {
   if (typeof value !== "string") return null;
@@ -49,10 +48,18 @@ function includesMirai(value: unknown): boolean {
   }
 }
 
-function isMiraiLead(lead: PortalLead | null | undefined, applications: PortalApplication[]): boolean {
+function isMiraiLead(
+  lead: PortalLead | null | undefined,
+  applications: PortalApplication[],
+  isMiraiInstitution: boolean,
+): boolean {
+  // Authoritative signal: the selected course's owning institution is Mirai.
+  // Campus alone can NOT single Mirai out — the GZ2/Avantika campus is shared
+  // with the College of Education (B.Ed), so a campus-id check misroutes every
+  // B.Ed–Avantika lead. Same reasoning as generate-offer-letter/index.ts.
+  if (isMiraiInstitution) return true;
   if (!lead) return false;
   if ((lead.source || "").toLowerCase() === "mirai_website") return true;
-  if ((lead.campus_id || "").toLowerCase() === MIRAI_CAMPUS_ID) return true;
   if (includesMirai(lead.origin_domain) || includesMirai(lead.landing_page)) return true;
   return applications.some((app) => includesMirai(app.course_selections));
 }
@@ -60,6 +67,7 @@ function isMiraiLead(lead: PortalLead | null | undefined, applications: PortalAp
 export function resolveApplyPortal(
   lead: PortalLead | null | undefined,
   applications: PortalApplication[] = [],
+  opts: { isMiraiInstitution?: boolean } = {},
 ): ApplyPortalId {
   const explicitAppPortal = portalFromApplicationFlags(applications);
   if (explicitAppPortal) return explicitAppPortal;
@@ -67,7 +75,7 @@ export function resolveApplyPortal(
   const leadBrand = normalizeApplyPortalId(lead?.portal_brand);
   if (leadBrand && leadBrand !== "nimt") return leadBrand;
 
-  if (isMiraiLead(lead, applications)) return "mirai";
+  if (isMiraiLead(lead, applications, opts.isMiraiInstitution === true)) return "mirai";
 
   if (hasSchoolApplication(applications)) return "beacon";
   if ((lead?.lead_institution_type || "").toLowerCase() === "school") return "beacon";
