@@ -34,6 +34,7 @@ const pageTitles: Record<string, string> = {
   "/hr-attendance": "Employee Attendance",
   "/hr-leave": "Leave Management",
   "/hr-directory": "Employee Directory",
+  "/hr-payroll": "Payroll",
   "/cloud-dialer": "Cloud Dialer",
   "/cahet-sprint": "CAHET Sprint",
   "/updeled-sprint": "UPDELED Sprint",

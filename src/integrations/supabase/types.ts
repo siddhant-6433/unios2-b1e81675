@@ -4369,54 +4369,6 @@ export type Database = {
           },
         ]
       }
-      class_teachers: {
-        Row: {
-          active: boolean
-          batch_id: string
-          created_at: string
-          created_by: string | null
-          id: string
-          section: string | null
-          session_id: string | null
-          teacher_user_id: string
-        }
-        Insert: {
-          active?: boolean
-          batch_id: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          section?: string | null
-          session_id?: string | null
-          teacher_user_id: string
-        }
-        Update: {
-          active?: boolean
-          batch_id?: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          section?: string | null
-          session_id?: string | null
-          teacher_user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "class_teachers_batch_id_fkey"
-            columns: ["batch_id"]
-            isOneToOne: false
-            referencedRelation: "batches"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "class_teachers_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "admission_sessions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       class_periods: {
         Row: {
           active: boolean
@@ -9076,6 +9028,7 @@ export type Database = {
           created_at: string
           current_address: Json | null
           date_of_birth: string | null
+          date_of_exit: string | null
           date_of_joining: string | null
           department_id: string | null
           designation_id: string | null
@@ -9095,6 +9048,7 @@ export type Database = {
           job_title_secondary: string | null
           keka_employee_id: string | null
           last_name: string | null
+          legal_entity_id: string | null
           marital_status: string | null
           middle_name: string | null
           mobile_number: string | null
@@ -9132,6 +9086,7 @@ export type Database = {
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
+          date_of_exit?: string | null
           date_of_joining?: string | null
           department_id?: string | null
           designation_id?: string | null
@@ -9151,6 +9106,7 @@ export type Database = {
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
           mobile_number?: string | null
@@ -9188,6 +9144,7 @@ export type Database = {
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
+          date_of_exit?: string | null
           date_of_joining?: string | null
           department_id?: string | null
           designation_id?: string | null
@@ -9207,6 +9164,7 @@ export type Database = {
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
           mobile_number?: string | null
@@ -9299,6 +9257,64 @@ export type Database = {
             columns: ["job_applicant_id"]
             isOneToOne: false
             referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_salaries: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          employee_profile_id: string
+          id: string
+          monthly_gross: number
+          revision_note: string | null
+          salary_structure_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          effective_from: string
+          effective_to?: string | null
+          employee_profile_id: string
+          id?: string
+          monthly_gross: number
+          revision_note?: string | null
+          salary_structure_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          employee_profile_id?: string
+          id?: string
+          monthly_gross?: number
+          revision_note?: string | null
+          salary_structure_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_salaries_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_salaries_salary_structure_id_fkey"
+            columns: ["salary_structure_id"]
+            isOneToOne: false
+            referencedRelation: "salary_structures"
             referencedColumns: ["id"]
           },
         ]
@@ -10875,6 +10891,71 @@ export type Database = {
           },
         ]
       }
+      holidays: {
+        Row: {
+          campus_id: string | null
+          created_at: string
+          created_by: string | null
+          holiday_date: string
+          id: string
+          institution_id: string | null
+          kind: string
+          name: string
+          notes: string | null
+        }
+        Insert: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name: string
+          notes?: string | null
+        }
+        Update: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date?: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "holidays_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "holidays_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "holidays_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "holidays_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "v_branch_fee_summary"
+            referencedColumns: ["institution_id"]
+          },
+        ]
+      }
       hostel_allocations: {
         Row: {
           allocated_by: string | null
@@ -11142,57 +11223,6 @@ export type Database = {
             columns: ["floor_id"]
             isOneToOne: false
             referencedRelation: "hostel_floors"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      holidays: {
-        Row: {
-          campus_id: string | null
-          created_at: string
-          created_by: string | null
-          holiday_date: string
-          id: string
-          institution_id: string | null
-          kind: string
-          name: string
-          notes: string | null
-        }
-        Insert: {
-          campus_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          holiday_date: string
-          id?: string
-          institution_id?: string | null
-          kind?: string
-          name: string
-          notes?: string | null
-        }
-        Update: {
-          campus_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          holiday_date?: string
-          id?: string
-          institution_id?: string | null
-          kind?: string
-          name?: string
-          notes?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "holidays_campus_id_fkey"
-            columns: ["campus_id"]
-            isOneToOne: false
-            referencedRelation: "campuses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "holidays_institution_id_fkey"
-            columns: ["institution_id"]
-            isOneToOne: false
-            referencedRelation: "institutions"
             referencedColumns: ["id"]
           },
         ]
@@ -17594,6 +17624,51 @@ export type Database = {
           },
         ]
       }
+      legal_entities: {
+        Row: {
+          created_at: string
+          esi_code: string | null
+          gstin: string | null
+          id: string
+          is_active: boolean
+          legal_name: string | null
+          name: string
+          pan: string | null
+          pf_code: string | null
+          registered_address: string | null
+          tan: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          esi_code?: string | null
+          gstin?: string | null
+          id?: string
+          is_active?: boolean
+          legal_name?: string | null
+          name: string
+          pan?: string | null
+          pf_code?: string | null
+          registered_address?: string | null
+          tan?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          esi_code?: string | null
+          gstin?: string | null
+          id?: string
+          is_active?: boolean
+          legal_name?: string | null
+          name?: string
+          pan?: string | null
+          pf_code?: string | null
+          registered_address?: string | null
+          tan?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       library_audit_events: {
         Row: {
           action: string
@@ -21163,6 +21238,249 @@ export type Database = {
           },
         ]
       }
+      payroll_cycle_audit: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          from_status: string | null
+          id: string
+          payroll_cycle_id: string
+          to_status: string
+          totals: Json | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          from_status?: string | null
+          id?: string
+          payroll_cycle_id: string
+          to_status: string
+          totals?: Json | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          from_status?: string | null
+          id?: string
+          payroll_cycle_id?: string
+          to_status?: string
+          totals?: Json | null
+        }
+        Relationships: []
+      }
+      payroll_cycles: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          legal_entity_id: string
+          locked_at: string | null
+          locked_by: string | null
+          note: string | null
+          paid_at: string | null
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legal_entity_id: string
+          locked_at?: string | null
+          locked_by?: string | null
+          note?: string | null
+          paid_at?: string | null
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legal_entity_id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          note?: string | null
+          paid_at?: string | null
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_cycles_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_line_components: {
+        Row: {
+          amount: number
+          component_code: string
+          component_name: string
+          display_order: number
+          id: string
+          kind: string
+          payroll_line_id: string
+        }
+        Insert: {
+          amount?: number
+          component_code: string
+          component_name: string
+          display_order?: number
+          id?: string
+          kind: string
+          payroll_line_id: string
+        }
+        Update: {
+          amount?: number
+          component_code?: string
+          component_name?: string
+          display_order?: number
+          id?: string
+          kind?: string
+          payroll_line_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_line_components_payroll_line_id_fkey"
+            columns: ["payroll_line_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_lines: {
+        Row: {
+          adhoc_deductions: number
+          adhoc_earnings: number
+          created_at: string
+          designation: string | null
+          employee_name: string | null
+          employee_number: string | null
+          employee_profile_id: string
+          employer_cost: number
+          gross_earnings: number
+          id: string
+          lop_days: number
+          monthly_gross: number
+          net_pay: number
+          note: string | null
+          on_hold: boolean
+          payable_days: number
+          payroll_cycle_id: string
+          total_days: number
+          total_deductions: number
+          updated_at: string
+        }
+        Insert: {
+          adhoc_deductions?: number
+          adhoc_earnings?: number
+          created_at?: string
+          designation?: string | null
+          employee_name?: string | null
+          employee_number?: string | null
+          employee_profile_id: string
+          employer_cost?: number
+          gross_earnings?: number
+          id?: string
+          lop_days?: number
+          monthly_gross?: number
+          net_pay?: number
+          note?: string | null
+          on_hold?: boolean
+          payable_days?: number
+          payroll_cycle_id: string
+          total_days?: number
+          total_deductions?: number
+          updated_at?: string
+        }
+        Update: {
+          adhoc_deductions?: number
+          adhoc_earnings?: number
+          created_at?: string
+          designation?: string | null
+          employee_name?: string | null
+          employee_number?: string | null
+          employee_profile_id?: string
+          employer_cost?: number
+          gross_earnings?: number
+          id?: string
+          lop_days?: number
+          monthly_gross?: number
+          net_pay?: number
+          note?: string | null
+          on_hold?: boolean
+          payable_days?: number
+          payroll_cycle_id?: string
+          total_days?: number
+          total_deductions?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_lines_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_lines_payroll_cycle_id_fkey"
+            columns: ["payroll_cycle_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_cycles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_statutory_config: {
+        Row: {
+          created_at: string
+          effective_from: string
+          id: string
+          key: string
+          legal_entity_id: string | null
+          note: string | null
+          numeric_value: number
+        }
+        Insert: {
+          created_at?: string
+          effective_from?: string
+          id?: string
+          key: string
+          legal_entity_id?: string | null
+          note?: string | null
+          numeric_value: number
+        }
+        Update: {
+          created_at?: string
+          effective_from?: string
+          id?: string
+          key?: string
+          legal_entity_id?: string | null
+          note?: string | null
+          numeric_value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_statutory_config_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       permissions: {
         Row: {
           action: string
@@ -22138,6 +22456,122 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_branch_fee_summary"
             referencedColumns: ["institution_id"]
+          },
+        ]
+      }
+      salary_components: {
+        Row: {
+          basis_code: string | null
+          calculation: string
+          code: string
+          created_at: string
+          display_order: number
+          id: string
+          is_active: boolean
+          kind: string
+          name: string
+          prorates: boolean
+          taxable: boolean
+        }
+        Insert: {
+          basis_code?: string | null
+          calculation: string
+          code: string
+          created_at?: string
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          kind: string
+          name: string
+          prorates?: boolean
+          taxable?: boolean
+        }
+        Update: {
+          basis_code?: string | null
+          calculation?: string
+          code?: string
+          created_at?: string
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          kind?: string
+          name?: string
+          prorates?: boolean
+          taxable?: boolean
+        }
+        Relationships: []
+      }
+      salary_structure_components: {
+        Row: {
+          component_id: string
+          id: string
+          salary_structure_id: string
+          value: number
+        }
+        Insert: {
+          component_id: string
+          id?: string
+          salary_structure_id: string
+          value?: number
+        }
+        Update: {
+          component_id?: string
+          id?: string
+          salary_structure_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salary_structure_components_component_id_fkey"
+            columns: ["component_id"]
+            isOneToOne: false
+            referencedRelation: "salary_components"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "salary_structure_components_salary_structure_id_fkey"
+            columns: ["salary_structure_id"]
+            isOneToOne: false
+            referencedRelation: "salary_structures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      salary_structures: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          legal_entity_id: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salary_structures_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -33598,7 +34032,7 @@ export type Database = {
         Returns: boolean
       }
       hr_staff_directory: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           campus: string
           department: string
@@ -33608,10 +34042,6 @@ export type Database = {
           user_id: string
           work_email: string
         }[]
-      }
-      teaches_student: {
-        Args: { _student_id: string; _user_id: string }
-        Returns: boolean
       }
       insert_lead: {
         Args: {
@@ -34220,6 +34650,7 @@ export type Database = {
         }
         Returns: Json
       }
+      populate_payroll_cycle: { Args: { _cycle_id: string }; Returns: number }
       preview_call_list_assignment: {
         Args: { _include_terminal?: boolean; _list_id: string }
         Returns: Json
@@ -35082,6 +35513,14 @@ export type Database = {
           p_provider: string
         }
         Returns: string
+      }
+      whatsapp_inbox_category_counts: {
+        Args: { p_business_key?: string; p_counsellor_id?: string }
+        Returns: {
+          category: string
+          conversations: number
+          unread_messages: number
+        }[]
       }
       whatsapp_inbox_page: {
         Args: {
