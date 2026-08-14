@@ -85,6 +85,7 @@ export const EMPLOYEE_COLUMN_ALIASES: Record<string, string[]> = {
   campus: ["Campus", "Location", "Branch", "Work Location"],
   institution: ["Institution", "School", "College", "Business Unit"],
   legal_entity: ["Legal Entity", "Employer", "Company"],
+  business_unit: ["Business Unit", "Unit"],
   sub_department: ["Sub Department", "Sub-Department"],
   reports_to_name: ["Reporting To", "Reports To", "Manager"],
   worker_type: ["Worker Type", "Employment Type", "Employee Type"],
@@ -217,7 +218,7 @@ export function buildEmployeeRows(
     for (const f of [
       "employee_number", "gender", "marital_status", "blood_group", "nationality",
       "personal_email", "job_title", "department", "campus", "institution",
-      "legal_entity", "sub_department", "reports_to_name",
+      "legal_entity", "sub_department", "reports_to_name", "business_unit",
       "worker_type", "time_type", "employment_status",
       "bank_account_holder_name", "bank_account_number", "bank_name", "bank_branch",
     ]) {

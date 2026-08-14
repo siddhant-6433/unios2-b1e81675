@@ -9536,6 +9536,7 @@ export type Database = {
         Row: {
           aadhaar_number: string | null
           blood_group: string | null
+          business_unit: string | null
           campus_id: string | null
           confirmed_on: string | null
           created_at: string
@@ -9556,6 +9557,7 @@ export type Database = {
           first_name: string | null
           gender: string | null
           hr_department: string | null
+          hr_location_id: string | null
           hr_sub_department: string | null
           id: string
           import_batch_id: string | null
@@ -9605,6 +9607,7 @@ export type Database = {
         Insert: {
           aadhaar_number?: string | null
           blood_group?: string | null
+          business_unit?: string | null
           campus_id?: string | null
           confirmed_on?: string | null
           created_at?: string
@@ -9625,6 +9628,7 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           hr_department?: string | null
+          hr_location_id?: string | null
           hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
@@ -9674,6 +9678,7 @@ export type Database = {
         Update: {
           aadhaar_number?: string | null
           blood_group?: string | null
+          business_unit?: string | null
           campus_id?: string | null
           confirmed_on?: string | null
           created_at?: string
@@ -9694,6 +9699,7 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           hr_department?: string | null
+          hr_location_id?: string | null
           hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
@@ -9774,6 +9780,13 @@ export type Database = {
             columns: ["designation_id"]
             isOneToOne: false
             referencedRelation: "designations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_hr_location_id_fkey"
+            columns: ["hr_location_id"]
+            isOneToOne: false
+            referencedRelation: "hr_locations"
             referencedColumns: ["id"]
           },
           {
@@ -11917,6 +11930,61 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "hr_letter_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_locations: {
+        Row: {
+          address: string | null
+          campus_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          is_office: boolean
+          legal_entity_id: string | null
+          name: string
+        }
+        Insert: {
+          address?: string | null
+          campus_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_office?: boolean
+          legal_entity_id?: string | null
+          name: string
+        }
+        Update: {
+          address?: string | null
+          campus_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_office?: boolean
+          legal_entity_id?: string | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_locations_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_locations_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "hr_locations_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
             referencedColumns: ["id"]
           },
         ]

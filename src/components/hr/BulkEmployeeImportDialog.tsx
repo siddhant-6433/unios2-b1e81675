@@ -222,6 +222,7 @@ export function BulkEmployeeImportDialog({ open, onOpenChange, onSuccess }: Prop
           hr_department: v.department || null,
           hr_sub_department: v.sub_department || null,
           reports_to_name: v.reports_to_name || null,
+          business_unit: v.business_unit || null,
         };
         for (const c of PROFILE_COLUMNS) row[c] = v[c] || null;
         return { row, bank: r };

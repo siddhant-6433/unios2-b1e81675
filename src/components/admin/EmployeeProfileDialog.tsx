@@ -532,7 +532,8 @@ const EmployeeProfileDialog = ({
             <OrbLoader state="working" />
           </div>
         ) : (
-          <fieldset disabled={!editable} className="overflow-y-auto flex-1 p-6 disabled:opacity-100">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+          <fieldset disabled={!editable} className="p-6 disabled:opacity-100 w-full">
             <Tabs defaultValue="personal" className="w-full">
               <TabsList className="bg-muted/50 border border-border rounded-xl p-1 h-auto flex-wrap mb-6">
                 <TabsTrigger value="personal" className={tabCls}><User className="h-3.5 w-3.5 mr-1" />Personal</TabsTrigger>
@@ -790,6 +791,7 @@ const EmployeeProfileDialog = ({
               )}
             </Tabs>
           </fieldset>
+          </div>
         )}
       </DialogContent>
     </Dialog>

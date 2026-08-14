@@ -32,6 +32,7 @@ interface Employee {
   /** employee_profiles.id when one exists. */
   employeeProfileId?: string;
   userId?: string;
+  employeeNumber: string | null;
   name: string;
   phone: string | null;
   role: string | null;
@@ -99,10 +100,10 @@ const HrEmployeeDirectory = () => {
           .select("user_id, role")
           .range(from, to),
       ),
-      fetchAll<{ id: string; user_id: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null }>(
+      fetchAll<{ id: string; user_id: string | null; employee_number: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null; hr_department: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("id, user_id, display_name, mobile_number, job_title, department_id, campus_id, photo_url")
+          .select("id, user_id, employee_number, display_name, mobile_number, job_title, department_id, campus_id, photo_url, hr_department")
           .eq("verification_status", "verified")
           .order("display_name")
           .range(from, to),
@@ -119,10 +120,10 @@ const HrEmployeeDirectory = () => {
       // hold a login show up in this list via `profiles`, and their imported HR record
       // carries no user_id — so email is the only thing tying the two together. Without
       // it the row opens a BLANK profile and saving creates a duplicate employee.
-      fetchAll<{ id: string; work_email: string | null; photo_url: string | null; job_title: string | null }>(
+      fetchAll<{ id: string; work_email: string | null; photo_url: string | null; job_title: string | null; employee_number: string | null; hr_department: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("id, work_email, photo_url, job_title")
+          .select("id, work_email, photo_url, job_title, employee_number, hr_department")
           .not("work_email", "is", null)
           .range(from, to),
       ),
@@ -164,16 +165,26 @@ const HrEmployeeDirectory = () => {
     // not on the payroll however the row got created.
     const employeeRows = emps.filter((e) => !(e.user_id && nonEmployees.has(e.user_id)));
     const claimed = new Set(employeeRows.map((e) => e.user_id).filter(Boolean));
+    // Also key on email. An imported record carries no user_id, so without this a
+    // staff member with a login is emitted twice — once from their employee record
+    // and once from the login fallback. That is what produced five Jai Gopal Jindals.
+    const emittedIds = new Set(employeeRows.map((e) => e.id));
+    const claimedEmails = new Set(
+      [...empByEmail.entries()]
+        .filter(([, ep]) => emittedIds.has(ep.id))
+        .map(([email]) => email),
+    );
     const merged: Employee[] = employeeRows.map((e) => {
       const p = e.user_id ? profileByUser.get(e.user_id) : undefined;
       return {
         employeeProfileId: e.id,
         userId: e.user_id ?? undefined,
+        employeeNumber: e.employee_number,
         name: e.display_name || p?.display_name || "Unnamed",
         phone: e.mobile_number || p?.phone || null,
         role: e.user_id ? roleByUser.get(e.user_id) ?? null : null,
         jobTitle: e.job_title,
-        department: departmentName(e.department_id),
+        department: e.hr_department ?? departmentName(e.department_id),
         campusId: e.campus_id,
         photoUrl: e.photo_url,
       };
@@ -181,17 +192,19 @@ const HrEmployeeDirectory = () => {
 
     for (const s of staff) {
       if (claimed.has(s.user_id)) continue;
+      if (s.email && claimedEmails.has(s.email.toLowerCase())) continue;
       // Their HR record may exist but be unlinked (imported, still pending). Carry its
       // id so opening the row edits that record instead of starting a blank one.
       const ep = s.email ? empByEmail.get(s.email.toLowerCase()) : undefined;
       merged.push({
         employeeProfileId: ep?.id,
         userId: s.user_id,
+        employeeNumber: ep?.employee_number ?? null,
         name: s.display_name || "Unnamed",
         phone: s.phone,
         role: roleByUser.get(s.user_id) ?? null,
         jobTitle: ep?.job_title ?? null,
-        department: s.department,
+        department: ep?.hr_department ?? s.department,
         campusId: null,
         photoUrl: ep?.photo_url ?? s.avatar_url,
       });
@@ -214,6 +227,7 @@ const HrEmployeeDirectory = () => {
       const q = search.toLowerCase();
       result = result.filter((e) =>
         e.name.toLowerCase().includes(q) ||
+        e.employeeNumber?.toLowerCase().includes(q) ||
         e.phone?.includes(q) ||
         e.jobTitle?.toLowerCase().includes(q) ||
         e.department?.toLowerCase().includes(q));
@@ -301,7 +315,16 @@ const HrEmployeeDirectory = () => {
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{emp.name}</p>
+                  <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                    {emp.name}
+                    {/* HR identifies people by employee number — it is the only
+                        unambiguous key when two staff share a name. */}
+                    {emp.employeeNumber && (
+                      <span className="font-mono text-[11px] font-normal text-muted-foreground">
+                        {emp.employeeNumber}
+                      </span>
+                    )}
+                  </p>
                   {/* Designation is the HR job title; role is a UniOs access level.
                       They were previously collapsed into one line, so a role read as
                       a designation whenever job_title was empty. */}

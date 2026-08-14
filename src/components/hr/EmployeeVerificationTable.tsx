@@ -28,6 +28,7 @@ interface PendingEmployee {
   institution_id: string | null;
   department_id: string | null;
   import_batch_id: string | null;
+  hr_location_id: string | null;
   work_location: string | null;
   hr_department: string | null;
 }
@@ -56,7 +57,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     for (let from = 0; ; from += 1000) {
       const { data, error } = await supabase
         .from("employee_profiles")
-        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id, work_location, hr_department")
+        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id, hr_location_id, work_location, hr_department")
         .eq("verification_status", "pending")
         .order("created_at", { ascending: false })
         .range(from, from + 999);
@@ -80,10 +81,12 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     setDirty((d) => new Set(d).add(id));
   };
 
-  // Institution is deliberately NOT required: non-academic staff — drivers, maids,
-  // accountants, HR — belong to a campus but to no institution, and demanding one
-  // would strand them in this queue permanently.
-  const isReady = (r: PendingEmployee) => Boolean(r.display_name?.trim() && r.campus_id);
+  // Gate on WORK LOCATION, not campus. Two of NIMT's locations — Preet Vihar Center
+  // and Seralis Lab — are offices with no campus at all, so requiring a campus would
+  // strand those 14 people here forever. Same mistake as requiring an institution,
+  // which had to be undone for drivers and maids.
+  const isReady = (r: PendingEmployee) =>
+    Boolean(r.display_name?.trim() && (r.hr_location_id || r.campus_id));
 
   // The imported work location is the whole reason this screen is tractable: it is
   // the hint that says which campus someone belongs to. Filtering by it turns 90
@@ -375,7 +378,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
                     <button
-                      title={isReady(r) ? "Verify" : "Set a campus first"}
+                      title={isReady(r) ? "Verify" : "Set a work location first"}
                       disabled={busy || !isReady(r)}
                       onClick={() => save([r.id], true)}
                       className="p-1 text-muted-foreground hover:text-emerald-600 disabled:opacity-30"
