@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { MessageSquare, Send, Check } from "lucide-react";
 import { WhatsAppTemplatePicker } from "@/components/leads/WhatsAppTemplatePicker";
@@ -39,13 +41,37 @@ interface SendWhatsAppDialogProps {
   onSuccess?: () => void;
 }
 
+/** Date slots get a bounded native picker instead of free text. */
+const isDateSlot = (slot: TemplateParamSlot) => slot.name.endsWith("_date");
+
+/** yyyy-mm-dd in local time, for <input type="date"> min/max/value. */
+const toISODate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** yyyy-mm-dd → "16 Aug 2026", the readable form we actually send. */
+const formatReadableDate = (iso: string) =>
+  iso
+    ? new Date(`${iso}T00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+    : "";
+
 export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campusName, courseDuration, courseType, courseId, onSuccess }: SendWhatsAppDialogProps) {
   const { toast } = useToast();
+  const { profile } = useAuth();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   /** Values the counsellor typed for slots we could not resolve. */
   const [paramOverrides, setParamOverrides] = useState<Record<string, string>>({});
+  /** Raw yyyy-mm-dd backing each date picker (paramOverrides holds the readable form we send). */
+  const [dateInputs, setDateInputs] = useState<Record<string, string>>({});
+
+  // A callback can only be scheduled from today through two months out.
+  const todayISO = useMemo(() => toISODate(new Date()), []);
+  const maxDateISO = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 2);
+    return toISODate(d);
+  }, []);
 
   const { allowedKeys, visibleTemplates, templateComponentsByKey, catalogByKey } = useWhatsAppTemplates(open);
 
@@ -67,8 +93,13 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   }, [open, courseId, lead.name]);
 
   // Clear typed values when switching templates so one template's answer never
-  // leaks into another.
-  useEffect(() => { setParamOverrides({}); }, [selectedTemplate]);
+  // leaks into another. Seed the counsellor's own phone as an editable default
+  // when the template asks for it, so they can correct it but don't retype it.
+  useEffect(() => {
+    const hasPhoneSlot = catalogEntry?.paramSlots.some((s) => s.name === "counsellor_phone");
+    setParamOverrides(hasPhoneSlot && profile?.phone ? { counsellor_phone: profile.phone } : {});
+    setDateInputs({});
+  }, [selectedTemplate, catalogEntry, profile?.phone]);
 
   const leadContext = useMemo(() => ({
     student_name: lead.name,
@@ -76,13 +107,15 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
     campus_name: campusName,
     lead_source: lead.source,
     application_id: lead.application_id,
+    // The signature is signed by whoever is sending; frozen, never retyped.
+    counsellor_name: profile?.display_name || undefined,
     // Curated wins; the years-only derivation is the fallback.
     duration: curatedCourse.duration || (courseDuration ? `${courseDuration} years` : undefined),
     eligibility: curatedCourse.eligibility,
     approval: curatedCourse.approval,
     video_url: curatedCourse.video_url,
     course_url: curatedCourse.course_url,
-  }), [lead.name, lead.source, lead.application_id, courseName, campusName, courseDuration, curatedCourse]);
+  }), [lead.name, lead.source, lead.application_id, courseName, campusName, courseDuration, curatedCourse, profile?.display_name]);
 
   /**
    * Meta's placeholder_count is the authority — whatsapp-send validates the
@@ -100,6 +133,17 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
     }
     return { params: built.params, missingSlots: built.missing };
   }, [catalogEntry, leadContext, paramOverrides, selectedTmpl, lead, courseName, campusName, courseDuration, courseType]);
+
+  // Slots the counsellor sees: everything unresolved, plus their own phone even
+  // when prefilled (so they can correct it before sending). counsellor_name stays
+  // out — it's resolved from context and frozen.
+  const editableSlots = useMemo(() => {
+    if (!catalogEntry) return [] as TemplateParamSlot[];
+    const missingNames = new Set(missingSlots.map((s) => s.name));
+    return catalogEntry.paramSlots.filter(
+      (s) => missingNames.has(s.name) || s.name === "counsellor_phone",
+    );
+  }, [catalogEntry, missingSlots]);
 
   const previewText = catalogEntry
     ? catalogEntry.preview.replace(/\{\{(\w+)\}\}/g, (whole, name) => {
@@ -168,24 +212,40 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
 
         {/* Values Meta requires that we could not resolve from the lead or the
             course record. Asked for rather than invented. */}
-        {missingSlots.length > 0 && (
+        {editableSlots.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-              Fill in {missingSlots.length} detail{missingSlots.length !== 1 ? "s" : ""}
+              Fill in {editableSlots.length} detail{editableSlots.length !== 1 ? "s" : ""}
             </p>
             <div className="space-y-2">
-              {missingSlots.map((slot) => (
+              {editableSlots.map((slot) => (
                 <div key={slot.name} className="space-y-1">
                   <label className="text-[11px] text-muted-foreground" htmlFor={`wa-param-${slot.name}`}>
                     {slot.label}
                   </label>
-                  <input
-                    id={`wa-param-${slot.name}`}
-                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    placeholder={slot.example || slot.label}
-                    value={paramOverrides[slot.name] || ""}
-                    onChange={(e) => setParamOverrides((prev) => ({ ...prev, [slot.name]: e.target.value }))}
-                  />
+                  {isDateSlot(slot) ? (
+                    <Input
+                      id={`wa-param-${slot.name}`}
+                      type="date"
+                      className="text-foreground h-9"
+                      min={todayISO}
+                      max={maxDateISO}
+                      value={dateInputs[slot.name] || ""}
+                      onChange={(e) => {
+                        const iso = e.target.value;
+                        setDateInputs((prev) => ({ ...prev, [slot.name]: iso }));
+                        setParamOverrides((prev) => ({ ...prev, [slot.name]: formatReadableDate(iso) }));
+                      }}
+                    />
+                  ) : (
+                    <Input
+                      id={`wa-param-${slot.name}`}
+                      className="text-foreground h-9"
+                      placeholder={slot.example || slot.label}
+                      value={paramOverrides[slot.name] || ""}
+                      onChange={(e) => setParamOverrides((prev) => ({ ...prev, [slot.name]: e.target.value }))}
+                    />
+                  )}
                 </div>
               ))}
             </div>
