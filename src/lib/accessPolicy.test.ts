@@ -239,8 +239,9 @@ describe("accessPolicy", () => {
     const teacher = state({
       role: "teacher",
       realRole: "teacher",
-      permissions: ["dashboard:view", "students:view", "attendance:view", "attendance:mark",
-        "marks:view", "marks:enter", "timetable:view", "library:view", "hr:self"],
+      permissions: ["dashboard:view", "students:view", "attendance:view", "attendance:mark_daily",
+        "marks:view", "marks:enter", "marks:view_class", "timetable:view", "library:view",
+        "hr:self", "students:view_contact", "students:view_medical", "report_cards:sign_off"],
     });
     expect(decidePermissionAccess(teacher, "students:view").allowed).toBe(true);
     expect(decidePermissionAccess(teacher, "library:view").allowed).toBe(true);
@@ -254,7 +255,7 @@ describe("accessPolicy", () => {
       role: "school_coordinator",
       realRole: "school_coordinator",
       permissions: ["dashboard:view", "students:view", "students:create", "attendance:view",
-        "attendance:mark", "marks:view", "marks:enter", "marks:publish", "timetable:view",
+        "attendance:mark_daily", "attendance:mark_period", "marks:view", "marks:enter", "marks:publish", "timetable:view",
         "timetable:edit", "timetable:substitute", "finance:view", "courses_fees:view", "hr:self"],
     });
     expect(decidePermissionAccess(coordinator, "courses_fees:view").allowed).toBe(true);
@@ -280,7 +281,7 @@ describe("accessPolicy", () => {
   it("routes the new academic and self-service pages off the right permissions", () => {
     const teacher = state({
       role: "teacher", realRole: "teacher",
-      permissions: ["students:view", "timetable:view", "attendance:view", "attendance:mark", "hr:self"],
+      permissions: ["students:view", "timetable:view", "attendance:view", "attendance:mark_daily", "marks:view", "hr:self"],
     });
     for (const url of ["/my-classes", "/timetable", "/attendance", "/my-hr"]) {
       expect(canSeePolicyItem(teacher, { url })).toBe(true);
@@ -295,5 +296,52 @@ describe("accessPolicy", () => {
     for (const url of ["/my-classes", "/timetable", "/attendance", "/hr", "/students", "/"]) {
       expect(canSeePolicyItem(nonTeaching, { url })).toBe(false);
     }
+  });
+
+  it("separates the nodal class teacher from the subject teacher", () => {
+    // A subject teacher may see the student (RLS: teaches_student) but must get
+    // none of the PII. The permission is the first gate; student_profile_for_viewer
+    // additionally requires is_class_teacher_of() for that specific student, so
+    // holding students:view_contact is not enough on its own.
+    const subjectTeacher = state({
+      role: "teacher", realRole: "teacher",
+      permissions: ["students:view", "attendance:view", "marks:view", "marks:enter", "timetable:view", "hr:self"],
+    });
+    for (const denied of [
+      "students:view_contact", "students:view_medical", "students:view_sensitive",
+      "documents:upload", "finance:view", "marks:view_class", "report_cards:sign_off",
+      "attendance:mark_daily",
+    ]) {
+      expect(decidePermissionAccess(subjectTeacher, denied).allowed).toBe(false);
+    }
+
+    // The class teacher is nodal: contact + medical to actually run the class,
+    // all subjects for their section, and report-card sign-off. Never Aadhaar,
+    // parent income, banking or fees.
+    const classTeacher = state({
+      role: "teacher", realRole: "teacher",
+      permissions: ["students:view", "students:view_contact", "students:view_medical",
+        "attendance:view", "attendance:mark_daily", "marks:view", "marks:enter",
+        "marks:view_class", "report_cards:sign_off", "timetable:view", "hr:self"],
+    });
+    for (const allowed of [
+      "students:view_contact", "students:view_medical",
+      "marks:view_class", "report_cards:sign_off", "attendance:mark_daily",
+    ]) {
+      expect(decidePermissionAccess(classTeacher, allowed).allowed).toBe(true);
+    }
+    for (const denied of ["students:view_sensitive", "finance:view", "documents:upload", "marks:publish"]) {
+      expect(decidePermissionAccess(classTeacher, denied).allowed).toBe(false);
+    }
+    expect(canSeePolicyItem(classTeacher, { url: "/report-cards" })).toBe(true);
+
+    // teacher = school (whole-day register), faculty = college (per lecture).
+    const collegeFaculty = state({
+      role: "faculty", realRole: "faculty",
+      permissions: ["students:view", "attendance:view", "attendance:mark_period", "marks:view", "marks:enter"],
+    });
+    expect(decidePermissionAccess(collegeFaculty, "attendance:mark_period").allowed).toBe(true);
+    expect(decidePermissionAccess(collegeFaculty, "attendance:mark_daily").allowed).toBe(false);
+    expect(decidePermissionAccess(collegeFaculty, "students:view_sensitive").allowed).toBe(false);
   });
 });

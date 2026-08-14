@@ -54,6 +54,7 @@ const Attendance           = lazy(() => import("./pages/Attendance"));
 const MyClasses            = lazy(() => import("./pages/MyClasses"));
 const Timetable            = lazy(() => import("./pages/Timetable"));
 const MyHr                 = lazy(() => import("./pages/MyHr"));
+const SchoolReportCards    = lazy(() => import("./pages/ReportCards"));
 const Finance              = lazy(() => import("./pages/Finance"));
 const Login                = lazy(() => import("./pages/Login"));
 const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
@@ -343,6 +344,7 @@ const App = () => (
                       {/* Academics — teacher / school coordinator */}
                       <Route path="/my-classes" element={<RequirePermission module="students" action="view"><MyClasses /></RequirePermission>} />
                       <Route path="/timetable" element={<RequirePermission module="timetable" action="view"><Timetable /></RequirePermission>} />
+                      <Route path="/report-cards" element={<RequirePermission module="marks" action="view"><SchoolReportCards /></RequirePermission>} />
 
                       {/* HR self-service — every staff role, and the whole app for non_teaching */}
                       <Route path="/my-hr" element={<RequirePermission module="hr" action="self"><MyHr /></RequirePermission>} />

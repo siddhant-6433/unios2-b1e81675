@@ -16,16 +16,28 @@ interface AttendanceRow {
   status: "present" | "absent" | "late";
 }
 
+interface ClassOption { id: string; name: string }
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const Attendance = () => {
   const { user, role } = useAuth();
-  const canMark = usePermission("attendance", "mark");
+  // School takes attendance class-wise — the class teacher marks the whole day
+  // once. College takes it per lecture, so each faculty marks their own period
+  // and a student can be present in one subject and absent in another.
+  const canMarkDaily = usePermission("attendance", "mark_daily");
+  const canMarkPeriod = usePermission("attendance", "mark_period");
+  const canMark = canMarkDaily || canMarkPeriod;
+  const [mode, setMode] = useState<"daily" | "period">(canMarkDaily ? "daily" : "period");
   const { toast } = useToast();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [batchId, setBatchId] = useState("");
-  const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
+  const [batches, setBatches] = useState<ClassOption[]>([]);
+  const [periods, setPeriods] = useState<{ id: string; label: string; period_no: number }[]>([]);
+  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [periodId, setPeriodId] = useState("");
+  const [subjectId, setSubjectId] = useState("");
   const [records, setRecords] = useState<AttendanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,39 +47,83 @@ const Attendance = () => {
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [attendanceDates, setAttendanceDates] = useState<Map<string, string>>(new Map());
 
-  useEffect(() => { fetchBatches(); }, [role]);
-  useEffect(() => { if (batchId) fetchAttendance(); }, [batchId, date]);
+  useEffect(() => { fetchBatches(); }, [role, mode]);
+  useEffect(() => { if (batchId) fetchAttendance(); }, [batchId, date, mode, periodId, subjectId]);
   useEffect(() => { if (batchId) fetchMonthSummary(); }, [batchId, calMonth, calYear]);
+  useEffect(() => { if (mode === "period") void fetchPeriodOptions(); }, [mode, batchId]);
 
-  // Teachers only see the classes they are assigned to — the same set RLS
-  // scopes them to via teaches_student(). Showing every batch would just render
-  // a dropdown of classes whose students come back empty.
+  // Scope the class list to the role's own assignments. Daily marking belongs to
+  // the class teacher, so it lists class_teachers batches; period marking belongs
+  // to the subject teacher, so it lists subject_allocations batches. Listing
+  // every batch would just offer classes whose students come back empty via RLS.
   const fetchBatches = async () => {
-    const { data } = await supabase.from("batches").select("id, name").order("name");
-    let visible = data || [];
+    // A class is a college batch ("batch:<id>") or a school course
+    // ("course:<id>"). School students have batch_id NULL, so a batch-only list
+    // would offer a school class teacher nothing to mark.
+    const [batchRes, courseRes] = await Promise.all([
+      supabase.from("batches").select("id, name").order("name"),
+      supabase.from("courses").select("id, name").eq("type", "school").eq("is_active", true).order("display_order"),
+    ]);
+
+    let visible: ClassOption[] = [
+      ...(((courseRes.data as { id: string; name: string }[]) || [])
+        .map((c) => ({ id: `course:${c.id}`, name: c.name }))),
+      ...(((batchRes.data as { id: string; name: string }[]) || [])
+        .map((b) => ({ id: `batch:${b.id}`, name: b.name }))),
+    ];
 
     if (role === "teacher" || role === "faculty") {
-      const [ct, sa] = await Promise.all([
-        supabase.from("class_teachers").select("batch_id").eq("active", true),
-        supabase.from("subject_allocations").select("batch_id").eq("active", true),
-      ]);
-      const mine = new Set([
-        ...((ct.data as { batch_id: string }[]) || []).map((r) => r.batch_id),
-        ...((sa.data as { batch_id: string | null }[]) || []).map((r) => r.batch_id).filter(Boolean) as string[],
-      ]);
-      visible = visible.filter((b) => mine.has(b.id));
+      const source = mode === "daily"
+        ? supabase.from("class_teachers").select("batch_id, course_id").eq("active", true)
+        : supabase.from("subject_allocations").select("batch_id").eq("active", true);
+      const { data: rows } = await source;
+      const mine = new Set(
+        ((rows as { batch_id: string | null; course_id?: string | null }[]) || [])
+          .flatMap((r) => [
+            r.batch_id ? `batch:${r.batch_id}` : null,
+            r.course_id ? `course:${r.course_id}` : null,
+          ])
+          .filter(Boolean) as string[],
+      );
+      visible = visible.filter((c) => mine.has(c.id));
     }
 
     setBatches(visible);
-    if (visible.length > 0) setBatchId(visible[0].id);
+    setBatchId((prev) => (visible.some((b) => b.id === prev) ? prev : visible[0]?.id ?? ""));
     setLoading(false);
+  };
+
+  // Period mode needs a period + subject: they are what make the row distinct
+  // under da_uniq_student_date_subject_period, so a whole-day row and a
+  // per-lecture row for the same student and date can coexist.
+  const fetchPeriodOptions = async () => {
+    const [p, sa] = await Promise.all([
+      supabase.from("class_periods").select("id, label, period_no").eq("active", true).order("period_no"),
+      // Period marking is the college path, which is always batch-keyed.
+      supabase.from("subject_allocations")
+        .select("subject_id").eq("active", true)
+        .eq("batch_id", batchId.startsWith("batch:")
+          ? batchId.slice(6)
+          : "00000000-0000-0000-0000-000000000000"),
+    ]);
+    setPeriods((p.data as { id: string; label: string; period_no: number }[]) || []);
+
+    const ids = Array.from(new Set(((sa.data as { subject_id: string }[]) || []).map((r) => r.subject_id)));
+    if (ids.length === 0) { setSubjects([]); setSubjectId(""); return; }
+    const { data: subs } = await supabase.from("subjects").select("id, name").in("id", ids).order("name");
+    const list = (subs as { id: string; name: string }[]) || [];
+    setSubjects(list);
+    setSubjectId((prev) => (list.some((s) => s.id === prev) ? prev : list[0]?.id ?? ""));
   };
 
   const fetchAttendance = async () => {
     setLoading(true);
+    // batchId is "batch:<id>" or "course:<id>" — school classes are keyed by
+    // course because those students have no batch.
+    const [kind, targetId] = batchId.split(":");
     const { data: students } = await supabase.from("students")
       .select("id, name, admission_no, pre_admission_no")
-      .eq("batch_id", batchId)
+      .eq(kind === "course" ? "course_id" : "batch_id", targetId)
       .in("status", ["active", "pre_admitted"])
       .order("name");
 
@@ -77,13 +133,19 @@ const Attendance = () => {
       return;
     }
 
-    // Matched on student + date only, not batch: a student who changed batch
-    // mid-year still has one row per day, and re-inserting would collide with
-    // da_uniq_student_date_subject_period.
-    const { data: existing } = await supabase.from("daily_attendance")
+    // Matched on student + date, not batch: a student who changed batch mid-year
+    // still has one row per slot, and re-inserting would collide with
+    // da_uniq_student_date_subject_period. The slot is the whole day
+    // (subject_id/period_id NULL) or one lecture — matching the wrong slot would
+    // make a subject teacher overwrite the class teacher's daily register.
+    let existingQuery = supabase.from("daily_attendance")
       .select("id, student_id, status")
       .eq("date", date)
       .in("student_id", students.map(s => s.id));
+    existingQuery = mode === "daily"
+      ? existingQuery.is("subject_id", null).is("period_id", null)
+      : existingQuery.eq("subject_id", subjectId).eq("period_id", periodId);
+    const { data: existing } = await existingQuery;
 
     const existingMap = new Map((existing || []).map(a => [a.student_id, a]));
 
@@ -105,9 +167,10 @@ const Attendance = () => {
     const endDay = new Date(calYear, calMonth + 1, 0).getDate();
     const endDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${endDay}`;
 
-    const { data } = await supabase.from("daily_attendance")
-      .select("date, status")
-      .eq("batch_id", batchId)
+    const [sKind, sTarget] = batchId.split(":");
+    let q = supabase.from("daily_attendance").select("date, status, students!inner(course_id)");
+    q = sKind === "course" ? q.eq("students.course_id", sTarget) : q.eq("batch_id", sTarget);
+    const { data } = await q
       .gte("date", startDate)
       .lte("date", endDate);
 
@@ -133,6 +196,10 @@ const Attendance = () => {
   // da_uniq_student_date_subject_period. It also threw away period/subject
   // columns set by anyone else on the same day.
   const saveAttendance = async () => {
+    if (mode === "period" && (!periodId || !subjectId)) {
+      toast({ title: "Pick a period and subject first", variant: "destructive" });
+      return;
+    }
     setSaving(true);
 
     const existing = records.filter(r => r.id);
@@ -147,10 +214,11 @@ const Attendance = () => {
       ...(fresh.length
         ? [supabase.from("daily_attendance").insert(fresh.map(r => ({
             student_id: r.student_id,
-            batch_id: batchId,
+            batch_id: batchId.startsWith("batch:") ? batchId.slice(6) : null,
             date,
             status: r.status,
             marked_by: user?.id || null,
+            ...(mode === "period" ? { subject_id: subjectId, period_id: periodId } : {}),
           }))).select("id")]
         : []),
     ]);
@@ -223,12 +291,42 @@ const Attendance = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-foreground">Attendance</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Mark and manage daily attendance</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {mode === "daily" ? "Whole-day register for your class" : "Per-lecture attendance for your own periods"}
+          </p>
         </div>
-        <select value={batchId} onChange={(e) => setBatchId(e.target.value)}
-          className="rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          {canMarkDaily && canMarkPeriod && (
+            <div className="flex rounded-lg border border-input overflow-hidden">
+              {(["daily", "period"] as const).map(m => (
+                <button key={m} onClick={() => setMode(m)}
+                  className={`px-3 py-2 text-xs font-medium transition-colors ${
+                    mode === m ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"
+                  }`}>
+                  {m === "daily" ? "Whole day" : "Per lecture"}
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === "period" && (
+            <>
+              <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}
+                className="rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+                <option value="">Period…</option>
+                {periods.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)}
+                className="rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+                <option value="">Subject…</option>
+                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </>
+          )}
+          <select value={batchId} onChange={(e) => setBatchId(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
       </div>
 
       {loading ? (

@@ -13,7 +13,7 @@ import {
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, CalendarDays, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt, FileMinus2,
-  Briefcase, CalendarOff, CalendarDays, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
+  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
   Library, Barcode, DoorOpen, Share2,
@@ -119,6 +119,7 @@ const marketingSubMenu: MenuItem[] = [
 const teachingSubMenu: MenuItem[] = [
   { title: "My Classes", url: "/my-classes", icon: GraduationCap, permission: "students:view" },
   { title: "Timetable", url: "/timetable", icon: CalendarDays, permission: "timetable:view" },
+  { title: "Report Cards", url: "/report-cards", icon: FileText, permission: "marks:view" },
 ];
 
 const academicsSubMenu: MenuItem[] = [

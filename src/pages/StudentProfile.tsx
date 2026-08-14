@@ -374,12 +374,13 @@ const StudentProfile = () => {
   const [photoInputKey, setPhotoInputKey] = useState(0);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // The tab lives in the URL, not in Radix's internal state: a non-silent
   // fetchStudent() flips the page into <PageLoader/>, which unmounts the tab
   // subtree — an uncontrolled Tabs would snap back to Details every time.
   // Also makes /students/<an>?tab=fees shareable and reload-proof.
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") || "details";
+  const requestedTab = searchParams.get("tab") || "details";
   const setActiveTab = (tab: string) =>
     setSearchParams((prev) => { prev.set("tab", tab); return prev; }, { replace: true });
   const [syncing, setSyncing] = useState(false);
@@ -472,17 +473,37 @@ const StudentProfile = () => {
       setStudentDocs([]);
       setAuditRows([]);
     }
-    let { data } = await supabase.from("students")
-      .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
-      .eq("admission_no", admissionNo)
-      .maybeSingle();
+    setLoadError(null);
+    // Columns come from student_profile_for_viewer(), not `select("*")`.
+    // A subject teacher can legitimately see this row (they teach the student),
+    // but must not get Aadhaar, parents' income, banking or medical history —
+    // and hiding those in JSX would still ship them to the browser. The RPC
+    // OMITS fields the caller may not see, so an un-gated field renders blank
+    // rather than leaking. Row access is still RLS; the RPC is SECURITY INVOKER.
+    const LOOKUPS =
+      "id, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
 
-    if (!data) {
+    let { data: found } = await supabase.from("students")
+      .select(LOOKUPS).eq("admission_no", admissionNo).maybeSingle();
+    if (!found) {
       const res = await supabase.from("students")
-        .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
-        .eq("pre_admission_no", admissionNo)
-        .maybeSingle();
-      data = res.data;
+        .select(LOOKUPS).eq("pre_admission_no", admissionNo).maybeSingle();
+      found = res.data;
+    }
+
+    let data: StudentRecord | null = null;
+    if (found) {
+      const { data: shaped, error: shapeErr } = await supabase
+        .rpc("student_profile_for_viewer", { _student_id: (found as { id: string }).id });
+      // Fail closed. Falling back to select("*") here would silently restore
+      // the leak the moment the migration hasn't been applied.
+      if (shapeErr || !shaped) {
+        setLoadError(shapeErr?.message || "Could not load this student profile.");
+        setLoading(false);
+        return;
+      }
+      const { id: _ignored, ...lookups } = found as Record<string, unknown>;
+      data = { ...(shaped as Record<string, unknown>), ...lookups } as unknown as StudentRecord;
     }
 
     if (data) {
@@ -650,6 +671,17 @@ const StudentProfile = () => {
 
   if (loading) return <PageLoader />;
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
+        <User className="h-16 w-16 text-destructive/30 mb-4" />
+        <h2 className="text-lg font-semibold text-foreground">Could not load this profile</h2>
+        <p className="text-sm text-muted-foreground mt-1 max-w-md text-center">{loadError}</p>
+        <Link to="/students" className="mt-4 text-sm font-medium text-primary hover:underline">← Back to Students</Link>
+      </div>
+    );
+  }
+
   if (!student) {
     return (
       <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
@@ -704,6 +736,22 @@ const StudentProfile = () => {
     return "bg-warning/10 text-warning";
   };
   const canUploadDocuments = can("documents", "upload");
+  // The RPC omits fields the caller may not see, so presence of a key IS the
+  // permission check — no second source of truth to drift out of sync.
+  const hasContact = student != null && "father_phone" in student;
+  const hasMedical = student != null && "blood_group" in student;
+  const hasSensitive = student != null && "student_aadhar" in student;
+  // Teachers have no fee_ledger SELECT policy, so this tab rendered an empty,
+  // erroring StudentFeePanel for them. Fees stay with accounts/office.
+  const canSeeFees = can("finance", "view");
+  const canSeeAudit = can("students", "update") || can("user_management", "view");
+  const canSeeDocuments = can("documents", "view");
+  // ?tab=fees in a shared link must not land a teacher on a hidden tab —
+  // Radix renders nothing and the page looks broken.
+  const hiddenTabs = new Set(
+    [!canSeeFees && "fees", !canSeeAudit && "audit", !canSeeDocuments && "documents"].filter(Boolean) as string[],
+  );
+  const activeTab = hiddenTabs.has(requestedTab) ? "details" : requestedTab;
   const canCorrectProfile = can("students", "update") || ["office_assistant", "school_coordinator", "office_admin", "principal", "campus_admin", "super_admin"].includes(role || "");
   const canUploadPhoto = canCorrectProfile;
 
@@ -1117,15 +1165,21 @@ const StudentProfile = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
-          <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            Documents{(studentDocs.length + leadDocs.length + appDocs.length) > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{studentDocs.length + leadDocs.length + appDocs.length}</span>}
-          </TabsTrigger>
-          <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
+          {canSeeDocuments && (
+            <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              Documents{(studentDocs.length + leadDocs.length + appDocs.length) > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{studentDocs.length + leadDocs.length + appDocs.length}</span>}
+            </TabsTrigger>
+          )}
+          {canSeeFees && (
+            <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
+          )}
           <TabsTrigger value="attendance" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
           <TabsTrigger value="exams" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Exams</TabsTrigger>
-          <TabsTrigger value="audit" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            Audit{auditRows.length > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{auditRows.length}</span>}
-          </TabsTrigger>
+          {canSeeAudit && (
+            <TabsTrigger value="audit" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              Audit{auditRows.length > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{auditRows.length}</span>}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="details">
@@ -1185,6 +1239,7 @@ const StudentProfile = () => {
             </div>
 
             {/* Father's Information */}
+            {hasContact && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Father's Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
@@ -1210,8 +1265,10 @@ const StudentProfile = () => {
                 </div>
               )}
             </div>
+            )}
 
             {/* Mother's Information */}
+            {hasContact && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Mother's Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
@@ -1234,8 +1291,10 @@ const StudentProfile = () => {
                 </div>
               )}
             </div>
+            )}
 
             {/* Guardian Information */}
+            {hasContact && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4 md:col-span-2">
               <h3 className="text-sm font-semibold text-foreground">Guardian Information</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 text-sm">
@@ -1250,9 +1309,10 @@ const StudentProfile = () => {
                 </div>
               )}
             </div>
+            )}
 
             {/* Siblings */}
-            {siblings.length > 0 && (
+            {hasContact && siblings.length > 0 && (
               <div className="rounded-xl bg-card card-shadow p-5 space-y-4 md:col-span-2">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-muted-foreground" />
@@ -1332,6 +1392,7 @@ const StudentProfile = () => {
             </div>
 
             {/* Medical Information */}
+            {hasMedical && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Medical Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
@@ -1344,8 +1405,10 @@ const StudentProfile = () => {
                 <Detail label="Ongoing Treatment" value={student.ongoing_treatment || "—"} />
               </div>
             </div>
+            )}
 
             {/* Identification */}
+            {hasSensitive && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Identification</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
@@ -1353,8 +1416,10 @@ const StudentProfile = () => {
                 <Detail label="Identification Mark 2" value={student.identification_mark_2 || "—"} />
               </div>
             </div>
+            )}
 
             {/* Banking */}
+            {hasSensitive && (
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Banking</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
@@ -1364,6 +1429,7 @@ const StudentProfile = () => {
                 <Detail label="Bank Reference No" value={student.bank_reference_no || "—"} />
               </div>
             </div>
+            )}
           </div>
         </TabsContent>
 
@@ -1513,11 +1579,13 @@ const StudentProfile = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="fees">
-          <div className="mt-4">
-            <StudentFeePanel student={student} onRefresh={() => fetchStudent(true)} />
-          </div>
-        </TabsContent>
+        {canSeeFees && (
+          <TabsContent value="fees">
+            <div className="mt-4">
+              <StudentFeePanel student={student} onRefresh={() => fetchStudent(true)} />
+            </div>
+          </TabsContent>
+        )}
 
         <TabsContent value="attendance">
           <div className="mt-4 space-y-4">
