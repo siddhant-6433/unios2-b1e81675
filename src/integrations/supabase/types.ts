@@ -9084,6 +9084,68 @@ export type Database = {
           },
         ]
       }
+      employee_exits: {
+        Row: {
+          clearance: Json
+          created_at: string
+          created_by: string | null
+          employee_profile_id: string
+          exit_interview_note: string | null
+          exit_type: string
+          final_settlement_amount: number | null
+          id: string
+          last_working_day: string | null
+          notice_waived: boolean
+          reason: string | null
+          resignation_date: string | null
+          settled_on: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          clearance?: Json
+          created_at?: string
+          created_by?: string | null
+          employee_profile_id: string
+          exit_interview_note?: string | null
+          exit_type?: string
+          final_settlement_amount?: number | null
+          id?: string
+          last_working_day?: string | null
+          notice_waived?: boolean
+          reason?: string | null
+          resignation_date?: string | null
+          settled_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          clearance?: Json
+          created_at?: string
+          created_by?: string | null
+          employee_profile_id?: string
+          exit_interview_note?: string | null
+          exit_type?: string
+          final_settlement_amount?: number | null
+          id?: string
+          last_working_day?: string | null
+          notice_waived?: boolean
+          reason?: string | null
+          resignation_date?: string | null
+          settled_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_exits_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: true
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_face_registrations: {
         Row: {
           approved_at: string | null
@@ -9153,15 +9215,68 @@ export type Database = {
         }
         Relationships: []
       }
+      employee_leave_entitlements: {
+        Row: {
+          available_days: number | null
+          carried_forward: number
+          employee_profile_id: string
+          entitled_days: number
+          id: string
+          leave_type_id: string
+          leave_year: number
+          updated_at: string
+          used_days: number
+        }
+        Insert: {
+          available_days?: number | null
+          carried_forward?: number
+          employee_profile_id: string
+          entitled_days?: number
+          id?: string
+          leave_type_id: string
+          leave_year: number
+          updated_at?: string
+          used_days?: number
+        }
+        Update: {
+          available_days?: number | null
+          carried_forward?: number
+          employee_profile_id?: string
+          entitled_days?: number
+          id?: string
+          leave_type_id?: string
+          leave_year?: number
+          updated_at?: string
+          used_days?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_leave_entitlements_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_leave_entitlements_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_leave_requests: {
         Row: {
           approved_at: string | null
           approved_by: string | null
           created_at: string | null
           days: number
+          employee_profile_id: string | null
           end_date: string
           id: string
           leave_type: string
+          leave_type_id: string | null
           reason: string | null
           start_date: string
           status: string
@@ -9172,9 +9287,11 @@ export type Database = {
           approved_by?: string | null
           created_at?: string | null
           days: number
+          employee_profile_id?: string | null
           end_date: string
           id?: string
           leave_type: string
+          leave_type_id?: string | null
           reason?: string | null
           start_date: string
           status?: string
@@ -9185,21 +9302,86 @@ export type Database = {
           approved_by?: string | null
           created_at?: string | null
           days?: number
+          employee_profile_id?: string | null
           end_date?: string
           id?: string
           leave_type?: string
+          leave_type_id?: string | null
           reason?: string | null
           start_date?: string
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "employee_leave_requests_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_leave_requests_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_profile_change_requests: {
+        Row: {
+          changes: Json
+          created_at: string
+          employee_profile_id: string
+          id: string
+          note: string | null
+          requested_by: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          changes: Json
+          created_at?: string
+          employee_profile_id: string
+          id?: string
+          note?: string | null
+          requested_by?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          changes?: Json
+          created_at?: string
+          employee_profile_id?: string
+          id?: string
+          note?: string | null
+          requested_by?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_profile_change_requests_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       employee_profiles: {
         Row: {
           aadhaar_number: string | null
           blood_group: string | null
           campus_id: string | null
+          confirmed_on: string | null
           created_at: string
           current_address: Json | null
           date_of_birth: string | null
@@ -9210,6 +9392,8 @@ export type Database = {
           display_name: string | null
           dotted_line_manager: string | null
           education: Json | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
           employee_number: string | null
           employment_status: string | null
           experience: Json | null
@@ -9225,6 +9409,7 @@ export type Database = {
           job_title_secondary: string | null
           keka_employee_id: string | null
           last_name: string | null
+          leave_plan_id: string | null
           legal_entity_id: string | null
           marital_status: string | null
           middle_name: string | null
@@ -9243,6 +9428,8 @@ export type Database = {
           personal_email: string | null
           photo_url: string | null
           physically_handicapped: boolean | null
+          probation_end_date: string | null
+          probation_status: string | null
           professional_summary: string | null
           reports_to: string | null
           reports_to_name: string | null
@@ -9262,6 +9449,7 @@ export type Database = {
           aadhaar_number?: string | null
           blood_group?: string | null
           campus_id?: string | null
+          confirmed_on?: string | null
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
@@ -9272,6 +9460,8 @@ export type Database = {
           display_name?: string | null
           dotted_line_manager?: string | null
           education?: Json | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           employee_number?: string | null
           employment_status?: string | null
           experience?: Json | null
@@ -9287,6 +9477,7 @@ export type Database = {
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          leave_plan_id?: string | null
           legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
@@ -9305,6 +9496,8 @@ export type Database = {
           personal_email?: string | null
           photo_url?: string | null
           physically_handicapped?: boolean | null
+          probation_end_date?: string | null
+          probation_status?: string | null
           professional_summary?: string | null
           reports_to?: string | null
           reports_to_name?: string | null
@@ -9324,6 +9517,7 @@ export type Database = {
           aadhaar_number?: string | null
           blood_group?: string | null
           campus_id?: string | null
+          confirmed_on?: string | null
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
@@ -9334,6 +9528,8 @@ export type Database = {
           display_name?: string | null
           dotted_line_manager?: string | null
           education?: Json | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           employee_number?: string | null
           employment_status?: string | null
           experience?: Json | null
@@ -9349,6 +9545,7 @@ export type Database = {
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          leave_plan_id?: string | null
           legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
@@ -9367,6 +9564,8 @@ export type Database = {
           personal_email?: string | null
           photo_url?: string | null
           physically_handicapped?: boolean | null
+          probation_end_date?: string | null
+          probation_status?: string | null
           professional_summary?: string | null
           reports_to?: string | null
           reports_to_name?: string | null
@@ -9444,6 +9643,13 @@ export type Database = {
             columns: ["job_applicant_id"]
             isOneToOne: false
             referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_leave_plan_id_fkey"
+            columns: ["leave_plan_id"]
+            isOneToOne: false
+            referencedRelation: "leave_plans"
             referencedColumns: ["id"]
           },
           {
@@ -17967,6 +18173,94 @@ export type Database = {
             columns: ["session_id"]
             isOneToOne: false
             referencedRelation: "admission_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_plans: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          is_default: boolean
+          legal_entity_id: string | null
+          name: string
+          year_start_month: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          legal_entity_id?: string | null
+          name: string
+          year_start_month?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          legal_entity_id?: string | null
+          name?: string
+          year_start_month?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_plans_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_types: {
+        Row: {
+          accrual: string
+          annual_days: number
+          carry_forward_max: number
+          code: string
+          display_order: number
+          id: string
+          is_paid: boolean
+          leave_plan_id: string
+          name: string
+          requires_approval: boolean
+        }
+        Insert: {
+          accrual?: string
+          annual_days?: number
+          carry_forward_max?: number
+          code: string
+          display_order?: number
+          id?: string
+          is_paid?: boolean
+          leave_plan_id: string
+          name: string
+          requires_approval?: boolean
+        }
+        Update: {
+          accrual?: string
+          annual_days?: number
+          carry_forward_max?: number
+          code?: string
+          display_order?: number
+          id?: string
+          is_paid?: boolean
+          leave_plan_id?: string
+          name?: string
+          requires_approval?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_types_leave_plan_id_fkey"
+            columns: ["leave_plan_id"]
+            isOneToOne: false
+            referencedRelation: "leave_plans"
             referencedColumns: ["id"]
           },
         ]
@@ -33457,6 +33751,10 @@ export type Database = {
           old_stage: Database["public"]["Enums"]["lead_stage"]
         }[]
       }
+      apply_profile_change_request: {
+        Args: { _approve: boolean; _note?: string; _request_id: string }
+        Returns: undefined
+      }
       apply_student_credit: {
         Args: {
           _amount?: number
@@ -34017,6 +34315,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      employee_self_editable_fields: { Args: never; Returns: string[] }
       exam_mark_registered: {
         Args: {
           p_document_url?: string
@@ -34723,6 +35022,10 @@ export type Database = {
           sla_due_at: string
           unread_count: number
         }[]
+      }
+      grant_leave_entitlements: {
+        Args: { _leave_plan_id: string; _leave_year: number }
+        Returns: number
       }
       has_course_allow: {
         Args: { _course_id: string; _user_id: string }

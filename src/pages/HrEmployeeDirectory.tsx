@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SelectField } from "@/components/ui/state-fields";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useOrgUnits } from "@/hooks/useOrgUnits";
-import { Search, Phone, Building2, Upload, ClipboardCheck, Users } from "lucide-react";
+import { Search, Phone, Building2, Upload, ClipboardCheck, Users, Inbox, UserCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,6 +23,10 @@ const BulkEmployeeImportDialog = lazy(() =>
   import("@/components/hr/BulkEmployeeImportDialog").then((m) => ({ default: m.BulkEmployeeImportDialog })));
 const EmployeeVerificationTable = lazy(() =>
   import("@/components/hr/EmployeeVerificationTable").then((m) => ({ default: m.EmployeeVerificationTable })));
+const ProfileChangeRequests = lazy(() =>
+  import("@/components/hr/ProfileChangeRequests").then((m) => ({ default: m.ProfileChangeRequests })));
+const LifecyclePanel = lazy(() =>
+  import("@/components/hr/LifecyclePanel").then((m) => ({ default: m.LifecyclePanel })));
 
 interface Employee {
   /** employee_profiles.id when one exists. */
@@ -69,6 +73,7 @@ const HrEmployeeDirectory = () => {
   const org = useOrgUnits();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [changeReqCount, setChangeReqCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -87,7 +92,7 @@ const HrEmployeeDirectory = () => {
     setLoading(true);
     // `profiles` has no role column — roles live in user_roles. Selecting
     // profiles.role 400s and leaves this page permanently empty.
-    const [roles, emps, pending] = await Promise.all([
+    const [roles, emps, pending, changeReqs] = await Promise.all([
       fetchAll<{ user_id: string; role: string }>(
         (from, to) => supabase
           .from("user_roles")
@@ -106,6 +111,10 @@ const HrEmployeeDirectory = () => {
         .from("employee_profiles")
         .select("id", { count: "exact", head: true })
         .eq("verification_status", "pending"),
+      supabase
+        .from("employee_profile_change_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending"),
     ]);
 
     // Fetch every role, then partition here rather than filtering in the query:
@@ -173,6 +182,7 @@ const HrEmployeeDirectory = () => {
     merged.sort((a, b) => a.name.localeCompare(b.name));
     setEmployees(merged);
     setPendingCount(pending.count ?? 0);
+    setChangeReqCount(changeReqs.count ?? 0);
     setLoading(false);
   }, [departmentName]);
 
@@ -337,11 +347,28 @@ const HrEmployeeDirectory = () => {
               <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Needs verification
               {pendingCount > 0 && <span className="ml-1.5 rounded-full bg-destructive/15 text-destructive px-1.5">{pendingCount}</span>}
             </TabsTrigger>
+            <TabsTrigger value="requests" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Inbox className="h-3.5 w-3.5 mr-1" /> Change requests
+              {changeReqCount > 0 && <span className="ml-1.5 rounded-full bg-destructive/15 text-destructive px-1.5">{changeReqCount}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="lifecycle" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <UserCheck className="h-3.5 w-3.5 mr-1" /> Probation &amp; exits
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="directory" className="space-y-6">{directory}</TabsContent>
           <TabsContent value="verify">
             <Suspense fallback={<PageLoader />}>
               <EmployeeVerificationTable onChange={fetchEmployees} />
+            </Suspense>
+          </TabsContent>
+          <TabsContent value="requests">
+            <Suspense fallback={<PageLoader />}>
+              <ProfileChangeRequests onChange={fetchEmployees} />
+            </Suspense>
+          </TabsContent>
+          <TabsContent value="lifecycle">
+            <Suspense fallback={<PageLoader />}>
+              <LifecyclePanel onChange={fetchEmployees} />
             </Suspense>
           </TabsContent>
         </Tabs>
