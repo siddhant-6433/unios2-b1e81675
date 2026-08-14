@@ -15387,6 +15387,110 @@ export type Database = {
           },
         ]
       }
+      interview_feedback: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          panelist: string
+          rating: number | null
+          recommend: string | null
+          round_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          panelist: string
+          rating?: number | null
+          recommend?: string | null
+          round_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          panelist?: string
+          rating?: number | null
+          recommend?: string | null
+          round_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_feedback_round_id_fkey"
+            columns: ["round_id"]
+            isOneToOne: false
+            referencedRelation: "interview_rounds"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interview_rounds: {
+        Row: {
+          applicant_id: string
+          created_at: string
+          created_by: string | null
+          duration_mins: number
+          id: string
+          location: string | null
+          mode: string
+          panel: string[]
+          result: string | null
+          round_name: string
+          round_number: number
+          scheduled_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          applicant_id: string
+          created_at?: string
+          created_by?: string | null
+          duration_mins?: number
+          id?: string
+          location?: string | null
+          mode?: string
+          panel?: string[]
+          result?: string | null
+          round_name: string
+          round_number?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          applicant_id?: string
+          created_at?: string
+          created_by?: string | null
+          duration_mins?: number
+          id?: string
+          location?: string | null
+          mode?: string
+          panel?: string[]
+          result?: string | null
+          round_name?: string
+          round_number?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_rounds_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interview_rounds_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jd_category_mappings: {
         Row: {
           category: string
@@ -15449,6 +15553,48 @@ export type Database = {
           },
         ]
       }
+      job_applicant_activities: {
+        Row: {
+          applicant_id: string
+          created_at: string
+          description: string
+          id: string
+          type: string
+          user_id: string | null
+        }
+        Insert: {
+          applicant_id: string
+          created_at?: string
+          description: string
+          id?: string
+          type?: string
+          user_id?: string | null
+        }
+        Update: {
+          applicant_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_applicant_activities_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_applicant_activities_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_applicants: {
         Row: {
           ai_confidence: number | null
@@ -15469,10 +15615,12 @@ export type Database = {
           lead_id: string | null
           name: string | null
           notes: string | null
+          rating: number | null
           resume_url: string | null
           source_channel: string
           source_message_id: string | null
           source_phone: string | null
+          stage_changed_at: string
           status: string
           updated_at: string
         }
@@ -15495,10 +15643,12 @@ export type Database = {
           lead_id?: string | null
           name?: string | null
           notes?: string | null
+          rating?: number | null
           resume_url?: string | null
           source_channel?: string
           source_message_id?: string | null
           source_phone?: string | null
+          stage_changed_at?: string
           status?: string
           updated_at?: string
         }
@@ -15521,10 +15671,12 @@ export type Database = {
           lead_id?: string | null
           name?: string | null
           notes?: string | null
+          rating?: number | null
           resume_url?: string | null
           source_channel?: string
           source_message_id?: string | null
           source_phone?: string | null
+          stage_changed_at?: string
           status?: string
           updated_at?: string
         }
@@ -36118,6 +36270,17 @@ export type Database = {
       has_student_institution_access: {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
+      }
+      hire_job_applicant: {
+        Args: {
+          _applicant_id: string
+          _campus_id?: string
+          _ctc_annual?: number
+          _department_id?: string
+          _job_title?: string
+          _joining_date?: string
+        }
+        Returns: string
       }
       hr_staff_directory: {
         Args: never
