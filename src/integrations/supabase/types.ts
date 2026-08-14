@@ -3560,6 +3560,60 @@ export type Database = {
           },
         ]
       }
+      attendance_overtime: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          date: string
+          employee_profile_id: string
+          hours: number
+          id: string
+          payroll_cycle_id: string | null
+          reason: string | null
+          status: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          date: string
+          employee_profile_id: string
+          hours: number
+          id?: string
+          payroll_cycle_id?: string | null
+          reason?: string | null
+          status?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          date?: string
+          employee_profile_id?: string
+          hours?: number
+          id?: string
+          payroll_cycle_id?: string | null
+          reason?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_overtime_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_overtime_payroll_cycle_id_fkey"
+            columns: ["payroll_cycle_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_cycles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attendance_permission_requests: {
         Row: {
           approved_at: string | null
@@ -3643,6 +3697,59 @@ export type Database = {
             columns: ["scope_subject_id"]
             isOneToOne: false
             referencedRelation: "subjects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attendance_regularisations: {
+        Row: {
+          created_at: string
+          date: string
+          employee_profile_id: string
+          id: string
+          reason: string
+          requested_punch_in: string | null
+          requested_punch_out: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          employee_profile_id: string
+          id?: string
+          reason: string
+          requested_punch_in?: string | null
+          requested_punch_out?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          employee_profile_id?: string
+          id?: string
+          reason?: string
+          requested_punch_in?: string | null
+          requested_punch_out?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_regularisations_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -4532,7 +4639,8 @@ export type Database = {
       class_teachers: {
         Row: {
           active: boolean
-          batch_id: string
+          batch_id: string | null
+          course_id: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -4542,7 +4650,8 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          batch_id: string
+          batch_id?: string | null
+          course_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -4552,7 +4661,8 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          batch_id?: string
+          batch_id?: string | null
+          course_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -4567,6 +4677,34 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "batches"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_first_year_fee"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "seat_matrix"
+            referencedColumns: ["course_id"]
           },
           {
             foreignKeyName: "class_teachers_session_id_fkey"
@@ -9025,54 +9163,72 @@ export type Database = {
       employee_documents: {
         Row: {
           created_at: string
+          doc_category: string | null
           doc_key: string
           employee_id: string
+          expires_on: string | null
           file_name: string
           file_path: string
           file_size: number | null
           file_url: string
           id: string
+          issued_on: string | null
           mime_type: string | null
+          notes: string | null
           original_file_name: string | null
           storage_provider: string
           updated_at: string
           uploaded_at: string
           uploaded_by: string | null
           uploaded_source: string
+          verified_at: string | null
+          verified_by: string | null
         }
         Insert: {
           created_at?: string
+          doc_category?: string | null
           doc_key: string
           employee_id: string
+          expires_on?: string | null
           file_name: string
           file_path: string
           file_size?: number | null
           file_url: string
           id?: string
+          issued_on?: string | null
           mime_type?: string | null
+          notes?: string | null
           original_file_name?: string | null
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
           uploaded_by?: string | null
           uploaded_source?: string
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Update: {
           created_at?: string
+          doc_category?: string | null
           doc_key?: string
           employee_id?: string
+          expires_on?: string | null
           file_name?: string
           file_path?: string
           file_size?: number | null
           file_url?: string
           id?: string
+          issued_on?: string | null
           mime_type?: string | null
+          notes?: string | null
           original_file_name?: string | null
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
           uploaded_by?: string | null
           uploaded_source?: string
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Relationships: [
           {
@@ -9443,6 +9599,7 @@ export type Database = {
           work_email: string | null
           work_location: string | null
           work_number: string | null
+          work_shift_id: string | null
           worker_type: string | null
         }
         Insert: {
@@ -9511,6 +9668,7 @@ export type Database = {
           work_email?: string | null
           work_location?: string | null
           work_number?: string | null
+          work_shift_id?: string | null
           worker_type?: string | null
         }
         Update: {
@@ -9579,6 +9737,7 @@ export type Database = {
           work_email?: string | null
           work_location?: string | null
           work_number?: string | null
+          work_shift_id?: string | null
           worker_type?: string | null
         }
         Relationships: [
@@ -9657,6 +9816,13 @@ export type Database = {
             columns: ["legal_entity_id"]
             isOneToOne: false
             referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_work_shift_id_fkey"
+            columns: ["work_shift_id"]
+            isOneToOne: false
+            referencedRelation: "work_shifts"
             referencedColumns: ["id"]
           },
         ]
@@ -11650,6 +11816,107 @@ export type Database = {
             columns: ["floor_id"]
             isOneToOne: false
             referencedRelation: "hostel_floors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_letter_templates: {
+        Row: {
+          body: string
+          code: string
+          created_at: string
+          id: string
+          is_active: boolean
+          legal_entity_id: string | null
+          name: string
+          subject: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          code: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          code?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name?: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_letter_templates_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_letters: {
+        Row: {
+          body: string
+          created_at: string
+          employee_profile_id: string
+          id: string
+          issued_by: string | null
+          issued_on: string
+          letter_code: string
+          letter_name: string
+          reference_no: string | null
+          subject: string | null
+          template_id: string | null
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          employee_profile_id: string
+          id?: string
+          issued_by?: string | null
+          issued_on?: string
+          letter_code: string
+          letter_name: string
+          reference_no?: string | null
+          subject?: string | null
+          template_id?: string | null
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          employee_profile_id?: string
+          id?: string
+          issued_by?: string | null
+          issued_on?: string
+          letter_code?: string
+          letter_name?: string
+          reference_no?: string | null
+          subject?: string | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_letters_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_letters_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "hr_letter_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -29897,6 +30164,48 @@ export type Database = {
         }
         Relationships: []
       }
+      work_shifts: {
+        Row: {
+          break_minutes: number
+          created_at: string
+          end_time: string
+          full_day_hours: number
+          grace_minutes: number
+          half_day_hours: number
+          id: string
+          is_active: boolean
+          name: string
+          start_time: string
+          weekly_offs: number[]
+        }
+        Insert: {
+          break_minutes?: number
+          created_at?: string
+          end_time: string
+          full_day_hours?: number
+          grace_minutes?: number
+          half_day_hours?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          start_time: string
+          weekly_offs?: number[]
+        }
+        Update: {
+          break_minutes?: number
+          created_at?: string
+          end_time?: string
+          full_day_hours?: number
+          grace_minutes?: number
+          half_day_hours?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          start_time?: string
+          weekly_offs?: number[]
+        }
+        Relationships: []
+      }
     }
     Views: {
       academic_partner_assignment_summary: {
@@ -33765,6 +34074,10 @@ export type Database = {
         }
         Returns: Json
       }
+      approve_attendance_regularisation: {
+        Args: { _approve: boolean; _ids: string[]; _note?: string }
+        Returns: number
+      }
       approve_pgdm_certificate: {
         Args: { _approval_notes?: string; _request_id: string }
         Returns: string
@@ -34574,6 +34887,10 @@ export type Database = {
         Returns: Json
       }
       generate_family_application_id: { Args: never; Returns: string }
+      generate_hr_letter: {
+        Args: { _employee_profile_id: string; _template_code: string }
+        Returns: string
+      }
       generate_video_bill: {
         Args: {
           _brand: Database["public"]["Enums"]["video_brand"]

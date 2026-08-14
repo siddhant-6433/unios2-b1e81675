@@ -12,9 +12,10 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useOrgUnits } from "@/hooks/useOrgUnits";
 import { downscaleImage } from "@/lib/downscaleImage";
-import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera } from "lucide-react";
+import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera, ScrollText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
@@ -531,6 +532,9 @@ const EmployeeProfileDialog = ({
                 {canEditBank && (
                   <TabsTrigger value="bank" className={tabCls}><Landmark className="h-3.5 w-3.5 mr-1" />Bank</TabsTrigger>
                 )}
+                {profile.id && editable && (
+                  <TabsTrigger value="letters" className={tabCls}><ScrollText className="h-3.5 w-3.5 mr-1" />Letters</TabsTrigger>
+                )}
               </TabsList>
 
               {/* Personal */}
@@ -763,6 +767,13 @@ const EmployeeProfileDialog = ({
                     <p className="text-[11px] text-muted-foreground">
                       Every change to these fields is recorded with your name and the time.
                     </p>
+                  </Section>
+                </TabsContent>
+              )}
+              {profile.id && editable && (
+                <TabsContent value="letters" className="space-y-5">
+                  <Section title="Employment letters">
+                    <LettersPanel employeeProfileId={profile.id} />
                   </Section>
                 </TabsContent>
               )}

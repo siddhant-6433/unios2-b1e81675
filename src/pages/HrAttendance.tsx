@@ -1,5 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import {
@@ -9,6 +9,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+const RegularisationQueue = lazy(() =>
+  import("@/components/hr/RegularisationQueue").then((m) => ({ default: m.RegularisationQueue })));
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface AttendanceRecord {
@@ -29,6 +32,7 @@ interface AttendanceRecord {
 
 const HrAttendance = () => {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [view, setView] = useState<"daily" | "corrections">("daily");
   const [search, setSearch] = useState("");
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [allProfiles, setAllProfiles] = useState<any[]>([]);
@@ -130,8 +134,21 @@ const HrAttendance = () => {
           <h1 className="text-2xl font-bold text-foreground">Employee Attendance</h1>
           <p className="text-sm text-muted-foreground mt-1">Daily punch-in/out records</p>
         </div>
-        <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
+        <div className="flex items-center gap-2">
+          <Button variant={view === "corrections" ? "default" : "outline"} size="sm"
+            onClick={() => setView(view === "corrections" ? "daily" : "corrections")}>
+            Corrections
+          </Button>
+          <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
+        </div>
       </div>
+
+      {view === "corrections" ? (
+        <Suspense fallback={<PageLoader />}>
+          <RegularisationQueue />
+        </Suspense>
+      ) : (
+      <>
 
       {/* Date nav + search */}
       <div className="flex flex-wrap items-center gap-3">
@@ -310,6 +327,8 @@ const HrAttendance = () => {
             </div>
           </CardContent>
         </Card>
+      )}
+      </>
       )}
     </div>
   );
