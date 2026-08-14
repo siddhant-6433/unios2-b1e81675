@@ -13,8 +13,8 @@
 // Only ADDED files under supabase/migrations are touched; edits to existing
 // migrations keep their version. Run `node scripts/stamp-staged-migrations.mjs
 // --selftest` to exercise the timestamp logic.
-import { readdirSync } from "node:fs";
-import { dirname, join, basename } from "node:path";
+import { readdirSync, existsSync } from "node:fs";
+import { dirname, join, basename, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -91,6 +91,33 @@ function git(args) {
     process.exit(1);
   }
   return r.stdout;
+}
+
+// An in-progress merge/rebase/cherry-pick/revert must be left alone. During one
+// of those, --diff-filter=A also lists every migration the OTHER side is
+// bringing in — files that already exist upstream and are already applied to
+// production under their recorded version. Restamping those deletes them and
+// re-adds them under today's timestamp, orphaning the version in
+// supabase_migrations.schema_migrations and making `db push` treat an
+// already-applied migration as new. Merging main once restamped nine of them.
+//
+// Only a plain commit genuinely authors a new migration, so bail otherwise.
+// In a git worktree (Conductor uses them) --git-dir is an absolute path;
+// join(repoRoot, "/abs") would mangle it, so only resolve when relative.
+const rawGitDir = git(["rev-parse", "--git-dir"]).trim();
+const gitDir = isAbsolute(rawGitDir) ? rawGitDir : join(repoRoot, rawGitDir);
+const IN_PROGRESS = [
+  ["MERGE_HEAD", "merge"],
+  ["CHERRY_PICK_HEAD", "cherry-pick"],
+  ["REVERT_HEAD", "revert"],
+  ["rebase-merge", "rebase"],
+  ["rebase-apply", "rebase"],
+];
+for (const [marker, label] of IN_PROGRESS) {
+  if (existsSync(join(gitDir, marker))) {
+    console.log(`migration stamper: skipped (${label} in progress — incoming files keep their upstream version)`);
+    process.exit(0);
+  }
 }
 
 const staged = git(["diff", "--cached", "--name-only", "--diff-filter=A", "--", "supabase/migrations"])
