@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { MarkExitDialog } from "@/components/hr/MarkExitDialog";
 import { AttendanceLog } from "@/components/hr/AttendanceLog";
+import { EmployeeDocuments } from "@/components/hr/EmployeeDocuments";
 import { useEmployeeProfile, EmployeeProfileTabs } from "@/components/hr/employeeProfileForm";
 import {
   ArrowLeft, Mail, Phone, MapPin, IdCard, Camera, Save, LogOut, Lock,
@@ -263,7 +264,7 @@ const EmployeeProfile = () => {
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList className="h-auto w-full justify-start gap-0 rounded-none border-b border-border bg-transparent p-0">
           {[["about", "About"],
-            ...(canSeePrivate ? [["profile", "Profile"], ["time", "Time"]] as const : [])
+            ...(canSeePrivate ? [["profile", "Profile"], ["time", "Time"], ["documents", "Documents"]] as const : [])
           ].map(([v, label]) => (
             <TabsTrigger key={v} value={v}
               className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none">
@@ -310,6 +311,11 @@ const EmployeeProfile = () => {
                 </p>
               </div>
             )}
+          </TabsContent>
+        )}
+        {canSeePrivate && (
+          <TabsContent value="documents" className="mt-5">
+            <EmployeeDocuments employeeProfileId={id} isSelf={isSelf} />
           </TabsContent>
         )}
       </Tabs>

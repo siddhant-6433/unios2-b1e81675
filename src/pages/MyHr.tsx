@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarDays, Users, Palmtree, Search } from "lucide-react";
 import { AttendanceLog } from "@/components/hr/AttendanceLog";
+import { EmployeeDocuments } from "@/components/hr/EmployeeDocuments";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
@@ -142,6 +143,7 @@ const MyHr = () => {
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
           {[
             ["attendance", "My Attendance"],
+            ["documents", "My Documents"],
             ["leave", "My Leave"],
             ["directory", "Directory"],
             ["holidays", "Holidays"],
@@ -155,6 +157,12 @@ const MyHr = () => {
 
         <TabsContent value="attendance" className="mt-6">
           {user?.id && <AttendanceLog userId={user.id} employeeProfileId={employeeProfileId} />}
+        </TabsContent>
+
+        <TabsContent value="documents" className="mt-6">
+          {employeeProfileId
+            ? <EmployeeDocuments employeeProfileId={employeeProfileId} isSelf />
+            : <Empty icon={Users} text="No employee record is linked to your login yet" />}
         </TabsContent>
 
         <TabsContent value="leave" className="mt-6 space-y-4">

@@ -9381,6 +9381,42 @@ export type Database = {
           },
         ]
       }
+      employee_document_types: {
+        Row: {
+          code: string
+          created_at: string
+          folder: string
+          has_expiry: boolean
+          id: string
+          is_active: boolean
+          is_mandatory: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          folder?: string
+          has_expiry?: boolean
+          id?: string
+          is_active?: boolean
+          is_mandatory?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          folder?: string
+          has_expiry?: boolean
+          id?: string
+          is_active?: boolean
+          is_mandatory?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       employee_documents: {
         Row: {
           created_at: string
@@ -9397,6 +9433,8 @@ export type Database = {
           mime_type: string | null
           notes: string | null
           original_file_name: string | null
+          review_note: string | null
+          status: string
           storage_provider: string
           updated_at: string
           uploaded_at: string
@@ -9420,6 +9458,8 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           original_file_name?: string | null
+          review_note?: string | null
+          status?: string
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
@@ -9443,6 +9483,8 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           original_file_name?: string | null
+          review_note?: string | null
+          status?: string
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
@@ -35319,6 +35361,17 @@ export type Database = {
           work_location: string
         }[]
       }
+      employee_pending_documents: {
+        Args: { _employee_id: string }
+        Returns: {
+          code: string
+          folder: string
+          is_mandatory: boolean
+          name: string
+          review_note: string
+          status: string
+        }[]
+      }
       employee_self_editable_fields: { Args: never; Returns: string[] }
       exam_mark_registered: {
         Args: {
@@ -36764,6 +36817,7 @@ export type Database = {
         Args: { _lead_id: string }
         Returns: undefined
       }
+      reconcile_login_bans_internal: { Args: never; Returns: number }
       reconcile_stale_live_calls: {
         Args: { p_stale_after_seconds?: number }
         Returns: number
@@ -37017,6 +37071,10 @@ export type Database = {
       review_application_edit_request: {
         Args: { _decision: string; _notes?: string; _request_id: string }
         Returns: Json
+      }
+      review_employee_document: {
+        Args: { _document_id: string; _note?: string; _status: string }
+        Returns: undefined
       }
       review_lead_association_request: {
         Args: {
