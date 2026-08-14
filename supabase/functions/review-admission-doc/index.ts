@@ -36,12 +36,17 @@ Deno.serve(async (req) => {
       return json({ error: "application_id, file_path and a valid status are required" }, 400);
     }
 
+    // reviewed_by FK → profiles.id, NOT auth.uid. Resolve the reviewer's
+    // profile row; fall back to null (column is nullable) if none exists so
+    // the review still saves instead of FK-violating.
+    const { data: prof } = await db.from("profiles").select("id").eq("user_id", user.id).maybeSingle();
+
     const { error: upErr } = await db.from("application_doc_reviews").upsert({
       application_id,
       file_path,
       status,
       notes: notes ?? null,
-      reviewed_by: user.id,
+      reviewed_by: prof?.id ?? null,
       reviewed_at: new Date().toISOString(),
     }, { onConflict: "application_id,file_path" });
     if (upErr) return json({ error: `review write failed: ${upErr.message}` }, 500);
