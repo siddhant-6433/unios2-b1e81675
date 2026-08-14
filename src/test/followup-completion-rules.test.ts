@@ -72,13 +72,26 @@ describe("follow-up completion rules", () => {
   });
 
   it("keeps the latest disposition RPC migration on the guarded implementation", () => {
-    expect(latestDispositionMigrationFile).toBe("20260702120000_restore_record_disposition_followup_guard.sql");
+    expect(latestDispositionMigrationFile).toMatch(/_cold_lead_revival_cycle\.sql$/);
     expect(latestDispositionMigration).toContain("p_cnet_appeared           boolean");
     expect(latestDispositionMigration).toContain("p_cahet_registered        boolean");
     expect(latestDispositionMigration).toContain("v_should_clear_followups := p_disposition <> 'not_answered'");
     expect(latestDispositionMigration).toContain("SET scheduled_at = p_followup_at");
     expect(latestDispositionMigration).toContain("GET DIAGNOSTICS v_rescheduled_count = ROW_COUNT");
     expect(latestDispositionMigration).toContain("NOTIFY pgrst, 'reload schema'");
+  });
+
+  it("puts the guard on the 19-arg overload the frontend actually calls", () => {
+    // 20260702120000 restored the guard on the 18-arg overload only, while the
+    // client always sends p_requested_course_text and so hit the unguarded
+    // 19-arg body from 20260701110000. The two must not diverge again.
+    expect(latestDispositionMigration).toContain("p_requested_course_text   text DEFAULT NULL");
+    expect(latestDispositionMigration).toContain("SELECT public.record_disposition_writes(");
+  });
+
+  it("keeps cold revival rounds out of the not-answered reschedule", () => {
+    expect(latestDispositionMigration).toContain("AND type    = 'cold_followup'");
+    expect(latestDispositionMigration).toContain("AND type    <> 'cold_followup'");
   });
 
   it("does not treat call cancellation as a disposition", () => {

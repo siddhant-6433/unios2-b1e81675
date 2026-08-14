@@ -87,6 +87,7 @@ const DISPOSITION_LABELS: Record<string, string> = {
   do_not_contact: "DNC",
   voicemail: "Voicemail",
   busy: "Busy",
+  cold: "Cold",
 };
 
 const DISPOSITION_COLORS: Record<string, string> = {
@@ -99,6 +100,7 @@ const DISPOSITION_COLORS: Record<string, string> = {
   do_not_contact: "bg-destructive/15 text-destructive",
   voicemail: "bg-primary/10 text-primary",
   busy: "bg-warning/10 text-warning-foreground",
+  cold: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
 };
 
 type BreakdownSortCol = "counsellor_name" | "total" | "new_lead" | "called" | "not_called"

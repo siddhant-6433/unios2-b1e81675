@@ -27,6 +27,9 @@ describe("LeadDetail stage model", () => {
   it("uses the shared lead stage order for action gating", () => {
     expect(leadDetailSource).toContain('from "@/lib/leadStages"');
     expect(leadDetailSource).not.toContain("const STAGE_ORDER = [");
-    expect(leadDetailSource).toContain('stageIndex("application_submitted")');
+    // Ordering/gating lives in leadStages, not in a local copy of either the
+    // stage array or a stageIndex helper.
+    expect(leadDetailSource).not.toContain("const stageIndex = ");
+    expect(leadDetailSource).toContain("shouldAutoAdvance");
   });
 });

@@ -29,6 +29,7 @@ const DISPOSITION_LABELS: Record<string, string> = {
   voicemail: "Voicemail",
   busy: "Busy",
   course_not_listed: "Course Not Listed",
+  cold: "Cold — Not Reachable",
 };
 
 const formatFollowupDate = (iso?: string) => {
