@@ -113,6 +113,13 @@ export type Database = {
             foreignKeyName: "abvmu_deposit_claims_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "abvmu_deposit_claims_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -152,6 +159,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "abvmu_deposit_claims_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "abvmu_deposit_claims_offer_letter_id_fkey"
             columns: ["offer_letter_id"]
             isOneToOne: false
@@ -159,11 +173,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "abvmu_deposit_claims_offer_letter_id_fkey"
+            columns: ["offer_letter_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
+          },
+          {
             foreignKeyName: "abvmu_deposit_claims_settlement_payment_id_fkey"
             columns: ["settlement_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "abvmu_deposit_claims_settlement_payment_id_fkey"
+            columns: ["settlement_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
         ]
       }
@@ -379,6 +407,13 @@ export type Database = {
             foreignKeyName: "academic_partner_offer_otps_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_offer_otps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -418,11 +453,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "academic_partner_offer_otps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "academic_partner_offer_otps_offer_letter_id_fkey"
             columns: ["offer_letter_id"]
             isOneToOne: false
             referencedRelation: "offer_letters"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "academic_partner_offer_otps_offer_letter_id_fkey"
+            columns: ["offer_letter_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
           },
           {
             foreignKeyName: "academic_partner_offer_otps_token_fkey"
@@ -581,6 +630,13 @@ export type Database = {
             foreignKeyName: "academic_partner_payouts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -620,11 +676,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "academic_partner_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "academic_partner_payouts_lead_payment_id_fkey"
             columns: ["lead_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
           {
             foreignKeyName: "academic_partner_payouts_partner_id_fkey"
@@ -665,6 +735,13 @@ export type Database = {
             foreignKeyName: "academic_partner_payouts_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -672,7 +749,28 @@ export type Database = {
             foreignKeyName: "academic_partner_payouts_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -778,6 +876,96 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      admission_bypass_audit: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          admission_no: string | null
+          created_at: string
+          doc_snapshot: Json
+          id: string
+          lead_id: string
+          reason: string
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          admission_no?: string | null
+          created_at?: string
+          doc_snapshot?: Json
+          id?: string
+          lead_id: string
+          reason: string
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          admission_no?: string | null
+          created_at?: string
+          doc_snapshot?: Json
+          id?: string
+          lead_id?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "hot_engaged_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "inactive_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "lead_payment_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_breached_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_warning_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+        ]
       }
       admission_sessions: {
         Row: {
@@ -974,6 +1162,13 @@ export type Database = {
             foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1011,6 +1206,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "admissions_ai_reply_examples_source_message_id_fkey"
@@ -1099,6 +1301,13 @@ export type Database = {
             foreignKeyName: "ai_call_logs_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "ai_call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1136,6 +1345,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -1178,6 +1394,13 @@ export type Database = {
             foreignKeyName: "ai_call_queue_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1216,6 +1439,13 @@ export type Database = {
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "ai_call_queue_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
         ]
       }
       ai_call_records: {
@@ -1248,6 +1478,7 @@ export type Database = {
           status: string
           student_connected_at: string | null
           summary: string | null
+          transcribe_attempts: number
           transcript: string | null
           transfer_reason: string | null
         }
@@ -1280,6 +1511,7 @@ export type Database = {
           status?: string
           student_connected_at?: string | null
           summary?: string | null
+          transcribe_attempts?: number
           transcript?: string | null
           transfer_reason?: string | null
         }
@@ -1312,6 +1544,7 @@ export type Database = {
           status?: string
           student_connected_at?: string | null
           summary?: string | null
+          transcribe_attempts?: number
           transcript?: string | null
           transfer_reason?: string | null
         }
@@ -1376,6 +1609,13 @@ export type Database = {
             foreignKeyName: "ai_call_records_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "ai_call_records_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1413,6 +1653,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_records_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -2106,6 +2353,13 @@ export type Database = {
             foreignKeyName: "application_families_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "application_families_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2143,6 +2397,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_families_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -2218,6 +2479,13 @@ export type Database = {
             foreignKeyName: "application_on_behalf_audit_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "application_on_behalf_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2257,11 +2525,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "application_on_behalf_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "application_on_behalf_audit_lead_payment_id_fkey"
             columns: ["lead_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_on_behalf_audit_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
           {
             foreignKeyName: "application_on_behalf_audit_offer_letter_id_fkey"
@@ -2270,6 +2552,13 @@ export type Database = {
             referencedRelation: "offer_letters"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "application_on_behalf_audit_offer_letter_id_fkey"
+            columns: ["offer_letter_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
+          },
         ]
       }
       applications: {
@@ -2277,6 +2566,8 @@ export type Database = {
           aadhaar: string | null
           academic_details: Json | null
           address: Json | null
+          admission_doc_status: Json | null
+          admission_doc_status_at: string | null
           apaar_id: string | null
           applicant_type: string | null
           application_id: string
@@ -2311,6 +2602,7 @@ export type Database = {
           institution_id: string | null
           is_nri: boolean | null
           lead_id: string | null
+          mandatory_docs_complete: boolean
           mother: Json | null
           nationality: string | null
           parent_shared_source: string | null
@@ -2335,6 +2627,8 @@ export type Database = {
           aadhaar?: string | null
           academic_details?: Json | null
           address?: Json | null
+          admission_doc_status?: Json | null
+          admission_doc_status_at?: string | null
           apaar_id?: string | null
           applicant_type?: string | null
           application_id: string
@@ -2369,6 +2663,7 @@ export type Database = {
           institution_id?: string | null
           is_nri?: boolean | null
           lead_id?: string | null
+          mandatory_docs_complete?: boolean
           mother?: Json | null
           nationality?: string | null
           parent_shared_source?: string | null
@@ -2393,6 +2688,8 @@ export type Database = {
           aadhaar?: string | null
           academic_details?: Json | null
           address?: Json | null
+          admission_doc_status?: Json | null
+          admission_doc_status_at?: string | null
           apaar_id?: string | null
           applicant_type?: string | null
           application_id?: string
@@ -2427,6 +2724,7 @@ export type Database = {
           institution_id?: string | null
           is_nri?: boolean | null
           lead_id?: string | null
+          mandatory_docs_complete?: boolean
           mother?: Json | null
           nationality?: string | null
           parent_shared_source?: string | null
@@ -2515,6 +2813,13 @@ export type Database = {
             foreignKeyName: "applications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2552,6 +2857,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "applications_session_id_fkey"
@@ -2686,6 +2998,13 @@ export type Database = {
             foreignKeyName: "apply_magic_tokens_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "apply_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2723,6 +3042,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "apply_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -3031,6 +3357,13 @@ export type Database = {
             foreignKeyName: "attendance_audit_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_audit_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -3038,7 +3371,28 @@ export type Database = {
             foreignKeyName: "attendance_audit_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_audit_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_audit_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_audit_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -3166,6 +3520,13 @@ export type Database = {
             foreignKeyName: "attendance_face_matches_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_face_matches_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -3173,8 +3534,83 @@ export type Database = {
             foreignKeyName: "attendance_face_matches_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_face_matches_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
             referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_face_matches_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "attendance_face_matches_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
+        ]
+      }
+      attendance_overtime: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          date: string
+          employee_profile_id: string
+          hours: number
+          id: string
+          payroll_cycle_id: string | null
+          reason: string | null
+          status: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          date: string
+          employee_profile_id: string
+          hours: number
+          id?: string
+          payroll_cycle_id?: string | null
+          reason?: string | null
+          status?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          date?: string
+          employee_profile_id?: string
+          hours?: number
+          id?: string
+          payroll_cycle_id?: string | null
+          reason?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_overtime_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_overtime_payroll_cycle_id_fkey"
+            columns: ["payroll_cycle_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_cycles"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3265,6 +3701,59 @@ export type Database = {
           },
         ]
       }
+      attendance_regularisations: {
+        Row: {
+          created_at: string
+          date: string
+          employee_profile_id: string
+          id: string
+          reason: string
+          requested_punch_in: string | null
+          requested_punch_out: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          employee_profile_id: string
+          id?: string
+          reason: string
+          requested_punch_in?: string | null
+          requested_punch_out?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          employee_profile_id?: string
+          id?: string
+          reason?: string
+          requested_punch_in?: string | null
+          requested_punch_out?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_regularisations_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attendance_settings: {
         Row: {
           daily_lock_at_time: string
@@ -3340,6 +3829,13 @@ export type Database = {
             foreignKeyName: "automation_rule_executions_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "automation_rule_executions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -3377,6 +3873,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_rule_executions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "automation_rule_executions_rule_id_fkey"
@@ -3605,6 +4108,13 @@ export type Database = {
             foreignKeyName: "cahet_registrations_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "cahet_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -3642,6 +4152,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cahet_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "cahet_registrations_registered_by_fkey"
@@ -3752,6 +4269,13 @@ export type Database = {
             foreignKeyName: "call_logs_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -3789,6 +4313,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -3863,6 +4394,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -3900,6 +4438,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -4043,54 +4588,6 @@ export type Database = {
           },
         ]
       }
-      class_teachers: {
-        Row: {
-          active: boolean
-          batch_id: string
-          created_at: string
-          created_by: string | null
-          id: string
-          section: string | null
-          session_id: string | null
-          teacher_user_id: string
-        }
-        Insert: {
-          active?: boolean
-          batch_id: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          section?: string | null
-          session_id?: string | null
-          teacher_user_id: string
-        }
-        Update: {
-          active?: boolean
-          batch_id?: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          section?: string | null
-          session_id?: string | null
-          teacher_user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "class_teachers_batch_id_fkey"
-            columns: ["batch_id"]
-            isOneToOne: false
-            referencedRelation: "batches"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "class_teachers_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "admission_sessions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       class_periods: {
         Row: {
           active: boolean
@@ -4139,6 +4636,85 @@ export type Database = {
           },
         ]
       }
+      class_teachers: {
+        Row: {
+          active: boolean
+          batch_id: string | null
+          course_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          section: string | null
+          session_id: string | null
+          teacher_user_id: string
+        }
+        Insert: {
+          active?: boolean
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          section?: string | null
+          session_id?: string | null
+          teacher_user_id: string
+        }
+        Update: {
+          active?: boolean
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          section?: string | null
+          session_id?: string | null
+          teacher_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_teachers_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_first_year_fee"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_teachers_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "seat_matrix"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "class_teachers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "admission_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cloud_dialer_pins: {
         Row: {
           created_at: string
@@ -4159,6 +4735,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "cloud_dialer_pins_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "cloud_dialer_pins_lead_id_fkey"
             columns: ["lead_id"]
@@ -4200,6 +4783,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cloud_dialer_pins_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -4417,6 +5007,60 @@ export type Database = {
           },
         ]
       }
+      concession_audit: {
+        Row: {
+          action: string
+          actor_role: string | null
+          actor_user_id: string | null
+          concession_id: string | null
+          created_at: string
+          fee_ledger_id: string | null
+          id: string
+          new_amount: number | null
+          new_type: string | null
+          new_value: number | null
+          old_amount: number | null
+          old_type: string | null
+          old_value: number | null
+          reason: string | null
+          student_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_role?: string | null
+          actor_user_id?: string | null
+          concession_id?: string | null
+          created_at?: string
+          fee_ledger_id?: string | null
+          id?: string
+          new_amount?: number | null
+          new_type?: string | null
+          new_value?: number | null
+          old_amount?: number | null
+          old_type?: string | null
+          old_value?: number | null
+          reason?: string | null
+          student_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_role?: string | null
+          actor_user_id?: string | null
+          concession_id?: string | null
+          created_at?: string
+          fee_ledger_id?: string | null
+          id?: string
+          new_amount?: number | null
+          new_type?: string | null
+          new_value?: number | null
+          old_amount?: number | null
+          old_type?: string | null
+          old_value?: number | null
+          reason?: string | null
+          student_id?: string | null
+        }
+        Relationships: []
+      }
       concessions: {
         Row: {
           approved_by: string | null
@@ -4628,6 +5272,13 @@ export type Database = {
             foreignKeyName: "concessions_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "concessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -4635,7 +5286,28 @@ export type Database = {
             foreignKeyName: "concessions_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "concessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "concessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "concessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -4830,6 +5502,13 @@ export type Database = {
             foreignKeyName: "consultant_credit_note_applications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_credit_note_applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -4869,11 +5548,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "consultant_credit_note_applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "consultant_credit_note_applications_lead_payment_id_fkey"
             columns: ["lead_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_credit_note_applications_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
         ]
       }
@@ -5139,6 +5832,13 @@ export type Database = {
             foreignKeyName: "consultant_fee_collection_remittances_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -5176,6 +5876,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "consultant_fee_collection_remittances_recorded_by_fkey"
@@ -5258,6 +5965,13 @@ export type Database = {
             foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -5265,7 +5979,28 @@ export type Database = {
             foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -5431,6 +6166,13 @@ export type Database = {
             foreignKeyName: "consultant_lead_commissions_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_lead_commissions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -5468,6 +6210,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_lead_commissions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "consultant_lead_commissions_set_by_fkey"
@@ -5729,6 +6478,13 @@ export type Database = {
             foreignKeyName: "consultant_payouts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -5768,11 +6524,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "consultant_payouts_lead_payment_id_fkey"
             columns: ["lead_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
           {
             foreignKeyName: "consultant_payouts_paid_by_fkey"
@@ -6354,6 +7124,13 @@ export type Database = {
             foreignKeyName: "counsellor_score_events_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "counsellor_score_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -6391,6 +7168,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "counsellor_score_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -6566,6 +7350,86 @@ export type Database = {
           },
           {
             foreignKeyName: "course_admission_briefs_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: true
+            referencedRelation: "seat_matrix"
+            referencedColumns: ["course_id"]
+          },
+        ]
+      }
+      course_facts: {
+        Row: {
+          affiliation: string | null
+          age_requirement: string | null
+          course_id: string
+          created_at: string
+          duration: string | null
+          eligibility: string | null
+          entrance_exam: string | null
+          fee_first_year: string | null
+          intake_seats: string | null
+          source: string
+          subjects: string | null
+          updated_at: string
+          updated_by: string | null
+          verified_at: string
+        }
+        Insert: {
+          affiliation?: string | null
+          age_requirement?: string | null
+          course_id: string
+          created_at?: string
+          duration?: string | null
+          eligibility?: string | null
+          entrance_exam?: string | null
+          fee_first_year?: string | null
+          intake_seats?: string | null
+          source?: string
+          subjects?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          verified_at?: string
+        }
+        Update: {
+          affiliation?: string | null
+          age_requirement?: string | null
+          course_id?: string
+          created_at?: string
+          duration?: string | null
+          eligibility?: string | null
+          entrance_exam?: string | null
+          fee_first_year?: string | null
+          intake_seats?: string | null
+          source?: string
+          subjects?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          verified_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "course_facts_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: true
+            referencedRelation: "course_first_year_fee"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "course_facts_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: true
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "course_facts_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: true
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_facts_course_id_fkey"
             columns: ["course_id"]
             isOneToOne: true
             referencedRelation: "seat_matrix"
@@ -6750,7 +7614,6 @@ export type Database = {
           is_active: boolean | null
           kind: string
           maps_cid: string | null
-          marketing_eligibility: string | null
           name: string
           seats: number | null
           slug: string | null
@@ -6787,7 +7650,6 @@ export type Database = {
           is_active?: boolean | null
           kind?: string
           maps_cid?: string | null
-          marketing_eligibility?: string | null
           name: string
           seats?: number | null
           slug?: string | null
@@ -6824,7 +7686,6 @@ export type Database = {
           is_active?: boolean | null
           kind?: string
           maps_cid?: string | null
-          marketing_eligibility?: string | null
           name?: string
           seats?: number | null
           slug?: string | null
@@ -6956,6 +7817,13 @@ export type Database = {
             foreignKeyName: "daily_attendance_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -6963,7 +7831,28 @@ export type Database = {
             foreignKeyName: "daily_attendance_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -7299,6 +8188,13 @@ export type Database = {
             foreignKeyName: "direct_dial_overrides_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "direct_dial_overrides_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -7336,6 +8232,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_dial_overrides_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -7485,6 +8388,13 @@ export type Database = {
             foreignKeyName: "dunning_log_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "dunning_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -7492,7 +8402,28 @@ export type Database = {
             foreignKeyName: "dunning_log_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "dunning_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "dunning_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "dunning_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -7676,6 +8607,13 @@ export type Database = {
             foreignKeyName: "email_campaign_recipients_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "email_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -7713,6 +8651,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -7900,6 +8845,13 @@ export type Database = {
             foreignKeyName: "email_messages_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "email_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -7937,6 +8889,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "email_messages_sent_by_fkey"
@@ -8121,63 +9080,223 @@ export type Database = {
           },
         ]
       }
+      employee_bank_audit: {
+        Row: {
+          action: string
+          changed_at: string
+          changed_by: string | null
+          employee_profile_id: string
+          id: string
+          new_values: Json | null
+          old_values: Json | null
+        }
+        Insert: {
+          action: string
+          changed_at?: string
+          changed_by?: string | null
+          employee_profile_id: string
+          id?: string
+          new_values?: Json | null
+          old_values?: Json | null
+        }
+        Update: {
+          action?: string
+          changed_at?: string
+          changed_by?: string | null
+          employee_profile_id?: string
+          id?: string
+          new_values?: Json | null
+          old_values?: Json | null
+        }
+        Relationships: []
+      }
+      employee_bank_details: {
+        Row: {
+          account_holder_name: string | null
+          account_number: string | null
+          account_type: string | null
+          bank_name: string | null
+          branch: string | null
+          created_at: string
+          employee_profile_id: string
+          id: string
+          ifsc: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          account_holder_name?: string | null
+          account_number?: string | null
+          account_type?: string | null
+          bank_name?: string | null
+          branch?: string | null
+          created_at?: string
+          employee_profile_id: string
+          id?: string
+          ifsc?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          account_holder_name?: string | null
+          account_number?: string | null
+          account_type?: string | null
+          bank_name?: string | null
+          branch?: string | null
+          created_at?: string
+          employee_profile_id?: string
+          id?: string
+          ifsc?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_bank_details_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: true
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_documents: {
         Row: {
           created_at: string
+          doc_category: string | null
           doc_key: string
           employee_id: string
+          expires_on: string | null
           file_name: string
           file_path: string
           file_size: number | null
           file_url: string
           id: string
+          issued_on: string | null
           mime_type: string | null
+          notes: string | null
           original_file_name: string | null
           storage_provider: string
           updated_at: string
           uploaded_at: string
           uploaded_by: string | null
           uploaded_source: string
+          verified_at: string | null
+          verified_by: string | null
         }
         Insert: {
           created_at?: string
+          doc_category?: string | null
           doc_key: string
           employee_id: string
+          expires_on?: string | null
           file_name: string
           file_path: string
           file_size?: number | null
           file_url: string
           id?: string
+          issued_on?: string | null
           mime_type?: string | null
+          notes?: string | null
           original_file_name?: string | null
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
           uploaded_by?: string | null
           uploaded_source?: string
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Update: {
           created_at?: string
+          doc_category?: string | null
           doc_key?: string
           employee_id?: string
+          expires_on?: string | null
           file_name?: string
           file_path?: string
           file_size?: number | null
           file_url?: string
           id?: string
+          issued_on?: string | null
           mime_type?: string | null
+          notes?: string | null
           original_file_name?: string | null
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
           uploaded_by?: string | null
           uploaded_source?: string
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "employee_documents_employee_id_fkey"
             columns: ["employee_id"]
             isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_exits: {
+        Row: {
+          clearance: Json
+          created_at: string
+          created_by: string | null
+          employee_profile_id: string
+          exit_interview_note: string | null
+          exit_type: string
+          final_settlement_amount: number | null
+          id: string
+          last_working_day: string | null
+          notice_waived: boolean
+          reason: string | null
+          resignation_date: string | null
+          settled_on: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          clearance?: Json
+          created_at?: string
+          created_by?: string | null
+          employee_profile_id: string
+          exit_interview_note?: string | null
+          exit_type?: string
+          final_settlement_amount?: number | null
+          id?: string
+          last_working_day?: string | null
+          notice_waived?: boolean
+          reason?: string | null
+          resignation_date?: string | null
+          settled_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          clearance?: Json
+          created_at?: string
+          created_by?: string | null
+          employee_profile_id?: string
+          exit_interview_note?: string | null
+          exit_type?: string
+          final_settlement_amount?: number | null
+          id?: string
+          last_working_day?: string | null
+          notice_waived?: boolean
+          reason?: string | null
+          resignation_date?: string | null
+          settled_on?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_exits_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: true
             referencedRelation: "employee_profiles"
             referencedColumns: ["id"]
           },
@@ -8252,15 +9371,68 @@ export type Database = {
         }
         Relationships: []
       }
+      employee_leave_entitlements: {
+        Row: {
+          available_days: number | null
+          carried_forward: number
+          employee_profile_id: string
+          entitled_days: number
+          id: string
+          leave_type_id: string
+          leave_year: number
+          updated_at: string
+          used_days: number
+        }
+        Insert: {
+          available_days?: number | null
+          carried_forward?: number
+          employee_profile_id: string
+          entitled_days?: number
+          id?: string
+          leave_type_id: string
+          leave_year: number
+          updated_at?: string
+          used_days?: number
+        }
+        Update: {
+          available_days?: number | null
+          carried_forward?: number
+          employee_profile_id?: string
+          entitled_days?: number
+          id?: string
+          leave_type_id?: string
+          leave_year?: number
+          updated_at?: string
+          used_days?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_leave_entitlements_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_leave_entitlements_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_leave_requests: {
         Row: {
           approved_at: string | null
           approved_by: string | null
           created_at: string | null
           days: number
+          employee_profile_id: string | null
           end_date: string
           id: string
           leave_type: string
+          leave_type_id: string | null
           reason: string | null
           start_date: string
           status: string
@@ -8271,9 +9443,11 @@ export type Database = {
           approved_by?: string | null
           created_at?: string | null
           days: number
+          employee_profile_id?: string | null
           end_date: string
           id?: string
           leave_type: string
+          leave_type_id?: string | null
           reason?: string | null
           start_date: string
           status?: string
@@ -8284,42 +9458,115 @@ export type Database = {
           approved_by?: string | null
           created_at?: string | null
           days?: number
+          employee_profile_id?: string | null
           end_date?: string
           id?: string
           leave_type?: string
+          leave_type_id?: string | null
           reason?: string | null
           start_date?: string
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "employee_leave_requests_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_leave_requests_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_profile_change_requests: {
+        Row: {
+          changes: Json
+          created_at: string
+          employee_profile_id: string
+          id: string
+          note: string | null
+          requested_by: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          changes: Json
+          created_at?: string
+          employee_profile_id: string
+          id?: string
+          note?: string | null
+          requested_by?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          changes?: Json
+          created_at?: string
+          employee_profile_id?: string
+          id?: string
+          note?: string | null
+          requested_by?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_profile_change_requests_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       employee_profiles: {
         Row: {
           aadhaar_number: string | null
           blood_group: string | null
           campus_id: string | null
+          confirmed_on: string | null
           created_at: string
           current_address: Json | null
           date_of_birth: string | null
+          date_of_exit: string | null
           date_of_joining: string | null
           department_id: string | null
           designation_id: string | null
           display_name: string | null
           dotted_line_manager: string | null
           education: Json | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
           employee_number: string | null
           employment_status: string | null
           experience: Json | null
           first_name: string | null
           gender: string | null
+          hr_department: string | null
+          hr_sub_department: string | null
           id: string
+          import_batch_id: string | null
           institution_id: string | null
           job_applicant_id: string | null
           job_title: string | null
           job_title_secondary: string | null
           keka_employee_id: string | null
           last_name: string | null
+          leave_plan_id: string | null
+          legal_entity_id: string | null
           marital_status: string | null
           middle_name: string | null
           mobile_number: string | null
@@ -8337,41 +9584,58 @@ export type Database = {
           personal_email: string | null
           photo_url: string | null
           physically_handicapped: boolean | null
+          probation_end_date: string | null
+          probation_status: string | null
           professional_summary: string | null
           reports_to: string | null
+          reports_to_name: string | null
           residence_number: string | null
           time_type: string | null
           updated_at: string
           user_id: string | null
+          verification_status: string
+          verified_at: string | null
+          verified_by: string | null
           work_email: string | null
+          work_location: string | null
           work_number: string | null
+          work_shift_id: string | null
           worker_type: string | null
         }
         Insert: {
           aadhaar_number?: string | null
           blood_group?: string | null
           campus_id?: string | null
+          confirmed_on?: string | null
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
+          date_of_exit?: string | null
           date_of_joining?: string | null
           department_id?: string | null
           designation_id?: string | null
           display_name?: string | null
           dotted_line_manager?: string | null
           education?: Json | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           employee_number?: string | null
           employment_status?: string | null
           experience?: Json | null
           first_name?: string | null
           gender?: string | null
+          hr_department?: string | null
+          hr_sub_department?: string | null
           id?: string
+          import_batch_id?: string | null
           institution_id?: string | null
           job_applicant_id?: string | null
           job_title?: string | null
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          leave_plan_id?: string | null
+          legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
           mobile_number?: string | null
@@ -8389,41 +9653,58 @@ export type Database = {
           personal_email?: string | null
           photo_url?: string | null
           physically_handicapped?: boolean | null
+          probation_end_date?: string | null
+          probation_status?: string | null
           professional_summary?: string | null
           reports_to?: string | null
+          reports_to_name?: string | null
           residence_number?: string | null
           time_type?: string | null
           updated_at?: string
           user_id?: string | null
+          verification_status?: string
+          verified_at?: string | null
+          verified_by?: string | null
           work_email?: string | null
+          work_location?: string | null
           work_number?: string | null
+          work_shift_id?: string | null
           worker_type?: string | null
         }
         Update: {
           aadhaar_number?: string | null
           blood_group?: string | null
           campus_id?: string | null
+          confirmed_on?: string | null
           created_at?: string
           current_address?: Json | null
           date_of_birth?: string | null
+          date_of_exit?: string | null
           date_of_joining?: string | null
           department_id?: string | null
           designation_id?: string | null
           display_name?: string | null
           dotted_line_manager?: string | null
           education?: Json | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           employee_number?: string | null
           employment_status?: string | null
           experience?: Json | null
           first_name?: string | null
           gender?: string | null
+          hr_department?: string | null
+          hr_sub_department?: string | null
           id?: string
+          import_batch_id?: string | null
           institution_id?: string | null
           job_applicant_id?: string | null
           job_title?: string | null
           job_title_secondary?: string | null
           keka_employee_id?: string | null
           last_name?: string | null
+          leave_plan_id?: string | null
+          legal_entity_id?: string | null
           marital_status?: string | null
           middle_name?: string | null
           mobile_number?: string | null
@@ -8441,14 +9722,22 @@ export type Database = {
           personal_email?: string | null
           photo_url?: string | null
           physically_handicapped?: boolean | null
+          probation_end_date?: string | null
+          probation_status?: string | null
           professional_summary?: string | null
           reports_to?: string | null
+          reports_to_name?: string | null
           residence_number?: string | null
           time_type?: string | null
           updated_at?: string
           user_id?: string | null
+          verification_status?: string
+          verified_at?: string | null
+          verified_by?: string | null
           work_email?: string | null
+          work_location?: string | null
           work_number?: string | null
+          work_shift_id?: string | null
           worker_type?: string | null
         }
         Relationships: [
@@ -8513,6 +9802,84 @@ export type Database = {
             columns: ["job_applicant_id"]
             isOneToOne: false
             referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_leave_plan_id_fkey"
+            columns: ["leave_plan_id"]
+            isOneToOne: false
+            referencedRelation: "leave_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_work_shift_id_fkey"
+            columns: ["work_shift_id"]
+            isOneToOne: false
+            referencedRelation: "work_shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_salaries: {
+        Row: {
+          annual_ctc: number | null
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          employee_profile_id: string
+          id: string
+          monthly_gross: number
+          revision_note: string | null
+          salary_structure_id: string | null
+          source: string | null
+        }
+        Insert: {
+          annual_ctc?: number | null
+          created_at?: string
+          created_by?: string | null
+          effective_from: string
+          effective_to?: string | null
+          employee_profile_id: string
+          id?: string
+          monthly_gross: number
+          revision_note?: string | null
+          salary_structure_id?: string | null
+          source?: string | null
+        }
+        Update: {
+          annual_ctc?: number | null
+          created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          employee_profile_id?: string
+          id?: string
+          monthly_gross?: number
+          revision_note?: string | null
+          salary_structure_id?: string | null
+          source?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_salaries_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_salaries_salary_structure_id_fkey"
+            columns: ["salary_structure_id"]
+            isOneToOne: false
+            referencedRelation: "salary_structures"
             referencedColumns: ["id"]
           },
         ]
@@ -8587,6 +9954,13 @@ export type Database = {
             foreignKeyName: "exam_records_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -8594,7 +9968,28 @@ export type Database = {
             foreignKeyName: "exam_records_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -8653,6 +10048,13 @@ export type Database = {
             foreignKeyName: "exam_registrations_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "exam_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -8690,6 +10092,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -8809,6 +10218,13 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -8816,7 +10232,28 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -8881,6 +10318,13 @@ export type Database = {
             foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -8888,7 +10332,28 @@ export type Database = {
             foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_migration_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -8949,6 +10414,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_payments_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
         ]
       }
@@ -9102,6 +10574,13 @@ export type Database = {
             foreignKeyName: "fee_proposals_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "fee_proposals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -9139,6 +10618,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fee_proposals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "fee_proposals_superseded_by_fkey"
@@ -9429,6 +10915,13 @@ export type Database = {
             foreignKeyName: "feedback_responses_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "feedback_responses_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -9466,6 +10959,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_responses_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -9511,6 +11011,13 @@ export type Database = {
             foreignKeyName: "ga_event_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "ga_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -9548,6 +11055,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ga_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -9650,6 +11164,13 @@ export type Database = {
             foreignKeyName: "gate_passes_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "gate_passes_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -9657,7 +11178,28 @@ export type Database = {
             foreignKeyName: "gate_passes_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "gate_passes_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "gate_passes_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "gate_passes_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -9701,6 +11243,39 @@ export type Database = {
           id?: string
           metadata?: Json
           source?: string
+        }
+        Relationships: []
+      }
+      gemini_usage_log: {
+        Row: {
+          created_at: string
+          id: number
+          model: string
+          output_tokens: number
+          prompt_tokens: number
+          source: string
+          thought_tokens: number
+          total_tokens: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          model: string
+          output_tokens?: number
+          prompt_tokens?: number
+          source: string
+          thought_tokens?: number
+          total_tokens?: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          model?: string
+          output_tokens?: number
+          prompt_tokens?: number
+          source?: string
+          thought_tokens?: number
+          total_tokens?: number
         }
         Relationships: []
       }
@@ -9869,6 +11444,13 @@ export type Database = {
             foreignKeyName: "guardian_links_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "guardian_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -9876,8 +11458,94 @@ export type Database = {
             foreignKeyName: "guardian_links_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "guardian_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
             referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "guardian_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "guardian_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
+        ]
+      }
+      holidays: {
+        Row: {
+          campus_id: string | null
+          created_at: string
+          created_by: string | null
+          holiday_date: string
+          id: string
+          institution_id: string | null
+          kind: string
+          name: string
+          notes: string | null
+        }
+        Insert: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name: string
+          notes?: string | null
+        }
+        Update: {
+          campus_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          holiday_date?: string
+          id?: string
+          institution_id?: string | null
+          kind?: string
+          name?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "holidays_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "holidays_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "holidays_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "holidays_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "v_branch_fee_summary"
+            referencedColumns: ["institution_id"]
           },
         ]
       }
@@ -9945,6 +11613,13 @@ export type Database = {
             foreignKeyName: "hostel_allocations_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "hostel_allocations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -9952,7 +11627,28 @@ export type Database = {
             foreignKeyName: "hostel_allocations_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "hostel_allocations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "hostel_allocations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "hostel_allocations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -10124,53 +11820,103 @@ export type Database = {
           },
         ]
       }
-      holidays: {
+      hr_letter_templates: {
         Row: {
-          campus_id: string | null
+          body: string
+          code: string
           created_at: string
-          created_by: string | null
-          holiday_date: string
           id: string
-          institution_id: string | null
-          kind: string
+          is_active: boolean
+          legal_entity_id: string | null
           name: string
-          notes: string | null
+          subject: string | null
+          updated_at: string
         }
         Insert: {
-          campus_id?: string | null
+          body: string
+          code: string
           created_at?: string
-          created_by?: string | null
-          holiday_date: string
           id?: string
-          institution_id?: string | null
-          kind?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
           name: string
-          notes?: string | null
+          subject?: string | null
+          updated_at?: string
         }
         Update: {
-          campus_id?: string | null
+          body?: string
+          code?: string
           created_at?: string
-          created_by?: string | null
-          holiday_date?: string
           id?: string
-          institution_id?: string | null
-          kind?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
           name?: string
-          notes?: string | null
+          subject?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "holidays_campus_id_fkey"
-            columns: ["campus_id"]
+            foreignKeyName: "hr_letter_templates_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
             isOneToOne: false
-            referencedRelation: "campuses"
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_letters: {
+        Row: {
+          body: string
+          created_at: string
+          employee_profile_id: string
+          id: string
+          issued_by: string | null
+          issued_on: string
+          letter_code: string
+          letter_name: string
+          reference_no: string | null
+          subject: string | null
+          template_id: string | null
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          employee_profile_id: string
+          id?: string
+          issued_by?: string | null
+          issued_on?: string
+          letter_code: string
+          letter_name: string
+          reference_no?: string | null
+          subject?: string | null
+          template_id?: string | null
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          employee_profile_id?: string
+          id?: string
+          issued_by?: string | null
+          issued_on?: string
+          letter_code?: string
+          letter_name?: string
+          reference_no?: string | null
+          subject?: string | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_letters_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "holidays_institution_id_fkey"
-            columns: ["institution_id"]
+            foreignKeyName: "hr_letters_template_id_fkey"
+            columns: ["template_id"]
             isOneToOne: false
-            referencedRelation: "institutions"
+            referencedRelation: "hr_letter_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -10244,6 +11990,13 @@ export type Database = {
             foreignKeyName: "ib_action_journal_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_action_journal_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -10251,7 +12004,28 @@ export type Database = {
             foreignKeyName: "ib_action_journal_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_action_journal_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_action_journal_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_action_journal_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -10351,6 +12125,13 @@ export type Database = {
             foreignKeyName: "ib_assessment_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_assessment_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -10358,7 +12139,28 @@ export type Database = {
             foreignKeyName: "ib_assessment_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_assessment_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_assessment_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_assessment_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -10556,6 +12358,13 @@ export type Database = {
             foreignKeyName: "ib_exhibition_students_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_exhibition_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -10563,7 +12372,28 @@ export type Database = {
             foreignKeyName: "ib_exhibition_students_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_exhibition_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_exhibition_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_exhibition_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -10740,6 +12570,13 @@ export type Database = {
             foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -10747,7 +12584,28 @@ export type Database = {
             foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_gradebook_snapshots_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -10823,6 +12681,13 @@ export type Database = {
             foreignKeyName: "ib_idu_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_idu_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -10830,7 +12695,28 @@ export type Database = {
             foreignKeyName: "ib_idu_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_idu_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_idu_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_idu_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -11249,6 +13135,13 @@ export type Database = {
             foreignKeyName: "ib_myp_projects_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_myp_projects_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -11256,7 +13149,28 @@ export type Database = {
             foreignKeyName: "ib_myp_projects_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_myp_projects_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_myp_projects_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_myp_projects_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -11508,6 +13422,13 @@ export type Database = {
             foreignKeyName: "ib_portfolio_entries_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_portfolio_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -11515,7 +13436,28 @@ export type Database = {
             foreignKeyName: "ib_portfolio_entries_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_portfolio_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_portfolio_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_portfolio_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -11612,6 +13554,13 @@ export type Database = {
             foreignKeyName: "ib_report_cards_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -11619,7 +13568,28 @@ export type Database = {
             foreignKeyName: "ib_report_cards_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -11763,6 +13733,13 @@ export type Database = {
             foreignKeyName: "ib_service_as_action_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_service_as_action_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -11770,7 +13747,28 @@ export type Database = {
             foreignKeyName: "ib_service_as_action_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_service_as_action_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_service_as_action_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "ib_service_as_action_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -12191,6 +14189,13 @@ export type Database = {
             foreignKeyName: "incentive_flags_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "incentive_flags_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -12228,6 +14233,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incentive_flags_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "incentive_flags_resolved_by_fkey"
@@ -12385,6 +14397,13 @@ export type Database = {
             foreignKeyName: "incentive_ledger_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "incentive_ledger_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -12422,6 +14441,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incentive_ledger_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -13105,6 +15131,13 @@ export type Database = {
             foreignKeyName: "job_applicants_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -13142,6 +15175,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "job_applicants_source_message_id_fkey"
@@ -13394,6 +15434,13 @@ export type Database = {
             foreignKeyName: "lead_activities_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_activities_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -13431,6 +15478,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_activities_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_activities_user_id_fkey"
@@ -13695,6 +15749,13 @@ export type Database = {
             foreignKeyName: "lead_assignment_history_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_assignment_history_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -13732,6 +15793,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_assignment_history_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_assignment_history_list_assignment_batch_id_fkey"
@@ -13913,6 +15981,13 @@ export type Database = {
             foreignKeyName: "lead_association_requests_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_association_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -13950,6 +16025,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_association_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_association_requests_proposed_campus_id_fkey"
@@ -14161,6 +16243,13 @@ export type Database = {
             foreignKeyName: "lead_counsellors_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_counsellors_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14198,6 +16287,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_counsellors_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -14240,6 +16336,13 @@ export type Database = {
             foreignKeyName: "lead_deletion_requests_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_deletion_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14277,6 +16380,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_deletion_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -14338,6 +16448,13 @@ export type Database = {
             foreignKeyName: "lead_documents_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_documents_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14375,6 +16492,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_documents_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_documents_verified_by_fkey"
@@ -14515,6 +16639,13 @@ export type Database = {
             foreignKeyName: "lead_engagement_events_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_engagement_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14552,6 +16683,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_engagement_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -14597,6 +16735,13 @@ export type Database = {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14634,6 +16779,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_followups_visit_id_fkey"
@@ -14775,20 +16927,108 @@ export type Database = {
       lead_list_members: {
         Row: {
           added_at: string
+          assigned_at: string | null
+          assigned_to: string | null
+          call_log_id: string | null
           lead_id: string
           list_id: string
+          sort_order: number | null
+          work_status: string
+          worked_at: string | null
         }
         Insert: {
           added_at?: string
+          assigned_at?: string | null
+          assigned_to?: string | null
+          call_log_id?: string | null
           lead_id: string
           list_id: string
+          sort_order?: number | null
+          work_status?: string
+          worked_at?: string | null
         }
         Update: {
           added_at?: string
+          assigned_at?: string | null
+          assigned_to?: string | null
+          call_log_id?: string | null
           lead_id?: string
           list_id?: string
+          sort_order?: number | null
+          work_status?: string
+          worked_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "counsellor_dialer_usage"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "counsellor_funnel_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "counsellor_leaderboard"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "counsellor_performance_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "counsellor_tat_defaults"
+            referencedColumns: ["profile_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "staff_incentive_summary"
+            referencedColumns: ["recipient_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "team_leader_defaults_summary"
+            referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_call_log_id_fkey"
+            columns: ["call_log_id"]
+            isOneToOne: false
+            referencedRelation: "call_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_list_members_lead_id_fkey"
             columns: ["lead_id"]
@@ -14832,6 +17072,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "lead_list_members_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "lead_list_members_list_id_fkey"
             columns: ["list_id"]
             isOneToOne: false
@@ -14845,10 +17092,18 @@ export type Database = {
           created_at: string
           created_by: string | null
           description: string | null
+          due_date: string | null
+          filter_definition: Json | null
           filters_snapshot: Json | null
           id: string
+          include_terminal: boolean
+          is_active: boolean
+          last_refreshed_at: string | null
+          list_type: string
           member_count: number
           name: string
+          priority_note: string | null
+          purpose: string
           source: string
           updated_at: string
         }
@@ -14856,10 +17111,18 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          due_date?: string | null
+          filter_definition?: Json | null
           filters_snapshot?: Json | null
           id?: string
+          include_terminal?: boolean
+          is_active?: boolean
+          last_refreshed_at?: string | null
+          list_type?: string
           member_count?: number
           name: string
+          priority_note?: string | null
+          purpose?: string
           source?: string
           updated_at?: string
         }
@@ -14867,10 +17130,18 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          due_date?: string | null
+          filter_definition?: Json | null
           filters_snapshot?: Json | null
           id?: string
+          include_terminal?: boolean
+          is_active?: boolean
+          last_refreshed_at?: string | null
+          list_type?: string
           member_count?: number
           name?: string
+          priority_note?: string | null
+          purpose?: string
           source?: string
           updated_at?: string
         }
@@ -14963,6 +17234,13 @@ export type Database = {
             foreignKeyName: "lead_merges_kept_lead_id_fkey"
             columns: ["kept_lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_merges_kept_lead_id_fkey"
+            columns: ["kept_lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15000,6 +17278,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_merges_kept_lead_id_fkey"
+            columns: ["kept_lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_merges_merged_by_fkey"
@@ -15086,6 +17371,13 @@ export type Database = {
             foreignKeyName: "lead_notes_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15124,6 +17416,13 @@ export type Database = {
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "lead_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
         ]
       }
       lead_payments: {
@@ -15138,7 +17437,7 @@ export type Database = {
           fee_code_id: string | null
           gateway: string | null
           id: string
-          lead_id: string
+          lead_id: string | null
           notes: string | null
           payment_date: string | null
           payment_mode: string
@@ -15147,6 +17446,7 @@ export type Database = {
           receipt_url: string | null
           recorded_by: string | null
           status: string | null
+          student_id: string | null
           transaction_ref: string | null
           type: string
           waiver_reason: string | null
@@ -15162,7 +17462,7 @@ export type Database = {
           fee_code_id?: string | null
           gateway?: string | null
           id?: string
-          lead_id: string
+          lead_id?: string | null
           notes?: string | null
           payment_date?: string | null
           payment_mode: string
@@ -15171,6 +17471,7 @@ export type Database = {
           receipt_url?: string | null
           recorded_by?: string | null
           status?: string | null
+          student_id?: string | null
           transaction_ref?: string | null
           type: string
           waiver_reason?: string | null
@@ -15186,7 +17487,7 @@ export type Database = {
           fee_code_id?: string | null
           gateway?: string | null
           id?: string
-          lead_id?: string
+          lead_id?: string | null
           notes?: string | null
           payment_date?: string | null
           payment_mode?: string
@@ -15195,6 +17496,7 @@ export type Database = {
           receipt_url?: string | null
           recorded_by?: string | null
           status?: string | null
+          student_id?: string | null
           transaction_ref?: string | null
           type?: string
           waiver_reason?: string | null
@@ -15211,6 +17513,13 @@ export type Database = {
             foreignKeyName: "lead_payments_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15248,6 +17557,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "lead_payments_recorded_by_fkey"
@@ -15305,6 +17621,69 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "academic_partner_students"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "library_branch_student_members"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_credit_balances"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
         ]
       }
       lead_payments_audit: {
@@ -15355,6 +17734,122 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_referrals: {
+        Row: {
+          created_at: string
+          id: string
+          lead_id: string
+          outcome_at: string | null
+          partner_id: string
+          partner_notes: string | null
+          referral_note: string | null
+          referred_at: string
+          referred_by: string | null
+          referred_by_name: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lead_id: string
+          outcome_at?: string | null
+          partner_id: string
+          partner_notes?: string | null
+          referral_note?: string | null
+          referred_at?: string
+          referred_by?: string | null
+          referred_by_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lead_id?: string
+          outcome_at?: string | null
+          partner_id?: string
+          partner_notes?: string | null
+          referral_note?: string | null
+          referred_at?: string
+          referred_by?: string | null
+          referred_by_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "hot_engaged_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "inactive_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "lead_payment_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_breached_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_warning_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_partner_id_fkey"
+            columns: ["partner_id"]
+            isOneToOne: false
+            referencedRelation: "academic_partner_dashboard"
+            referencedColumns: ["partner_id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_partner_id_fkey"
+            columns: ["partner_id"]
+            isOneToOne: false
+            referencedRelation: "academic_partners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_source_audit: {
         Row: {
           changed_at: string
@@ -15381,6 +17876,13 @@ export type Database = {
           old_source?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_source_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_source_audit_lead_id_fkey"
             columns: ["lead_id"]
@@ -15422,6 +17924,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_source_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -15874,6 +18383,13 @@ export type Database = {
             foreignKeyName: "leads_mirror_lead_id_fkey"
             columns: ["mirror_lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "leads_mirror_lead_id_fkey"
+            columns: ["mirror_lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15913,6 +18429,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "leads_mirror_lead_id_fkey"
+            columns: ["mirror_lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "leads_session_id_fkey"
             columns: ["session_id"]
             isOneToOne: false
@@ -15920,6 +18443,139 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      leave_plans: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          is_default: boolean
+          legal_entity_id: string | null
+          name: string
+          year_start_month: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          legal_entity_id?: string | null
+          name: string
+          year_start_month?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          legal_entity_id?: string | null
+          name?: string
+          year_start_month?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_plans_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_types: {
+        Row: {
+          accrual: string
+          annual_days: number
+          carry_forward_max: number
+          code: string
+          display_order: number
+          id: string
+          is_paid: boolean
+          leave_plan_id: string
+          name: string
+          requires_approval: boolean
+        }
+        Insert: {
+          accrual?: string
+          annual_days?: number
+          carry_forward_max?: number
+          code: string
+          display_order?: number
+          id?: string
+          is_paid?: boolean
+          leave_plan_id: string
+          name: string
+          requires_approval?: boolean
+        }
+        Update: {
+          accrual?: string
+          annual_days?: number
+          carry_forward_max?: number
+          code?: string
+          display_order?: number
+          id?: string
+          is_paid?: boolean
+          leave_plan_id?: string
+          name?: string
+          requires_approval?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_types_leave_plan_id_fkey"
+            columns: ["leave_plan_id"]
+            isOneToOne: false
+            referencedRelation: "leave_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      legal_entities: {
+        Row: {
+          created_at: string
+          esi_code: string | null
+          gstin: string | null
+          id: string
+          is_active: boolean
+          legal_name: string | null
+          name: string
+          pan: string | null
+          pf_code: string | null
+          registered_address: string | null
+          tan: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          esi_code?: string | null
+          gstin?: string | null
+          id?: string
+          is_active?: boolean
+          legal_name?: string | null
+          name: string
+          pan?: string | null
+          pf_code?: string | null
+          registered_address?: string | null
+          tan?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          esi_code?: string | null
+          gstin?: string | null
+          id?: string
+          is_active?: boolean
+          legal_name?: string | null
+          name?: string
+          pan?: string | null
+          pf_code?: string | null
+          registered_address?: string | null
+          tan?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       library_audit_events: {
         Row: {
@@ -15969,6 +18625,66 @@ export type Database = {
           },
         ]
       }
+      library_authors: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          normalized_name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          normalized_name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          normalized_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      library_book_authors: {
+        Row: {
+          author_id: string
+          book_id: string
+          position: number | null
+        }
+        Insert: {
+          author_id: string
+          book_id: string
+          position?: number | null
+        }
+        Update: {
+          author_id?: string
+          book_id?: string
+          position?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "library_book_authors_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "library_authors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_book_authors_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "library_books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       library_books: {
         Row: {
           authors: string[]
@@ -15984,13 +18700,17 @@ export type Database = {
           isbn_13: string | null
           language: string | null
           metadata: Json
+          pages: number | null
+          place: string | null
           published_year: number | null
           publisher: string | null
+          publisher_id: string | null
           subject: string | null
           subtitle: string | null
           tags: string[]
           title: string
           updated_at: string
+          volume: string | null
         }
         Insert: {
           authors?: string[]
@@ -16006,13 +18726,17 @@ export type Database = {
           isbn_13?: string | null
           language?: string | null
           metadata?: Json
+          pages?: number | null
+          place?: string | null
           published_year?: number | null
           publisher?: string | null
+          publisher_id?: string | null
           subject?: string | null
           subtitle?: string | null
           tags?: string[]
           title: string
           updated_at?: string
+          volume?: string | null
         }
         Update: {
           authors?: string[]
@@ -16028,15 +18752,27 @@ export type Database = {
           isbn_13?: string | null
           language?: string | null
           metadata?: Json
+          pages?: number | null
+          place?: string | null
           published_year?: number | null
           publisher?: string | null
+          publisher_id?: string | null
           subject?: string | null
           subtitle?: string | null
           tags?: string[]
           title?: string
           updated_at?: string
+          volume?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "library_books_publisher_id_fkey"
+            columns: ["publisher_id"]
+            isOneToOne: false
+            referencedRelation: "library_publishers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       library_branch_courses: {
         Row: {
@@ -16108,6 +18844,53 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+        ]
+      }
+      library_branch_institutions: {
+        Row: {
+          branch_id: string
+          created_at: string
+          institution_id: string
+        }
+        Insert: {
+          branch_id: string
+          created_at?: string
+          institution_id: string
+        }
+        Update: {
+          branch_id?: string
+          created_at?: string
+          institution_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "library_branch_institutions_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "library_branch_student_members"
+            referencedColumns: ["branch_id"]
+          },
+          {
+            foreignKeyName: "library_branch_institutions_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "library_branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_branch_institutions_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_branch_institutions_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "v_branch_fee_summary"
+            referencedColumns: ["institution_id"]
           },
         ]
       }
@@ -16235,12 +19018,16 @@ export type Database = {
           cover_image_url: string | null
           created_at: string
           duplicate_of: string | null
+          edition: string | null
+          enrichment_status: string | null
           id: string
           import_row: Json
           isbn: string | null
           language: string | null
           matched_book_id: string | null
           notes: string | null
+          pages: number | null
+          place: string | null
           published_year: number | null
           publisher: string | null
           purchase_price: number | null
@@ -16256,6 +19043,7 @@ export type Database = {
           suggested_metadata: Json
           title: string | null
           updated_at: string
+          volume: string | null
         }
         Insert: {
           accession_no?: string | null
@@ -16270,12 +19058,16 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           duplicate_of?: string | null
+          edition?: string | null
+          enrichment_status?: string | null
           id?: string
           import_row?: Json
           isbn?: string | null
           language?: string | null
           matched_book_id?: string | null
           notes?: string | null
+          pages?: number | null
+          place?: string | null
           published_year?: number | null
           publisher?: string | null
           purchase_price?: number | null
@@ -16291,6 +19083,7 @@ export type Database = {
           suggested_metadata?: Json
           title?: string | null
           updated_at?: string
+          volume?: string | null
         }
         Update: {
           accession_no?: string | null
@@ -16305,12 +19098,16 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           duplicate_of?: string | null
+          edition?: string | null
+          enrichment_status?: string | null
           id?: string
           import_row?: Json
           isbn?: string | null
           language?: string | null
           matched_book_id?: string | null
           notes?: string | null
+          pages?: number | null
+          place?: string | null
           published_year?: number | null
           publisher?: string | null
           purchase_price?: number | null
@@ -16326,6 +19123,7 @@ export type Database = {
           suggested_metadata?: Json
           title?: string | null
           updated_at?: string
+          volume?: string | null
         }
         Relationships: [
           {
@@ -16368,6 +19166,39 @@ export type Database = {
             columns: ["matched_book_id"]
             isOneToOne: false
             referencedRelation: "library_books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      library_enrich_branch_settings: {
+        Row: {
+          auto_enabled: boolean
+          branch_id: string
+          updated_at: string
+        }
+        Insert: {
+          auto_enabled?: boolean
+          branch_id: string
+          updated_at?: string
+        }
+        Update: {
+          auto_enabled?: boolean
+          branch_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "library_enrich_branch_settings_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: true
+            referencedRelation: "library_branch_student_members"
+            referencedColumns: ["branch_id"]
+          },
+          {
+            foreignKeyName: "library_enrich_branch_settings_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: true
+            referencedRelation: "library_branches"
             referencedColumns: ["id"]
           },
         ]
@@ -16493,6 +19324,13 @@ export type Database = {
             foreignKeyName: "library_fines_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_fines_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -16500,7 +19338,28 @@ export type Database = {
             foreignKeyName: "library_fines_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_fines_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_fines_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_fines_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -16904,8 +19763,22 @@ export type Database = {
             foreignKeyName: "library_members_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_members_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_members_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
           },
           {
             foreignKeyName: "library_members_student_id_fkey"
@@ -16914,7 +19787,48 @@ export type Database = {
             referencedRelation: "v_student_institution"
             referencedColumns: ["student_id"]
           },
+          {
+            foreignKeyName: "library_members_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "library_members_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
         ]
+      }
+      library_publishers: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          normalized_name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          normalized_name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          normalized_name?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       library_settings: {
         Row: {
@@ -17156,6 +20070,13 @@ export type Database = {
             foreignKeyName: "marks_entries_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "marks_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -17163,7 +20084,28 @@ export type Database = {
             foreignKeyName: "marks_entries_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "marks_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "marks_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "marks_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -17222,6 +20164,13 @@ export type Database = {
             foreignKeyName: "mess_attendance_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -17229,7 +20178,28 @@ export type Database = {
             foreignKeyName: "mess_attendance_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -17343,6 +20313,13 @@ export type Database = {
             foreignKeyName: "mess_subscriptions_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_subscriptions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -17350,7 +20327,28 @@ export type Database = {
             foreignKeyName: "mess_subscriptions_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_subscriptions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_subscriptions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "mess_subscriptions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -17465,6 +20463,13 @@ export type Database = {
             foreignKeyName: "meta_event_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "meta_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -17502,6 +20507,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -17559,6 +20571,13 @@ export type Database = {
             foreignKeyName: "meta_lead_events_ingested_lead_id_fkey"
             columns: ["ingested_lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "meta_lead_events_ingested_lead_id_fkey"
+            columns: ["ingested_lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -17596,6 +20615,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_lead_events_ingested_lead_id_fkey"
+            columns: ["ingested_lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -17795,6 +20821,13 @@ export type Database = {
             foreignKeyName: "notifications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "notifications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -17832,6 +20865,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -17888,6 +20928,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "offer_letters"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "offer_letter_edit_requests_offer_letter_id_fkey"
+            columns: ["offer_letter_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
           },
         ]
       }
@@ -18029,6 +21076,13 @@ export type Database = {
             foreignKeyName: "offer_letters_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "offer_letters_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -18066,6 +21120,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "offer_letters_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "offer_letters_session_id_fkey"
@@ -18154,6 +21215,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "offer_letters"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "offer_waivers_offer_letter_id_fkey"
+            columns: ["offer_letter_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
           },
           {
             foreignKeyName: "offer_waivers_source_fee_proposal_id_fkey"
@@ -18537,6 +21605,13 @@ export type Database = {
             foreignKeyName: "optional_fee_heads_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "optional_fee_heads_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -18544,7 +21619,28 @@ export type Database = {
             foreignKeyName: "optional_fee_heads_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "optional_fee_heads_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "optional_fee_heads_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "optional_fee_heads_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -18771,6 +21867,13 @@ export type Database = {
             foreignKeyName: "payment_links_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "payment_links_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -18810,11 +21913,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payment_links_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "payment_links_lead_payment_id_fkey"
             columns: ["lead_payment_id"]
             isOneToOne: false
             referencedRelation: "lead_payments"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_links_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
           },
           {
             foreignKeyName: "payment_links_student_id_fkey"
@@ -18841,6 +21958,13 @@ export type Database = {
             foreignKeyName: "payment_links_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payment_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -18848,7 +21972,28 @@ export type Database = {
             foreignKeyName: "payment_links_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payment_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payment_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payment_links_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -18996,6 +22141,13 @@ export type Database = {
             foreignKeyName: "payments_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -19003,8 +22155,275 @@ export type Database = {
             foreignKeyName: "payments_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
             referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "payments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
+        ]
+      }
+      payroll_cycle_audit: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          from_status: string | null
+          id: string
+          payroll_cycle_id: string
+          to_status: string
+          totals: Json | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          from_status?: string | null
+          id?: string
+          payroll_cycle_id: string
+          to_status: string
+          totals?: Json | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          from_status?: string | null
+          id?: string
+          payroll_cycle_id?: string
+          to_status?: string
+          totals?: Json | null
+        }
+        Relationships: []
+      }
+      payroll_cycles: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          legal_entity_id: string
+          locked_at: string | null
+          locked_by: string | null
+          name: string | null
+          note: string | null
+          paid_at: string | null
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legal_entity_id: string
+          locked_at?: string | null
+          locked_by?: string | null
+          name?: string | null
+          note?: string | null
+          paid_at?: string | null
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legal_entity_id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          name?: string | null
+          note?: string | null
+          paid_at?: string | null
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_cycles_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_line_components: {
+        Row: {
+          amount: number
+          component_code: string
+          component_name: string
+          display_order: number
+          id: string
+          kind: string
+          payroll_line_id: string
+        }
+        Insert: {
+          amount?: number
+          component_code: string
+          component_name: string
+          display_order?: number
+          id?: string
+          kind: string
+          payroll_line_id: string
+        }
+        Update: {
+          amount?: number
+          component_code?: string
+          component_name?: string
+          display_order?: number
+          id?: string
+          kind?: string
+          payroll_line_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_line_components_payroll_line_id_fkey"
+            columns: ["payroll_line_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_lines: {
+        Row: {
+          adhoc_deductions: number
+          adhoc_earnings: number
+          created_at: string
+          designation: string | null
+          employee_name: string | null
+          employee_number: string | null
+          employee_profile_id: string
+          employer_cost: number
+          gross_earnings: number
+          id: string
+          lop_days: number
+          monthly_gross: number
+          net_pay: number
+          note: string | null
+          on_hold: boolean
+          payable_days: number
+          payroll_cycle_id: string
+          total_days: number
+          total_deductions: number
+          updated_at: string
+        }
+        Insert: {
+          adhoc_deductions?: number
+          adhoc_earnings?: number
+          created_at?: string
+          designation?: string | null
+          employee_name?: string | null
+          employee_number?: string | null
+          employee_profile_id: string
+          employer_cost?: number
+          gross_earnings?: number
+          id?: string
+          lop_days?: number
+          monthly_gross?: number
+          net_pay?: number
+          note?: string | null
+          on_hold?: boolean
+          payable_days?: number
+          payroll_cycle_id: string
+          total_days?: number
+          total_deductions?: number
+          updated_at?: string
+        }
+        Update: {
+          adhoc_deductions?: number
+          adhoc_earnings?: number
+          created_at?: string
+          designation?: string | null
+          employee_name?: string | null
+          employee_number?: string | null
+          employee_profile_id?: string
+          employer_cost?: number
+          gross_earnings?: number
+          id?: string
+          lop_days?: number
+          monthly_gross?: number
+          net_pay?: number
+          note?: string | null
+          on_hold?: boolean
+          payable_days?: number
+          payroll_cycle_id?: string
+          total_days?: number
+          total_deductions?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_lines_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_lines_payroll_cycle_id_fkey"
+            columns: ["payroll_cycle_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_cycles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_statutory_config: {
+        Row: {
+          created_at: string
+          effective_from: string
+          id: string
+          key: string
+          legal_entity_id: string | null
+          note: string | null
+          numeric_value: number
+        }
+        Insert: {
+          created_at?: string
+          effective_from?: string
+          id?: string
+          key: string
+          legal_entity_id?: string | null
+          note?: string | null
+          numeric_value: number
+        }
+        Update: {
+          created_at?: string
+          effective_from?: string
+          id?: string
+          key?: string
+          legal_entity_id?: string | null
+          note?: string | null
+          numeric_value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_statutory_config_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -19294,6 +22713,13 @@ export type Database = {
             foreignKeyName: "profile_queries_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "profile_queries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -19331,6 +22757,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_queries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -19581,6 +23014,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "refund_requests_lead_payment_id_fkey"
+            columns: ["lead_payment_id"]
+            isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["lead_payment_id"]
+          },
+          {
             foreignKeyName: "refund_requests_payment_id_fkey"
             columns: ["payment_id"]
             isOneToOne: false
@@ -19592,15 +23032,21 @@ export type Database = {
       report_cards: {
         Row: {
           cgpa: number | null
+          class_teacher_comment: string | null
+          coordinator_comment: string | null
           course_id: string
           generated_at: string
           grade: string | null
           id: string
           percentage: number | null
+          published_at: string | null
           result_status: string
           session_id: string | null
           sgpa: number | null
           sheet_json: Json
+          signed_off_at: string | null
+          signed_off_by: string | null
+          status: string
           student_id: string
           term: string
           total_marks: number | null
@@ -19608,15 +23054,21 @@ export type Database = {
         }
         Insert: {
           cgpa?: number | null
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
           course_id: string
           generated_at?: string
           grade?: string | null
           id?: string
           percentage?: number | null
+          published_at?: string | null
           result_status?: string
           session_id?: string | null
           sgpa?: number | null
           sheet_json?: Json
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           student_id: string
           term: string
           total_marks?: number | null
@@ -19624,15 +23076,21 @@ export type Database = {
         }
         Update: {
           cgpa?: number | null
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
           course_id?: string
           generated_at?: string
           grade?: string | null
           id?: string
           percentage?: number | null
+          published_at?: string | null
           result_status?: string
           session_id?: string | null
           sgpa?: number | null
           sheet_json?: Json
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           student_id?: string
           term?: string
           total_marks?: number | null
@@ -19699,6 +23157,13 @@ export type Database = {
             foreignKeyName: "report_cards_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -19706,7 +23171,28 @@ export type Database = {
             foreignKeyName: "report_cards_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "report_cards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -19944,6 +23430,122 @@ export type Database = {
           },
         ]
       }
+      salary_components: {
+        Row: {
+          basis_code: string | null
+          calculation: string
+          code: string
+          created_at: string
+          display_order: number
+          id: string
+          is_active: boolean
+          kind: string
+          name: string
+          prorates: boolean
+          taxable: boolean
+        }
+        Insert: {
+          basis_code?: string | null
+          calculation: string
+          code: string
+          created_at?: string
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          kind: string
+          name: string
+          prorates?: boolean
+          taxable?: boolean
+        }
+        Update: {
+          basis_code?: string | null
+          calculation?: string
+          code?: string
+          created_at?: string
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          kind?: string
+          name?: string
+          prorates?: boolean
+          taxable?: boolean
+        }
+        Relationships: []
+      }
+      salary_structure_components: {
+        Row: {
+          component_id: string
+          id: string
+          salary_structure_id: string
+          value: number
+        }
+        Insert: {
+          component_id: string
+          id?: string
+          salary_structure_id: string
+          value?: number
+        }
+        Update: {
+          component_id?: string
+          id?: string
+          salary_structure_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salary_structure_components_component_id_fkey"
+            columns: ["component_id"]
+            isOneToOne: false
+            referencedRelation: "salary_components"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "salary_structure_components_salary_structure_id_fkey"
+            columns: ["salary_structure_id"]
+            isOneToOne: false
+            referencedRelation: "salary_structures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      salary_structures: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          legal_entity_id: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          legal_entity_id?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salary_structures_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       score_penalty_log: {
         Row: {
           counsellor_id: string
@@ -20030,6 +23632,13 @@ export type Database = {
             foreignKeyName: "score_penalty_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "score_penalty_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -20067,6 +23676,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "score_penalty_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -20387,6 +24003,13 @@ export type Database = {
             foreignKeyName: "staff_incentive_payouts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "staff_incentive_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -20424,6 +24047,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_incentive_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "staff_incentive_payouts_plan_id_fkey"
@@ -20749,6 +24379,13 @@ export type Database = {
             foreignKeyName: "student_audit_log_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_audit_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -20756,7 +24393,28 @@ export type Database = {
             foreignKeyName: "student_audit_log_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_audit_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_audit_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_audit_log_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -20842,6 +24500,13 @@ export type Database = {
             foreignKeyName: "student_contact_change_requests_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_contact_change_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -20849,7 +24514,28 @@ export type Database = {
             foreignKeyName: "student_contact_change_requests_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_contact_change_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_contact_change_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_contact_change_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -20920,6 +24606,13 @@ export type Database = {
             foreignKeyName: "student_documents_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_documents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -20927,7 +24620,28 @@ export type Database = {
             foreignKeyName: "student_documents_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_documents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_documents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_documents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21066,6 +24780,13 @@ export type Database = {
             foreignKeyName: "student_exam_forms_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_exam_forms_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21073,7 +24794,28 @@ export type Database = {
             foreignKeyName: "student_exam_forms_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_exam_forms_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_exam_forms_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_exam_forms_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -21164,8 +24906,22 @@ export type Database = {
             foreignKeyName: "student_fee_visibility_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
             referencedRelation: "students"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
           },
           {
             foreignKeyName: "student_fee_visibility_student_id_fkey"
@@ -21174,10 +24930,25 @@ export type Database = {
             referencedRelation: "v_student_institution"
             referencedColumns: ["student_id"]
           },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "v_unaccounted_ledger_credit"
+            referencedColumns: ["student_id"]
+          },
         ]
       }
       student_magic_tokens: {
         Row: {
+          auto_send: boolean
           claimed_at: string | null
           claimed_user_id: string | null
           created_at: string
@@ -21190,6 +24961,7 @@ export type Database = {
           token: string
         }
         Insert: {
+          auto_send?: boolean
           claimed_at?: string | null
           claimed_user_id?: string | null
           created_at?: string
@@ -21202,6 +24974,7 @@ export type Database = {
           token?: string
         }
         Update: {
+          auto_send?: boolean
           claimed_at?: string | null
           claimed_user_id?: string | null
           created_at?: string
@@ -21214,6 +24987,13 @@ export type Database = {
           token?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "student_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "student_magic_tokens_lead_id_fkey"
             columns: ["lead_id"]
@@ -21257,6 +25037,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "student_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "student_magic_tokens_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
@@ -21281,6 +25068,13 @@ export type Database = {
             foreignKeyName: "student_magic_tokens_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_magic_tokens_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21288,7 +25082,28 @@ export type Database = {
             foreignKeyName: "student_magic_tokens_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_magic_tokens_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_magic_tokens_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_magic_tokens_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21377,6 +25192,13 @@ export type Database = {
             foreignKeyName: "student_payment_intents_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_payment_intents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21384,7 +25206,28 @@ export type Database = {
             foreignKeyName: "student_payment_intents_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_payment_intents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_payment_intents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_payment_intents_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21473,6 +25316,13 @@ export type Database = {
             foreignKeyName: "student_photo_jobs_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_photo_jobs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21480,7 +25330,28 @@ export type Database = {
             foreignKeyName: "student_photo_jobs_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_photo_jobs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_photo_jobs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_photo_jobs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21548,6 +25419,13 @@ export type Database = {
             foreignKeyName: "student_referrals_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "student_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -21585,6 +25463,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "student_referrals_referred_campus_id_fkey"
@@ -21653,6 +25538,13 @@ export type Database = {
             foreignKeyName: "student_referrals_referrer_student_id_fkey"
             columns: ["referrer_student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_referrals_referrer_student_id_fkey"
+            columns: ["referrer_student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21660,7 +25552,28 @@ export type Database = {
             foreignKeyName: "student_referrals_referrer_student_id_fkey"
             columns: ["referrer_student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_referrals_referrer_student_id_fkey"
+            columns: ["referrer_student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_referrals_referrer_student_id_fkey"
+            columns: ["referrer_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_referrals_referrer_student_id_fkey"
+            columns: ["referrer_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21837,6 +25750,13 @@ export type Database = {
             foreignKeyName: "student_tc_requests_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_tc_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21844,7 +25764,28 @@ export type Database = {
             foreignKeyName: "student_tc_requests_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_tc_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_tc_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_tc_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -21981,6 +25922,13 @@ export type Database = {
             foreignKeyName: "student_university_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_university_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -21988,7 +25936,28 @@ export type Database = {
             foreignKeyName: "student_university_results_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_university_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_university_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_university_results_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -22423,6 +26392,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -22460,6 +26436,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "students_session_id_fkey"
@@ -22870,6 +26853,13 @@ export type Database = {
             foreignKeyName: "token_fee_reminders_sent_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "token_fee_reminders_sent_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -22909,11 +26899,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "token_fee_reminders_sent_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "token_fee_reminders_sent_offer_id_fkey"
             columns: ["offer_id"]
             isOneToOne: false
             referencedRelation: "offer_letters"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "token_fee_reminders_sent_offer_id_fkey"
+            columns: ["offer_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["offer_letter_id"]
           },
         ]
       }
@@ -22989,6 +26993,13 @@ export type Database = {
             foreignKeyName: "updeled_registrations_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "updeled_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -23026,6 +27037,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "updeled_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "updeled_registrations_registered_by_fkey"
@@ -23358,6 +27376,13 @@ export type Database = {
             foreignKeyName: "vehicle_passes_owner_student_id_fkey"
             columns: ["owner_student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "vehicle_passes_owner_student_id_fkey"
+            columns: ["owner_student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -23365,7 +27390,28 @@ export type Database = {
             foreignKeyName: "vehicle_passes_owner_student_id_fkey"
             columns: ["owner_student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "vehicle_passes_owner_student_id_fkey"
+            columns: ["owner_student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "vehicle_passes_owner_student_id_fkey"
+            columns: ["owner_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "vehicle_passes_owner_student_id_fkey"
+            columns: ["owner_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -23634,6 +27680,13 @@ export type Database = {
             foreignKeyName: "visit_followup_nudges_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "visit_followup_nudges_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -23671,6 +27724,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visit_followup_nudges_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -23761,6 +27821,13 @@ export type Database = {
             foreignKeyName: "visitor_passes_host_student_id_fkey"
             columns: ["host_student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "visitor_passes_host_student_id_fkey"
+            columns: ["host_student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -23768,7 +27835,28 @@ export type Database = {
             foreignKeyName: "visitor_passes_host_student_id_fkey"
             columns: ["host_student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "visitor_passes_host_student_id_fkey"
+            columns: ["host_student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "visitor_passes_host_student_id_fkey"
+            columns: ["host_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "visitor_passes_host_student_id_fkey"
+            columns: ["host_student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
           {
@@ -23953,6 +28041,13 @@ export type Database = {
             foreignKeyName: "voice_knowledge_gaps_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "voice_knowledge_gaps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -23990,6 +28085,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_knowledge_gaps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -24119,6 +28221,13 @@ export type Database = {
             foreignKeyName: "waitlist_entries_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "waitlist_entries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24156,6 +28265,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "waitlist_entries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -24189,6 +28305,13 @@ export type Database = {
             foreignKeyName: "web_conversations_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "web_conversations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24226,6 +28349,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "web_conversations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -24283,6 +28413,13 @@ export type Database = {
             foreignKeyName: "whatsapp_ai_drafts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_ai_drafts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24320,6 +28457,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_ai_drafts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -24395,6 +28539,13 @@ export type Database = {
             foreignKeyName: "whatsapp_automation_events_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_automation_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24432,6 +28583,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_automation_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "whatsapp_automation_events_message_id_fkey"
@@ -24531,6 +28689,13 @@ export type Database = {
             foreignKeyName: "whatsapp_campaign_recipients_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24568,6 +28733,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "whatsapp_campaign_recipients_response_message_id_fkey"
@@ -24852,6 +29024,13 @@ export type Database = {
             foreignKeyName: "whatsapp_conversation_state_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_conversation_state_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24889,6 +29068,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_conversation_state_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -24994,6 +29180,13 @@ export type Database = {
             foreignKeyName: "whatsapp_inbound_events_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_inbound_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25031,6 +29224,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_inbound_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "whatsapp_inbound_events_message_id_fkey"
@@ -25152,6 +29352,13 @@ export type Database = {
             foreignKeyName: "whatsapp_message_buffers_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_message_buffers_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25189,6 +29396,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_message_buffers_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -25326,6 +29540,13 @@ export type Database = {
             foreignKeyName: "whatsapp_messages_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25363,6 +29584,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "whatsapp_messages_read_by_fkey"
@@ -25538,6 +29766,13 @@ export type Database = {
             foreignKeyName: "whatsapp_outbound_context_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_outbound_context_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25575,6 +29810,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_outbound_context_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "whatsapp_outbound_context_message_id_fkey"
@@ -25663,6 +29905,13 @@ export type Database = {
             foreignKeyName: "whatsapp_scheduled_sends_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25700,6 +29949,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -25748,6 +30004,13 @@ export type Database = {
             foreignKeyName: "whatsapp_sla_alerts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_sla_alerts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25787,6 +30050,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "whatsapp_sla_alerts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+          {
             foreignKeyName: "whatsapp_sla_alerts_notification_id_fkey"
             columns: ["notification_id"]
             isOneToOne: false
@@ -25803,6 +30073,7 @@ export type Database = {
           created_at: string
           description: string | null
           display_name: string
+          media_url: string | null
           show_in_lead_picker: boolean
           template_key: string
           updated_at: string
@@ -25814,6 +30085,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           display_name: string
+          media_url?: string | null
           show_in_lead_picker?: boolean
           template_key: string
           updated_at?: string
@@ -25825,6 +30097,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           display_name?: string
+          media_url?: string | null
           show_in_lead_picker?: boolean
           template_key?: string
           updated_at?: string
@@ -25888,6 +30161,48 @@ export type Database = {
           status_updated_at?: string | null
           submitted_at?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      work_shifts: {
+        Row: {
+          break_minutes: number
+          created_at: string
+          end_time: string
+          full_day_hours: number
+          grace_minutes: number
+          half_day_hours: number
+          id: string
+          is_active: boolean
+          name: string
+          start_time: string
+          weekly_offs: number[]
+        }
+        Insert: {
+          break_minutes?: number
+          created_at?: string
+          end_time: string
+          full_day_hours?: number
+          grace_minutes?: number
+          half_day_hours?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          start_time: string
+          weekly_offs?: number[]
+        }
+        Update: {
+          break_minutes?: number
+          created_at?: string
+          end_time?: string
+          full_day_hours?: number
+          grace_minutes?: number
+          half_day_hours?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          start_time?: string
+          weekly_offs?: number[]
         }
         Relationships: []
       }
@@ -26108,6 +30423,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -26145,6 +30467,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -26256,6 +30585,13 @@ export type Database = {
             foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -26293,6 +30629,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "admissions_ai_reply_examples_source_message_id_fkey"
@@ -26412,6 +30755,74 @@ export type Database = {
           lead_id: string | null
         }
         Relationships: []
+      }
+      cold_cycle_state: {
+        Row: {
+          cold_at: string | null
+          counsellor_id: string | null
+          has_open_round: boolean | null
+          lead_id: string | null
+          responded: boolean | null
+          rounds_spent: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_dialer_usage"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_funnel_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_leaderboard"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_performance_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_tat_defaults"
+            referencedColumns: ["profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "staff_incentive_summary"
+            referencedColumns: ["recipient_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "team_leader_defaults_summary"
+            referencedColumns: ["counsellor_profile_id"]
+          },
+        ]
       }
       consultant_credit_note_summary: {
         Row: {
@@ -26540,6 +30951,13 @@ export type Database = {
             foreignKeyName: "consultant_payouts_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -26577,6 +30995,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -26773,6 +31198,8 @@ export type Database = {
       }
       course_marketing_info: {
         Row: {
+          affiliation: string | null
+          age_requirement: string | null
           apply_url: string | null
           campus_id: string | null
           campus_name: string | null
@@ -26782,9 +31209,15 @@ export type Database = {
           course_summary: string | null
           cover_image_url: string | null
           description: string | null
+          duration_text: string | null
           duration_years: number | null
           eligibility: string | null
+          entrance_exam: string | null
+          facts_verified_at: string | null
+          fee_first_year: string | null
           google_maps_url: string | null
+          intake_seats: string | null
+          subject_requirement: string | null
           video_url_en: string | null
           video_url_hi: string | null
         }
@@ -26812,6 +31245,13 @@ export type Database = {
           type: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
@@ -26853,6 +31293,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -27106,6 +31553,13 @@ export type Database = {
             foreignKeyName: "job_applicants_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27143,6 +31597,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
         ]
       }
@@ -27299,6 +31760,13 @@ export type Database = {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27336,6 +31804,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -27446,6 +31921,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27483,6 +31965,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -27921,6 +32410,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27959,6 +32455,88 @@ export type Database = {
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+        ]
+      }
+      student_fee_reconciliation: {
+        Row: {
+          candidate_lead_id: string | null
+          candidate_lead_payments: number | null
+          candidate_lead_waivers: number | null
+          confirmed_payments: number | null
+          difference: number | null
+          issue: string | null
+          lead_id: string | null
+          ledger_paid: number | null
+          ledger_rows: number | null
+          student_id: string | null
+          student_name: string | null
+          student_no: string | null
+          student_status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "hot_engaged_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "inactive_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "lead_payment_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_breached_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_warning_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
         ]
       }
       team_leader_defaults_summary: {
@@ -27977,6 +32555,80 @@ export type Database = {
           total_defaults: number | null
         }
         Relationships: []
+      }
+      unapplied_lead_payments: {
+        Row: {
+          amount: number | null
+          applied_amount: number | null
+          applied_to_ledger: boolean | null
+          created_at: string | null
+          lead_id: string | null
+          lead_name: string | null
+          lead_payment_id: string | null
+          lead_phone: string | null
+          payment_type: string | null
+          student_id: string | null
+          student_name: string | null
+          unapplied_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "hot_engaged_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "inactive_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "lead_payment_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_breached_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "sla_warning_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
+          },
+        ]
       }
       unassigned_leads_bucket: {
         Row: {
@@ -28079,6 +32731,18 @@ export type Database = {
         }
         Relationships: []
       }
+      v_duplicate_payments: {
+        Row: {
+          kind: string | null
+          lead_id: string | null
+          lead_name: string | null
+          match_key: string | null
+          payment_count: number | null
+          payment_ids: string[] | null
+          total_amount: number | null
+        }
+        Relationships: []
+      }
       v_fee_ledger_with_inst: {
         Row: {
           ageing_bucket: string | null
@@ -28142,6 +32806,13 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -28149,7 +32820,28 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -28207,6 +32899,13 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -28214,7 +32913,28 @@ export type Database = {
             foreignKeyName: "fee_ledger_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "fee_ledger_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -28281,6 +33001,13 @@ export type Database = {
             foreignKeyName: "student_fee_visibility_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: true
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
             referencedRelation: "students"
             referencedColumns: ["id"]
           },
@@ -28288,7 +33015,28 @@ export type Database = {
             foreignKeyName: "student_fee_visibility_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: true
+            referencedRelation: "unapplied_lead_payments"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
             referencedRelation: "v_student_institution"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "v_student_offer_waivers"
+            referencedColumns: ["student_id"]
+          },
+          {
+            foreignKeyName: "student_fee_visibility_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
           },
         ]
@@ -28352,6 +33100,23 @@ export type Database = {
           },
         ]
       }
+      v_student_offer_waivers: {
+        Row: {
+          amount: number | null
+          approved_by_name: string | null
+          created_at: string | null
+          offer_letter_id: string | null
+          reason: string | null
+          rejection_reason: string | null
+          requested_by_name: string | null
+          requested_by_role: string | null
+          status: string | null
+          student_id: string | null
+          term: string | null
+          waiver_id: string | null
+        }
+        Relationships: []
+      }
       v_timetable_room_capacity: {
         Row: {
           allocated_strength: number | null
@@ -28373,6 +33138,18 @@ export type Database = {
           },
         ]
       }
+      v_unaccounted_ledger_credit: {
+        Row: {
+          admission_no: string | null
+          ledger_paid: number | null
+          linked_to_payments: number | null
+          pre_admission_no: string | null
+          student_id: string | null
+          student_name: string | null
+          unaccounted: number | null
+        }
+        Relationships: []
+      }
       visit_funnel_leads: {
         Row: {
           checked_in_at: string | null
@@ -28384,6 +33161,13 @@ export type Database = {
           visit_status: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
@@ -28425,6 +33209,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -28518,6 +33309,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28555,6 +33353,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -28648,6 +33453,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28685,6 +33497,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -28777,6 +33596,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28814,6 +33640,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sla_warning_leads"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "student_fee_reconciliation"
+            referencedColumns: ["candidate_lead_id"]
           },
           {
             foreignKeyName: "leads_counsellor_id_fkey"
@@ -29050,6 +33883,15 @@ export type Database = {
               stage: string
             }[]
           }
+      academic_partner_update_referral: {
+        Args: {
+          _notes?: string
+          _partner_id?: string
+          _referral_id: string
+          _status: string
+        }
+        Returns: undefined
+      }
       action_badge_counts: {
         Args: { p_include_unassigned?: boolean; p_scope_counsellor_id?: string }
         Returns: Json
@@ -29158,6 +34000,10 @@ export type Database = {
         Args: { _show_archived?: boolean }
         Returns: Json
       }
+      admission_bypass_generate_an: {
+        Args: { _lead_id: string; _reason: string }
+        Returns: string
+      }
       admissions_followup_bucket_counts: {
         Args: { p_campus_id?: string; p_counsellor_id?: string }
         Returns: Json
@@ -29214,6 +34060,10 @@ export type Database = {
           old_stage: Database["public"]["Enums"]["lead_stage"]
         }[]
       }
+      apply_profile_change_request: {
+        Args: { _approve: boolean; _note?: string; _request_id: string }
+        Returns: undefined
+      }
       apply_student_credit: {
         Args: {
           _amount?: number
@@ -29223,6 +34073,10 @@ export type Database = {
           _source_payment_id?: string
         }
         Returns: Json
+      }
+      approve_attendance_regularisation: {
+        Args: { _approve: boolean; _ids: string[]; _note?: string }
+        Returns: number
       }
       approve_pgdm_certificate: {
         Args: { _approval_notes?: string; _request_id: string }
@@ -29275,7 +34129,14 @@ export type Database = {
         Returns: Json
       }
       assign_lead_list_round_robin: {
-        Args: { _counsellor_ids: string[]; _list_id: string }
+        Args: {
+          _counsellor_ids: string[]
+          _due_date?: string
+          _include_terminal?: boolean
+          _list_id: string
+          _only_unassigned?: boolean
+          _priority_note?: string
+        }
         Returns: {
           assigned_count: number
           batch_id: string
@@ -29292,6 +34153,7 @@ export type Database = {
         Args: { _request_id: string }
         Returns: string
       }
+      assignable_counsellors: { Args: never; Returns: Json }
       attendance_pct_last_n_class_days: {
         Args: { _batch_id: string; _faculty_user_id?: string; _n_days?: number }
         Returns: number
@@ -29403,6 +34265,8 @@ export type Database = {
           team_today: number
         }[]
       }
+      call_list_overview: { Args: { p_include_done?: boolean }; Returns: Json }
+      call_list_progress: { Args: { p_list_id: string }; Returns: Json }
       call_log_metrics: {
         Args: {
           p_counsellor_id?: string
@@ -29435,6 +34299,7 @@ export type Database = {
       can_collect_fee: { Args: { _user: string }; Returns: boolean }
       can_create_cash_receipt: { Args: { _campus_id?: string }; Returns: Json }
       can_manage_fee_structure: { Args: { _user: string }; Returns: boolean }
+      can_manage_lead_lists: { Args: never; Returns: boolean }
       can_manage_library: { Args: never; Returns: boolean }
       can_operate_library: { Args: never; Returns: boolean }
       can_reallocate_fee: { Args: { _user: string }; Returns: boolean }
@@ -29451,8 +34316,10 @@ export type Database = {
         Returns: number
       }
       cashier_search: {
-        Args: { _q: string }
+        Args: { _active_only?: boolean; _include_leads?: boolean; _q: string }
         Returns: {
+          campus: string
+          course: string
           id: string
           identifier: string
           identifier_label: string
@@ -29541,6 +34408,10 @@ export type Database = {
         }[]
       }
       cloud_dialer_bootstrap: { Args: never; Returns: Json }
+      cloud_dialer_campaign_queue: {
+        Args: { p_counsellor_id?: string; p_limit?: number; p_list_id: string }
+        Returns: Json
+      }
       cloud_dialer_list_queue: {
         Args: { p_counsellor_id?: string; p_limit?: number; p_mode?: string }
         Returns: Json
@@ -29561,6 +34432,10 @@ export type Database = {
           _criterion_total: number
           _subject_group_id: string
         }
+        Returns: number
+      }
+      concession_effective_amount: {
+        Args: { _total: number; _type: string; _value: number }
         Returns: number
       }
       consultant_fee_students: { Args: never; Returns: Json }
@@ -29707,6 +34582,10 @@ export type Database = {
         Returns: Json
       }
       dialer_find_lead_by_phone: { Args: { _phone: string }; Returns: Json }
+      edit_fee_concession: {
+        Args: { _id: string; _reason: string; _type: string; _value: number }
+        Returns: undefined
+      }
       edit_lead_payment: {
         Args: {
           _amount: number
@@ -29728,7 +34607,7 @@ export type Database = {
           fee_code_id: string | null
           gateway: string | null
           id: string
-          lead_id: string
+          lead_id: string | null
           notes: string | null
           payment_date: string | null
           payment_mode: string
@@ -29737,6 +34616,7 @@ export type Database = {
           receipt_url: string | null
           recorded_by: string | null
           status: string | null
+          student_id: string | null
           transaction_ref: string | null
           type: string
           waiver_reason: string | null
@@ -29748,6 +34628,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      employee_self_editable_fields: { Args: never; Returns: string[] }
       exam_mark_registered: {
         Args: {
           p_document_url?: string
@@ -29811,6 +34692,10 @@ export type Database = {
       }
       fee_reconciliation_report: { Args: never; Returns: Json }
       finance_summary: { Args: { _campus_ids?: string[] }; Returns: Json }
+      find_auth_user_by_email_or_phone: {
+        Args: { _email?: string; _phone?: string }
+        Returns: string
+      }
       find_lead_duplicates: {
         Args: {
           p_email?: string
@@ -29889,6 +34774,7 @@ export type Database = {
         Returns: undefined
       }
       fn_cleanup_stale_ai_calls: { Args: never; Returns: undefined }
+      fn_cold_lead_cycle: { Args: never; Returns: Json }
       fn_counsellor_targets: {
         Args: { p_counsellor_id: string; p_month: string }
         Returns: Json
@@ -29897,7 +34783,15 @@ export type Database = {
         Args: { p_counsellor_id: string; p_within_min?: number }
         Returns: number
       }
+      fn_course_affiliation_label: {
+        Args: { p_course_id: string }
+        Returns: string
+      }
       fn_course_base_incentive: { Args: { p_course_id: string }; Returns: Json }
+      fn_course_facts: {
+        Args: { p_course_id: string; p_student_name?: string }
+        Returns: Json
+      }
       fn_ga_relay_post: {
         Args: {
           _event_name: string
@@ -29930,6 +34824,7 @@ export type Database = {
         Returns: string
       }
       fn_invoke_personal_doc_reminders: { Args: never; Returns: undefined }
+      fn_issue_admission_no: { Args: { _lead_id: string }; Returns: string }
       fn_lead_earns_incentive: { Args: { p_lead_id: string }; Returns: boolean }
       fn_lead_source_class: { Args: { p_source: string }; Returns: Json }
       fn_mark_overdue_fees: { Args: never; Returns: undefined }
@@ -29952,6 +34847,10 @@ export type Database = {
       }
       fn_resolve_course_info_params: {
         Args: { p_lead_id: string }
+        Returns: Json
+      }
+      fn_resolve_course_info_params_by_course: {
+        Args: { p_course_id: string; p_student_name?: string }
         Returns: Json
       }
       fn_resolve_course_info_video_params: {
@@ -29988,6 +34887,10 @@ export type Database = {
         Returns: Json
       }
       generate_family_application_id: { Args: never; Returns: string }
+      generate_hr_letter: {
+        Args: { _employee_profile_id: string; _template_code: string }
+        Returns: string
+      }
       generate_video_bill: {
         Args: {
           _brand: Database["public"]["Enums"]["video_brand"]
@@ -30057,6 +34960,8 @@ export type Database = {
           aadhaar: string | null
           academic_details: Json | null
           address: Json | null
+          admission_doc_status: Json | null
+          admission_doc_status_at: string | null
           apaar_id: string | null
           applicant_type: string | null
           application_id: string
@@ -30091,6 +34996,7 @@ export type Database = {
           institution_id: string | null
           is_nri: boolean | null
           lead_id: string | null
+          mandatory_docs_complete: boolean
           mother: Json | null
           nationality: string | null
           parent_shared_source: string | null
@@ -30434,6 +35340,10 @@ export type Database = {
           unread_count: number
         }[]
       }
+      grant_leave_entitlements: {
+        Args: { _leave_plan_id: string; _leave_year: number }
+        Returns: number
+      }
       has_course_allow: {
         Args: { _course_id: string; _user_id: string }
         Returns: boolean
@@ -30450,6 +35360,10 @@ export type Database = {
         Args: { _institution_id: string; _user_id: string }
         Returns: boolean
       }
+      has_permission: {
+        Args: { _perm: string; _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -30462,7 +35376,7 @@ export type Database = {
         Returns: boolean
       }
       hr_staff_directory: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           campus: string
           department: string
@@ -30472,10 +35386,6 @@ export type Database = {
           user_id: string
           work_email: string
         }[]
-      }
-      teaches_student: {
-        Args: { _student_id: string; _user_id: string }
-        Returns: boolean
       }
       insert_lead: {
         Args: {
@@ -30511,7 +35421,13 @@ export type Database = {
         Args: { p_course_id: string }
         Returns: boolean
       }
+      is_class_teacher_of: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_day_closed: { Args: { _campus_id?: string }; Returns: boolean }
       is_deled_course: { Args: { p_course_id: string }; Returns: boolean }
+      is_family_of_student: { Args: { _student_id: string }; Returns: boolean }
       is_fee_hidden_for_student: {
         Args: { _student_id: string }
         Returns: boolean
@@ -30523,6 +35439,8 @@ export type Database = {
         Returns: boolean
       }
       is_staff_incentive_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_staff_user: { Args: never; Returns: boolean }
+      issue_student_login_link: { Args: { _student_id: string }; Returns: Json }
       lead_abvmu_approved_credit: {
         Args: { _lead_id: string }
         Returns: number
@@ -30601,6 +35519,10 @@ export type Database = {
             }
           }
       lead_detail: { Args: { p_lead_id: string }; Returns: Json }
+      lead_docs_ready_for_admission: {
+        Args: { _lead_id: string }
+        Returns: boolean
+      }
       lead_fee_policy: { Args: { _lead_id: string }; Returns: Json }
       lead_fee_preview: {
         Args: { _lead_id: string }
@@ -30626,6 +35548,10 @@ export type Database = {
           institution_name: string
         }[]
       }
+      lead_matches_filter: {
+        Args: { _f: Json; _lead: Database["public"]["Tables"]["leads"]["Row"] }
+        Returns: boolean
+      }
       lead_post_scholarship_year_1: {
         Args: { _lead_id: string }
         Returns: number
@@ -30644,8 +35570,9 @@ export type Database = {
           _head_id: string
           _note?: string
           _student_id: string
+          _terms?: string[]
         }
-        Returns: string
+        Returns: string[]
       }
       library_approve_digitization_record: {
         Args: {
@@ -30653,8 +35580,11 @@ export type Database = {
           _authors_text?: string
           _category?: string
           _condition?: string
+          _edition?: string
           _isbn?: string
           _language?: string
+          _pages?: number
+          _place?: string
           _published_year?: number
           _publisher?: string
           _purchase_price?: number
@@ -30663,6 +35593,7 @@ export type Database = {
           _shelf_location?: string
           _subject?: string
           _title?: string
+          _volume?: string
         }
         Returns: {
           accession_no: string
@@ -30671,9 +35602,62 @@ export type Database = {
         }[]
       }
       library_assess_loan_fine: { Args: { _loan_id: string }; Returns: number }
+      library_author_duplicate_pairs: {
+        Args: { _threshold?: number }
+        Returns: {
+          id_a: string
+          id_b: string
+          name_a: string
+          name_b: string
+          sim: number
+        }[]
+      }
+      library_branch_institution_ids: {
+        Args: { _branch_id: string }
+        Returns: string[]
+      }
+      library_clean_author_name: { Args: { _name: string }; Returns: string }
       library_course_belongs_to_institution: {
         Args: { _course_id: string; _institution_id: string }
         Returns: boolean
+      }
+      library_course_serves_branch: {
+        Args: { _branch_id: string; _course_id: string }
+        Returns: boolean
+      }
+      library_delete_digitization_records: {
+        Args: { _record_ids: string[] }
+        Returns: number
+      }
+      library_enrich_status: {
+        Args: never
+        Returns: {
+          enabled: boolean
+          enriched: number
+          last_processed: string
+          last_run: string
+          minutes: number
+          no_match: number
+          remaining: number
+        }[]
+      }
+      library_enrich_status_by_branch: {
+        Args: never
+        Returns: {
+          auto_enabled: boolean
+          branch_id: string
+          branch_name: string
+          enriched: number
+          no_match: number
+          remaining: number
+        }[]
+      }
+      library_get_enrich_cron: {
+        Args: never
+        Returns: {
+          enabled: boolean
+          minutes: number
+        }[]
       }
       library_get_or_create_student_member: {
         Args: { _student_id: string }
@@ -30688,16 +35672,60 @@ export type Database = {
         }
         Returns: string
       }
+      library_list_authors: {
+        Args: { _limit?: number; _search?: string }
+        Returns: {
+          book_count: number
+          id: string
+          name: string
+        }[]
+      }
+      library_list_publishers: {
+        Args: { _limit?: number; _search?: string }
+        Returns: {
+          book_count: number
+          id: string
+          name: string
+        }[]
+      }
       library_mark_digitization_duplicate: {
         Args: { _duplicate_of?: string; _notes?: string; _record_id: string }
+        Returns: undefined
+      }
+      library_merge_authors: {
+        Args: { _keep: string; _merge: string[] }
+        Returns: undefined
+      }
+      library_merge_publishers: {
+        Args: { _keep: string; _merge: string[] }
         Returns: undefined
       }
       library_next_accession_no: {
         Args: { _branch_id: string; _prefix?: string }
         Returns: string
       }
+      library_normalize_name: { Args: { _name: string }; Returns: string }
+      library_normalize_publisher: { Args: { _name: string }; Returns: string }
+      library_publisher_duplicate_pairs: {
+        Args: { _threshold?: number }
+        Returns: {
+          id_a: string
+          id_b: string
+          name_a: string
+          name_b: string
+          sim: number
+        }[]
+      }
       library_reject_digitization_record: {
         Args: { _notes?: string; _record_id: string }
+        Returns: undefined
+      }
+      library_rename_author: {
+        Args: { _id: string; _name: string }
+        Returns: undefined
+      }
+      library_rename_publisher: {
+        Args: { _id: string; _name: string }
         Returns: undefined
       }
       library_return_by_accession: {
@@ -30707,6 +35735,14 @@ export type Database = {
           loan_id: string
         }[]
       }
+      library_set_branch_enrich: {
+        Args: { _branch_id: string; _enabled: boolean }
+        Returns: undefined
+      }
+      library_set_enrich_cron: {
+        Args: { _enabled: boolean; _minutes?: number }
+        Returns: undefined
+      }
       library_student_can_borrow_from_branch: {
         Args: { _branch_id: string; _student_id: string }
         Returns: boolean
@@ -30714,6 +35750,22 @@ export type Database = {
       library_student_has_unpaid_dues: {
         Args: { _student_id: string }
         Returns: boolean
+      }
+      library_sync_book_authors: {
+        Args: { _authors: string[]; _book_id: string }
+        Returns: undefined
+      }
+      library_sync_book_publisher: {
+        Args: { _book_id: string; _name: string }
+        Returns: undefined
+      }
+      library_upsert_author: {
+        Args: { _name: string; _threshold?: number }
+        Returns: string
+      }
+      library_upsert_publisher: {
+        Args: { _name: string; _threshold?: number }
+        Returns: string
       }
       library_user_can_access_branch: {
         Args: { _action?: string; _branch_id: string; _user_id: string }
@@ -30726,6 +35778,18 @@ export type Database = {
       library_user_has_any_assignment: {
         Args: { _action?: string; _user_id: string }
         Returns: boolean
+      }
+      list_pending_an_generation: {
+        Args: never
+        Returns: {
+          admission_doc_status: Json
+          application_id: string
+          course: string
+          lead_id: string
+          name: string
+          pre_admission_no: string
+          student_id: string
+        }[]
       }
       list_photo_day_staff: {
         Args: never
@@ -30761,6 +35825,7 @@ export type Database = {
         Args: { _family_id: string; _paid_at?: string; _payment_ref: string }
         Returns: undefined
       }
+      mark_call_list_undialable: { Args: { _list_id: string }; Returns: number }
       mark_consultant_payout_paid: {
         Args: {
           _note?: string
@@ -30854,6 +35919,7 @@ export type Database = {
         Args: { _student_id: string }
         Returns: Json
       }
+      my_call_lists: { Args: never; Returns: Json }
       my_tat_defaults: {
         Args: { p_scope_counsellor_id?: string }
         Returns: Json
@@ -30867,6 +35933,10 @@ export type Database = {
       normalize_student_service_course: {
         Args: { _value: string }
         Returns: string
+      }
+      notify_pending_an_generation: {
+        Args: { _lead_id: string }
+        Returns: undefined
       }
       notify_pgdm_certificate_workflow: {
         Args: { _event: string; _request_id: string }
@@ -30908,6 +35978,22 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      payroll_uncovered_employees: {
+        Args: {
+          _legal_entity_id: string
+          _period_end: string
+          _period_start: string
+        }
+        Returns: {
+          campus_id: string
+          department_id: string
+          designation: string
+          employee_name: string
+          employee_number: string
+          employee_profile_id: string
+          worker_type: string
+        }[]
+      }
       pending_followups_payload: {
         Args: {
           p_page?: number
@@ -30928,11 +36014,28 @@ export type Database = {
         }
         Returns: Json
       }
+      populate_payroll_cycle: {
+        Args: {
+          _campus_ids?: string[]
+          _cycle_id: string
+          _department_ids?: string[]
+          _worker_types?: string[]
+        }
+        Returns: number
+      }
+      preview_call_list_assignment: {
+        Args: { _include_terminal?: boolean; _list_id: string }
+        Returns: Json
+      }
       promote_from_waitlist: {
         Args: { p_campus_id?: string; p_course_id: string }
         Returns: string
       }
       provision_student_fees: { Args: { _lead_id: string }; Returns: Json }
+      provision_student_fees_for_student: {
+        Args: { _student_id: string }
+        Returns: Json
+      }
       recalculate_offer_letter_net_fee: {
         Args: { _offer_letter_id: string }
         Returns: undefined
@@ -31037,6 +36140,10 @@ export type Database = {
             }
             Returns: string
           }
+      refer_lead_to_partner: {
+        Args: { _lead_id: string; _note?: string; _partner_id?: string }
+        Returns: string
+      }
       refresh_email_campaign_engagement_counts: {
         Args: { _campaign_id: string }
         Returns: undefined
@@ -31096,6 +36203,14 @@ export type Database = {
         Args: { _notes?: string; _request_id: string }
         Returns: undefined
       }
+      remove_fee_charge: {
+        Args: { _fee_ledger_id: string; _reason?: string }
+        Returns: undefined
+      }
+      remove_fee_concession: {
+        Args: { _id: string; _reason?: string }
+        Returns: undefined
+      }
       report_meta_leadgen_silence: { Args: never; Returns: undefined }
       report_stale_orphan_applications: { Args: never; Returns: undefined }
       request_application_edit_access: {
@@ -31138,6 +36253,10 @@ export type Database = {
       resend_payment_notification: {
         Args: { _mode?: string; _payment_id: string }
         Returns: undefined
+      }
+      resolve_dynamic_list_members: {
+        Args: { _list_id: string }
+        Returns: Json
       }
       review_admissions_ai_reply_example: {
         Args: {
@@ -31198,6 +36317,10 @@ export type Database = {
       revoke_application_edit_unlock: {
         Args: { _application_id: string }
         Returns: undefined
+      }
+      revoke_offer_waiver: {
+        Args: { _reason: string; _waiver_id: string }
+        Returns: Json
       }
       save_academic_partner_logo: {
         Args: { _logo_file_path: string; _partner_id: string }
@@ -31351,6 +36474,8 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      send_student_claim_link: { Args: { _token_id: string }; Returns: Json }
+      send_student_login_link: { Args: { _token_id: string }; Returns: Json }
       set_applicant_deadline: {
         Args: { _key: string; _value: string }
         Returns: undefined
@@ -31393,6 +36518,10 @@ export type Database = {
           _payment_ref?: string
         }
         Returns: Json
+      }
+      skip_call_list_member: {
+        Args: { p_lead_id: string; p_list_id: string }
+        Returns: undefined
       }
       snapshot_and_reset_pg_stat_statements: {
         Args: { p_limit?: number }
@@ -31452,6 +36581,26 @@ export type Database = {
       }
       student_fee_credit_balance: { Args: { _id: string }; Returns: Json }
       student_fee_due_summary: { Args: { _student_id: string }; Returns: Json }
+      student_fee_terms: {
+        Args: { _student_id: string }
+        Returns: {
+          due_date: string
+          rows: number
+          term: string
+        }[]
+      }
+      student_letterhead: {
+        Args: { _student_id: string }
+        Returns: {
+          address: string
+          campus_name: string
+          institution_name: string
+        }[]
+      }
+      student_profile_for_viewer: {
+        Args: { _student_id: string }
+        Returns: Json
+      }
       student_service_assignable_handlers: {
         Args: never
         Returns: {
@@ -31512,6 +36661,14 @@ export type Database = {
         Returns: undefined
       }
       tc_academic_year: { Args: { _d: string }; Returns: string }
+      teaches_student: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
+      teaches_subject_of: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
       transfer_counsellor_account: {
         Args: {
           disable_source?: boolean
@@ -31737,6 +36894,14 @@ export type Database = {
         }
         Returns: string
       }
+      whatsapp_inbox_category_counts: {
+        Args: { p_business_key?: string; p_counsellor_id?: string }
+        Returns: {
+          category: string
+          conversations: number
+          unread_messages: number
+        }[]
+      }
       whatsapp_inbox_page: {
         Args: {
           p_business_number?: string
@@ -31777,6 +36942,19 @@ export type Database = {
           reply_window_open: boolean
           unread_count: number
           unreplied_count: number
+        }[]
+      }
+      whatsapp_reply_state_counts: {
+        Args: {
+          p_business_key?: string
+          p_counsellor_id?: string
+          p_include_outbound_only?: boolean
+        }
+        Returns: {
+          awaiting_them: number
+          needs_reply: number
+          total: number
+          unread_messages: number
         }[]
       }
       whatsapp_stable_conversation_key: {

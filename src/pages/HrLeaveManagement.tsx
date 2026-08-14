@@ -1,4 +1,5 @@
 import { PageLoader } from "@/components/ui/page-loader";
+import { lazy, Suspense } from "react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,6 +11,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+const LeavePlansPanel = lazy(() =>
+  import("@/components/hr/LeavePlansPanel").then((m) => ({ default: m.LeavePlansPanel })));
 
 interface LeaveRequest {
   id: string;
@@ -34,7 +38,7 @@ const statusStyles: Record<string, string> = {
 const HrLeaveManagement = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [tab, setTab] = useState<"pending" | "all">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "plans">("pending");
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -108,6 +112,10 @@ const HrLeaveManagement = () => {
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <CalendarOff className="h-4 w-4" /> All Requests
           </button>
+          <button onClick={() => setTab("plans")}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "plans" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            <Users className="h-4 w-4" /> Leave Plans
+          </button>
         </div>
 
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -117,7 +125,11 @@ const HrLeaveManagement = () => {
         </div>
       </div>
 
-      {loading ? (
+      {tab === "plans" ? (
+        <Suspense fallback={<PageLoader />}>
+          <LeavePlansPanel />
+        </Suspense>
+      ) : loading ? (
         <PageLoader />
       ) : (
         <Card className="border-border/60 shadow-none overflow-hidden">

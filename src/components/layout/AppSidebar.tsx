@@ -154,6 +154,7 @@ const hrSubMenu: MenuItem[] = [
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
+  { title: "Payroll", url: "/hr-payroll", icon: IndianRupee, permission: "hr:payroll_run" },
 ];
 
 const managementMenu: MenuItem[] = [
