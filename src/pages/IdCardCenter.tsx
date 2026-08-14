@@ -352,85 +352,131 @@ const IdCardCenter = () => {
     }));
   }
 
+  interface RoleRow { user_id: string; role: string }
+  interface EmpRow {
+    id: string; user_id: string | null; employee_number: string | null;
+    display_name: string | null; mobile_number: string | null; work_email: string | null;
+    job_title: string | null; photo_url: string | null; blood_group: string | null;
+    date_of_birth: string | null; hr_department: string | null; work_location: string | null;
+  }
+  interface ProfileRow {
+    user_id: string; display_name: string | null; phone: string | null; email: string | null;
+    department: string | null; institution: string | null; campus: string | null;
+    avatar_url: string | null; employee_id: string | null;
+  }
+
   async function fetchEmployees() {
-    // Roles live in user_roles (a user may hold several), NOT on profiles. Staff = anyone with a
-    // role outside the applicant/partner set. RLS lets admin roles (super_admin/campus_admin/
-    // principal/admission_head) read all rows.
+    // employee_profiles is the HR master and the ONLY complete list: 92 of the ~99
+    // employees were imported from Keka with no auth user at all. Keying this screen
+    // off logins (as it used to) showed 27 people and no photos for anyone whose
+    // record was not linked to an account.
     const NON_EMPLOYEE_ROLES = ["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"];
-    const rolesRes = await (supabase as any).from("user_roles").select("user_id, role");
-    if (rolesRes.error) {
-      console.error("[IdCardCenter] user_roles fetch failed:", rolesRes.error);
-      setEmployees([]);
-      return;
+
+    // Page through: PostgREST caps every response at 1000 rows, and silently losing
+    // the tail of a staff list is the kind of bug nobody notices until a card is missing.
+    async function pageAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error?: unknown }>): Promise<T[]> {
+      const out: T[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data } = await build(from, from + 999);
+        if (!data?.length) break;
+        out.push(...data);
+        if (data.length < 1000) break;
+      }
+      return out;
     }
 
-    const staffRoleByUser = new Map<string, string>();
-    for (const row of rolesRes.data || []) {
-      if (!row.user_id || NON_EMPLOYEE_ROLES.includes(row.role)) continue;
-      if (!staffRoleByUser.has(row.user_id)) staffRoleByUser.set(row.user_id, row.role);
-    }
-    const userIds = [...staffRoleByUser.keys()];
-    if (!userIds.length) {
-      setEmployees([]);
-      return;
-    }
-
-    // employee_profiles carries the richer HR fields when present (mostly empty today); profiles
-    // supplies name / contact / department / campus for everyone else.
-    const [profilesRes, employeeProfilesRes] = await Promise.all([
-      (supabase as any)
-        .from("profiles")
-        .select("user_id, display_name, phone, email, department, institution, campus, avatar_url, employee_id")
-        .in("user_id", userIds)
-        .is("deleted_at", null)
-        .order("display_name"),
-      supabase
-        .from("employee_profiles")
-        .select("user_id, employee_number, display_name, mobile_number, work_email, job_title, photo_url, blood_group, date_of_birth")
-        .in("user_id", userIds),
+    const [roles, emps] = await Promise.all([
+      pageAll<RoleRow>((from, to) =>
+        (supabase as any).from("user_roles").select("user_id, role").range(from, to)),
+      pageAll<EmpRow>((from, to) =>
+        (supabase as any)
+          .from("employee_profiles")
+          .select("id, user_id, employee_number, display_name, mobile_number, work_email, job_title, photo_url, blood_group, date_of_birth, hr_department, work_location")
+          .order("display_name")
+          .range(from, to)),
     ]);
 
-    if (profilesRes.error) {
-      console.error("[IdCardCenter] profile fetch failed:", profilesRes.error);
-      setEmployees([]);
-      return;
-    }
-    if (employeeProfilesRes.error) {
-      console.error("[IdCardCenter] employee profile fetch failed:", employeeProfilesRes.error);
+    const excluded = new Set(NON_EMPLOYEE_ROLES);
+    const nonEmployees = new Set(roles.filter((r) => excluded.has(r.role)).map((r) => r.user_id));
+    const staffRoleByUser = new Map<string, string>();
+    for (const r of roles) {
+      if (!r.user_id || excluded.has(r.role)) continue;
+      if (!staffRoleByUser.has(r.user_id)) staffRoleByUser.set(r.user_id, r.role);
     }
 
-    const empByUser = new Map<string, any>();
-    (employeeProfilesRes.data || []).forEach((ep: any) => empByUser.set(ep.user_id, ep));
+    // A record pointing at a consultant or partner login is not an employee, however
+    // it got created.
+    const employeeRows = emps.filter((e) => !(e.user_id && nonEmployees.has(e.user_id)));
 
-    setEmployees((profilesRes.data || []).map((profile: any) => {
-      const ep = empByUser.get(profile.user_id) || {};
-      const roleLabel = String(staffRoleByUser.get(profile.user_id) || "Employee").replace(/_/g, " ");
+    const linkedIds = new Set(employeeRows.map((e) => e.user_id).filter(Boolean));
+    const wantIds = [...new Set([...staffRoleByUser.keys(), ...linkedIds])] as string[];
+
+    const profiles = wantIds.length
+      ? await pageAll<ProfileRow>((from, to) =>
+          (supabase as any)
+            .from("profiles")
+            .select("user_id, display_name, phone, email, department, institution, campus, avatar_url, employee_id")
+            .in("user_id", wantIds)
+            .is("deleted_at", null)
+            .order("display_name")
+            .range(from, to))
+      : [];
+
+    const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
+    // Imported records carry no user_id, so a login can only be tied to its HR record
+    // by email — which is also how the photo reaches someone who has both.
+    const empByEmail = new Map(
+      employeeRows.filter((e) => e.work_email).map((e) => [String(e.work_email).toLowerCase(), e]),
+    );
+
+    const toCard = (ep: EmpRow | undefined, profile: ProfileRow | undefined, roleKey?: string): CardPerson => {
+      const roleLabel = String(roleKey || "Employee").replace(/_/g, " ");
       return {
-        id: profile.user_id,
+        // employee_profiles.id where we have one — an imported employee has no user_id
+        // to key a row on.
+        id: ep?.id || profile?.user_id,
         type: "employees",
-        name: ep.display_name || profile.display_name || "Unnamed employee",
-        primaryNo: ep.employee_number || profile.employee_id || "-",
+        name: ep?.display_name || profile?.display_name || "Unnamed employee",
+        primaryNo: ep?.employee_number || profile?.employee_id || "-",
         secondaryNo: "",
-        subtitle: ep.job_title || roleLabel,
-        group: profile.department || roleLabel,
-        campus: profile.campus || profile.institution || "-",
-        phone: ep.mobile_number || profile.phone || "-",
-        email: ep.work_email || profile.email || "-",
-        bloodGroup: ep.blood_group || "-",
-        photoUrl: ep.photo_url || profile.avatar_url || null,
+        subtitle: ep?.job_title || roleLabel,
+        group: ep?.hr_department || profile?.department || roleLabel,
+        campus: ep?.work_location || profile?.campus || profile?.institution || "-",
+        phone: ep?.mobile_number || profile?.phone || "-",
+        email: ep?.work_email || profile?.email || "-",
+        bloodGroup: ep?.blood_group || "-",
+        photoUrl: ep?.photo_url || profile?.avatar_url || null,
         photoOriginalUrl: null,
         photoProcessedUrl: null,
         extraLabel: "Department",
-        extraValue: profile.department || "-",
+        extraValue: ep?.hr_department || profile?.department || "-",
         fatherName: "-",
         fatherPhone: "-",
         motherName: "-",
         motherPhone: "-",
-        dob: ep.date_of_birth || "",
+        dob: ep?.date_of_birth || "",
         studentType: "employee",
         brand: NIMT_EDU_BRAND,
       } satisfies CardPerson;
-    }));
+    };
+
+    const cards: CardPerson[] = employeeRows.map((ep) =>
+      toCard(ep, ep.user_id ? profileByUser.get(ep.user_id) : undefined,
+             ep.user_id ? staffRoleByUser.get(ep.user_id) : undefined));
+
+    // Staff who hold a login but have no HR record yet — they would otherwise vanish
+    // from a screen that used to be built entirely from logins.
+    for (const [userId, role] of staffRoleByUser) {
+      if (linkedIds.has(userId)) continue;
+      const profile = profileByUser.get(userId);
+      if (!profile) continue;
+      const viaEmail = profile.email ? empByEmail.get(String(profile.email).toLowerCase()) : undefined;
+      if (viaEmail) continue; // already emitted from its employee record
+      cards.push(toCard(undefined, profile, role));
+    }
+
+    cards.sort((a, b) => a.name.localeCompare(b.name));
+    setEmployees(cards);
   }
 
   function switchMode(nextMode: CardMode) {
