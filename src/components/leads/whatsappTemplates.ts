@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import {
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
@@ -413,26 +414,16 @@ export async function sendWhatsAppTemplate(
   { template, lead, courseName, campusName, courseDuration, courseType, catalogEntry, params: curatedParams }: SendWhatsAppTemplateArgs,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const authHeaders = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken || anonKey}`,
-      apikey: anonKey,
-    };
-
+    // Route every edge call through invokeEdge: it uses the shared supabase
+    // client's configured URL (so it works in local dev where VITE_SUPABASE_URL
+    // is unset — a raw fetch(`${undefined}/functions/...`) hit Vite and returned
+    // the opaque "Invalid response"), attaches a real session JWT, and reads the
+    // function's JSON { error } body.
     if (template.isQuickReply && template.quickReplyText) {
-      const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-reply`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ phone: lead.phone, message: template.quickReplyText, lead_id: lead.id }),
+      const { error } = await invokeEdge("whatsapp-reply", {
+        body: { phone: lead.phone, message: template.quickReplyText, lead_id: lead.id },
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        return { ok: false, error: body?.error || `HTTP ${response.status}` };
-      }
+      if (error) return { ok: false, error: error.message };
     } else {
       // Curated params win; buildParams is the fallback for local-only keys.
       const params = curatedParams
@@ -462,10 +453,8 @@ export async function sendWhatsAppTemplate(
         }
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({
+      const { error } = await invokeEdge("whatsapp-send", {
+        body: {
           template_key: template.key,
           phone: lead.phone,
           params,
@@ -473,11 +462,10 @@ export async function sendWhatsAppTemplate(
           ...(button_urls ? { button_urls } : {}),
           ...(template.headerImageUrl ? { header_image_url: template.headerImageUrl } : {}),
           ...headerPayload,
-        }),
+        },
       });
-      const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));
-      if (!response.ok) {
-        return { ok: false, error: responseBody?.error || responseBody?.meta_error || `HTTP ${response.status}` };
+      if (error) {
+        return { ok: false, error: error.message };
       }
     }
 
@@ -487,10 +475,8 @@ export async function sendWhatsAppTemplate(
         ? template.followUpMsg(courseName, campusName)
         : template.followUpMsg;
       if (followUp) {
-        await fetch(`${supabaseUrl}/functions/v1/whatsapp-reply`, {
-          method: "POST",
-          headers: authHeaders,
-          body: JSON.stringify({ phone: lead.phone, message: followUp, lead_id: lead.id }),
+        await invokeEdge("whatsapp-reply", {
+          body: { phone: lead.phone, message: followUp, lead_id: lead.id },
         }).catch(() => {});
       }
     }
