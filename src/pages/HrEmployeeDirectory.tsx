@@ -8,6 +8,7 @@
 
 import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SelectField } from "@/components/ui/state-fields";
 import { usePermissions } from "@/contexts/PermissionContext";
@@ -91,8 +92,17 @@ const HrEmployeeDirectory = () => {
   const [entityFilter, setEntityFilter] = useState("all");
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [editing, setEditing] = useState<Employee | null>(null);
+  const navigate = useNavigate();
 
   const canEdit = can("hr", "employees_edit");
+
+  // A person deserves a URL, so a row opens the profile page. Staff who exist only
+  // as a login have no employee_profiles row to address yet — those still open the
+  // modal, which is the thing that can create one.
+  const openEmployee = (emp: Employee) => {
+    if (emp.employeeProfileId) navigate(`/employee/${emp.employeeProfileId}`);
+    else setEditing(emp);
+  };
 
   const departmentName = useCallback(
     (id: string | null) => (id ? org.departments.find((d) => d.id === id)?.name ?? null : null),
@@ -388,8 +398,8 @@ const HrEmployeeDirectory = () => {
                 key={emp.employeeProfileId || emp.userId}
                 role="button"
                 tabIndex={0}
-                onClick={() => setEditing(emp)}
-                onKeyDown={(e) => { if (e.key === "Enter") setEditing(emp); }}
+                onClick={() => openEmployee(emp)}
+                onKeyDown={(e) => { if (e.key === "Enter") openEmployee(emp); }}
                 className="flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer text-left w-full"
               >
                 {emp.photoUrl ? (

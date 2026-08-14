@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useNavigate } from "react-router-dom";
-import { Search as SearchIcon, User, FileText, GraduationCap, Phone, Hash } from "lucide-react";
+import { Search as SearchIcon, User, FileText, GraduationCap, Briefcase, Phone, Hash } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 
+/** Exactly what employee_directory_card is allowed to return. */
+type DirectoryCard = Database["public"]["Functions"]["employee_directory_card"]["Returns"][number];
+
 interface SearchResult {
-  type: "lead" | "student";
+  type: "lead" | "student" | "employee";
   id: string;
   name: string;
   phone: string;
@@ -15,6 +19,8 @@ interface SearchResult {
   identifierLabel?: string;
   stage?: string;
   status?: string;
+  /** Employees only: "Nursing Tutor · NIMT School". */
+  subtitle?: string;
 }
 
 const GlobalSearch = () => {
@@ -30,13 +36,16 @@ const GlobalSearch = () => {
     setLoading(true);
     setSearched(true);
 
-    const [leadsRes, studentsRes] = await Promise.all([
+    // Colleagues come from employee_directory_card, whose return signature is the
+    // privacy boundary — name, designation, location, employee number, contact.
+    const [leadsRes, studentsRes, employeesRes] = await Promise.all([
       supabase.from("leads").select("id, name, phone, email, application_id, pre_admission_no, admission_no, stage")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(20),
       supabase.from("students").select("id, name, phone, email, admission_no, pre_admission_no, status")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,pre_admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(20),
+      supabase.rpc("employee_directory_card", { _q: q }),
     ]);
 
     const allResults: SearchResult[] = [];
@@ -62,12 +71,23 @@ const GlobalSearch = () => {
       }
     });
 
+    (employeesRes.data || []).forEach((e: DirectoryCard) => {
+      allResults.push({
+        type: "employee", id: e.employee_profile_id, name: e.display_name || "(no name)",
+        phone: e.mobile_number || "",
+        identifier: e.employee_number || undefined,
+        identifierLabel: e.employee_number ? "ID" : undefined,
+        subtitle: [e.job_title, e.work_location].filter(Boolean).join(" \u00b7 "),
+      });
+    });
+
     setResults(allResults);
     setLoading(false);
   };
 
   const handleClick = (r: SearchResult) => {
     if (r.type === "lead") navigate(`/admissions/${r.id}`);
+    else if (r.type === "employee") navigate(`/employee/${r.id}`);
     else navigate("/students");
   };
 
@@ -119,8 +139,11 @@ const GlobalSearch = () => {
               {results.map((r) => (
                 <Card key={`${r.type}-${r.id}`} className="border-border/60 hover:shadow-sm transition-shadow cursor-pointer" onClick={() => handleClick(r)}>
                   <CardContent className="p-4 flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${r.type === "lead" ? "bg-pastel-orange" : "bg-pastel-blue"}`}>
-                      {r.type === "lead" ? <User className="h-5 w-5 text-foreground/70" /> : <GraduationCap className="h-5 w-5 text-foreground/70" />}
+                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      r.type === "lead" ? "bg-pastel-orange" : r.type === "employee" ? "bg-pastel-green" : "bg-pastel-blue"}`}>
+                      {r.type === "lead" ? <User className="h-5 w-5 text-foreground/70" />
+                        : r.type === "employee" ? <Briefcase className="h-5 w-5 text-foreground/70" />
+                        : <GraduationCap className="h-5 w-5 text-foreground/70" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -129,8 +152,9 @@ const GlobalSearch = () => {
                         {r.stage && <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">{stageLabels[r.stage] || r.stage}</Badge>}
                         {r.status && <Badge className="text-[10px] border-0 bg-muted text-muted-foreground capitalize">{r.status}</Badge>}
                       </div>
+                      {r.subtitle && <p className="mt-0.5 text-xs text-muted-foreground truncate">{r.subtitle}</p>}
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{r.phone}</span>
+                        {r.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{r.phone}</span>}
                         {r.identifier && (
                           <span className="flex items-center gap-1 font-mono text-primary">
                             <Hash className="h-3 w-3" />{r.identifierLabel}: {r.identifier}

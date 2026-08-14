@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _app_config: {
@@ -34712,6 +34737,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      employee_directory_card: {
+        Args: { _q?: string }
+        Returns: {
+          display_name: string
+          employee_number: string
+          employee_profile_id: string
+          job_title: string
+          mobile_number: string
+          photo_url: string
+          work_email: string
+          work_location: string
+        }[]
+      }
       employee_self_editable_fields: { Args: never; Returns: string[] }
       exam_mark_registered: {
         Args: {
@@ -37331,6 +37369,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: [

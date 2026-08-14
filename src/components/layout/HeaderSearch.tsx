@@ -1,12 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Loader2, User, GraduationCap, FileText, X } from "lucide-react";
+import type { Database } from "@/integrations/supabase/types";
+import { Search, Loader2, User, GraduationCap, FileText, Briefcase, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 
+/** Exactly what employee_directory_card is allowed to return. */
+type DirectoryCard = Database["public"]["Functions"]["employee_directory_card"]["Returns"][number];
+
 interface SearchResult {
-  type: "lead" | "student" | "application";
+  type: "lead" | "student" | "application" | "employee";
   id: string;
   name: string;
   phone: string;
@@ -21,6 +25,8 @@ interface SearchResult {
   status?: string;
   leadId?: string;
   ownerName?: string;
+  /** Employees only: "Nursing Tutor · NIMT School". */
+  subtitle?: string;
 }
 
 const stageLabels: Record<string, string> = {
@@ -69,7 +75,11 @@ export function HeaderSearch() {
     if (!q.trim()) { setResults([]); return; }
     setLoading(true);
 
-    const [leadsRes, studentsRes, applicationsRes] = await Promise.all([
+    // Colleagues come from employee_directory_card, never from a table select. The
+    // function returns name/designation/location/employee-number/contact and has no
+    // column for anything else, so this surface cannot leak salary or PAN even to a
+    // caller who goes looking for them.
+    const [leadsRes, studentsRes, applicationsRes, employeesRes] = await Promise.all([
       supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage, counsellor_profile:counsellor_id(display_name)")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .eq("is_mirror", false)
@@ -80,6 +90,7 @@ export function HeaderSearch() {
       supabase.from("applications").select("id, application_id, lead_id, full_name, phone, status")
         .ilike("application_id", `%${q}%`)
         .limit(5),
+      supabase.rpc("employee_directory_card", { _q: q }),
     ]);
 
     const all: SearchResult[] = [];
@@ -115,6 +126,15 @@ export function HeaderSearch() {
         status: s.status,
       });
     });
+    (employeesRes.data || []).slice(0, 5).forEach((e: DirectoryCard) => {
+      all.push({
+        type: "employee", id: e.employee_profile_id, name: e.display_name || "(no name)",
+        phone: e.mobile_number || "",
+        identifier: e.employee_number || undefined,
+        identifierLabel: e.employee_number ? "ID" : undefined,
+        subtitle: [e.job_title, e.work_location].filter(Boolean).join(" · "),
+      });
+    });
     setResults(all);
     setLoading(false);
   };
@@ -130,6 +150,7 @@ export function HeaderSearch() {
     setQuery("");
     setResults([]);
     if (r.type === "lead") navigate(`/admissions/${r.id}`);
+    else if (r.type === "employee") navigate(`/employee/${r.id}`);
     else if (r.type === "application") {
       // Prefer lead detail when the application is linked; otherwise land on the
       // applications list which lets the user inspect docs and status.
@@ -188,10 +209,12 @@ export function HeaderSearch() {
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                     r.type === "lead" ? "bg-info/10 text-info-foreground" :
                     r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+                    r.type === "employee" ? "bg-primary/10 text-primary" :
                     "bg-success/10 text-success"
                   }`}>
                     {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
                      r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
+                     r.type === "employee" ? <Briefcase className="h-3.5 w-3.5" /> :
                      <GraduationCap className="h-3.5 w-3.5" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -205,7 +228,9 @@ export function HeaderSearch() {
                       )}
                     </div>
                     <p className="text-[11px] text-muted-foreground truncate">
-                      {r.phone}
+                      {r.subtitle ? (
+                        <>{r.subtitle}{r.phone && <span className="ml-1.5">· {r.phone}</span>}</>
+                      ) : r.phone}
                       {r.type === "lead" && (
                         <span className="ml-1.5 text-muted-foreground/80">
                           · Owner: <span className="font-medium text-foreground/80">{r.ownerName || "Unassigned"}</span>

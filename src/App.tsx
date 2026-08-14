@@ -97,6 +97,7 @@ const HrDashboard          = lazy(() => import("./pages/HrDashboard"));
 const HrAttendance         = lazy(() => import("./pages/HrAttendance"));
 const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
 const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
+const EmployeeProfile      = lazy(() => import("./pages/EmployeeProfile"));
 const HrPayroll            = lazy(() => import("./pages/HrPayroll"));
 const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
@@ -360,6 +361,9 @@ const App = () => (
                       <Route path="/hr-attendance" element={<RequirePermission module="hr" action="view"><HrAttendance /></RequirePermission>} />
                       <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
                       <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />
+                      {/* hr:self, not hr:view — every colleague may look someone up. What
+                          they actually see is decided by RLS inside the page, not here. */}
+                      <Route path="/employee/:id" element={<RequirePermission module="hr" action="self"><EmployeeProfile /></RequirePermission>} />
                       <Route path="/hr-payroll" element={<RequirePermission module="hr" action="payroll_run"><HrPayroll /></RequirePermission>} />
 
                       {/* Admin — user_management:view */}
