@@ -5,13 +5,13 @@ import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CalendarDays, Fingerprint, Users, Palmtree, Search } from "lucide-react";
+import { CalendarDays, Users, Palmtree, Search } from "lucide-react";
+import { AttendanceLog } from "@/components/hr/AttendanceLog";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
 // deliberately NOT hr:view (that unlocks everyone's leave and attendance).
 
-interface AttendanceRow { id: string; date: string; punch_in: string | null; punch_out: string | null; }
 interface LeaveRow {
   id: string; leave_type: string; start_date: string; end_date: string;
   days: number; reason: string | null; status: string;
@@ -29,7 +29,7 @@ const MyHr = () => {
   const { user, profile } = useAuth();
   const { toast } = useToast();
 
-  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [employeeProfileId, setEmployeeProfileId] = useState<string | null>(null);
   const [leave, setLeave] = useState<LeaveRow[]>([]);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -45,10 +45,10 @@ const MyHr = () => {
   const load = async () => {
     setLoading(true);
     const year = new Date().getFullYear();
-    const [att, lv, bal, hol, dir] = await Promise.all([
-      supabase.from("employee_attendance")
-        .select("id, date, punch_in, punch_out")
-        .eq("user_id", user!.id).order("date", { ascending: false }).limit(30),
+    // Attendance loads inside AttendanceLog — it is month-scoped and paginates
+    // its own way, and duplicating the fetch here would just fight it.
+    const [emp, lv, bal, hol, dir] = await Promise.all([
+      supabase.from("employee_profiles").select("id").eq("user_id", user!.id).maybeSingle(),
       supabase.from("employee_leave_requests")
         .select("id, leave_type, start_date, end_date, days, reason, status")
         .eq("user_id", user!.id).order("start_date", { ascending: false }),
@@ -62,7 +62,7 @@ const MyHr = () => {
       supabase.rpc("hr_staff_directory"),
     ]);
 
-    setAttendance((att.data as AttendanceRow[]) || []);
+    setEmployeeProfileId((emp.data as { id: string } | null)?.id ?? null);
     setLeave((lv.data as LeaveRow[]) || []);
     setBalances((bal.data as BalanceRow[]) || []);
     setHolidays((hol.data as Holiday[]) || []);
@@ -154,33 +154,7 @@ const MyHr = () => {
         </TabsList>
 
         <TabsContent value="attendance" className="mt-6">
-          {attendance.length === 0 ? (
-            <Empty icon={Fingerprint} text="No attendance recorded yet" />
-          ) : (
-            <div className="rounded-xl border border-border overflow-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-muted">
-                  <tr>
-                    <Th>Date</Th><Th>Punch in</Th><Th>Punch out</Th><Th>Hours</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attendance.map(a => (
-                    <tr key={a.id} className="hover:bg-muted/20">
-                      <Td>{new Date(a.date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })}</Td>
-                      <Td>{a.punch_in ? new Date(a.punch_in).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</Td>
-                      <Td>{a.punch_out ? new Date(a.punch_out).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</Td>
-                      <Td>
-                        {a.punch_in && a.punch_out
-                          ? `${((new Date(a.punch_out).getTime() - new Date(a.punch_in).getTime()) / 3_600_000).toFixed(1)}h`
-                          : "—"}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {user?.id && <AttendanceLog userId={user.id} employeeProfileId={employeeProfileId} />}
         </TabsContent>
 
         <TabsContent value="leave" className="mt-6 space-y-4">
