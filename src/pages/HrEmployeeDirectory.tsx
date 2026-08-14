@@ -34,6 +34,8 @@ interface Employee {
   userId?: string;
   employeeNumber: string | null;
   name: string;
+  /** Set once their last working day has passed — archived, not deleted. */
+  exitedOn: string | null;
   phone: string | null;
   role: string | null;
   jobTitle: string | null;
@@ -80,6 +82,7 @@ const HrEmployeeDirectory = () => {
   const [roleFilter, setRoleFilter] = useState("all");
   const [campusFilter, setCampusFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
+  const [showExited, setShowExited] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
 
   const canEdit = can("hr", "employees_edit");
@@ -100,10 +103,10 @@ const HrEmployeeDirectory = () => {
           .select("user_id, role")
           .range(from, to),
       ),
-      fetchAll<{ id: string; user_id: string | null; employee_number: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null; hr_department: string | null }>(
+      fetchAll<{ id: string; user_id: string | null; employee_number: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null; hr_department: string | null; date_of_exit: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("id, user_id, employee_number, display_name, mobile_number, job_title, department_id, campus_id, photo_url, hr_department")
+          .select("id, user_id, employee_number, display_name, mobile_number, job_title, department_id, campus_id, photo_url, hr_department, date_of_exit")
           .eq("verification_status", "verified")
           .order("display_name")
           .range(from, to),
@@ -180,6 +183,7 @@ const HrEmployeeDirectory = () => {
         employeeProfileId: e.id,
         userId: e.user_id ?? undefined,
         employeeNumber: e.employee_number,
+        exitedOn: e.date_of_exit,
         name: e.display_name || p?.display_name || "Unnamed",
         phone: e.mobile_number || p?.phone || null,
         role: e.user_id ? roleByUser.get(e.user_id) ?? null : null,
@@ -200,6 +204,7 @@ const HrEmployeeDirectory = () => {
         employeeProfileId: ep?.id,
         userId: s.user_id,
         employeeNumber: ep?.employee_number ?? null,
+        exitedOn: null,
         name: s.display_name || "Unnamed",
         phone: s.phone,
         role: roleByUser.get(s.user_id) ?? null,
@@ -220,7 +225,12 @@ const HrEmployeeDirectory = () => {
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
   const filtered = useMemo(() => {
-    let result = employees;
+    const today = new Date().toISOString().slice(0, 10);
+    // Archived, not deleted: someone who has left keeps their record and their
+    // history, but drops out of the working directory unless asked for.
+    let result = showExited
+      ? employees.filter((e) => e.exitedOn && e.exitedOn <= today)
+      : employees.filter((e) => !e.exitedOn || e.exitedOn > today);
     if (roleFilter !== "all") result = result.filter((e) => e.role === roleFilter);
     if (campusFilter !== "all") result = result.filter((e) => e.campusId === campusFilter);
     if (search) {
@@ -233,7 +243,12 @@ const HrEmployeeDirectory = () => {
         e.department?.toLowerCase().includes(q));
     }
     return result;
-  }, [employees, search, roleFilter, campusFilter]);
+  }, [employees, search, roleFilter, campusFilter, showExited]);
+
+  const exitedCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return employees.filter((e) => e.exitedOn && e.exitedOn <= today).length;
+  }, [employees]);
 
   const roles = [...new Set(employees.map((e) => e.role).filter(Boolean))].sort() as string[];
   const deptGroups = useMemo(() => {
@@ -282,6 +297,14 @@ const HrEmployeeDirectory = () => {
           ariaLabel="Filter by role"
           placeholder="All Roles"
         />
+        <Button
+          size="sm"
+          variant={showExited ? "default" : "outline"}
+          onClick={() => setShowExited((v) => !v)}
+          title="Employees whose last working day has passed. Archived, not deleted."
+        >
+          Exited ({exitedCount})
+        </Button>
         <SelectField
           value={campusFilter}
           onValueChange={setCampusFilter}

@@ -9242,51 +9242,66 @@ export type Database = {
       }
       employee_exits: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           clearance: Json
           created_at: string
           created_by: string | null
           employee_profile_id: string
           exit_interview_note: string | null
           exit_type: string
+          expected_last_working_day: string | null
           final_settlement_amount: number | null
           id: string
           last_working_day: string | null
+          notice_period_days: number | null
           notice_waived: boolean
           reason: string | null
+          rejected_reason: string | null
           resignation_date: string | null
           settled_on: string | null
           status: string
           updated_at: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           clearance?: Json
           created_at?: string
           created_by?: string | null
           employee_profile_id: string
           exit_interview_note?: string | null
           exit_type?: string
+          expected_last_working_day?: string | null
           final_settlement_amount?: number | null
           id?: string
           last_working_day?: string | null
+          notice_period_days?: number | null
           notice_waived?: boolean
           reason?: string | null
+          rejected_reason?: string | null
           resignation_date?: string | null
           settled_on?: string | null
           status?: string
           updated_at?: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           clearance?: Json
           created_at?: string
           created_by?: string | null
           employee_profile_id?: string
           exit_interview_note?: string | null
           exit_type?: string
+          expected_last_working_day?: string | null
           final_settlement_amount?: number | null
           id?: string
           last_working_day?: string | null
+          notice_period_days?: number | null
           notice_waived?: boolean
           reason?: string | null
+          rejected_reason?: string | null
           resignation_date?: string | null
           settled_on?: string | null
           status?: string
@@ -34475,6 +34490,7 @@ export type Database = {
           closed_date: string
         }[]
       }
+      close_due_employee_exits: { Args: never; Returns: number }
       cloud_dialer_bootstrap: { Args: never; Returns: Json }
       cloud_dialer_campaign_queue: {
         Args: { p_counsellor_id?: string; p_limit?: number; p_list_id: string }
@@ -36103,6 +36119,17 @@ export type Database = {
       provision_student_fees_for_student: {
         Args: { _student_id: string }
         Returns: Json
+      }
+      raise_employee_exit: {
+        Args: {
+          _employee_profile_id: string
+          _exit_type: string
+          _last_working_day?: string
+          _notice_waived?: boolean
+          _reason?: string
+          _resignation_date: string
+        }
+        Returns: string
       }
       recalculate_offer_letter_net_fee: {
         Args: { _offer_letter_id: string }

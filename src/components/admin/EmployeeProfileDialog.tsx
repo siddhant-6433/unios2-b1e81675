@@ -12,10 +12,11 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useOrgUnits } from "@/hooks/useOrgUnits";
 import { downscaleImage } from "@/lib/downscaleImage";
-import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera, ScrollText } from "lucide-react";
+import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera, ScrollText, LogOut } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { LettersPanel } from "@/components/hr/LettersPanel";
+import { MarkExitDialog } from "@/components/hr/MarkExitDialog";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
@@ -123,6 +124,7 @@ const EmployeeProfileDialog = ({
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoStage, setPhotoStage] = useState<"processing" | "uploading" | null>(null);
+  const [exitOpen, setExitOpen] = useState(false);
   const [isNew, setIsNew] = useState(true);
   const { toast } = useToast();
   const { can } = usePermissions();
@@ -510,6 +512,15 @@ const EmployeeProfileDialog = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {editable && profile.id && !isNew && (
+              <button
+                onClick={() => setExitOpen(true)}
+                title="Record a resignation or termination"
+                className="flex items-center gap-1.5 rounded-xl border border-input px-3 py-2 text-sm font-medium text-muted-foreground hover:text-destructive hover:border-destructive/40 transition-colors"
+              >
+                <LogOut className="h-4 w-4" /> Mark exit
+              </button>
+            )}
             {editable && (
               <button
                 onClick={handleSave}
@@ -794,6 +805,13 @@ const EmployeeProfileDialog = ({
           </div>
         )}
       </DialogContent>
+
+      <MarkExitDialog
+        open={exitOpen}
+        onOpenChange={setExitOpen}
+        employee={profile.id ? { id: profile.id, name: profile.display_name || userName, employeeNumber: profile.employee_number } : null}
+        onSuccess={() => { onSuccess?.(); onClose(); }}
+      />
     </Dialog>
   );
 };
