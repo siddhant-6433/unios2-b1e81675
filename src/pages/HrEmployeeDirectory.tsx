@@ -115,15 +115,14 @@ const HrEmployeeDirectory = () => {
         .from("employee_profile_change_requests")
         .select("id", { count: "exact", head: true })
         .eq("status", "pending"),
-      // Photos for staff whose employee_profiles row is still PENDING. They show up
-      // in this list via their login, so without this their migrated photo stays
-      // invisible until somebody verifies them. Keyed by EMAIL, not user_id:
-      // imported rows carry no user_id, which is the whole reason they are pending.
-      fetchAll<{ work_email: string | null; photo_url: string | null }>(
+      // EVERY employee record keyed by email, including the pending ones. Staff who
+      // hold a login show up in this list via `profiles`, and their imported HR record
+      // carries no user_id — so email is the only thing tying the two together. Without
+      // it the row opens a BLANK profile and saving creates a duplicate employee.
+      fetchAll<{ id: string; work_email: string | null; photo_url: string | null; job_title: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("work_email, photo_url")
-          .not("photo_url", "is", null)
+          .select("id, work_email, photo_url, job_title")
           .not("work_email", "is", null)
           .range(from, to),
       ),
@@ -154,10 +153,8 @@ const HrEmployeeDirectory = () => {
         )
       : [];
 
-    const photoByEmail = new Map(
-      allPhotos
-        .filter((p) => p.work_email && p.photo_url)
-        .map((p) => [p.work_email!.toLowerCase(), p.photo_url!]),
+    const empByEmail = new Map(
+      allPhotos.filter((p) => p.work_email).map((p) => [p.work_email!.toLowerCase(), p]),
     );
     const roleByUser = new Map(employeeRoles.map((r) => [r.user_id, r.role]));
     const profileByUser = new Map(staff.map((s) => [s.user_id, s]));
@@ -184,15 +181,19 @@ const HrEmployeeDirectory = () => {
 
     for (const s of staff) {
       if (claimed.has(s.user_id)) continue;
+      // Their HR record may exist but be unlinked (imported, still pending). Carry its
+      // id so opening the row edits that record instead of starting a blank one.
+      const ep = s.email ? empByEmail.get(s.email.toLowerCase()) : undefined;
       merged.push({
+        employeeProfileId: ep?.id,
         userId: s.user_id,
         name: s.display_name || "Unnamed",
         phone: s.phone,
         role: roleByUser.get(s.user_id) ?? null,
-        jobTitle: null,
+        jobTitle: ep?.job_title ?? null,
         department: s.department,
         campusId: null,
-        photoUrl: (s.email ? photoByEmail.get(s.email.toLowerCase()) : null) ?? s.avatar_url,
+        photoUrl: ep?.photo_url ?? s.avatar_url,
       });
     }
 

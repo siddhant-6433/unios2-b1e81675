@@ -143,19 +143,30 @@ const EmployeeProfileDialog = ({
         ? supabase.from("employee_profiles").select("*").eq("id", employeeProfileId).maybeSingle()
         : supabase.from("employee_profiles").select("*").eq("user_id", userId!).maybeSingle();
 
-      const [empRes, profileRes] = await Promise.all([
+      const [empRes0, profileRes] = await Promise.all([
         empQuery,
         userId
-          ? supabase.from("profiles").select("display_name, phone, salutation").eq("user_id", userId).maybeSingle()
+          ? supabase.from("profiles").select("display_name, phone, salutation, email").eq("user_id", userId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
       ]);
+
+      // Last resort: an imported record that was never linked to this login. Matching
+      // on email stops the dialog opening blank and a save creating a SECOND employee
+      // row for somebody who already exists.
+      let empRes = empRes0;
+      const loginEmail = (profileRes.data as { email?: string } | null)?.email;
+      if (!empRes.data && !employeeProfileId && loginEmail) {
+        empRes = await supabase
+          .from("employee_profiles").select("*")
+          .ilike("work_email", loginEmail).maybeSingle();
+      }
 
       if (empRes.error) {
         toast({ title: "Error", description: empRes.error.message, variant: "destructive" });
       }
 
       const empData = empRes.data as EmployeeProfileRow | null;
-      const baseProfile = profileRes.data as { display_name?: string; phone?: string; salutation?: string } | null;
+      const baseProfile = profileRes.data as { display_name?: string; phone?: string; salutation?: string; email?: string } | null;
       const resolvedUserId = (empData?.user_id as string | null) ?? userId ?? null;
       setLinkedUserId(resolvedUserId);
 
