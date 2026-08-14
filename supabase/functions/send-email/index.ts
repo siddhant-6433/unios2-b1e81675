@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
       user = { id: data.user.id };
     }
 
-    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc, attachments } = await req.json();
+    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc, attachments, from_email } = await req.json();
     // attachments: [{ filename: string; url?: string; content_base64?: string }]
     // — url is fetched + base64-encoded; content_base64 is passed straight
     // through. Resend free tier supports up to 40 MB; we don't enforce here
@@ -96,6 +96,10 @@ Deno.serve(async (req) => {
     let subject: string;
     let bodyHtml: string;
     let templateId: string | null = null;
+    // Per-template sender. Without this every email leaves from EMAIL_FROM
+    // (admissions@nimt.ac.in), so an interview invite would reach a candidate from
+    // Admissions and their reply would land in the wrong inbox.
+    let templateFrom: string | null = null;
 
     if (template_slug) {
       const { data: template } = await admin
@@ -114,6 +118,7 @@ Deno.serve(async (req) => {
       templateId = template.id;
       subject = template.subject;
       bodyHtml = template.body_html;
+      templateFrom = template.from_email ?? null;
 
       // Replace variables
       const vars = variables || {};
@@ -182,8 +187,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Send via Resend
-    const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
+    // Send via Resend.
+    // Precedence: the template's own sender, then an explicit override, then the
+    // global default. The override is restricted to our own domain so a caller
+    // cannot make mail appear to come from somewhere else.
+    const requestedFrom = typeof from_email === "string" ? from_email.trim() : "";
+    const overrideFrom = /^[^@\s]+@nimt\.ac\.in$/i.test(requestedFrom) ? requestedFrom : "";
+    if (requestedFrom && !overrideFrom) {
+      console.warn(`[send-email] ignoring from_email outside nimt.ac.in: ${requestedFrom}`);
+    }
+    const fromEmail = templateFrom || overrideFrom || Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const emailRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {

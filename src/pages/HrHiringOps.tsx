@@ -213,6 +213,17 @@ const HrHiringOps = () => {
   }
 
   async function moveToStage(row: JobApplicantRow, next: HiringStage) {
+    // Ask before writing to the candidate. Notifying is opt-in per move rather
+    // than automatic on the status change: 405 people are sitting in this pipeline,
+    // most for over a month, and a trigger would have messaged every one of them
+    // the moment it shipped.
+    const notifiable = ["sourced", "interview", "preboarding", "archived"].includes(next);
+    const notify = notifiable && window.confirm(
+      next === "archived"
+        ? `Send ${row.name || "this candidate"} the "not proceeding" message on WhatsApp and email?\n\nOK to send, Cancel to move them quietly.`
+        : `Let ${row.name || "this candidate"} know they have moved to ${STAGE_LABEL[next]}?\n\nOK to send on WhatsApp and email, Cancel to move them quietly.`,
+    );
+
     setSaving(true);
     const status = STATUS_FOR_STAGE[next];
     const { error } = await supabase
@@ -225,12 +236,28 @@ const HrHiringOps = () => {
         description: `Moved to ${STAGE_LABEL[next]}`,
       });
     }
-    setSaving(false);
     if (error) {
+      setSaving(false);
       toast({ title: "Could not move the candidate", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: `Moved to ${STAGE_LABEL[next]}` });
+
+    if (notify) {
+      const { data, error: notifyErr } = await supabase.functions.invoke("hiring-notify", {
+        body: { applicant_id: row.id, stage: next },
+      });
+      const results = (data as { results?: Record<string, string> } | null)?.results ?? {};
+      const summary = Object.entries(results).map(([k, v]) => `${k}: ${v}`).join(" · ");
+      toast(
+        notifyErr
+          ? { title: `Moved to ${STAGE_LABEL[next]}, but nothing was sent`, description: notifyErr.message, variant: "destructive" }
+          : { title: `Moved to ${STAGE_LABEL[next]}`, description: summary || "Nothing to send at this stage." },
+      );
+    } else {
+      toast({ title: `Moved to ${STAGE_LABEL[next]}` });
+    }
+
+    setSaving(false);
     setActive(null);
     fetchAll();
   }

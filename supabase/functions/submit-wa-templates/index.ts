@@ -646,6 +646,65 @@ const TEMPLATES = [
       },
     ],
   },
+
+  // ── Hiring ────────────────────────────────────────────────────────────
+  // A candidate today gets one line ("forwarded to HR") and then nothing —
+  // 281 of the 405 have been waiting over a month in silence. These are the
+  // four moments they actually experience.
+  //
+  // All UTILITY: each is a direct update about a process the person themselves
+  // started. Meta has previously reclassified this org's course_info* templates
+  // to MARKETING regardless of wording, so check the approved category before
+  // relying on these — a MARKETING template is subject to per-user marketing
+  // limits and can be dropped.
+  {
+    name: "hiring_application_received",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Dear {{1}}, thank you for your interest in the {{2}} role at NIMT. Your application has reached our HR team and is being reviewed. We will be in touch either way — you will not be left waiting. For queries, reply here or email hr@nimt.ac.in.",
+        example: { body_text: [["Rahul Sharma", "Nursing Tutor"]] },
+      },
+    ],
+  },
+  {
+    name: "hiring_interview_invite",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Dear {{1}}, we would like to meet you for the {{2}} role. Interview: {{3}} at {{4}}. Please bring your CV and relevant certificates. If this time does not suit you, reply here and HR will arrange another.",
+        example: { body_text: [["Rahul Sharma", "Nursing Tutor", "Mon 18 Aug, 11:00 AM", "NIMT Greater Noida Campus"]] },
+      },
+    ],
+  },
+  {
+    name: "hiring_offer_extended",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Dear {{1}}, we are pleased to offer you the position of {{2}} at NIMT, with a proposed joining date of {{3}}. Your appointment letter and the documents we need follow by email from hr@nimt.ac.in. Reply here if you have any questions.",
+        example: { body_text: [["Rahul Sharma", "Nursing Tutor", "1 September 2026"]] },
+      },
+    ],
+  },
+  {
+    name: "hiring_not_proceeding",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Dear {{1}}, thank you for applying for the {{2}} role at NIMT and for your patience through our process. On this occasion we will not be taking your application further. We would be glad to hear from you for future openings.",
+        example: { body_text: [["Rahul Sharma", "Nursing Tutor"]] },
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {

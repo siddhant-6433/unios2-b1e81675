@@ -713,7 +713,7 @@ Deno.serve(async (req) => {
     if (existingLead && (existingLead.person_role === "job_applicant" || existingLead.person_role === "vendor")) {
       const role = existingLead.person_role;
       const reply = role === "job_applicant"
-        ? "Thanks for writing to NIMT. You've been forwarded to our HR team — they will get in touch about openings shortly. For urgent queries email careers@nimt.ac.in."
+        ? "Thanks for writing to NIMT. You've been forwarded to our HR team — they will get in touch about openings shortly. For urgent queries email hr@nimt.ac.in."
         : "Thanks for your message. You've been forwarded to our procurement team. For business enquiries please email procurement@nimt.ac.in with your company profile.";
       try {
         const sendResult = await sendWhatsAppText(admin, {
