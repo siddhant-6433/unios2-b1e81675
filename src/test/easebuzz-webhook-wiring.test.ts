@@ -17,11 +17,15 @@ describe("Easebuzz webhook wiring", () => {
   });
 
   it("routes lead-side and student-fee callbacks before application-id fallback", () => {
-    const feePaymentPath = webhookSource.indexOf("Path 1: STUDENT FEE PAYMENT");
-    const leadPaymentPath = webhookSource.indexOf("Path 2: LEAD-SIDE PAYMENT");
-    const applicationPath = webhookSource.indexOf("Path 3: APPLICATION FEE");
+    // Payment links claim first (they carry an explicit udf3 marker), then the
+    // two typed paths, and only then the application-id fallback.
+    const paymentLinkPath = webhookSource.indexOf("// Path 0: payment link");
+    const feePaymentPath = webhookSource.indexOf("// Path 1: student fee");
+    const leadPaymentPath = webhookSource.indexOf("// Path 2: lead payment");
+    const applicationPath = webhookSource.indexOf("// Path 3: application fee");
 
-    expect(feePaymentPath).toBeGreaterThan(-1);
+    expect(paymentLinkPath).toBeGreaterThan(-1);
+    expect(feePaymentPath).toBeGreaterThan(paymentLinkPath);
     expect(leadPaymentPath).toBeGreaterThan(feePaymentPath);
     expect(applicationPath).toBeGreaterThan(leadPaymentPath);
   });

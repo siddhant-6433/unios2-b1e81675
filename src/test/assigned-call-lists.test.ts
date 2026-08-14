@@ -367,6 +367,9 @@ describe("assigned call lists", () => {
     expect(admissions).toContain("Assign as a priority call list");
     expect(admissions).toContain("const canAssignLists");
     // The button used to render for everyone and only fail inside the RPC.
-    expect(leadLists).toContain("{canAssignLists && (");
+    expect(admissions).toContain("{canAssignLists && (");
+    expect(leadLists).toContain("const canAssignLists = ");
+    expect(leadLists).toContain('canAssignLists ? "Assign" : "Call this"');
+    expect(leadLists).toContain("canAssignLists && (");
   });
 });

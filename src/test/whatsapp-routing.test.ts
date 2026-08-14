@@ -242,7 +242,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
   });
 
   it("records send health events and exposes route diagnostics", () => {
-    expect(aiReply).toContain('eventType: "ai_reply_sent"');
+    expect(aiReply).toContain('eventType: counsellorHandoff ? "handoff_created" : "ai_reply_sent"');
     expect(aiReply).toContain('eventType: "send_failed"');
     expect(aiReply).toContain('eventType: "human_mode_skip"');
     expect(conversationActionHelper).toContain('decision: "manual_reply_sent"');

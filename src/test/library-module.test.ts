@@ -11,17 +11,23 @@ const libraryPage = readFileSync("src/pages/Library.tsx", "utf8");
 const app = readFileSync("src/App.tsx", "utf8");
 const sidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
 const permissions = readFileSync("src/components/admin/PermissionMatrixPanel.tsx", "utf8");
+const accessPolicy = readFileSync("src/lib/accessPolicy.ts", "utf8");
 const inviteDialog = readFileSync("src/components/admin/InviteUserDialog.tsx", "utf8");
-const mobileTabs = readFileSync("mobile/app/(tabs)/_layout.tsx", "utf8");
+// Mobile moved to (staff)/(family) route groups: librarians now land on the
+// staff Work tab, and the library screen lives under (family).
+const mobileWork = readFileSync("mobile/app/(staff)/(tabs)/work.tsx", "utf8");
 const mobileAuth = readFileSync("mobile/contexts/AuthContext.tsx", "utf8");
-const mobileLibrary = readFileSync("mobile/app/(tabs)/library.tsx", "utf8");
+const mobileLibrary = readFileSync("mobile/app/(family)/library.tsx", "utf8");
 const lookupFunction = readFileSync("supabase/functions/library-book-lookup/index.ts", "utf8");
 
 describe("library module", () => {
   it("adds librarian as a first-class role and exposes it in admin role surfaces", () => {
     expect(roleMigration).toContain("ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'librarian'");
     expect(inviteDialog).toContain('{ value: "librarian", label: "Librarian" }');
-    expect(permissions).toContain('"ib_coordinator", "librarian"');
+    // The role list is derived from accessPolicy, so the matrix picks up
+    // librarian automatically instead of hardcoding it.
+    expect(accessPolicy).toContain('librarian: "Librarian"');
+    expect(permissions).toContain("ALL_APP_ROLES");
     expect(mobileAuth).toContain("| 'librarian'");
   });
 
@@ -170,9 +176,8 @@ describe("library module", () => {
   });
 
   it("adds a mobile Library tab with scanner capture for librarians and patron discovery", () => {
-    expect(mobileTabs).toContain("librarian:");
-    expect(mobileTabs).toContain("{ name: 'library', title: 'Library', icon: BookOpen }");
-    expect(mobileTabs).toContain("if (role === 'librarian') return roleTabs.librarian");
+    expect(mobileWork).toContain("if (role === 'librarian') return <LibrarianWork");
+    expect(mobileWork).toContain("function LibrarianWork(");
     expect(mobileLibrary).toContain("CameraView");
     expect(mobileLibrary).toContain("onBarcodeScanned");
     expect(mobileLibrary).toContain("type ScanAction = 'digitize' | 'issue' | 'return' | 'audit'");
@@ -192,6 +197,7 @@ describe("library module", () => {
     expect(lookupFunction).toContain("www.googleapis.com/books/v1/volumes");
     expect(lookupFunction).toContain("openlibrary.org/isbn");
     expect(lookupFunction).toContain("covers.openlibrary.org");
-    expect(lookupFunction).toContain("A valid ISBN-10 or ISBN-13 is required");
+    // Lookup also accepts a title, so the guard covers both inputs.
+    expect(lookupFunction).toContain("A valid ISBN-10/13 or a title is required");
   });
 });

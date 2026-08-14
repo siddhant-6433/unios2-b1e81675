@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
+import { readMigration } from "./readMigration";
 import {
   canSeePolicyItem,
   canUsePermission,
@@ -27,10 +28,7 @@ const leadAssociationMigration = readFileSync(
   "supabase/migrations/20260619121300_lead_association_approval_requests.sql",
   "utf8",
 );
-const studentLoginLinkMigration = readFileSync(
-  "supabase/migrations/20260809052920_academic_partner_student_login_link.sql",
-  "utf8",
-);
+const studentLoginLinkMigration = readMigration("academic_partner_student_login_link");
 const partnerCandidateActions = readFileSync(
   "src/components/partner/PartnerCandidateActions.tsx",
   "utf8",

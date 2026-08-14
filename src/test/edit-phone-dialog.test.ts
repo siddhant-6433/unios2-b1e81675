@@ -39,9 +39,13 @@ describe("EditPhoneDialog phone uniqueness UX", () => {
     expect(source).toContain("Find under");
     expect(source).toContain("Go to user");
     expect(source).toContain("Leads & Applicants");
-    expect(adminPanel).toContain("onOpenProfile");
-    expect(adminPanel).toContain("setUserSubTab(category)");
-    expect(adminPanel).toContain('searchParams.get("user")');
+    // AdminPanel is reached through a full-page deep link rather than an
+    // onOpenProfile callback, so it must honour the params in that URL.
+    expect(source).toContain("window.location.assign(adminUserProfileHref(");
+    expect(adminPanel).toContain('searchParams.get("category")');
+    expect(adminPanel).toContain('searchParams.get("q")');
+    expect(adminPanel).toContain("setUserSubTab(category as typeof userSubTab)");
+    expect(adminPanel).toContain("USER_SUB_TABS");
   });
 });
 

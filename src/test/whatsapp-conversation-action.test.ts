@@ -43,12 +43,19 @@ describe("WhatsApp conversation action module", () => {
 
   it("routes AI, handoff, and DNC acknowledgement sends through the shared outbound action", () => {
     expect(aiReplyFunction).toContain("recordOutboundConversationAction");
-    expect(aiReplyFunction).toContain('kind: "aiReply"');
+    // The main send picks kind/outboundKind by handoff branch rather than
+    // repeating two literal call sites.
+    expect(aiReplyFunction).toContain('kind: counsellorHandoff ? "handoff" : "aiReply"');
     expect(aiReplyFunction).toContain('kind: "handoff"');
-    expect(aiReplyFunction).toContain('outboundKind: "ai_reply"');
+    expect(aiReplyFunction).toContain('outboundKind: counsellorHandoff ? "system_notification" : "ai_reply"');
     expect(aiReplyFunction).toContain('outboundKind: "system_notification"');
-    expect(aiReplyFunction).not.toContain('template_key: "ai_auto_reply"');
-    expect(aiReplyFunction).not.toContain('template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff"');
+    // Sends route through the shared action (templateKey), never a raw
+    // whatsapp_messages insert. recordAiFailureBubble is exempt: it writes the
+    // failed-send bubble itself and is not an outbound send.
+    const sendPath = aiReplyFunction.slice(aiReplyFunction.indexOf("// ─── NIMT Knowledge Base"));
+    expect(sendPath).not.toContain('template_key: "ai_auto_reply"');
+    expect(sendPath).not.toContain('template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff"');
+    expect(aiReplyFunction).toContain('templateKey: counsellorHandoff ? "counsellor_handoff" : "ai_auto_reply"');
 
     expect(orchestratorFunction).toContain("recordOutboundConversationAction");
     expect(orchestratorFunction).toContain('kind: "dncAcknowledgement"');

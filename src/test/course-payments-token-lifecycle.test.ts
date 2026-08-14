@@ -42,8 +42,10 @@ describe("course payments unlock token lifecycle", () => {
   });
 
   it("batches applications dashboard lead-side lifecycle lookups", () => {
-    expect(applicationsPage).toContain("const RELATED_QUERY_BATCH_SIZE = 50;");
-    expect(applicationsPage).toContain("const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);");
+    // Batching keeps the lookups under the 1000-row response cap; the manual
+    // slice loop is now the shared chunkArray helper.
+    expect(applicationsPage).toContain("const RELATED_QUERY_BATCH_SIZE = ");
+    expect(applicationsPage).toContain("chunkArray(leadIds, RELATED_QUERY_BATCH_SIZE)");
     expect(applicationsPage).toContain(".in(\"lead_id\", batch)");
     expect(applicationsPage).toContain("OFFER_OR_PAYMENT_STAGES.has(leadStageMap[lid])");
   });

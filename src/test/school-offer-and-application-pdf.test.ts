@@ -30,8 +30,11 @@ describe("school offer letter and application PDF recovery", () => {
   });
 
   it("uses shared offer fee term grouping in the dialog and edge PDF generator", () => {
-    expect(offerDialog).toContain("collectOfferFeeTermTotals(items)");
-    expect(offerDialog).toContain("firstOfferFeeTerm(totals)");
+    // Variable names moved on (rawFeeItems / payable); what matters is the
+    // dialog grouping through the shared helpers rather than its own logic.
+    expect(offerDialog).toContain("collectOfferFeeTermTotals(rawFeeItems");
+    expect(offerDialog).toContain("firstOfferFeeTerm(");
+    expect(offerDialog).toContain('from "@/lib/offerFeeTerms"');
     expect(offerFunction).toContain('SCHOOL_OFFER_TERM_ORDER = ["admission", "q1", "q2", "q3", "q4"]');
     expect(offerFunction).toContain("isOfferProgrammeFeeTerm(term)");
     expect(offerFunction).not.toContain("if (!it.term?.startsWith(\"year_\")) continue");

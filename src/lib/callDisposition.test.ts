@@ -78,7 +78,20 @@ function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError
     rpc: (name: string, params: Record<string, unknown>) => {
       rpcCalls.push({ name, params });
       const error = opts?.rpcErrors ? opts.rpcErrors[rpcCalls.length - 1] ?? null : opts?.rpcError ?? null;
-      return Promise.resolve({ data: "call-log-1", error });
+      // Course info is sent as free-form text, so the pipeline first resolves
+      // the copy params. Only that RPC returns a row shape.
+      const data = name === "fn_resolve_course_info_params"
+        ? {
+            student_name: "Asha",
+            course_name: "B.Sc Nursing",
+            duration: "4 years",
+            eligibility: "PCB 45%",
+            approval: "INC",
+            course_url: "https://nimt.ac.in/course",
+            video_url: "https://nimt.ac.in/video",
+          }
+        : "call-log-1";
+      return Promise.resolve({ data, error });
     },
     ...(opts?.withFrom ? { from } : {}),
     auth: {
@@ -404,13 +417,20 @@ describe("dispatchDispositionWhatsApp — template selection", () => {
     expect(bodies().map((b) => b.template_key)).toContain("nimt_not_interested_ack");
   });
 
-  it("also sends course_info_v4 when send_course_info is set", async () => {
+  it("sends course info as free-form text alongside the disposition template", async () => {
+    // course_info* templates are permanently flagged MARKETING by Meta, so the
+    // details go out as a free-form reply inside the 24h window instead.
     const { client } = makeMockSupabase();
     await recordCallDisposition(baseArgs(makeData({ disposition: "interested", send_course_info: true }), client));
     await flushMicrotasks();
-    expect(bodies().map((b) => b.template_key)).toEqual(
-      expect.arrayContaining(["nimt_followup_v2", "course_info_v4"]),
-    );
+    expect(bodies().map((b) => b.template_key)).toContain("nimt_followup_v2");
+    expect(bodies().map((b) => b.template_key)).not.toContain("course_info_v4");
+
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((u) => u.endsWith("/functions/v1/whatsapp-reply"))).toBe(true);
+    const freeForm = bodies().find((b) => typeof b.message === "string");
+    expect(freeForm?.message).toContain("B.Sc Nursing");
+    expect(freeForm?.message).toContain("https://nimt.ac.in/course");
   });
 
   it("sends nothing when suppressed and no course info", async () => {

@@ -320,8 +320,10 @@ describe("a recurring add-on rides the existing collection terms", () => {
   it("offers the student's real terms in the charge dialog", () => {
     expect(addCharge).toContain('"student_fee_terms"');
     expect(addCharge).toContain("_terms: selectedTerms.length ? selectedTerms : null");
-    // The free-date field only makes sense for a genuine one-off.
-    expect(addCharge).toContain("{selectedTerms.length === 0 && (");
+    // The free-date field only makes sense for a single target row — it is
+    // shown for a one-off or exactly one term, and the payload agrees.
+    expect(addCharge).toContain("{selectedTerms.length <= 1 && (");
+    expect(addCharge).toContain("_due_date: selectedTerms.length <= 1 ? (dueDate || null) : null");
   });
 });
 

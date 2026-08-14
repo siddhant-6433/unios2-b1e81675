@@ -39,7 +39,9 @@ describe("DAOTT seat-block fee", () => {
     expect(migration).toContain("v_min_instalment    numeric := COALESCE((v_policy->>'min_token_instalment')::numeric, 5000)");
     expect(migration).toContain("(v_policy->>'token_required_amount')::numeric");
     expect(migration).toContain("(v_policy->>'an_threshold_amount')::numeric");
-    expect(offerDialog).toContain("const tokenFloor = policyTokenRequiredAmount || 5000;");
+    // School-term offers keep the flat ₹5,000 floor; every other lead falls
+    // back to the DAOTT policy amount.
+    expect(offerDialog).toContain("const tokenFloor = usesSchoolTerms ? 5000 : (policyTokenRequiredAmount || 5000);");
     expect(offerDialog).toContain("const policyTokenRequiredAmount = Number(feePolicy?.token_required_amount || 0);");
     expect(offerDialog).toContain("const nextTokenFloor = feeSnapshot.tokenRequiredAmount || 5000;");
     expect(offerGenerator).toContain("const tokenFloor = policyTokenAmount || 5000;");
