@@ -114,7 +114,14 @@ export function FeeHeadAllocationField({ open, studentId, leadId, value, onChang
       if (cancelled) return;
       setHasLedger(false);
       setHeads((codes || []).map((c: any) => ({ fee_code_id: c.id, label: `${c.name} (${c.code})`, due: 0, concession: 0 })));
-    })();
+    })().catch((err) => {
+      // A throw here (network, RLS, missing client) used to surface only as an
+      // unhandled rejection while the picker sat silently empty.
+      if (cancelled) return;
+      console.error("[FeeHeadAllocationField] could not load fee heads:", err);
+      setHasLedger(false);
+      setHeads([]);
+    });
     return () => { cancelled = true; };
   }, [open, studentId, leadId]);
 

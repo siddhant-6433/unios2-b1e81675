@@ -63,7 +63,7 @@ import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
-import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
+import { STAGE_LABELS, shouldAutoAdvance } from "@/lib/leadStages";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { completeCampusVisit } from "@/lib/visitCompletion";
@@ -78,11 +78,7 @@ const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
   not_interested: { points: -3, label: "Not interested" },
   do_not_contact: { points: -2, label: "Do not contact" },
   wrong_number: { points: -2, label: "Wrong number" },
-};
-
-const stageIndex = (stage: string) => {
-  const idx = STAGE_ORDER.indexOf(stage);
-  return idx === -1 ? -1 : idx;
+  cold: { points: 0, label: "Marked cold" },
 };
 
 const FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL = new Date(2026, 6, 12);
@@ -1414,6 +1410,7 @@ const LeadDetail = () => {
           onOpenChange={setShowCallDisposition}
           leadName={lead.name}
           leadPhone={lead.phone}
+          leadId={lead.id}
           campuses={campuses}
           defaultCampusId={lead.campus_id || undefined}
           onSubmit={logCallDisposition}

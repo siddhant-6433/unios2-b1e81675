@@ -20,6 +20,17 @@ const PermissionMatrixPanel = lazy(() =>
 const InviteUserDialog = lazy(() => import("@/components/admin/InviteUserDialog"));
 const BulkImportDialog = lazy(() => import("@/components/admin/BulkImportDialog"));
 const EditPhoneDialog = lazy(() => import("@/components/admin/EditPhoneDialog"));
+
+// Directory sub-tabs. Shared by the tab bar and the ?category= deep link that
+// EditPhoneDialog builds when a phone number is already taken.
+const USER_SUB_TABS = [
+  { key: "employees" as const, label: "Employees" },
+  { key: "consultants" as const, label: "Consultants" },
+  { key: "academic_partners" as const, label: "Academic Partners" },
+  { key: "publishers" as const, label: "Publishers" },
+  { key: "families" as const, label: "Students & Families" },
+  { key: "leads" as const, label: "Leads & Applicants" },
+];
 const EmployeeProfileDialog = lazy(() => import("@/components/admin/EmployeeProfileDialog"));
 const SetPasswordDialog = lazy(() => import("@/components/admin/SetPasswordDialog"));
 const UserPermissionsDialog = lazy(() => import("@/components/admin/UserPermissionsDialog"));
@@ -118,6 +129,20 @@ const AdminPanel = () => {
   const [publishersLoading, setPublishersLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "academic_partners" | "publishers" | "families" | "leads">("employees");
+
+  // Honour the deep link EditPhoneDialog builds when a phone number is already
+  // taken (/admin?tab=users&user=…&category=…&q=…): land on the right directory
+  // sub-tab with the owner already searched for.
+  useEffect(() => {
+    const category = searchParams.get("category");
+    const q = searchParams.get("q");
+    if (category && USER_SUB_TABS.some(t => t.key === category)) {
+      setUserSubTab(category as typeof userSubTab);
+    }
+    if (q) setSearch(q);
+    // Deep link is a one-shot entry point; later edits must not be clobbered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
@@ -575,14 +600,7 @@ const AdminPanel = () => {
               <span className="text-xs font-medium text-muted-foreground mr-1">
                 {counts?.total ?? 0} total users
               </span>
-              {([
-                { key: "employees" as const, label: "Employees" },
-                { key: "consultants" as const, label: "Consultants" },
-                { key: "academic_partners" as const, label: "Academic Partners" },
-                { key: "publishers" as const, label: "Publishers" },
-                { key: "families" as const, label: "Students & Families" },
-                { key: "leads" as const, label: "Leads & Applicants" },
-              ]).map((tab) => {
+              {USER_SUB_TABS.map((tab) => {
                 const count = tab.key === "publishers" ? publishers.length : counts?.[tab.key];
                 return (
                 <button

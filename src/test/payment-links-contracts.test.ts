@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 
 const migration = readFileSync("supabase/migrations/20260707120000_payment_links_and_pre_admission_token.sql", "utf8");
 const payLinkFn = readFileSync("supabase/functions/pay-link/index.ts", "utf8");
+// Settlement moved out of pay-link into the shared gateway module so the
+// Easebuzz reconcile cron settles through exactly the same code path.
+const settlementFn = readFileSync("supabase/functions/_shared/gateway-settlement.ts", "utf8");
 const createLinkFn = readFileSync("supabase/functions/create-payment-link/index.ts", "utf8");
 const receiptFn = readFileSync("supabase/functions/generate-payment-receipt/index.ts", "utf8");
 const offerFn = readFileSync("supabase/functions/generate-offer-letter/index.ts", "utf8");
@@ -62,25 +65,35 @@ describe("pay-link edge function", () => {
   it("settles idempotently — claims active→paid before inserting any payment row", () => {
     // The UPDATE ... eq(status,'active') guard runs first; a replayed webhook
     // that fails to claim the row returns ok without inserting.
-    const claimIdx = payLinkFn.indexOf('.eq("status", "active")');
-    const insertIdx = payLinkFn.indexOf('.from("lead_payments")');
+    // Scope to settlePaymentLink — the module also holds order/lead-payment
+    // helpers whose lead_payments writes come earlier in the file.
+    const body = settlementFn.slice(settlementFn.indexOf("export async function settlePaymentLink"));
+    const claimIdx = body.indexOf('.eq("status", "active")');
+    const insertIdx = body.indexOf('.from("lead_payments")');
     expect(claimIdx).toBeGreaterThan(-1);
     expect(insertIdx).toBeGreaterThan(claimIdx);
-    expect(payLinkFn).toContain("if (!claimed) return { ok: true }; // already settled");
+    expect(body).toContain('.update({ status: "paid" })');
+    expect(body).toContain("if (!claimed) {");
+    expect(body).toContain("already: true,");
   });
 
   it("always uses the DB amount — never a client-provided amount — for orders and settlement", () => {
-    expect(payLinkFn).toContain("const paidAmount = Number(link.amount);");
+    expect(settlementFn).toContain("const paidAmount = Number(link.amount);");
     expect(payLinkFn).toContain("const amountPaise = Math.round(Number(link.amount) * 100);");
     // No parsed.amount anywhere in the settlement path.
     expect(payLinkFn).not.toContain("parsed.amount");
+    expect(settlementFn).not.toContain("parsed.amount");
   });
 
   it("routes purposes correctly: pre_admission_token → lead_payments, fee_due/custom → ledger allocation", () => {
-    expect(payLinkFn).toContain('if (link.purpose === "pre_admission_token")');
-    expect(payLinkFn).toContain('type: "pre_admission_token"');
-    expect(payLinkFn).toContain("settleStudentFeeLedger(admin, link.student_id, paidAmount, lp.id)");
-    expect(payLinkFn).toContain('from("fee_ledger_payments")');
+    expect(settlementFn).toContain('if (link.purpose === "pre_admission_token")');
+    expect(settlementFn).toContain('type: "pre_admission_token"');
+    // fee_due / custom links sweep the student's oldest-due ledger rows.
+    expect(settlementFn).toContain('.from("fee_ledger")');
+    expect(settlementFn).toContain('.in("status", ["due", "overdue"])');
+    expect(settlementFn).toContain('from("fee_ledger_payments")');
+    // pay-link itself only routes; it must not re-implement settlement.
+    expect(payLinkFn).toContain('import { settlePaymentLink } from "../_shared/gateway-settlement.ts";');
   });
 
   it("verifies signatures with constant-time comparison for both webhook and checkout callbacks", () => {

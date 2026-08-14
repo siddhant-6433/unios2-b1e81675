@@ -22,7 +22,13 @@ describe("Inbox offer waiver badge and reload behavior", () => {
   it("loads pending waiver rows before resolving related offer data", () => {
     expect(inbox).toContain("const waiverRows = (data || []) as any[]");
     expect(inbox).toContain(".from(\"offer_letters\")\n            .select(\"id, lead_id, course_id, session_id\")");
-    expect(inbox).not.toContain("offer_letters!offer_letter_id");
+    // Scoped to the waivers branch: the offer_edits category legitimately uses
+    // an offer_letters!offer_letter_id embed of its own.
+    const waiverBranch = inbox.slice(
+      inbox.indexOf('cat === "offer_waivers"'),
+      inbox.indexOf('cat === "offer_approvals"'),
+    );
+    expect(waiverBranch).not.toContain("offer_letters!offer_letter_id");
   });
 
   it("lets WhatsApp inbox notifications be marked read from the detail pane", () => {

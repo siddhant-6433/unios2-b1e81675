@@ -1,11 +1,9 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
+import { readMigration } from "./readMigration";
 
 const edgeFn = readFileSync("supabase/functions/provision-student-fees/index.ts", "utf8");
-const guard = readFileSync(
-  "supabase/migrations/20260806050226_duplicate_payment_application_guard.sql",
-  "utf8",
-);
+const guard = readMigration("duplicate_payment_application_guard");
 
 describe("edge provisioner writes payment links", () => {
   it("attributes each credit to the payment that funded it", () => {

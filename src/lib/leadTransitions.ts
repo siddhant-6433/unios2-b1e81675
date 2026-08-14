@@ -10,7 +10,8 @@ export type LeadCallDisposition =
   | "do_not_contact"
   | "voicemail"
   | "busy"
-  | "course_not_listed";
+  | "course_not_listed"
+  | "cold";
 
 const LEAD_CALL_DISPOSITIONS = [
   "interested",
@@ -23,10 +24,31 @@ const LEAD_CALL_DISPOSITIONS = [
   "voicemail",
   "busy",
   "course_not_listed",
+  "cold",
 ] as const;
 
 export const isLeadCallDisposition = (disposition: string): disposition is LeadCallDisposition =>
   (LEAD_CALL_DISPOSITIONS as readonly string[]).includes(disposition);
+
+/** Dispositions that mean "we never reached the lead on this attempt". */
+const UNANSWERED_DISPOSITIONS = new Set(["not_answered", "busy", "voicemail"]);
+
+/**
+ * Length of the most recent unbroken run of unanswered calls, newest first.
+ * Shown next to the Cold pill so the counsellor can see they've already rung
+ * this lead three times — context only, it never blocks the choice.
+ */
+export function consecutiveNotAnswered(
+  logs: { disposition: string | null }[],
+): number {
+  let streak = 0;
+  for (const log of logs) {
+    if (!log.disposition) continue;
+    if (!UNANSWERED_DISPOSITIONS.has(log.disposition)) break;
+    streak += 1;
+  }
+  return streak;
+}
 
 export type LeadTransitionCommandName =
   | "recordDispositionInterested"
@@ -36,6 +58,7 @@ export type LeadTransitionCommandName =
   | "recordDispositionDnc"
   | "recordDispositionIneligible"
   | "recordDispositionDeferred"
+  | "recordDispositionCold"
   | "recordDispositionNoStageChange"
   | "scheduleVisit"
   | "rescheduleVisit"
@@ -137,6 +160,16 @@ export function resolveCallDispositionTransition(
       currentStage,
       newStage: "not_interested",
       activityDescription: "Stage changed to Not Interested",
+      futureEligibleSession: null,
+    };
+  }
+
+  if (disposition === "cold") {
+    return {
+      name: "recordDispositionCold",
+      currentStage,
+      newStage: "cold",
+      activityDescription: "Stage changed to Cold after repeated unanswered calls",
       futureEligibleSession: null,
     };
   }

@@ -9,7 +9,7 @@ import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SelectField } from "@/components/ui/state-fields";
-import { Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Search, ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock } from "lucide-react";
+import { Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Search, ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock, Snowflake } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -25,7 +25,7 @@ import { useCampuses } from "@/hooks/useAdmissionsData";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
-type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
+type Tab = "overdue" | "today" | "upcoming" | "cold" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
 const TABS: { key: Tab; label: string; icon: any; description: string }[] = [
   { key: "overdue", label: "Overdue", icon: AlertTriangle, description: "Follow-up calls that were scheduled but not completed — these leads are waiting for contact." },
@@ -34,6 +34,7 @@ const TABS: { key: Tab; label: string; icon: any; description: string }[] = [
   { key: "visit_confirm", label: "Visit Confirmations", icon: MapPin, description: "Visits scheduled for today or tomorrow — call each lead to confirm they are coming." },
   { key: "unclosed_visits", label: "Unclosed Visits", icon: AlertTriangle, description: "Visits that happened but were never marked completed or no-show — close these to avoid score penalties." },
   { key: "post_visit", label: "Post-Visit", icon: Phone, description: "Completed visits with no follow-up call logged — call to collect feedback and push towards admission." },
+  { key: "cold", label: "Cold Revival", icon: Snowflake, description: "Cold leads due for their 15-day revival call — two unanswered rounds and the lead auto-closes as Not Interested." },
 ];
 
 interface FollowupItem {
@@ -82,7 +83,7 @@ const PendingFollowups = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [counts, setCounts] = useState<Record<Tab, number>>({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, unclosed_visits: 0, post_visit: 0 });
+  const [counts, setCounts] = useState<Record<Tab, number>>({ overdue: 0, today: 0, upcoming: 0, cold: 0, visit_confirm: 0, unclosed_visits: 0, post_visit: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [reassignTo, setReassignTo] = useState("");
@@ -159,6 +160,7 @@ const PendingFollowups = () => {
       visit_confirm: data?.counts?.visit_confirm || 0,
       unclosed_visits: data?.counts?.unclosed_visits || 0,
       post_visit: data?.counts?.post_visit || 0,
+      cold: data?.counts?.cold || 0,
     });
     setItems(data?.items || []);
     setLoading(false);
@@ -511,7 +513,7 @@ const PendingFollowups = () => {
     fetchPayload();
   };
 
-  const totalAll = counts.overdue + counts.today + counts.upcoming + counts.visit_confirm + counts.unclosed_visits + counts.post_visit;
+  const totalAll = counts.overdue + counts.today + counts.upcoming + counts.cold + counts.visit_confirm + counts.unclosed_visits + counts.post_visit;
 
   const fmtOverdue = (d: number) => d === 0 ? "Today" : d === 1 ? "1 day overdue" : `${d} days overdue`;
   const fmtDate = (s: string) => {
@@ -623,6 +625,7 @@ const PendingFollowups = () => {
           onOpenChange={(open) => { if (!open) resetInlineCall(); }}
           leadName={inlineCall.item.lead_name}
           leadPhone={inlineCall.item.lead_phone}
+          leadId={inlineCall.item.lead_id}
           campuses={campuses}
           onSubmit={submitInlineDisposition}
           callStatus={inlineCallStatus}
@@ -692,7 +695,7 @@ const PendingFollowups = () => {
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Lead</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Type</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                    {tab === "overdue" || tab === "unclosed_visits" ? "Overdue" : tab === "post_visit" ? "Since Visit" : "Scheduled"}
+                    {tab === "overdue" || tab === "unclosed_visits" ? "Overdue" : tab === "post_visit" ? "Since Visit" : tab === "cold" ? "Due" : "Scheduled"}
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Stage</th>
                   {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
@@ -735,6 +738,7 @@ const PendingFollowups = () => {
                         r.type === "call" ? "bg-info/10 text-info-foreground"
                         : r.type === "visit_confirmation" ? "bg-primary/10 text-primary"
                         : r.type === "post_visit" ? "bg-warning/10 text-warning-foreground"
+                        : r.type === "cold_followup" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
                         : "bg-muted text-muted-foreground"
                       }`}>{r.type.replace(/_/g, " ")}</Badge>
                     </td>

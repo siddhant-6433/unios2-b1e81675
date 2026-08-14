@@ -386,6 +386,7 @@ export function ActionCenterView({
         onOpenChange={(open) => { if (!open) setCallLead(null); }}
         leadName={callLead?.name || ""}
         leadPhone={callLead?.phone || ""}
+        leadId={callLead?.id}
         campuses={campuses}
         onSubmit={handleCallSubmit}
         leadSource={callLead?.source || null}

@@ -20,7 +20,7 @@ const admissionsBannerMigration = readFileSync(
 describe("pending follow-up count alignment", () => {
   it("keeps the page headline total aligned with every visible follow-up tab", () => {
     expect(pendingFollowupsPage).toContain(
-      "counts.overdue + counts.today + counts.upcoming + counts.visit_confirm + counts.unclosed_visits + counts.post_visit",
+      "counts.overdue + counts.today + counts.upcoming + counts.cold + counts.visit_confirm + counts.unclosed_visits + counts.post_visit",
     );
   });
 

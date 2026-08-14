@@ -30,6 +30,7 @@ const DISPOSITION_COLORS: Record<string, string> = {
   wrong_number: "bg-pink-100 text-pink-700",
   do_not_contact: "bg-destructive/15 text-destructive",
   ineligible: "bg-gray-100 text-gray-600",
+  cold: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
 };
 
 type DatePreset = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "all" | "custom";

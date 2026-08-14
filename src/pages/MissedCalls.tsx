@@ -629,6 +629,7 @@ export default function MissedCalls() {
             onOpenChange={setShowDialog}
             leadName={activeMc.lead_name}
             leadPhone={activeMc.lead_phone}
+            leadId={activeMc.lead_id}
             campuses={[]}
             onSubmit={onDispositionSubmit}
             callStatus={dispositionStatus}

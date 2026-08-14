@@ -150,6 +150,7 @@ const DISPOSITION_LABELS: Record<string, string> = {
   do_not_contact: "DNC",
   voicemail: "Voicemail",
   busy: "Busy",
+  cold: "Cold",
   cancelled: "Cancelled",
 };
 

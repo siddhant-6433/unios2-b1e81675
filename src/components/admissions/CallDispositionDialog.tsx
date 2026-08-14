@@ -4,13 +4,15 @@ import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
-import { Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3, BanIcon, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock, AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion } from "lucide-react";
+import { Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3, BanIcon, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock, AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion, Snowflake } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { REFERRAL_PARTNER_LABEL } from "@/lib/leadReferral";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { consecutiveNotAnswered } from "@/lib/leadTransitions";
 
 export type CallDisposition =
   | "interested"
@@ -22,7 +24,8 @@ export type CallDisposition =
   | "do_not_contact"
   | "voicemail"
   | "busy"
-  | "course_not_listed";
+  | "course_not_listed"
+  | "cold";
 
 export interface CallDispositionData {
   disposition: CallDisposition;
@@ -77,6 +80,8 @@ interface CallDispositionDialogProps {
   onOpenChange: (open: boolean) => void;
   leadName: string;
   leadPhone: string;
+  /** Enables the "N consecutive unanswered calls" hint on the Cold pill. */
+  leadId?: string;
   campuses: { id: string; name: string }[];
   defaultCampusId?: string;
   onSubmit: (data: CallDispositionData) => Promise<void>;
@@ -161,6 +166,9 @@ const DISPOSITIONS: {
   { value: "busy", label: "Busy", icon: Phone, color: "bg-warning/10 text-warning-foreground border-warning/25 hover:bg-warning/5 dark:bg-warning/80/30 dark:text-warning", suggestsFollowup: true,
     help: "Lead's line was busy. Will retry; an apology WhatsApp also goes out.",
     onlyWhenNotConnected: true },
+  { value: "cold", label: "Cold — Not Reachable", icon: Snowflake, color: "bg-sky-100 text-sky-700 border-sky-300 hover:bg-sky-50 dark:bg-sky-900/30 dark:text-sky-400", suggestsFollowup: false,
+    help: "Lead hasn't picked up across repeated attempts. Parks the lead and schedules a revival call in 15 days. After two unanswered revival rounds the lead auto-closes as Not Interested.",
+    onlyWhenNotConnected: true },
   { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false,
     help: "Number reached someone other than the lead, or is invalid. No further calls; flag for admin to clean the data." },
   { value: "course_not_listed", label: "Course Not Listed", icon: FileQuestion, color: "bg-teal-100 text-teal-700 border-teal-300 hover:bg-teal-50 dark:bg-teal-900/30 dark:text-teal-400", suggestsFollowup: false,
@@ -228,7 +236,7 @@ const formatDisplayDate = (dateStr: string) => {
 };
 
 export function CallDispositionDialog({
-  open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
+  open, onOpenChange, leadName, leadPhone, leadId, campuses, defaultCampusId,
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
   callStarting = false, onRetryCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
@@ -289,6 +297,24 @@ export function CallDispositionDialog({
     return () => clearInterval(id);
   }, [connectedAt, callEnded]);
   const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // Context for the Cold pill: how many times in a row this lead has already
+  // failed to pick up. Purely informational — Cold is never gated on it.
+  const [unansweredStreak, setUnansweredStreak] = useState(0);
+  useEffect(() => {
+    if (!open || !leadId) { setUnansweredStreak(0); return; }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from("call_logs")
+        .select("disposition")
+        .eq("lead_id", leadId)
+        .order("called_at", { ascending: false })
+        .limit(10);
+      if (!cancelled) setUnansweredStreak(consecutiveNotAnswered(data || []));
+    })();
+    return () => { cancelled = true; };
+  }, [open, leadId]);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
   const asksCnetAppeared = isBscNursingCourse(courseName || null);
@@ -764,6 +790,11 @@ export function CallDispositionDialog({
                   >
                     <Icon className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
                     <span className="truncate">{d.label}</span>
+                    {d.value === "cold" && unansweredStreak > 0 && (
+                      <span className="ml-auto shrink-0 rounded-full bg-current/10 px-1.5 text-[10px] font-semibold tabular-nums opacity-80">
+                        {unansweredStreak}×
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -777,6 +808,11 @@ export function CallDispositionDialog({
               return (
                 <p className="text-[10px] text-muted-foreground mt-1 px-1">
                   <span className="font-medium text-foreground">{meta.label}:</span> {meta.help}
+                  {disposition === "cold" && unansweredStreak > 0 && (
+                    <> {" "}<span className="font-medium text-foreground">
+                      {unansweredStreak} consecutive unanswered call{unansweredStreak === 1 ? "" : "s"} logged so far.
+                    </span></>
+                  )}
                 </p>
               );
             })()}

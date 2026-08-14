@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-const adminPanel = readFileSync("src/pages/AdminPanel.tsx", "utf8");
+// The Gemini selector moved out of AdminPanel into its own Navya page.
+const navyaVoiceAgent = readFileSync("src/pages/admin/NavyaVoiceAgent.tsx", "utf8");
 const voiceAgent = readFileSync("voice-agent/server.ts", "utf8");
 const guardMigration = readFileSync(
   "supabase/migrations/20260624120000_block_flash_live_voice_model.sql",
@@ -10,9 +11,9 @@ const guardMigration = readFileSync(
 
 describe("voice agent Gemini model guardrails", () => {
   it("does not expose flash-live-preview models in the admin selector", () => {
-    const modelList = adminPanel.slice(
-      adminPanel.indexOf("const GEMINI_MODELS = ["),
-      adminPanel.indexOf("] as const;", adminPanel.indexOf("const GEMINI_MODELS = [")),
+    const modelList = navyaVoiceAgent.slice(
+      navyaVoiceAgent.indexOf("const GEMINI_MODELS = ["),
+      navyaVoiceAgent.indexOf("] as const;", navyaVoiceAgent.indexOf("const GEMINI_MODELS = [")),
     );
 
     expect(modelList).toContain("gemini-2.5-flash-native-audio-latest");

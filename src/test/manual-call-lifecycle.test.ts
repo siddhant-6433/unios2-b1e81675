@@ -11,16 +11,17 @@ describe("manual-call lifecycle ordering", () => {
     );
   });
 
-  it("supports multiple cloud-dialer caller IDs and chooses them round-robin", () => {
-    expect(manualCallSource).toContain("normalizePlivoVoiceNumberPool(dialerNumberSecrets)");
-    expect(manualCallSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
+  it("dials from the dedicated cloud-dialer number, separate from the AI number", () => {
+    // #471 removed the rotation pool on purpose: counsellor calls now come from
+    // one dedicated caller ID so leads can tell a human from Navya.
     expect(manualCallSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")');
-    expect(manualCallSource).toContain("dialerNumbers.length < 2");
-    expect(manualCallSource).toContain("At least two unique PLIVO_DIALER_PHONE_NUMBER(S)");
-    expect(manualCallSource).toContain('.from("ai_call_records")');
-    expect(manualCallSource).toContain('.eq("call_type", "manual")');
-    expect(manualCallSource).toContain('select("from_number")');
-    expect(manualCallSource).toContain("chooseNextDialerNumber(dialerNumbers");
+    expect(manualCallSource).not.toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
+    expect(manualCallSource).not.toContain("chooseNextDialerNumber");
+    expect(manualCallSource).not.toContain("PLIVO_AI_PHONE_NUMBER");
+    expect(manualCallSource).toContain("normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER)");
+    // A malformed secret must fail loudly rather than dial from a bad caller ID.
+    expect(manualCallSource).toContain("if (!dialerFrom)");
+    expect(manualCallSource).toContain("maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER)");
     expect(manualCallSource).toContain("from_number: dialerFrom");
   });
 

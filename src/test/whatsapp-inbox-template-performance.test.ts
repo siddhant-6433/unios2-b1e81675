@@ -94,10 +94,15 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(whatsappSend).toContain("business_phone_number_id");
   });
 
-  it("keeps the Plivo admissions channel segregated and discovers Meta channels from data", () => {
+  it("keeps each admissions number segregated and discovers Meta channels from data", () => {
     expect(inbox).toContain("detectedInboxChannels");
     expect(inbox).toContain("KNOWN_ADMISSIONS_PHONE_CHANNELS");
-    expect(inbox).toContain('provider: "plivo"');
+    // 9555192192 migrated off Plivo onto Meta Cloud API coexistence, so every
+    // known admissions channel is now provider "meta" — it still gets its own
+    // inbox entry rather than being merged into the primary number.
+    expect(inbox).toContain("PLIVO_WHATSAPP_NUMBER");
+    expect(inbox).toContain('provider: "meta"');
+    expect(inbox).not.toContain('provider: "plivo",');
     expect(inbox).toContain("PRIMARY_META_WHATSAPP_NUMBER");
     expect(inbox).toContain("919667641872");
     expect(inbox).toContain("917428499849");
@@ -158,8 +163,13 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(admissionsContext).toContain('const FEE_STRUCTURE_URL = "https://nimt.ac.in/admissions/fees/"');
     expect(whatsappAiReply).toContain("FEE ANSWER RULES (strict)");
     expect(whatsappAiReply).toContain("If the user asks about fee");
-    expect(whatsappAiReply).toContain("B.Sc Nursing: ₹1,53,000/year");
-    expect(whatsappAiReply).toContain("Full year-wise programme fees are published");
+    // Fee amounts are no longer hardcoded in the prompt — they come from
+    // course_facts / fee_structures via verifiedAdmissionsContext, so a price
+    // change can't leave a stale number baked into the edge function.
+    expect(whatsappAiReply).not.toContain("₹1,53,000/year");
+    expect(whatsappAiReply).toContain("Never invent fee amounts.");
+    expect(whatsappAiReply).toContain("full year-wise programme fees are published here: ${FEE_STRUCTURE_URL}");
+    expect(whatsappAiReply).toContain("verifiedAdmissionsContext");
     expect(whatsappCopilotAssist).toContain("always include the canonical fee page: https://nimt.ac.in/admissions/fees/");
     expect(inbox).toContain("Detailed year-wise fees are published here");
     expect(inbox).toContain("https://nimt.ac.in/admissions/fees/");

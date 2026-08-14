@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  consecutiveNotAnswered,
   leadTransitionStagePatch,
   resolveCallDispositionTransition,
   resolveLeadTransitionCommand,
@@ -205,5 +206,34 @@ describe("resolveLeadTransitionCommand", () => {
       name: "adminOverrideStage",
       newStage: "waitlisted",
     });
+  });
+});
+
+describe("cold disposition", () => {
+  it("parks the lead in cold from any stage, without the auto-advance gate", () => {
+    for (const currentStage of ["new_lead", "counsellor_call", "visit_scheduled", "offer_sent"]) {
+      expect(resolveCallDispositionTransition({ currentStage, disposition: "cold" })).toEqual({
+        name: "recordDispositionCold",
+        currentStage,
+        newStage: "cold",
+        activityDescription: "Stage changed to Cold after repeated unanswered calls",
+        futureEligibleSession: null,
+      });
+    }
+  });
+});
+
+describe("consecutiveNotAnswered", () => {
+  const logs = (...ds: (string | null)[]) => ds.map(disposition => ({ disposition }));
+
+  it("counts the unbroken run of unanswered calls, newest first", () => {
+    expect(consecutiveNotAnswered([])).toBe(0);
+    expect(consecutiveNotAnswered(logs("not_answered", "busy", "voicemail"))).toBe(3);
+    expect(consecutiveNotAnswered(logs("interested", "not_answered", "not_answered"))).toBe(0);
+    expect(consecutiveNotAnswered(logs("not_answered", "interested", "not_answered"))).toBe(1);
+  });
+
+  it("ignores rows with no disposition instead of breaking the run", () => {
+    expect(consecutiveNotAnswered(logs("not_answered", null, "busy"))).toBe(2);
   });
 });

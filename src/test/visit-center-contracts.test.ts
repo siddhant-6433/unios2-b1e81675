@@ -95,7 +95,9 @@ describe("Visit Center mobile wiring", () => {
     expect(mobileWork).not.toContain("gte('scheduled_at'");
     expect(mobileWork).toContain("gte('visit_date'");
     expect(mobileIndex).not.toContain("gte('scheduled_at'");
-    expect(mobileIndex).toContain("Visits today");
+    // Home pulse tile counts today's visits off campus_visits.visit_date.
+    expect(mobileIndex).toContain("gte('visit_date'");
+    expect(mobileIndex).toContain('label="Visits"');
   });
 
   it("visit crons deep-link mobile pushes to the visit detail screen", () => {
