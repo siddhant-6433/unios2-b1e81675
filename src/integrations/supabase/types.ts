@@ -113,6 +113,13 @@ export type Database = {
             foreignKeyName: "abvmu_deposit_claims_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "abvmu_deposit_claims_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -400,6 +407,13 @@ export type Database = {
             foreignKeyName: "academic_partner_offer_otps_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_offer_otps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -611,6 +625,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "academic_partner_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "academic_partner_payouts_lead_id_fkey"
@@ -892,6 +913,13 @@ export type Database = {
             foreignKeyName: "admission_bypass_audit_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admission_bypass_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1134,6 +1162,13 @@ export type Database = {
             foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1266,6 +1301,13 @@ export type Database = {
             foreignKeyName: "ai_call_logs_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "ai_call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -1348,6 +1390,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_call_queue_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "ai_call_queue_lead_id_fkey"
             columns: ["lead_id"]
@@ -1555,6 +1604,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "ai_call_records_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "ai_call_records_lead_id_fkey"
@@ -2297,6 +2353,13 @@ export type Database = {
             foreignKeyName: "application_families_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "application_families_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2411,6 +2474,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "applications"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_on_behalf_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "application_on_behalf_audit_lead_id_fkey"
@@ -2743,6 +2813,13 @@ export type Database = {
             foreignKeyName: "applications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -2916,6 +2993,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "apply_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "apply_magic_tokens_lead_id_fkey"
@@ -3638,6 +3722,13 @@ export type Database = {
             foreignKeyName: "automation_rule_executions_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "automation_rule_executions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -3910,6 +4001,13 @@ export type Database = {
             foreignKeyName: "cahet_registrations_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "cahet_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -4064,6 +4162,13 @@ export type Database = {
             foreignKeyName: "call_logs_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -4177,6 +4282,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "course_marketing_info"
             referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "campus_visits_lead_id_fkey"
@@ -4485,6 +4597,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "cloud_dialer_pins_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "cloud_dialer_pins_lead_id_fkey"
             columns: ["lead_id"]
@@ -5245,6 +5364,13 @@ export type Database = {
             foreignKeyName: "consultant_credit_note_applications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_credit_note_applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -5563,6 +5689,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "consultant_fee_collection_remittances_lead_id_fkey"
@@ -5895,6 +6028,13 @@ export type Database = {
             foreignKeyName: "consultant_lead_commissions_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "consultant_lead_commissions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -6195,6 +6335,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "consultant_payouts_lead_id_fkey"
@@ -6834,6 +6981,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "counsellor_score_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "counsellor_score_events_lead_id_fkey"
@@ -7896,6 +8050,13 @@ export type Database = {
             foreignKeyName: "direct_dial_overrides_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "direct_dial_overrides_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -8308,6 +8469,13 @@ export type Database = {
             foreignKeyName: "email_campaign_recipients_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "email_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -8535,6 +8703,13 @@ export type Database = {
           to_email?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "email_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "email_messages_lead_id_fkey"
             columns: ["lead_id"]
@@ -9040,6 +9215,8 @@ export type Database = {
           experience: Json | null
           first_name: string | null
           gender: string | null
+          hr_department: string | null
+          hr_sub_department: string | null
           id: string
           import_batch_id: string | null
           institution_id: string | null
@@ -9068,6 +9245,7 @@ export type Database = {
           physically_handicapped: boolean | null
           professional_summary: string | null
           reports_to: string | null
+          reports_to_name: string | null
           residence_number: string | null
           time_type: string | null
           updated_at: string
@@ -9076,6 +9254,7 @@ export type Database = {
           verified_at: string | null
           verified_by: string | null
           work_email: string | null
+          work_location: string | null
           work_number: string | null
           worker_type: string | null
         }
@@ -9098,6 +9277,8 @@ export type Database = {
           experience?: Json | null
           first_name?: string | null
           gender?: string | null
+          hr_department?: string | null
+          hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
           institution_id?: string | null
@@ -9126,6 +9307,7 @@ export type Database = {
           physically_handicapped?: boolean | null
           professional_summary?: string | null
           reports_to?: string | null
+          reports_to_name?: string | null
           residence_number?: string | null
           time_type?: string | null
           updated_at?: string
@@ -9134,6 +9316,7 @@ export type Database = {
           verified_at?: string | null
           verified_by?: string | null
           work_email?: string | null
+          work_location?: string | null
           work_number?: string | null
           worker_type?: string | null
         }
@@ -9156,6 +9339,8 @@ export type Database = {
           experience?: Json | null
           first_name?: string | null
           gender?: string | null
+          hr_department?: string | null
+          hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
           institution_id?: string | null
@@ -9184,6 +9369,7 @@ export type Database = {
           physically_handicapped?: boolean | null
           professional_summary?: string | null
           reports_to?: string | null
+          reports_to_name?: string | null
           residence_number?: string | null
           time_type?: string | null
           updated_at?: string
@@ -9192,6 +9378,7 @@ export type Database = {
           verified_at?: string | null
           verified_by?: string | null
           work_email?: string | null
+          work_location?: string | null
           work_number?: string | null
           worker_type?: string | null
         }
@@ -9270,6 +9457,7 @@ export type Database = {
       }
       employee_salaries: {
         Row: {
+          annual_ctc: number | null
           created_at: string
           created_by: string | null
           effective_from: string
@@ -9279,8 +9467,10 @@ export type Database = {
           monthly_gross: number
           revision_note: string | null
           salary_structure_id: string | null
+          source: string | null
         }
         Insert: {
+          annual_ctc?: number | null
           created_at?: string
           created_by?: string | null
           effective_from: string
@@ -9290,8 +9480,10 @@ export type Database = {
           monthly_gross: number
           revision_note?: string | null
           salary_structure_id?: string | null
+          source?: string | null
         }
         Update: {
+          annual_ctc?: number | null
           created_at?: string
           created_by?: string | null
           effective_from?: string
@@ -9301,6 +9493,7 @@ export type Database = {
           monthly_gross?: number
           revision_note?: string | null
           salary_structure_id?: string | null
+          source?: string | null
         }
         Relationships: [
           {
@@ -9479,6 +9672,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "exam_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "exam_registrations_lead_id_fkey"
             columns: ["lead_id"]
@@ -10002,6 +10202,13 @@ export type Database = {
             foreignKeyName: "fee_proposals_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "fee_proposals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -10336,6 +10543,13 @@ export type Database = {
             foreignKeyName: "feedback_responses_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "feedback_responses_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -10421,6 +10635,13 @@ export type Database = {
           value?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ga_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "ga_event_log_lead_id_fkey"
             columns: ["lead_id"]
@@ -13495,6 +13716,13 @@ export type Database = {
             foreignKeyName: "incentive_flags_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "incentive_flags_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -13691,6 +13919,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "incentive_ledger_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "incentive_ledger_lead_id_fkey"
@@ -14423,6 +14658,13 @@ export type Database = {
             foreignKeyName: "job_applicants_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -14715,6 +14957,13 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_activities_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_activities_lead_id_fkey"
             columns: ["lead_id"]
@@ -15027,6 +15276,13 @@ export type Database = {
             foreignKeyName: "lead_assignment_history_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_assignment_history_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15247,6 +15503,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_association_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "lead_association_requests_lead_id_fkey"
@@ -15507,6 +15770,13 @@ export type Database = {
             foreignKeyName: "lead_counsellors_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_counsellors_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15589,6 +15859,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_deletion_requests_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_deletion_requests_lead_id_fkey"
             columns: ["lead_id"]
@@ -15693,6 +15970,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "document_checklists"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_documents_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "lead_documents_lead_id_fkey"
@@ -15882,6 +16166,13 @@ export type Database = {
             foreignKeyName: "lead_engagement_events_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_engagement_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -15967,6 +16258,13 @@ export type Database = {
           visit_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
@@ -16255,6 +16553,13 @@ export type Database = {
             foreignKeyName: "lead_list_members_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -16456,6 +16761,13 @@ export type Database = {
             foreignKeyName: "lead_merges_kept_lead_id_fkey"
             columns: ["kept_lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_merges_kept_lead_id_fkey"
+            columns: ["kept_lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -16582,6 +16894,13 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_notes_lead_id_fkey"
             columns: ["lead_id"]
@@ -16716,6 +17035,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "fee_codes"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "lead_payments_lead_id_fkey"
@@ -16983,6 +17309,13 @@ export type Database = {
             foreignKeyName: "lead_referrals_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -17070,6 +17403,13 @@ export type Database = {
           old_source?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_source_audit_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_source_audit_lead_id_fkey"
             columns: ["lead_id"]
@@ -17565,6 +17905,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "leads_mirror_lead_id_fkey"
+            columns: ["mirror_lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "leads_mirror_lead_id_fkey"
@@ -19555,6 +19902,13 @@ export type Database = {
             foreignKeyName: "meta_event_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "meta_event_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -19652,6 +20006,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "meta_lead_events_ingested_lead_id_fkey"
+            columns: ["ingested_lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "meta_lead_events_ingested_lead_id_fkey"
             columns: ["ingested_lead_id"]
@@ -19899,6 +20260,13 @@ export type Database = {
             foreignKeyName: "notifications_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "notifications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -20142,6 +20510,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "offer_letters_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "offer_letters_lead_id_fkey"
@@ -20926,6 +21301,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_links_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "payment_links_lead_id_fkey"
@@ -21770,6 +22152,13 @@ export type Database = {
             foreignKeyName: "profile_queries_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "profile_queries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -22082,15 +22471,21 @@ export type Database = {
       report_cards: {
         Row: {
           cgpa: number | null
+          class_teacher_comment: string | null
+          coordinator_comment: string | null
           course_id: string
           generated_at: string
           grade: string | null
           id: string
           percentage: number | null
+          published_at: string | null
           result_status: string
           session_id: string | null
           sgpa: number | null
           sheet_json: Json
+          signed_off_at: string | null
+          signed_off_by: string | null
+          status: string
           student_id: string
           term: string
           total_marks: number | null
@@ -22098,15 +22493,21 @@ export type Database = {
         }
         Insert: {
           cgpa?: number | null
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
           course_id: string
           generated_at?: string
           grade?: string | null
           id?: string
           percentage?: number | null
+          published_at?: string | null
           result_status?: string
           session_id?: string | null
           sgpa?: number | null
           sheet_json?: Json
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           student_id: string
           term: string
           total_marks?: number | null
@@ -22114,15 +22515,21 @@ export type Database = {
         }
         Update: {
           cgpa?: number | null
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
           course_id?: string
           generated_at?: string
           grade?: string | null
           id?: string
           percentage?: number | null
+          published_at?: string | null
           result_status?: string
           session_id?: string | null
           sgpa?: number | null
           sheet_json?: Json
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           student_id?: string
           term?: string
           total_marks?: number | null
@@ -22664,6 +23071,13 @@ export type Database = {
             foreignKeyName: "score_penalty_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "score_penalty_log_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -23023,6 +23437,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "staff_incentive_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "staff_incentive_payouts_lead_id_fkey"
@@ -24009,6 +24430,13 @@ export type Database = {
             foreignKeyName: "student_magic_tokens_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "student_magic_tokens_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -24426,6 +24854,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "student_referrals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "student_referrals_lead_id_fkey"
             columns: ["lead_id"]
@@ -25396,6 +25831,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25850,6 +26292,13 @@ export type Database = {
             foreignKeyName: "token_fee_reminders_sent_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "token_fee_reminders_sent_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -25979,6 +26428,13 @@ export type Database = {
           registration_no?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "updeled_registrations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "updeled_registrations_lead_id_fkey"
             columns: ["lead_id"]
@@ -26663,6 +27119,13 @@ export type Database = {
             foreignKeyName: "visit_followup_nudges_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "visit_followup_nudges_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27017,6 +27480,13 @@ export type Database = {
             foreignKeyName: "voice_knowledge_gaps_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "voice_knowledge_gaps_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27190,6 +27660,13 @@ export type Database = {
             foreignKeyName: "waitlist_entries_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "waitlist_entries_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -27263,6 +27740,13 @@ export type Database = {
           started_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "web_conversations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "web_conversations_lead_id_fkey"
             columns: ["lead_id"]
@@ -27364,6 +27848,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_ai_drafts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "whatsapp_ai_drafts_lead_id_fkey"
             columns: ["lead_id"]
@@ -27483,6 +27974,13 @@ export type Database = {
           reason?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_automation_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "whatsapp_automation_events_lead_id_fkey"
             columns: ["lead_id"]
@@ -27625,6 +28123,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "whatsapp_campaigns"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_campaign_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "whatsapp_campaign_recipients_lead_id_fkey"
@@ -27958,6 +28463,13 @@ export type Database = {
             foreignKeyName: "whatsapp_conversation_state_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_conversation_state_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28103,6 +28615,13 @@ export type Database = {
           skip_reason?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_inbound_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "whatsapp_inbound_events_lead_id_fkey"
             columns: ["lead_id"]
@@ -28268,6 +28787,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_message_buffers_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "whatsapp_message_buffers_lead_id_fkey"
             columns: ["lead_id"]
@@ -28448,6 +28974,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "whatsapp_messages_lead_id_fkey"
@@ -28672,6 +29205,13 @@ export type Database = {
             foreignKeyName: "whatsapp_outbound_context_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_outbound_context_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28804,6 +29344,13 @@ export type Database = {
             foreignKeyName: "whatsapp_scheduled_sends_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -28892,6 +29439,13 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_sla_alerts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "whatsapp_sla_alerts_lead_id_fkey"
             columns: ["lead_id"]
@@ -29266,6 +29820,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -29416,6 +29977,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "seat_matrix"
             referencedColumns: ["course_id"]
+          },
+          {
+            foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "admissions_ai_reply_examples_lead_id_fkey"
@@ -29585,6 +30153,74 @@ export type Database = {
         }
         Relationships: []
       }
+      cold_cycle_state: {
+        Row: {
+          cold_at: string | null
+          counsellor_id: string | null
+          has_open_round: boolean | null
+          lead_id: string | null
+          responded: boolean | null
+          rounds_spent: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_dialer_usage"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_funnel_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_leaderboard"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_performance_stats"
+            referencedColumns: ["counsellor_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "counsellor_tat_defaults"
+            referencedColumns: ["profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "staff_incentive_summary"
+            referencedColumns: ["recipient_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "team_leader_defaults_summary"
+            referencedColumns: ["counsellor_profile_id"]
+          },
+        ]
+      }
       consultant_credit_note_summary: {
         Row: {
           amount: number | null
@@ -29707,6 +30343,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "consultant_payouts_lead_id_fkey"
@@ -29999,6 +30642,13 @@ export type Database = {
           type: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
@@ -30300,6 +30950,13 @@ export type Database = {
             foreignKeyName: "job_applicants_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: true
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "job_applicants_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -30500,6 +31157,13 @@ export type Database = {
             foreignKeyName: "lead_followups_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -30649,6 +31313,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "course_marketing_info"
             referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "campus_visits_lead_id_fkey"
@@ -31136,6 +31807,13 @@ export type Database = {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -31200,6 +31878,13 @@ export type Database = {
           student_status: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "students_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "students_lead_id_fkey"
             columns: ["lead_id"]
@@ -31284,6 +31969,13 @@ export type Database = {
           unapplied_amount: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lead_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "lead_payments_lead_id_fkey"
             columns: ["lead_id"]
@@ -31870,6 +32562,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -32002,6 +32701,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "course_marketing_info"
             referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "campus_visits_lead_id_fkey"
@@ -32144,6 +32850,13 @@ export type Database = {
             foreignKeyName: "campus_visits_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "hot_engaged_leads"
             referencedColumns: ["id"]
           },
@@ -32275,6 +32988,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "course_marketing_info"
             referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "cold_cycle_state"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "campus_visits_lead_id_fkey"
@@ -33442,6 +34162,7 @@ export type Database = {
         Returns: undefined
       }
       fn_cleanup_stale_ai_calls: { Args: never; Returns: undefined }
+      fn_cold_lead_cycle: { Args: never; Returns: Json }
       fn_counsellor_targets: {
         Args: { p_counsellor_id: string; p_month: string }
         Returns: Json
@@ -34078,6 +34799,10 @@ export type Database = {
       }
       is_bpt_or_bmrit_course: {
         Args: { p_course_id: string }
+        Returns: boolean
+      }
+      is_class_teacher_of: {
+        Args: { _student_id: string; _user_id: string }
         Returns: boolean
       }
       is_day_closed: { Args: { _campus_id?: string }; Returns: boolean }
@@ -35252,6 +35977,10 @@ export type Database = {
           institution_name: string
         }[]
       }
+      student_profile_for_viewer: {
+        Args: { _student_id: string }
+        Returns: Json
+      }
       student_service_assignable_handlers: {
         Args: never
         Returns: {
@@ -35313,6 +36042,10 @@ export type Database = {
       }
       tc_academic_year: { Args: { _d: string }; Returns: string }
       teaches_student: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
+      teaches_subject_of: {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
       }

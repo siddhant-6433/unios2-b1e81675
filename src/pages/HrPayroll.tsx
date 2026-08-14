@@ -17,10 +17,11 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SelectField } from "@/components/ui/state-fields";
-import { Lock, Plus, RefreshCw, Calculator, IndianRupee, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Lock, Plus, RefreshCw, Calculator, IndianRupee, AlertTriangle, ArrowLeft, Upload } from "lucide-react";
 import {
   computePayroll, ratesFromConfig, type SalaryComponent, type StatutoryRates,
 } from "@/lib/payroll";
+import { SalaryImportDialog } from "@/components/hr/SalaryImportDialog";
 
 interface LegalEntity { id: string; name: string }
 
@@ -96,6 +97,7 @@ export default function HrPayroll() {
   const [uncovered, setUncovered] = useState<Uncovered[]>([]);
   const [workerType, setWorkerType] = useState("");
   const [runName, setRunName] = useState("");
+  const [salaryImportOpen, setSalaryImportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -350,6 +352,9 @@ export default function HrPayroll() {
               title="Name a run when paying a month in parts, e.g. “Teaching staff”"
               className="w-44 rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm"
             />
+            <Button size="sm" variant="outline" onClick={() => setSalaryImportOpen(true)}>
+              <Upload className="h-4 w-4 mr-1.5" /> Import salaries
+            </Button>
             <Button size="sm" onClick={createCycle} disabled={busy === "create"}>
               <Plus className="h-4 w-4 mr-1.5" /> New run
             </Button>
@@ -396,6 +401,12 @@ export default function HrPayroll() {
             </div>
           )}
         </div>
+
+        <SalaryImportDialog
+          open={salaryImportOpen}
+          onOpenChange={setSalaryImportOpen}
+          onSuccess={() => { if (openCycle) fetchLines(openCycle.id); }}
+        />
       </div>
     );
   }
