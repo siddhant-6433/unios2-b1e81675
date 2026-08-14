@@ -36,6 +36,9 @@ interface Employee {
   name: string;
   /** Set once their last working day has passed — archived, not deleted. */
   exitedOn: string | null;
+  location: string | null;
+  businessUnit: string | null;
+  legalEntityId: string | null;
   phone: string | null;
   role: string | null;
   jobTitle: string | null;
@@ -83,6 +86,10 @@ const HrEmployeeDirectory = () => {
   const [campusFilter, setCampusFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
   const [showExited, setShowExited] = useState(false);
+  const [deptFilter, setDeptFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [entityFilter, setEntityFilter] = useState("all");
+  const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [editing, setEditing] = useState<Employee | null>(null);
 
   const canEdit = can("hr", "employees_edit");
@@ -103,10 +110,10 @@ const HrEmployeeDirectory = () => {
           .select("user_id, role")
           .range(from, to),
       ),
-      fetchAll<{ id: string; user_id: string | null; employee_number: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null; hr_department: string | null; date_of_exit: string | null }>(
+      fetchAll<{ id: string; user_id: string | null; employee_number: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null; hr_department: string | null; date_of_exit: string | null; work_location: string | null; business_unit: string | null; legal_entity_id: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("id, user_id, employee_number, display_name, mobile_number, job_title, department_id, campus_id, photo_url, hr_department, date_of_exit")
+          .select("id, user_id, employee_number, display_name, mobile_number, job_title, department_id, campus_id, photo_url, hr_department, date_of_exit, work_location, business_unit, legal_entity_id")
           .eq("verification_status", "verified")
           .order("display_name")
           .range(from, to),
@@ -184,6 +191,9 @@ const HrEmployeeDirectory = () => {
         userId: e.user_id ?? undefined,
         employeeNumber: e.employee_number,
         exitedOn: e.date_of_exit,
+        location: e.work_location,
+        businessUnit: e.business_unit,
+        legalEntityId: e.legal_entity_id,
         name: e.display_name || p?.display_name || "Unnamed",
         phone: e.mobile_number || p?.phone || null,
         role: e.user_id ? roleByUser.get(e.user_id) ?? null : null,
@@ -205,6 +215,9 @@ const HrEmployeeDirectory = () => {
         userId: s.user_id,
         employeeNumber: ep?.employee_number ?? null,
         exitedOn: null,
+        location: null,
+        businessUnit: null,
+        legalEntityId: null,
         name: s.display_name || "Unnamed",
         phone: s.phone,
         role: roleByUser.get(s.user_id) ?? null,
@@ -224,6 +237,11 @@ const HrEmployeeDirectory = () => {
 
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
+  useEffect(() => {
+    supabase.from("legal_entities").select("id, name").eq("is_active", true).order("name")
+      .then(({ data }) => setEntities((data as { id: string; name: string }[]) ?? []));
+  }, []);
+
   const filtered = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     // Archived, not deleted: someone who has left keeps their record and their
@@ -233,6 +251,9 @@ const HrEmployeeDirectory = () => {
       : employees.filter((e) => !e.exitedOn || e.exitedOn > today);
     if (roleFilter !== "all") result = result.filter((e) => e.role === roleFilter);
     if (campusFilter !== "all") result = result.filter((e) => e.campusId === campusFilter);
+    if (deptFilter !== "all") result = result.filter((e) => (e.department ?? "") === deptFilter);
+    if (locationFilter !== "all") result = result.filter((e) => (e.location ?? "") === locationFilter);
+    if (entityFilter !== "all") result = result.filter((e) => e.legalEntityId === entityFilter);
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((e) =>
@@ -243,7 +264,7 @@ const HrEmployeeDirectory = () => {
         e.department?.toLowerCase().includes(q));
     }
     return result;
-  }, [employees, search, roleFilter, campusFilter, showExited]);
+  }, [employees, search, roleFilter, campusFilter, deptFilter, locationFilter, entityFilter, showExited]);
 
   const exitedCount = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -251,6 +272,10 @@ const HrEmployeeDirectory = () => {
   }, [employees]);
 
   const roles = [...new Set(employees.map((e) => e.role).filter(Boolean))].sort() as string[];
+  const locations = useMemo(
+    () => [...new Set(employees.map((e) => e.location).filter(Boolean))].sort() as string[],
+    [employees],
+  );
   const deptGroups = useMemo(() => {
     const map: Record<string, number> = {};
     for (const e of employees) {
@@ -272,14 +297,33 @@ const HrEmployeeDirectory = () => {
 
   const directory = (
     <>
-      {/* Department summary */}
+      {/* Departments. These used to be a static summary that LOOKED like filters —
+          same pill shape, counts, no effect. They now filter, and the active one is
+          obvious, so the affordance matches the behaviour. */}
       <div className="flex flex-wrap gap-2">
-        {deptGroups.slice(0, 8).map(([dept, count]) => (
-          <Badge key={dept} variant="outline" className="text-xs gap-1 cursor-default">
-            <Building2 className="h-3 w-3" />
-            {dept} ({count})
-          </Badge>
-        ))}
+        {deptGroups.map(([dept, count]) => {
+          const active = deptFilter === dept;
+          return (
+            <button
+              key={dept}
+              onClick={() => setDeptFilter(active ? "all" : dept)}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                active
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border hover:bg-muted"
+              }`}
+            >
+              <Building2 className="h-3 w-3" />
+              {dept} ({count})
+            </button>
+          );
+        })}
+        {deptFilter !== "all" && (
+          <button onClick={() => setDeptFilter("all")}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Search + filters */}
@@ -312,6 +356,24 @@ const HrEmployeeDirectory = () => {
           ariaLabel="Filter by campus"
           placeholder="All Campuses"
         />
+        {/* Location, not campus: two of the seven sites are offices with no campus,
+            so campus alone cannot reach 14 people. */}
+        <SelectField
+          value={locationFilter}
+          onValueChange={setLocationFilter}
+          options={[{ value: "all", label: "All Locations" }, ...locations.map((l) => ({ value: l, label: l }))]}
+          ariaLabel="Filter by work location"
+          placeholder="All Locations"
+        />
+        {entities.length > 1 && (
+          <SelectField
+            value={entityFilter}
+            onValueChange={setEntityFilter}
+            options={[{ value: "all", label: "All Entities" }, ...entities.map((e) => ({ value: e.id, label: e.name }))]}
+            ariaLabel="Filter by legal entity"
+            placeholder="All Entities"
+          />
+        )}
       </div>
 
       {loading ? (
