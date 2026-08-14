@@ -35,7 +35,17 @@ const listRes = await fetch(
   { headers: H },
 );
 if (!listRes.ok) throw new Error(`list failed: ${listRes.status} ${await listRes.text()}`);
-const employees = (await listRes.json()).slice(0, LIMIT);
+// --only <substr,substr> retries specific people. A blanket re-run is NOT safe:
+// it would back up each already-processed photo over its true original, destroying
+// the only way back for everyone who succeeded the first time.
+const onlyIdx = flags.indexOf("--only");
+const ONLY = onlyIdx >= 0 ? flags[onlyIdx + 1].split(",").map((x) => x.trim().toLowerCase()) : null;
+
+let employees = await listRes.json();
+if (ONLY) {
+  employees = employees.filter((e) => ONLY.some((o) => (e.display_name || "").toLowerCase().includes(o)));
+}
+employees = employees.slice(0, LIMIT);
 
 console.log(`${employees.length} photos to process`);
 
