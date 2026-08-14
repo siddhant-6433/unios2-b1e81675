@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle, Eye, EyeOff } from "lucide-react";
 import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
@@ -210,14 +210,51 @@ function TemplateCard({
   );
 }
 
+// Show/hide toggle for whether counsellors see this template in the send picker
+// (whatsapp_template_settings.show_in_lead_picker). size="sm" for the list rows,
+// "md" for the preview header.
+function VisibilityToggle({
+  on,
+  onChange,
+  size = "sm",
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+  size?: "sm" | "md";
+}) {
+  const Icon = on ? Eye : EyeOff;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onChange(!on); }}
+      title={on ? "Shown to counsellors — click to hide" : "Hidden from counsellors — click to show"}
+      aria-pressed={on}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border font-medium transition-colors ${
+        size === "md" ? "px-2.5 py-1 text-[11px]" : "px-2 py-0.5 text-[10px]"
+      } ${
+        on
+          ? "border-success/30 bg-success/10 text-success hover:bg-success/20"
+          : "border-input bg-muted/40 text-muted-foreground hover:bg-muted"
+      }`}
+    >
+      <Icon className={size === "md" ? "h-3.5 w-3.5" : "h-3 w-3"} />
+      {on ? "Shown" : "Hidden"}
+    </button>
+  );
+}
+
 function TemplatePreviewPanel({
   template,
   deleting,
   onDelete,
+  visible,
+  onToggleVisible,
 }: {
   template: WaTemplateRow | null;
   deleting: string | null;
   onDelete: (template: WaTemplateRow) => void;
+  visible?: boolean;
+  onToggleVisible?: (next: boolean) => void;
 }) {
   if (!template) {
     return (
@@ -243,10 +280,15 @@ function TemplatePreviewPanel({
               Meta ID: {template.meta_template_id || "Not returned yet"}
             </p>
           </div>
-          <Badge className={`shrink-0 gap-1 border-0 text-[10px] ${color}`}>
-            <Icon className="h-3 w-3" />
-            {template.status}
-          </Badge>
+          <div className="flex shrink-0 items-center gap-2">
+            {onToggleVisible && (
+              <VisibilityToggle on={!!visible} onChange={onToggleVisible} size="md" />
+            )}
+            <Badge className={`gap-1 border-0 text-[10px] ${color}`}>
+              <Icon className="h-3 w-3" />
+              {template.status}
+            </Badge>
+          </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Badge variant="outline" className="text-[9px]">Category: {metaCategory}</Badge>
@@ -308,7 +350,13 @@ function SectionHeader({
   );
 }
 
-export function WhatsAppTemplateTab() {
+export function WhatsAppTemplateTab({
+  visibilityByKey,
+  onToggleVisibility,
+}: {
+  visibilityByKey?: Record<string, boolean>;
+  onToggleVisibility?: (templateKey: string, next: boolean) => void;
+} = {}) {
   const { toast } = useToast();
   const [rows, setRows] = useState<WaTemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -526,11 +574,13 @@ export function WhatsAppTemplateTab() {
                   const body = templateBody(template);
                   const active = selectedApproved?.id === template.id;
                   return (
-                    <button
+                    <div
                       key={template.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedApprovedId(template.id)}
-                      className={`w-full rounded-lg px-3 py-3 text-left transition-colors ${
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedApprovedId(template.id); } }}
+                      className={`w-full cursor-pointer rounded-lg px-3 py-3 text-left transition-colors ${
                         active ? "bg-primary/10 text-foreground" : "hover:bg-muted/60"
                       }`}
                     >
@@ -541,24 +591,38 @@ export function WhatsAppTemplateTab() {
                             {template.meta_template_id || "No Meta ID"}
                           </p>
                         </div>
-                        <Badge className={`shrink-0 gap-1 border-0 text-[9px] ${color}`}>
-                          <Icon className="h-3 w-3" />
-                          {template.status}
-                        </Badge>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <Badge className={`gap-1 border-0 text-[9px] ${color}`}>
+                            <Icon className="h-3 w-3" />
+                            {template.status}
+                          </Badge>
+                          {onToggleVisibility && (
+                            <VisibilityToggle
+                              on={!!visibilityByKey?.[template.name]}
+                              onChange={(next) => onToggleVisibility(template.name, next)}
+                            />
+                          )}
+                        </div>
                       </div>
                       {body && (
                         <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
                           {body}
                         </p>
                       )}
-                    </button>
+                    </div>
                   );
                 })
                 )}
               </div>
             </div>
             {selectedApproved ? (
-              <TemplatePreviewPanel template={selectedApproved} deleting={deleting} onDelete={deleteTemplate} />
+              <TemplatePreviewPanel
+                template={selectedApproved}
+                deleting={deleting}
+                onDelete={deleteTemplate}
+                visible={!!visibilityByKey?.[selectedApproved.name]}
+                onToggleVisible={onToggleVisibility ? (next) => onToggleVisibility(selectedApproved.name, next) : undefined}
+              />
             ) : (
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
                 Select a template from the list.
