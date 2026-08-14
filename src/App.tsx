@@ -99,7 +99,7 @@ const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
 const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
 const EmployeeProfile      = lazy(() => import("./pages/EmployeeProfile"));
 const HrPayroll            = lazy(() => import("./pages/HrPayroll"));
-const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
+const HrHiringOps          = lazy(() => import("./pages/HrHiringOps"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
@@ -357,7 +357,10 @@ const App = () => (
 
                       {/* HR — campus_admin / principal / office_admin only */}
                       <Route path="/hr" element={<RequirePermission module="hr" action="view"><HrDashboard /></RequirePermission>} />
-                      <Route path="/hr-job-applicants" element={<RequirePermission module="hr" action="view"><HrJobApplicants /></RequirePermission>} />
+                      <Route path="/hiring" element={<RequirePermission module="hr" action="view"><HrHiringOps /></RequirePermission>} />
+                      {/* Renamed from Job Applicants. Kept so existing links and
+                          bookmarks don't 404. */}
+                      <Route path="/hr-job-applicants" element={<Navigate to="/hiring" replace />} />
                       <Route path="/hr-attendance" element={<RequirePermission module="hr" action="view"><HrAttendance /></RequirePermission>} />
                       <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
                       <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />

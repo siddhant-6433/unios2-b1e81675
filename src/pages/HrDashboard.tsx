@@ -130,7 +130,7 @@ const HrDashboard = () => {
           { label: "Absent", value: stats.absentToday, icon: AlertTriangle, bg: "bg-pastel-red", href: "/hr-attendance" },
           { label: "Pending Leaves", value: stats.pendingLeaves, icon: Clock, bg: "bg-pastel-orange", href: "/hr-leave" },
           { label: "Face Pending", value: stats.pendingFaceRegs, icon: UserCheck, bg: "bg-pastel-purple", href: "#face-approvals" },
-          { label: "New Applicants", value: stats.newJobApplicants, icon: UserPlus, bg: "bg-pastel-pink", href: "/hr-job-applicants" },
+          { label: "New Applicants", value: stats.newJobApplicants, icon: UserPlus, bg: "bg-pastel-pink", href: "/hiring" },
         ].map((s) => (
           <Link key={s.label} to={s.href} className="block">
             <Card className="border-border/60 shadow-none hover:shadow-sm transition-shadow cursor-pointer">

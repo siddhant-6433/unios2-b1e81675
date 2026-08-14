@@ -147,6 +147,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/collections", permission: "finance:view", staffOnly: true },
   { path: "/fee-structures", permission: "courses_fees:view", staffOnly: true },
   { path: "/hr", permission: "hr:view", staffOnly: true },
+  { path: "/hiring", permission: "hr:view", staffOnly: true },
   { path: "/hr-job-applicants", permission: "hr:view", staffOnly: true },
   { path: "/hr-attendance", permission: "hr:view", staffOnly: true },
   { path: "/hr-leave", permission: "hr:view", staffOnly: true },

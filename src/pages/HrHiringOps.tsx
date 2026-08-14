@@ -80,7 +80,7 @@ function formatDate(s: string | null): string {
   return new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const HrJobApplicants = () => {
+const HrHiringOps = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [tab, setTab] = useState<Status>("new");
@@ -267,10 +267,10 @@ const HrJobApplicants = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <UserPlus className="h-6 w-6" /> Job Applicants
+            <UserPlus className="h-6 w-6" /> Hiring Ops
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            People who reached out about employment via WhatsApp — auto-categorized and routed here.
+            Candidates who reached out about employment — auto-categorised from WhatsApp and worked through the hiring funnel.
           </p>
         </div>
       </div>
@@ -512,4 +512,4 @@ const HrJobApplicants = () => {
   );
 };
 
-export default HrJobApplicants;
+export default HrHiringOps;
