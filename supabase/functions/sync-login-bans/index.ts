@@ -24,6 +24,19 @@ const corsHeaders = {
 // 100 years — effectively permanent. Same constant toggle-user-login uses.
 const PERMANENT_BAN = "876000h";
 
+/** The `role` claim of a Supabase JWT, or null if it isn't one. */
+function jwtRole(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    return JSON.parse(atob(padded))?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface DriftRow {
   user_id: string;
   display_name: string | null;
@@ -41,10 +54,30 @@ Deno.serve(async (req) => {
     });
 
   try {
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
+
+    // Reconciling is idempotent, but it bans people — so it is not something any
+    // signed-in user should be able to fire. The scheduler presents the service
+    // key; a human has to be super_admin or hold the HR permission.
+    // Accept any valid service-role JWT rather than string-matching the env key:
+    // the scheduler reads its key from _app_config, which has drifted out of step
+    // with the edge environment before and silently 401'd every cron run.
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") ?? "";
+    let allowed = token === serviceKey || jwtRole(token) === "service_role";
+    if (!allowed && token) {
+      const { data: caller } = await admin.auth.getUser(token);
+      const callerId = caller?.user?.id;
+      if (callerId) {
+        const [{ data: role }, { data: perms }] = await Promise.all([
+          admin.rpc("get_user_role", { _user_id: callerId }),
+          admin.rpc("get_user_permissions", { _user_id: callerId }),
+        ]);
+        allowed = role === "super_admin"
+          || (Array.isArray(perms) && perms.includes("hr:employees_edit"));
+      }
+    }
+    if (!allowed) return json({ error: "Forbidden" }, 403);
 
     // Only the rows where the profile and the auth user disagree. Deliberately not
     // auth.admin.listUsers(), which pages at 1000 and has silently skipped the
