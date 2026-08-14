@@ -10,8 +10,12 @@ import { GraduationCap, Users, ClipboardCheck, CalendarDays } from "lucide-react
 // and/or subject teacher) and the students in each. RLS (teaches_student) is
 // what actually enforces the scope — this page just makes it navigable.
 
+// A class is either a college batch or a school course (Grade IV). School
+// students have batch_id NULL, so keying only on batch would show them nothing.
 interface ClassCard {
-  batchId: string;
+  key: string;             // "batch:<id>" | "course:<id>"
+  batchId: string | null;
+  courseId: string | null;
   label: string;
   section: string | null;
   asClassTeacher: boolean;
@@ -25,11 +29,12 @@ interface Student {
   pre_admission_no: string | null;
   section: string | null;
   batch_id: string | null;
+  course_id: string | null;
 }
 
 const MyClasses = () => {
   const { user } = useAuth();
-  const canMarkAttendance = usePermission("attendance", "mark");
+  const canMarkAttendance = usePermission("attendance", "mark_daily") || usePermission("attendance", "mark_period");
   const [classes, setClasses] = useState<ClassCard[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -44,20 +49,21 @@ const MyClasses = () => {
     // anyway so an admin opening this page sees their own classes, not everyone's.
     const [ctRes, saRes] = await Promise.all([
       supabase.from("class_teachers")
-        .select("batch_id, section").eq("teacher_user_id", user!.id).eq("active", true),
+        .select("batch_id, course_id, section").eq("teacher_user_id", user!.id).eq("active", true),
       supabase.from("subject_allocations")
         .select("batch_id, section, subject_id").eq("faculty_user_id", user!.id).eq("active", true),
     ]);
 
-    const ct = (ctRes.data as { batch_id: string; section: string | null }[]) || [];
+    const ct = (ctRes.data as { batch_id: string | null; course_id: string | null; section: string | null }[]) || [];
     const sa = (saRes.data as { batch_id: string | null; section: string | null; subject_id: string }[]) || [];
 
     const batchIds = Array.from(new Set([
       ...ct.map(r => r.batch_id),
-      ...sa.map(r => r.batch_id).filter(Boolean) as string[],
-    ]));
+      ...sa.map(r => r.batch_id),
+    ].filter(Boolean) as string[]));
+    const ctCourseIds = Array.from(new Set(ct.map(r => r.course_id).filter(Boolean) as string[]));
 
-    if (batchIds.length === 0) {
+    if (batchIds.length === 0 && ctCourseIds.length === 0) {
       setClasses([]);
       setStudents([]);
       setLoading(false);
@@ -65,17 +71,25 @@ const MyClasses = () => {
     }
 
     const subjectIds = Array.from(new Set(sa.map(r => r.subject_id)));
-    const [batchRes, courseRes, subjRes, studentRes] = await Promise.all([
-      supabase.from("batches").select("id, name, section, course_id").in("id", batchIds),
+    const [batchRes, courseRes, subjRes, byBatch, byCourse] = await Promise.all([
+      batchIds.length
+        ? supabase.from("batches").select("id, name, section, course_id").in("id", batchIds)
+        : Promise.resolve({ data: [] as { id: string; name: string; section: string | null; course_id: string }[] }),
       supabase.from("courses").select("id, name"),
       subjectIds.length
         ? supabase.from("subjects").select("id, name").in("id", subjectIds)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      supabase.from("students")
-        .select("id, name, admission_no, pre_admission_no, section, batch_id")
-        .in("batch_id", batchIds)
-        .in("status", ["active", "pre_admitted"])
-        .order("name"),
+      batchIds.length
+        ? supabase.from("students")
+            .select("id, name, admission_no, pre_admission_no, section, batch_id, course_id")
+            .in("batch_id", batchIds).in("status", ["active", "pre_admitted"]).order("name")
+        : Promise.resolve({ data: [] as Student[] }),
+      // School students are reached by course, not batch.
+      ctCourseIds.length
+        ? supabase.from("students")
+            .select("id, name, admission_no, pre_admission_no, section, batch_id, course_id")
+            .in("course_id", ctCourseIds).in("status", ["active", "pre_admitted"]).order("name")
+        : Promise.resolve({ data: [] as Student[] }),
     ]);
 
     const courseName = Object.fromEntries(
@@ -83,27 +97,49 @@ const MyClasses = () => {
     const subjectName = Object.fromEntries(
       ((subjRes.data as { id: string; name: string }[]) || []).map(s => [s.id, s.name]));
 
-    const cards: ClassCard[] = ((batchRes.data as { id: string; name: string; section: string | null; course_id: string }[]) || [])
+    const batchCards: ClassCard[] = ((batchRes.data as { id: string; name: string; section: string | null; course_id: string }[]) || [])
       .map(b => ({
+        key: `batch:${b.id}`,
         batchId: b.id,
+        courseId: null,
         label: [courseName[b.course_id], b.name].filter(Boolean).join(" · ") || b.name,
         section: ct.find(r => r.batch_id === b.id)?.section ?? b.section,
         asClassTeacher: ct.some(r => r.batch_id === b.id),
         subjects: sa.filter(r => r.batch_id === b.id).map(r => subjectName[r.subject_id]).filter(Boolean),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      }));
+
+    const courseCards: ClassCard[] = ctCourseIds.map(cid => ({
+      key: `course:${cid}`,
+      batchId: null,
+      courseId: cid,
+      label: courseName[cid] || "Class",
+      section: ct.find(r => r.course_id === cid)?.section ?? null,
+      asClassTeacher: true,
+      subjects: [],
+    }));
+
+    const cards = [...courseCards, ...batchCards].sort((a, b) => a.label.localeCompare(b.label));
+
+    // Dedupe: a student reachable by both batch and course appears once.
+    const merged = new Map<string, Student>();
+    for (const s of [...((byBatch.data as Student[]) || []), ...((byCourse.data as Student[]) || [])]) {
+      merged.set(s.id, s);
+    }
 
     setClasses(cards);
-    setStudents((studentRes.data as Student[]) || []);
-    setSelected(prev => prev && cards.some(c => c.batchId === prev) ? prev : cards[0]?.batchId ?? null);
+    setStudents(Array.from(merged.values()));
+    setSelected(prev => prev && cards.some(c => c.key === prev) ? prev : cards[0]?.key ?? null);
     setLoading(false);
   };
 
   const visibleStudents = useMemo(() => {
     if (!selected) return [];
-    const card = classes.find(c => c.batchId === selected);
-    return students.filter(s =>
-      s.batch_id === selected && (!card?.section || s.section === card.section));
+    const card = classes.find(c => c.key === selected);
+    if (!card) return [];
+    return students.filter(s => {
+      const inClass = card.batchId ? s.batch_id === card.batchId : s.course_id === card.courseId;
+      return inClass && (!card.section || s.section === card.section);
+    });
   }, [selected, students, classes]);
 
   if (loading) return <PageLoader />;
@@ -147,10 +183,10 @@ const MyClasses = () => {
         <div className="lg:col-span-1 space-y-2">
           {classes.map(c => (
             <button
-              key={c.batchId}
-              onClick={() => setSelected(c.batchId)}
+              key={c.key}
+              onClick={() => setSelected(c.key)}
               className={`w-full text-left rounded-xl p-3.5 transition-colors ${
-                selected === c.batchId ? "bg-primary/10 border border-primary/30" : "bg-card card-shadow hover:bg-muted/30"
+                selected === c.key ? "bg-primary/10 border border-primary/30" : "bg-card card-shadow hover:bg-muted/30"
               }`}
             >
               <p className="text-sm font-semibold text-foreground">

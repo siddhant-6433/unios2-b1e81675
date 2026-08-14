@@ -4046,7 +4046,8 @@ export type Database = {
       class_teachers: {
         Row: {
           active: boolean
-          batch_id: string
+          batch_id: string | null
+          course_id: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -4056,7 +4057,8 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          batch_id: string
+          batch_id?: string | null
+          course_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -4066,7 +4068,8 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          batch_id?: string
+          batch_id?: string | null
+          course_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -19591,6 +19594,12 @@ export type Database = {
       }
       report_cards: {
         Row: {
+          class_teacher_comment: string | null
+          coordinator_comment: string | null
+          published_at: string | null
+          signed_off_at: string | null
+          signed_off_by: string | null
+          status: string
           cgpa: number | null
           course_id: string
           generated_at: string
@@ -19607,6 +19616,12 @@ export type Database = {
           total_obtained: number | null
         }
         Insert: {
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
+          published_at?: string | null
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           cgpa?: number | null
           course_id: string
           generated_at?: string
@@ -19623,6 +19638,12 @@ export type Database = {
           total_obtained?: number | null
         }
         Update: {
+          class_teacher_comment?: string | null
+          coordinator_comment?: string | null
+          published_at?: string | null
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          status?: string
           cgpa?: number | null
           course_id?: string
           generated_at?: string
@@ -30473,7 +30494,19 @@ export type Database = {
           work_email: string
         }[]
       }
+      is_class_teacher_of: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
+      student_profile_for_viewer: {
+        Args: { _student_id: string }
+        Returns: Json
+      }
       teaches_student: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
+      teaches_subject_of: {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
       }

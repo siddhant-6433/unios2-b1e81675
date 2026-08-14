@@ -213,12 +213,17 @@ const phoneKey = (value?: string | null) => {
 // digit-to-digit instead of as a substring — same trick as
 // src/lib/admissionsListRead.ts. Parent numbers count: the number on file for a
 // school student is usually the father's.
-export const matchesStudentSearch = (student: StudentRow, query: string) => {
+//
+// Those numbers are only matched when the viewer holds students:view_contact.
+// The list never displays a phone, so matching them for everyone turned the
+// search box into an oracle: a subject teacher could recover any parent's
+// number digit by digit from which rows appeared.
+export const matchesStudentSearch = (student: StudentRow, query: string, canSeeContact = true) => {
   const q = query.trim().toLowerCase();
   if (!q) return true;
 
   const digits = phoneKey(q);
-  if (digits.length >= 3 && [
+  if (canSeeContact && digits.length >= 3 && [
     student.phone, student.father_phone, student.mother_phone, student.guardian_phone,
   ].some((phone) => phoneKey(phone).includes(digits))) return true;
 
@@ -226,8 +231,7 @@ export const matchesStudentSearch = (student: StudentRow, query: string) => {
     student.name,
     student.admission_no,
     student.pre_admission_no,
-    student.email,
-    student.student_email,
+    ...(canSeeContact ? [student.email, student.student_email] : []),
     getProgramLabel(student),
     getClassLabel(student),
     getBatchLabel(student),
@@ -264,13 +268,21 @@ const Students = () => {
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const { role } = useAuth();
+  const canSeeContact = can("students", "view_contact");
   const canCreateStudents = can("students", "create");
   const canExportStudents = role === "super_admin" || role === "principal";
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const selectFields = "id, lead_id, name, admission_no, pre_admission_no, status, archived_at, phone, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender, student_email, email, father_name, father_phone, mother_name, mother_phone, guardian_name, guardian_phone, address, city, state, pincode, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+    // Contact columns are requested only when the viewer may see them. The list
+    // renders none of them, so a subject teacher has no reason to receive them —
+    // and not fetching beats fetching-then-hiding.
+    const rosterFields = "id, lead_id, name, admission_no, pre_admission_no, status, archived_at, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender";
+    const contactFields = "phone, student_email, email, father_name, father_phone, mother_name, mother_phone, guardian_name, guardian_phone, address, city, state, pincode";
+    const joinFields = "courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+    const selectFields = [rosterFields, canSeeContact ? contactFields : null, joinFields]
+      .filter(Boolean).join(", ");
     const fallbackSelectFields = selectFields.replace("section, semester,", "section,");
 
     const runQuery = (fields: string) => {
@@ -324,7 +336,7 @@ const Students = () => {
       setStudents([]);
     }
     setLoading(false);
-  }, [selectedCampusId]);
+  }, [selectedCampusId, canSeeContact]);
 
   useEffect(() => { fetchStudents(); }, [fetchStudents]);
 
@@ -384,10 +396,10 @@ const Students = () => {
     if (!search.trim()) return 0;
     return students.filter((s) => (
       (otherMode === "class" ? isSchoolStudent(s) : !isSchoolStudent(s)) &&
-      matchesStudentSearch(s, search) &&
+      matchesStudentSearch(s, search, canSeeContact) &&
       matchesArchiveView(s)
     )).length;
-  }, [students, search, otherMode, matchesArchiveView]);
+  }, [students, search, otherMode, matchesArchiveView, canSeeContact]);
 
   const filtered = useMemo(() => {
     return students.filter((s) => {
@@ -399,7 +411,7 @@ const Students = () => {
       const secondaryLabel = getSecondaryAcademicLabel(s, segregationMode);
       const currentTermLabel = getCurrentTermLabel(s);
 
-      const matchesSearch = matchesStudentSearch(s, search);
+      const matchesSearch = matchesStudentSearch(s, search, canSeeContact);
 
       const matchesGroup = segregationMode === "class"
         ? matchesSelected(classFilters, classLabel)

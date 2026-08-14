@@ -60,3 +60,20 @@ describe("matchesStudentSearch", () => {
     expect(matchesStudentSearch({ ...student, pre_admission_no: null }, "31")).toBe(false);
   });
 });
+
+describe("students search — contact scope", () => {
+  // The list renders no phone number, so matching parent phones for a viewer
+  // who cannot see contact details turned the search box into an oracle:
+  // a subject teacher could recover a parent's number digit by digit from
+  // which rows appeared.
+  it("does not match parent phone numbers without students:view_contact", () => {
+    expect(matchesStudentSearch(student, "9871763193", false)).toBe(false);
+    expect(matchesStudentSearch(student, "9810011223", false)).toBe(false);
+    expect(matchesStudentSearch(student, "siddhant@nimt.ac.in", false)).toBe(false);
+  });
+
+  it("still matches name and admission number without contact access", () => {
+    expect(matchesStudentSearch(student, "zz test", false)).toBe(true);
+    expect(matchesStudentSearch(student, "TEST-PAYLINK-01", false)).toBe(true);
+  });
+});

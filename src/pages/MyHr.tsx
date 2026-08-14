@@ -134,7 +134,7 @@ const MyHr = () => {
       <div>
         <h1 className="text-xl font-bold text-foreground">My HR</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          {profile?.display_name || "Your"} attendance, leave, colleagues and holidays
+          {profile?.display_name ? `${profile.display_name}'s` : "Your"} attendance, leave, colleagues and holidays
         </p>
       </div>
 

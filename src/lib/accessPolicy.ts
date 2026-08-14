@@ -142,6 +142,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/attendance", permission: "attendance:view", staffOnly: true },
   { path: "/my-classes", permission: "students:view", staffOnly: true },
   { path: "/timetable", permission: "timetable:view", staffOnly: true },
+  { path: "/report-cards", permission: "marks:view", staffOnly: true },
   { path: "/my-hr", permission: "hr:self", staffOnly: true },
   { path: "/finance", permission: "finance:view", staffOnly: true },
   { path: "/collections", permission: "finance:view", staffOnly: true },

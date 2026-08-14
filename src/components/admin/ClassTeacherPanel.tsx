@@ -18,7 +18,8 @@ import { GraduationCap, Plus, Trash2, Search } from "lucide-react";
 interface ClassTeacher {
   id: string;
   teacher_user_id: string;
-  batch_id: string;
+  batch_id: string | null;
+  course_id: string | null;
   section: string | null;
   session_id: string | null;
   active: boolean;
@@ -30,6 +31,21 @@ interface Batch {
   section: string | null;
   course_id: string;
 }
+
+interface Course {
+  id: string;
+  name: string;
+  code: string | null;
+  type: string | null;
+}
+
+// A class is a college batch OR a school course (Grade IV). `batches` only
+// covers the college side — every school student has batch_id NULL — so
+// offering batches alone made it impossible to assign a class teacher to a
+// grade, which is the main thing this panel exists for.
+type ClassTarget =
+  | { kind: "batch"; id: string; label: string }
+  | { kind: "course"; id: string; label: string };
 
 interface Teacher {
   user_id: string;
@@ -43,13 +59,15 @@ export default function ClassTeacherPanel() {
   const { toast } = useToast();
   const [rows, setRows] = useState<ClassTeacher[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [courseNames, setCourseNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  const [draft, setDraft] = useState({ teacher_user_id: "", batch_id: "", section: "" });
+  // target is "batch:<id>" or "course:<id>" — one select covering both kinds.
+  const [draft, setDraft] = useState({ teacher_user_id: "", target: "", section: "" });
 
   useEffect(() => { void fetchData(); }, []);
 
@@ -59,12 +77,13 @@ export default function ClassTeacherPanel() {
       supabase.from("class_teachers").select("*").order("created_at", { ascending: false }),
       supabase.from("batches").select("id, name, section, course_id").order("name"),
       supabase.from("user_roles").select("user_id, role").in("role", TEACHING_ROLES as never[]),
-      supabase.from("courses").select("id, name"),
+      supabase.from("courses").select("id, name, code, type").eq("is_active", true).order("display_order"),
     ]);
 
     setRows((ctRes.data as ClassTeacher[]) || []);
     setBatches((batchRes.data as Batch[]) || []);
-    setCourseNames(Object.fromEntries(((courseRes.data as { id: string; name: string }[]) || [])
+    setCourses((courseRes.data as Course[]) || []);
+    setCourseNames(Object.fromEntries(((courseRes.data as Course[]) || [])
       .map((c) => [c.id, c.name])));
 
     // Names live on profiles, roles on user_roles — two queries, joined here.
@@ -92,25 +111,45 @@ export default function ClassTeacherPanel() {
     return [course, b.name, b.section].filter(Boolean).join(" · ");
   };
 
+  // School courses are the grades (Grade IV); everything else is a programme
+  // whose classes are batches. Both are offered, school first.
+  const targets = useMemo<ClassTarget[]>(() => {
+    const schoolCourses = courses
+      .filter((c) => c.type === "school")
+      .map<ClassTarget>((c) => ({ kind: "course", id: c.id, label: c.name }));
+    const batchTargets = batches.map<ClassTarget>((b) => ({
+      kind: "batch", id: b.id, label: batchLabel(b),
+    }));
+    return [...schoolCourses, ...batchTargets];
+  }, [courses, batches, courseNames]);
+
+  const rowLabel = (r: ClassTeacher) =>
+    r.course_id
+      ? courseNames[r.course_id] || "—"
+      : batchLabel(batches.find((b) => b.id === r.batch_id));
+
   const visible = useMemo(() => {
     if (!filter.trim()) return rows;
     const q = filter.toLowerCase();
     return rows.filter((r) =>
       teacherName(r.teacher_user_id).toLowerCase().includes(q) ||
-      batchLabel(batches.find((b) => b.id === r.batch_id)).toLowerCase().includes(q));
+      rowLabel(r).toLowerCase().includes(q));
   }, [rows, filter, teachers, batches, courseNames]);
 
   const add = async () => {
-    if (!draft.teacher_user_id || !draft.batch_id) {
+    if (!draft.teacher_user_id || !draft.target) {
       toast({ title: "Pick a teacher and a class", variant: "destructive" });
       return;
     }
+    const [kind, id] = draft.target.split(":");
     setSaving("new");
     const { data, error } = await supabase
       .from("class_teachers")
       .insert({
         teacher_user_id: draft.teacher_user_id,
-        batch_id: draft.batch_id,
+        // class_teachers_one_target enforces exactly one of these.
+        batch_id: kind === "batch" ? id : null,
+        course_id: kind === "course" ? id : null,
         section: draft.section.trim() || null,
       })
       .select()
@@ -126,7 +165,7 @@ export default function ClassTeacherPanel() {
       return;
     }
     setRows((prev) => [data as ClassTeacher, ...prev]);
-    setDraft({ teacher_user_id: "", batch_id: "", section: "" });
+    setDraft({ teacher_user_id: "", target: "", section: "" });
     toast({ title: "Class teacher assigned" });
   };
 
@@ -189,13 +228,13 @@ export default function ClassTeacherPanel() {
           ))}
         </select>
         <select
-          value={draft.batch_id}
-          onChange={(e) => setDraft({ ...draft, batch_id: e.target.value })}
+          value={draft.target}
+          onChange={(e) => setDraft({ ...draft, target: e.target.value })}
           className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs min-w-[240px] focus:outline-none focus:ring-1 focus:ring-ring/20"
         >
           <option value="">Select class / batch…</option>
-          {batches.map((b) => (
-            <option key={b.id} value={b.id}>{batchLabel(b)}</option>
+          {targets.map((t) => (
+            <option key={`${t.kind}:${t.id}`} value={`${t.kind}:${t.id}`}>{t.label}</option>
           ))}
         </select>
         <input
@@ -231,7 +270,7 @@ export default function ClassTeacherPanel() {
               <tr key={r.id} className="hover:bg-muted/20">
                 <td className="px-3 py-2 border-b border-border/30 text-foreground">{teacherName(r.teacher_user_id)}</td>
                 <td className="px-3 py-2 border-b border-border/30 text-muted-foreground">
-                  {batchLabel(batches.find((b) => b.id === r.batch_id))}
+                  {rowLabel(r)}
                 </td>
                 <td className="px-3 py-2 border-b border-border/30 text-muted-foreground">{r.section || "All"}</td>
                 <td className="px-3 py-2 border-b border-border/30">
