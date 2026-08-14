@@ -56,7 +56,10 @@ const LeadAllocation = () => {
     setLoading(true);
     const [rulesRes, profilesRes, coursesRes, campusesRes] = await Promise.all([
       supabase.from("lead_allocation_rules").select("*").order("priority", { ascending: true }),
-      supabase.from("profiles").select("user_id, display_name"),
+      // The pool feeds fn_intake_round_robin_assign, which hands out every inbound
+      // WhatsApp lead. Listing all profiles here meant anyone — including people who
+      // have left — could be dropped into the rotation.
+      supabase.from("v_assignable_counsellors").select("user_id, display_name"),
       supabase.from("courses").select("id, name"),
       supabase.from("campuses").select("id, name"),
     ]);

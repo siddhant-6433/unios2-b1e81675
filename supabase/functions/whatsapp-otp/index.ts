@@ -71,6 +71,16 @@ function normalizeLoginPhone(phone: unknown): string | null {
 }
 
 async function createSession(admin: SupabaseClient, userId: string) {
+  // This path mints a session with the service role via generateLink + verifyOtp,
+  // which does not go through GoTrue's normal grant — so a banned or disabled user
+  // would sail straight through. Every caller funnels through here, so one check
+  // covers WhatsApp OTP and the deep-link sign-in alike.
+  const { data: blocked } = await admin.rpc("is_login_blocked", { _user_id: userId });
+  if (blocked) {
+    console.warn(`[whatsapp-otp] refused session for disabled account ${userId}`);
+    return null;
+  }
+
   const { data: userData } = await admin.auth.admin.getUserById(userId);
   if (!userData?.user?.email) return null;
 

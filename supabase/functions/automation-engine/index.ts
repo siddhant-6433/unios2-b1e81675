@@ -395,6 +395,17 @@ Deno.serve(async (req) => {
 
             case "assign_counsellor": {
               if (!action.counsellor_id) break;
+              // The counsellor is a fixed id baked into the rule when it was written,
+              // so a rule outlives the person. Re-check before handing them a lead —
+              // otherwise the automation keeps feeding somebody who has left.
+              const { data: stillHere } = await admin.rpc("is_active_staff_profile", {
+                _profile_id: action.counsellor_id,
+              });
+              if (!stillHere) {
+                console.warn(`[automation-engine] rule ${rule.id} assigns a departed counsellor (${action.counsellor_id}); skipping`);
+                executedActions.push({ type: "assign_counsellor", skipped: "counsellor_inactive", to: action.counsellor_id });
+                break;
+              }
               await admin.from("leads").update({ counsellor_id: action.counsellor_id }).eq("id", lead.id);
               executedActions.push({ type: "assign_counsellor", to: action.counsellor_id });
               break;

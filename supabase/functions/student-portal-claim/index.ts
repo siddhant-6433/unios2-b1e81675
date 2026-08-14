@@ -64,6 +64,10 @@ async function findUserByEmailOrPhone(db: any, email: string, phone: string | nu
 }
 
 async function createSession(db: any, userId: string) {
+  // Minting a session here bypasses GoTrue's own grant, so a ban would not stop it.
+  const { data: blocked } = await db.rpc("is_login_blocked", { _user_id: userId });
+  if (blocked) return null;
+
   const { data: userData } = await db.auth.admin.getUserById(userId);
   const email = userData?.user?.email;
   if (!email) return null;

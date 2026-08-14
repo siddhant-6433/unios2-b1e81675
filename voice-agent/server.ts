@@ -224,11 +224,18 @@ async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
     return null;
   }
 
+  // v_assignable_counsellors, not profiles: this path used to take any team member
+  // at all — no role check, no login_disabled, no archived_at — so a counsellor who
+  // left stayed in the rotation for as long as their team_members row survived.
+  // Reading the shared view keeps this in step with the SQL assignment paths instead
+  // of being a sixth private definition of "assignable".
   const profRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/profiles?user_id=in.(${memberUserIds.join(",")})&select=id,user_id,display_name`,
+    `${SUPABASE_URL}/rest/v1/v_assignable_counsellors?user_id=in.(${memberUserIds.join(",")})&select=profile_id,user_id,display_name`,
     { headers: h },
   );
-  const profiles: { id: string; user_id: string; display_name: string }[] = await profRes.json().catch(() => []);
+  const assignable: { profile_id: string; user_id: string; display_name: string }[] =
+    await profRes.json().catch(() => []);
+  const profiles = assignable.map(a => ({ id: a.profile_id, user_id: a.user_id, display_name: a.display_name }));
   if (profiles.length === 0) return null;
   const profileIds = profiles.map(p => p.id);
 

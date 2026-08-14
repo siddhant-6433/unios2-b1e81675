@@ -930,14 +930,16 @@ const Admissions = () => {
         .eq("role", "counsellor");
       if (!roleRows?.length) return;
       const userIds = roleRows.map(r => r.user_id);
+      // Assignable, not merely counsellor-roled: this list drives bulk assignment,
+      // so a departed counsellor left in it gets handed live leads.
       const { data: profs } = await supabase
-        .from("profiles")
-        .select("id, display_name, user_id")
+        .from("v_assignable_counsellors")
+        .select("profile_id, display_name, user_id")
         .in("user_id", userIds);
       if (profs) {
         setCounsellorOptions(
           profs
-            .map(p => ({ id: p.id, name: p.display_name || "Unnamed" }))
+            .map(p => ({ id: p.profile_id, name: p.display_name || "Unnamed" }))
             .sort((a, b) => a.name.localeCompare(b.name))
         );
       }

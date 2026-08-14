@@ -18,6 +18,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
@@ -49,16 +50,24 @@ interface PrivateHeader {
   employment_status: string | null;
 }
 
+interface LoginState {
+  disabled: boolean;
+  displayName: string | null;
+}
+
 const EmployeeProfile = () => {
   const { id = "" } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const { toast } = useToast();
 
   const [card, setCard] = useState<DirectoryCard | null>(null);
   const [priv, setPriv] = useState<PrivateHeader | null>(null);
   const [probing, setProbing] = useState(true);
   const [exitOpen, setExitOpen] = useState(false);
+  const [login, setLogin] = useState<LoginState | null>(null);
+  const [togglingLogin, setTogglingLogin] = useState(false);
 
   const tab = searchParams.get("tab") || "about";
   const setTab = (v: string) => setSearchParams((p) => { p.set("tab", v); return p; }, { replace: true });
@@ -78,11 +87,52 @@ const EmployeeProfile = () => {
       if (cancelled) return;
       const rows = (cardRes.data as DirectoryCard[] | null) ?? [];
       setCard(rows.find((r) => r.employee_profile_id === id) ?? null);
-      setPriv((privRes.data as PrivateHeader | null) ?? null);
-      setProbing(false);
+      const privRow = (privRes.data as PrivateHeader | null) ?? null;
+      setPriv(privRow);
+
+      if (privRow?.user_id) {
+        const { data: prof } = await supabase
+          .from("profiles").select("login_disabled, display_name")
+          .eq("user_id", privRow.user_id).maybeSingle();
+        if (!cancelled && prof) {
+          setLogin({
+            disabled: Boolean((prof as { login_disabled?: boolean }).login_disabled),
+            displayName: (prof as { display_name?: string }).display_name ?? null,
+          });
+        }
+      }
+      if (!cancelled) setProbing(false);
     })();
     return () => { cancelled = true; };
   }, [id]);
+
+  // The login is banned at the auth layer by the edge function, not by writing the
+  // flag — a profiles update alone revokes nothing, which is exactly the bug that
+  // let exited staff keep signing in.
+  const toggleLogin = async (disabled: boolean) => {
+    if (!priv?.user_id) return;
+    if (disabled && !window.confirm(
+      `Disable ${name}'s login? They are signed out immediately and cannot sign back in.`)) return;
+
+    setTogglingLogin(true);
+    const { data, error } = await supabase.functions.invoke("toggle-user-login", {
+      body: { user_id: priv.user_id, disabled },
+    });
+    setTogglingLogin(false);
+
+    const failure = error?.message || (data as { error?: string } | null)?.error;
+    if (failure) {
+      toast({ title: "Could not change login access", description: failure, variant: "destructive" });
+      return;
+    }
+    setLogin((l) => (l ? { ...l, disabled } : { disabled, displayName: name }));
+    toast({
+      title: disabled ? "Login disabled" : "Login enabled",
+      description: disabled
+        ? "Their sessions were revoked. Reassign any open leads they were holding."
+        : "They can sign in again.",
+    });
+  };
 
   // The private record arriving IS the permission. Nothing else grants the tabs.
   const canSeePrivate = !!priv;
@@ -160,6 +210,11 @@ const EmployeeProfile = () => {
             {isSelf && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">You</span>
             )}
+            {login?.disabled && (
+              <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                <Lock className="h-3 w-3" /> Login disabled
+              </span>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">{title || "No designation set"}</p>
         </div>
@@ -171,6 +226,16 @@ const EmployeeProfile = () => {
           {empNo && <Meta icon={IdCard}><span className="font-mono text-xs">{empNo}</span></Meta>}
           {canEdit && canSeePrivate && (
             <div className="ml-auto flex items-center gap-2">
+              {priv?.user_id && !isSelf && (
+                <button onClick={() => toggleLogin(!login?.disabled)} disabled={togglingLogin}
+                  title={login?.disabled
+                    ? "Let them sign in again"
+                    : "Revoke their sessions and stop them signing in"}
+                  className="flex items-center gap-1.5 rounded-xl border border-input px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive disabled:opacity-50">
+                  {togglingLogin ? <ButtonOrb state="working" /> : <Lock className="h-3.5 w-3.5" />}
+                  {login?.disabled ? "Enable login" : "Disable login"}
+                </button>
+              )}
               {ctx.profile.id && (
                 <button onClick={() => setExitOpen(true)}
                   className="flex items-center gap-1.5 rounded-xl border border-input px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive">

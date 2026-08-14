@@ -47,10 +47,18 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Caller must be super_admin.
-    const { data: callerRole } = await adminClient.rpc("get_user_role", { _user_id: callerId });
-    if (callerRole !== "super_admin") {
-      return json({ error: "Forbidden: super_admin only" }, 403);
+    // Caller must be super_admin, or hold the HR permission that already gates every
+    // other write to an employee record. Without this HR cannot cut off a leaver at
+    // all — and five of the fifteen counsellors have no employee record, so the exit
+    // flow can never reach them either.
+    const [{ data: callerRole }, { data: callerPerms }] = await Promise.all([
+      adminClient.rpc("get_user_role", { _user_id: callerId }),
+      adminClient.rpc("get_user_permissions", { _user_id: callerId }),
+    ]);
+    const isSuperAdmin = callerRole === "super_admin";
+    const isHr = Array.isArray(callerPerms) && callerPerms.includes("hr:employees_edit");
+    if (!isSuperAdmin && !isHr) {
+      return json({ error: "Forbidden: requires super_admin or hr:employees_edit" }, 403);
     }
 
     const { user_id, disabled } = await req.json();
@@ -64,12 +72,18 @@ Deno.serve(async (req) => {
       return json({ error: "You cannot disable your own login." }, 400);
     }
 
+    const { data: targetRole } = await adminClient.rpc("get_user_role", { _user_id: user_id });
+
     // Refuse to disable a super_admin (matches delete-user guard).
-    if (disabled) {
-      const { data: targetRole } = await adminClient.rpc("get_user_role", { _user_id: user_id });
-      if (targetRole === "super_admin") {
-        return json({ error: "Super Admin accounts cannot be disabled." }, 403);
-      }
+    if (disabled && targetRole === "super_admin") {
+      return json({ error: "Super Admin accounts cannot be disabled." }, 403);
+    }
+
+    // HR may cut off staff, not leadership — and may not restore an elevated account
+    // either, which would otherwise be a way to hand back access they cannot grant.
+    const ELEVATED = ["super_admin", "campus_admin", "principal", "admission_head"];
+    if (!isSuperAdmin && ELEVATED.includes(String(targetRole))) {
+      return json({ error: "Only a Super Admin can change login access for an admin account." }, 403);
     }
 
     // Resolve display names for the audit log.
