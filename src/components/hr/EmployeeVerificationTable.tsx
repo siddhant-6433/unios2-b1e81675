@@ -28,6 +28,8 @@ interface PendingEmployee {
   institution_id: string | null;
   department_id: string | null;
   import_batch_id: string | null;
+  work_location: string | null;
+  hr_department: string | null;
 }
 
 const EDITABLE_TEXT = ["display_name", "employee_number", "job_title"] as const;
@@ -41,6 +43,8 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
   const [busy, setBusy] = useState(false);
   // Rows whose local edits haven't been written yet.
   const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
   const [bulkCampus, setBulkCampus] = useState("");
   const [bulkInstitution, setBulkInstitution] = useState("");
 
@@ -52,7 +56,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     for (let from = 0; ; from += 1000) {
       const { data, error } = await supabase
         .from("employee_profiles")
-        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id")
+        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id, work_location, hr_department")
         .eq("verification_status", "pending")
         .order("created_at", { ascending: false })
         .range(from, from + 999);
@@ -80,6 +84,24 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
   // accountants, HR — belong to a campus but to no institution, and demanding one
   // would strand them in this queue permanently.
   const isReady = (r: PendingEmployee) => Boolean(r.display_name?.trim() && r.campus_id);
+
+  // The imported work location is the whole reason this screen is tractable: it is
+  // the hint that says which campus someone belongs to. Filtering by it turns 90
+  // one-at-a-time dropdowns into a handful of bulk assignments.
+  const locations = useMemo(
+    () => [...new Set(rows.map((r) => r.work_location).filter(Boolean))].sort() as string[],
+    [rows],
+  );
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (locationFilter !== "all" && (r.work_location ?? "") !== locationFilter) return false;
+      if (!q) return true;
+      return [r.display_name, r.employee_number, r.job_title, r.work_email, r.hr_department]
+        .some((v) => v?.toLowerCase().includes(q));
+    });
+  }, [rows, search, locationFilter]);
 
   const selectedRows = useMemo(() => rows.filter((r) => selected.has(r.id)), [rows, selected]);
   const readyCount = rows.filter(isReady).length;
@@ -165,6 +187,12 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
   };
 
   const remove = async (id: string) => {
+    const r = rows.find((x) => x.id === id);
+    // Destructive and unrecoverable — the row sits next to the verify tick, so a
+    // misclick would otherwise silently drop an imported employee.
+    if (!window.confirm(
+      `Discard ${r?.display_name || "this employee"}?\n\nThis permanently deletes the imported record. It cannot be undone.`
+    )) return;
     setBusy(true);
     const { error } = await supabase.from("employee_profiles").delete().eq("id", id);
     setBusy(false);
@@ -194,6 +222,36 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
           <AlertTriangle className="h-3 w-3" /> {rows.length} awaiting verification
         </Badge>
         <span className="text-muted-foreground">{readyCount} ready</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search name, employee no., designation…"
+          className="flex-1 min-w-[220px] max-w-sm rounded-lg border border-input bg-background px-3 py-1.5 text-xs"
+        />
+        <select
+          value={locationFilter}
+          onChange={(e) => setLocationFilter(e.target.value)}
+          aria-label="Filter by the location imported from the staff register"
+          className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
+        >
+          <option value="all">All locations ({rows.length})</option>
+          {locations.map((l) => (
+            <option key={l} value={l}>
+              {l} ({rows.filter((r) => r.work_location === l).length})
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={visible.length === 0}
+          onClick={() => setSelected(new Set(visible.map((r) => r.id)))}
+        >
+          Select these {visible.length}
+        </Button>
       </div>
 
       {/* Bulk assign — the usual case is one sheet, one campus. */}
@@ -243,19 +301,20 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
       </div>
 
       <div className="rounded-xl bg-card card-shadow overflow-x-auto">
-        <table className="w-full text-xs min-w-[900px]">
+        <table className="w-full text-xs min-w-[1040px]">
           <thead className="bg-muted/50">
             <tr className="text-left">
               <th className="px-3 py-2 w-8">
                 <input
                   type="checkbox"
-                  checked={selected.size === rows.length && rows.length > 0}
-                  onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
+                  checked={visible.length > 0 && visible.every((r) => selected.has(r.id))}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((r) => r.id)) : new Set())}
                 />
               </th>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Emp no.</th>
               <th className="px-3 py-2 font-medium">Designation</th>
+              <th className="px-3 py-2 font-medium">From register</th>
               <th className="px-3 py-2 font-medium">Campus</th>
               <th className="px-3 py-2 font-medium">Institution</th>
               <th className="px-3 py-2 font-medium">Department</th>
@@ -263,7 +322,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((r) => (
+            {visible.map((r) => (
               <tr key={r.id} className={selected.has(r.id) ? "bg-muted/20" : ""}>
                 <td className="px-3 py-2">
                   <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
@@ -277,6 +336,10 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
                     />
                   </td>
                 ))}
+                <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                  {r.work_location || "—"}
+                  {r.hr_department && <span className="block text-[10px]">{r.hr_department}</span>}
+                </td>
                 <td className="px-3 py-2">
                   <select
                     className={selectCls}
