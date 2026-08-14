@@ -13,7 +13,7 @@ import {
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt, FileMinus2,
-  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
+  Briefcase, CalendarOff, CalendarDays, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
   Library, Barcode, DoorOpen, Share2,
