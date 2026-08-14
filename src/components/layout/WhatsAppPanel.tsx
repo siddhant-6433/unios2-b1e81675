@@ -70,8 +70,17 @@ export function WhatsAppPanel() {
     const filtered = (data || []) as Notification[];
 
     setNotifications(filtered);
-    setUnreadNotifCount(filtered.filter((n) => !n.is_read).length);
     setLoading(false);
+
+    // Count unread with a dedicated head query — deriving it from the 50-row
+    // list above capped the bell badge at "50" even when more were unread.
+    const { count } = await supabase
+      .from("notifications" as never)
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .in("type", ["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"] as never)
+      .eq("is_read", false as never);
+    setUnreadNotifCount(count ?? filtered.filter((n) => !n.is_read).length);
   }, [user?.id, role]);
 
   // Conversations still waiting on us — the same number, computed the same way,

@@ -351,13 +351,6 @@ const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
     preview: "Hi! 👋 Here's your link to apply online at NIMT:\n\n🔗 https://uni.nimt.ac.in/apply/nimt\n\nFill in your details and our admissions team will guide you through the next steps. For help, call us at 📞 +91 9555192192.",
   },
   {
-    key: "kb_campus_addresses",
-    label: "📍 Campus Addresses",
-    description: "All 5 NIMT campus locations",
-    params: [],
-    preview: "📍 *NIMT Campus Locations*\n\n🏫 *Greater Noida (Main)*\nPlot No. 41, Knowledge Park-1, Near Pari Chowk, Greater Noida, UP 201310\n\n🏫 *Ghaziabad – Arthala*\nNear Arthala Metro Station, GT Road, Mohan Nagar, Ghaziabad 201007\n\n🏫 *Ghaziabad – Avantika*\nAnsal Avantika Colony, Shastri Nagar, Ghaziabad 201015\n\n🏫 *Ghaziabad – Avantika II*\nAvantika Extension Colony, Ghaziabad\n\n🏫 *Kotputli, Jaipur*\nSP-3-1, RIICO Industrial Area, Keshwana, Kotputli, Jaipur 303108\n\nFor directions or to schedule a visit, call 📞 +91 9555192192.",
-  },
-  {
     key: "kb_rankings",
     label: "🏆 Rankings & Recognition",
     description: "NIMT rankings and accreditations",
@@ -379,25 +372,11 @@ const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
     preview: "🎓 *NIMT Scholarship Schemes*\n\nWe offer multiple scholarship opportunities:\n\n• 🏅 *Merit Scholarship* — For students with outstanding academic performance\n• 🤝 *SC/ST/OBC Scholarships* — As per government norms\n• ⚽ *Sports Scholarship* — For national/state level athletes\n• 🏥 *Nursing Scholarship* — Supported by INC guidelines\n• 👥 *Alumni Referral Discount* — For referrals from NIMT alumni\n\nFor detailed eligibility and current scholarship amounts, please call our admissions office:\n📞 +91 9555192192\n\nOr apply online at: https://uni.nimt.ac.in/apply/nimt",
   },
   {
-    key: "kb_placements",
-    label: "💼 Placements",
-    description: "Placement stats and top recruiters",
-    params: [],
-    preview: "💼 *NIMT Placement Highlights*\n\n📈 Highest Package: INR 18.75 LPA\n📊 Average Package: INR 5.40 LPA\n🏢 1,200+ corporate placement partners\n🎯 60+ companies visit campus annually\n\n*Top Recruiters:*\nFortis, KPMG, Cognizant, ICICI Bank, Wipro, HCL, Dell, Airtel, Kotak Mahindra, Infosys, Deloitte, TCS\n\n*By Course:*\n• MBA/PGDM: Highest 18.75 LPA, Avg 5.40 LPA\n• B.Sc Nursing: Highest 10 LPA, Avg 3 LPA (~98% placement rate)\n\nWould you like placement details for a specific course?",
-  },
-  {
     key: "kb_eligibility",
     label: "📋 Eligibility — General",
     description: "Quick eligibility overview for popular courses",
     params: [],
     preview: "📋 *Eligibility Overview — Popular Courses*\n\n🏥 *B.Sc Nursing:* 10+2 PCB, min 45%, age 17+\n🏥 *GNM:* 10+2 any stream, min 40%, age 17-35 (Science NOT required!)\n🦾 *BPT (Physiotherapy):* 10+2 PCB + English, min 50% (40% reserved/PwD); UP 2026 via CAHET counselling\n🩻 *BMRIT:* 10+2 PCB + English, min 50% (40% reserved/PwD); UP 2026 via CAHET counselling\n⚖️ *BA LLB (5yr):* 12th pass, min 45%\n⚖️ *LLB (3yr):* Graduation any stream, min 45%\n🎓 *MBA:* Bachelor's degree, min 50%, valid entrance score (CAT/MAT/XAT/CMAT)\n🎓 *PGDM:* Bachelor's degree, min 50%, CAT/MAT/XAT/CMAT\n🖥️ *BCA:* 12th with Maths, min 45%\n📊 *BBA:* 12th any stream, min 45%\n💊 *D Pharma:* 10+2 PCB/PCM, min 50%\n\nFor course-specific eligibility, please share which course you're interested in!",
-  },
-  {
-    key: "kb_fee_structure",
-    label: "💰 Fee Structure",
-    description: "Fee information and how to get details",
-    params: [],
-    preview: "💰 *NIMT Fee Structure 2026-27*\n\nDetailed year-wise fees are published here:\nhttps://nimt.ac.in/admissions/fees/\n\n*Popular first-year fees:*\n• B.Sc Nursing: ₹1,53,000/year\n• GNM: ₹1,18,000/year\n• BPT / BMRIT: ₹92,000/year\n• MBA: ₹1,30,000/year\n• PGDM: ₹2,25,000/year\n• BA LLB: ₹1,10,000/year\n• LLB: ₹44,250/year\n• BBA / BCA: ₹75,000/year\n• D.Pharma: ₹95,000/year\n\n✅ Merit scholarships available\n✅ Education loan support available\n✅ Application fee: Rs 500-1,000 depending on course\n\nPlease share your course and campus preference, and we can send the exact year-wise breakup.",
   },
   {
     key: "kb_course_details",
@@ -825,7 +804,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // and empty means we fall back to INBOX_TEMPLATES rather than showing nothing.
   const [catalogTemplates, setCatalogTemplates] = useState<CatalogTemplate[]>([]);
   const [catalogByKey, setCatalogByKey] = useState<Map<string, CatalogTemplate>>(new Map());
-  const [courseOptions, setCourseOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [courseOptions, setCourseOptions] = useState<Array<{ id: string; name: string; campus: string | null }>>([]);
   const [templateCourseId, setTemplateCourseId] = useState<string | null>(null);
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
@@ -896,6 +875,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [aiHealthIssue, setAiHealthIssue] = useState<{ since: string | null; reason: string | null } | null>(null);
   const [replyStateCounts, setReplyStateCounts] = useState<
     { needsReply: number; awaitingThem: number; unreadMessages: number; total: number } | null
+  >(null);
+  // Per-category server counts (all/admission/staff/other/jobs) so the chips
+  // reflect the full population, not just the loaded page. { conversations, unread }.
+  const [categoryCounts, setCategoryCounts] = useState<
+    Record<string, { conversations: number; unread: number }> | null
   >(null);
   const [replyStateFilter, setReplyStateFilter] = useState<"needs_reply" | "awaiting" | "all">("needs_reply");
   const [aiHealthDismissed, setAiHealthDismissed] = useState(false);
@@ -1524,6 +1508,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { cancelled = true; };
   }, [demoMode, role, profile?.id, businessNumber, isOutboundMode, messages.length]);
 
+  // Per-category totals for the chips, same population/scoping as the reply-state
+  // counts above. Replaces the client-side aggregate over the loaded ≤120 rows.
+  useEffect(() => {
+    if (demoMode || isOutboundMode) { setCategoryCounts(null); return; }
+    if (role === "counsellor" && !profile?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await (supabase.rpc as any)("whatsapp_inbox_category_counts", {
+        p_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
+        p_business_key: isHrScope || businessNumber === "all"
+          ? null
+          : businessNumber === "primary" ? "unattributed" : businessNumber,
+      });
+      if (cancelled || error) return;
+      const map: Record<string, { conversations: number; unread: number }> = {};
+      for (const row of (data || []) as any[]) {
+        map[row.category] = { conversations: Number(row.conversations || 0), unread: Number(row.unread_messages || 0) };
+      }
+      setCategoryCounts(map);
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode, isOutboundMode, role, profile?.id, businessNumber, isHrScope, messages.length]);
+
   // Course list for the template course picker.
   useEffect(() => {
     if (demoMode) return;
@@ -1531,10 +1538,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     (async () => {
       const { data } = await supabase
         .from("courses")
-        .select("id, name")
+        .select("id, name, departments(institutions(campuses(name)))")
         .neq("is_active", false)
         .order("name");
-      if (!cancelled && data) setCourseOptions(data as Array<{ id: string; name: string }>);
+      if (!cancelled && data) {
+        setCourseOptions((data as any[]).map(c => ({
+          id: c.id,
+          name: c.name,
+          campus: c.departments?.institutions?.campuses?.name ?? null,
+        })));
+      }
     })();
     return () => { cancelled = true; };
   }, [demoMode]);
@@ -2179,9 +2192,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   };
 
   const KB_TEMPLATE_KEYS = new Set([
-    "kb_apply_link", "kb_campus_addresses", "kb_rankings", "kb_approvals",
-    "kb_scholarships", "kb_placements", "kb_eligibility", "kb_fee_structure", "kb_course_details",
+    "kb_apply_link", "kb_rankings", "kb_approvals",
+    "kb_scholarships", "kb_eligibility", "kb_course_details",
   ]);
+  // KB helpers (hardcoded kb_* and DB quick replies kb_qr_*) send as free-form
+  // text via whatsapp-reply, not as Meta templates.
+  const isKbTemplate = (key: string) => KB_TEMPLATE_KEYS.has(key) || key.startsWith("kb_qr_");
 
   const handleSendTemplate = async () => {
     if (!selectedTemplate || !selectedPhone) return;
@@ -2239,7 +2255,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
     // KB quick-reply templates → send as freeform text via whatsapp-reply
     // These only work within the 24-hour WhatsApp conversation window
-    if (KB_TEMPLATE_KEYS.has(selectedTemplate)) {
+    if (isKbTemplate(selectedTemplate)) {
       const { error } = await invokeEdge("whatsapp-reply", {
         body: {
           phone: selectedPhone,
@@ -2389,14 +2405,28 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // The real, curated Meta list wins over the hardcoded INBOX_TEMPLATES entries:
   // same key means same template, but the catalog carries Meta's actual body text
   // and arity. Hardcoded entries with no Meta row (kb_* free-text helpers) stay.
+  // DB-managed quick replies become KNOWLEDGE-group templates (kb_qr_* → grouped
+  // by the kb_ prefix, sent as free text). Deduped by normalised label because the
+  // seed table currently holds an emoji/plain variant pair per label.
+  const quickReplyTemplates = useMemo<WhatsAppTemplateDefinition[]>(() => {
+    const seen = new Set<string>();
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const out: WhatsAppTemplateDefinition[] = [];
+    for (const qr of quickReplies) {
+      const k = norm(qr.label);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ key: `kb_qr_${qr.id}`, label: qr.label, description: "Saved quick reply", params: [], preview: qr.text });
+    }
+    return out;
+  }, [quickReplies]);
+
   const availableTemplates = useMemo<WhatsAppTemplateDefinition[]>(() => {
-    if (!catalogTemplates.length) return INBOX_TEMPLATES;
-    const catalogKeys = new Set(catalogTemplates.map(t => t.key));
-    return [
-      ...catalogTemplates,
-      ...INBOX_TEMPLATES.filter(t => !catalogKeys.has(t.key)),
-    ];
-  }, [catalogTemplates]);
+    const base = catalogTemplates.length
+      ? [...catalogTemplates, ...INBOX_TEMPLATES.filter(t => !new Set(catalogTemplates.map(c => c.key)).has(t.key))]
+      : INBOX_TEMPLATES;
+    return [...base, ...quickReplyTemplates];
+  }, [catalogTemplates, quickReplyTemplates]);
 
   const selectedTemplateDef = selectedTemplate
     ? availableTemplates.find(t => t.key === selectedTemplate) || null
@@ -2433,20 +2463,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
   const selectedTemplateCatalogEntry = selectedTemplate ? catalogByKey.get(selectedTemplate) : undefined;
 
-  const applyTemplateCourse = async (courseId: string) => {
+  // Just record the choice; the effect keyed on templateCourseId re-resolves the
+  // shared course context (below), which drives the preview for EVERY course
+  // template — not only the two in TEMPLATE_PARAM_NAMES.
+  const applyTemplateCourse = (courseId: string) => {
     setTemplateCourseId(courseId || null);
-    if (!courseId) return;
-    const resolved = await resolveCourseTemplateFields(
-      courseId,
-      selectedCourseInfo?.student_name || selectedConv?.lead_name || null,
-    );
-    if (!Object.keys(resolved).length) {
-      toast({ title: "Could not load course details", description: "Fill the fields manually.", variant: "destructive" });
-      return;
-    }
-    // Overrides win over context in renderWhatsAppTemplate, so this both fills
-    // the inputs and updates the preview bubble.
-    setTemplateParamOverrides(prev => ({ ...prev, ...resolved }));
   };
 
   const visibleTemplates = availableTemplates
@@ -2456,6 +2477,19 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       return [t.label, t.key, t.description, inferWhatsAppTemplateCategory(t.key)]
         .some(value => value.toLowerCase().includes(q));
     });
+
+  // Segregate the course picker by campus so per-campus duplicates (B.Ed ×3 etc.)
+  // read as one entry per campus instead of a flat list of clashing names.
+  const courseOptionsByCampus = (() => {
+    const groups = new Map<string, Array<{ id: string; name: string; campus: string | null }>>();
+    for (const c of courseOptions) {
+      const key = c.campus || "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(c);
+    }
+    return [...groups.entries()].sort((a, b) =>
+      a[0] === "Other" ? 1 : b[0] === "Other" ? -1 : a[0].localeCompare(b[0]));
+  })();
 
   const templateGroups = visibleTemplates.reduce<Record<string, WhatsAppTemplateDefinition[]>>((groups, template) => {
     const category = template.category || inferWhatsAppTemplateCategory(template.key);
@@ -2528,6 +2562,33 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     })();
     return () => { cancelled = true; };
   }, [selectedConv?.lead_id]);
+
+  // Re-resolve the course-specific fields whenever the chosen course changes so
+  // the preview tracks the dropdown. Merges over the lead-derived context
+  // (student_name/campus) but always CLEARS the previous course's fields first,
+  // so switching to a course with no facts doesn't leave stale duration/etc.
+  useEffect(() => {
+    if (demoMode) return; // demo context is set by the lead effect above
+    if (!templateCourseId) return;
+    let cancelled = false;
+    (async () => {
+      const resolved = await resolveCourseTemplateFields(
+        templateCourseId,
+        selectedConv?.lead_name || null,
+      );
+      if (cancelled) return;
+      if (!Object.keys(resolved).length) {
+        toast({ title: "Could not load course details", description: "Fill the fields manually.", variant: "destructive" });
+      }
+      const COURSE_FIELD_KEYS = ["course_name", "duration", "eligibility", "approval", "video_url", "course_url"];
+      setSelectedCourseInfo(prev => {
+        const base: Record<string, string> = { ...(prev || {}) };
+        for (const k of COURSE_FIELD_KEYS) delete base[k];
+        return { ...base, ...resolved };
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [templateCourseId, demoMode]);
 
   const getTemplateDefinition = (templateKey: string): WhatsAppTemplateDefinition | null => {
     // Prefer Meta's own body text so old bubbles render what was actually sent
@@ -2836,6 +2897,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const staffUnreadMsgs = staffConvs2.reduce((s, c) => s + c.unread_count, 0);
   const jobUnreadMsgs = jobConvs.reduce((s, c) => s + c.unread_count, 0);
   const otherUnreadMsgs = otherConvs.reduce((s, c) => s + c.unread_count, 0);
+  // Prefer the server category counts (full population); fall back to the loaded-
+  // page aggregate above only until the RPC resolves.
+  const catCount = (cat: string, fallbackConv: number, fallbackUnread: number) => ({
+    count: categoryCounts ? (categoryCounts[cat]?.conversations ?? 0) : fallbackConv,
+    unreplied: categoryCounts ? (categoryCounts[cat]?.unread ?? 0) : fallbackUnread,
+  });
   const opsFilters = [
     { key: "all" as const, label: "All ops", count: modeFiltered.length },
     { key: "reply_window" as const, label: "Reply now", count: modeFiltered.filter(isReplyWindowConversation).length },
@@ -3033,11 +3100,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             {/* Category pills */}
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
-                { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnreadMsgs, color: "bg-primary/10 text-primary border-primary/30" },
-                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreadMsgs, color: "bg-info/5 text-info-foreground border-info/20" },
-                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
-                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreadMsgs, color: "bg-primary/5 text-primary border-primary/20" },
-                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreadMsgs, color: "bg-warning/5 text-warning-foreground border-warning/20" },
+                // Counts come from whatsapp_inbox_category_counts (full population),
+                // falling back to the loaded-page aggregate only while it loads.
+                { key: "all" as const, label: "All", ...catCount("all", modeFiltered.length, totalUnreadMsgs), color: "bg-primary/10 text-primary border-primary/30" },
+                { key: "leads" as const, label: "Admission", ...catCount("admission", leadConvs.length, leadUnreadMsgs), color: "bg-info/5 text-info-foreground border-info/20" },
+                { key: "staff" as const, label: "Staff", ...catCount("staff", staffConvs2.length, staffUnreadMsgs), color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "jobs" as const, label: "Jobs", ...catCount("jobs", jobConvs.length, jobUnreadMsgs), color: "bg-primary/5 text-primary border-primary/20" },
+                { key: "other" as const, label: "Other", ...catCount("other", otherConvs.length, otherUnreadMsgs), color: "bg-warning/5 text-warning-foreground border-warning/20" },
               // matchesInbox drops every job_applicant row outside HR scope, so
               // the Jobs tab is structurally always 0 in admissions.
               ]).filter((t) => t.key !== "jobs" || isHrScope).map((t) => (
@@ -3864,6 +3933,17 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       <DialogTitle className="flex items-center gap-2 text-sm">
                         <LayoutTemplate className="h-4 w-4 text-success" />
                         Send WhatsApp Template
+                        {isAdminRole(role) && (
+                          <button
+                            type="button"
+                            onClick={() => navigate("/template-manager")}
+                            className="ml-auto inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                            title="Choose which templates counsellors see"
+                          >
+                            <Settings className="h-3 w-3" />
+                            Manage which show
+                          </button>
+                        )}
                       </DialogTitle>
                     </DialogHeader>
                     <div className="grid min-h-[620px] grid-cols-1 md:grid-cols-[300px_1fr]">
@@ -4000,8 +4080,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                   className="h-8 w-full rounded-md border border-input px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20"
                                 >
                                   <option value="">Select a course…</option>
-                                  {courseOptions.map(course => (
-                                    <option key={course.id} value={course.id}>{course.name}</option>
+                                  {courseOptionsByCampus.map(([campus, list]) => (
+                                    <optgroup key={campus} label={campus}>
+                                      {list.map(course => (
+                                        <option key={course.id} value={course.id}>{course.name}</option>
+                                      ))}
+                                    </optgroup>
                                   ))}
                                 </select>
                                 <p className="mt-1 text-[10px] text-muted-foreground">
