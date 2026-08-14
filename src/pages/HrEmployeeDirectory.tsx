@@ -62,6 +62,13 @@ const NON_EMPLOYEE_ROLES = [
   "publisher",
 ] as const;
 
+// One definition of an employee's department bucket, used by BOTH the chip counts
+// and the chip filter. They used to derive it separately — the counts fell back to
+// the label "Unassigned" while the filter compared the raw null — so the Unassigned
+// chip advertised 9 people and then matched none of them.
+const UNASSIGNED_DEPT = "Unassigned";
+const deptOf = (e: { department: string | null }) => e.department || UNASSIGNED_DEPT;
+
 // PostgREST caps every response at 1000 rows; raising the client limit does
 // nothing. Page through instead of silently losing staff past the first 1000.
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
@@ -261,7 +268,7 @@ const HrEmployeeDirectory = () => {
       : employees.filter((e) => !e.exitedOn || e.exitedOn > today);
     if (roleFilter !== "all") result = result.filter((e) => e.role === roleFilter);
     if (campusFilter !== "all") result = result.filter((e) => e.campusId === campusFilter);
-    if (deptFilter !== "all") result = result.filter((e) => (e.department ?? "") === deptFilter);
+    if (deptFilter !== "all") result = result.filter((e) => deptOf(e) === deptFilter);
     if (locationFilter !== "all") result = result.filter((e) => (e.location ?? "") === locationFilter);
     if (entityFilter !== "all") result = result.filter((e) => e.legalEntityId === entityFilter);
     if (search) {
@@ -289,7 +296,7 @@ const HrEmployeeDirectory = () => {
   const deptGroups = useMemo(() => {
     const map: Record<string, number> = {};
     for (const e of employees) {
-      const dept = e.department || "Unassigned";
+      const dept = deptOf(e);
       map[dept] = (map[dept] || 0) + 1;
     }
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
