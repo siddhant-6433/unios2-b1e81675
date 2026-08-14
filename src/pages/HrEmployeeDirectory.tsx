@@ -92,7 +92,7 @@ const HrEmployeeDirectory = () => {
     setLoading(true);
     // `profiles` has no role column — roles live in user_roles. Selecting
     // profiles.role 400s and leaves this page permanently empty.
-    const [roles, emps, pending, changeReqs] = await Promise.all([
+    const [roles, emps, pending, changeReqs, allPhotos] = await Promise.all([
       fetchAll<{ user_id: string; role: string }>(
         (from, to) => supabase
           .from("user_roles")
@@ -115,6 +115,18 @@ const HrEmployeeDirectory = () => {
         .from("employee_profile_change_requests")
         .select("id", { count: "exact", head: true })
         .eq("status", "pending"),
+      // Photos for staff whose employee_profiles row is still PENDING. They show up
+      // in this list via their login, so without this their migrated photo stays
+      // invisible until somebody verifies them. Keyed by EMAIL, not user_id:
+      // imported rows carry no user_id, which is the whole reason they are pending.
+      fetchAll<{ work_email: string | null; photo_url: string | null }>(
+        (from, to) => supabase
+          .from("employee_profiles")
+          .select("work_email, photo_url")
+          .not("photo_url", "is", null)
+          .not("work_email", "is", null)
+          .range(from, to),
+      ),
     ]);
 
     // Fetch every role, then partition here rather than filtering in the query:
@@ -132,16 +144,21 @@ const HrEmployeeDirectory = () => {
     ])];
 
     const staff = ids.length
-      ? await fetchAll<{ user_id: string; display_name: string | null; phone: string | null; department: string | null; avatar_url: string | null }>(
+      ? await fetchAll<{ user_id: string; display_name: string | null; phone: string | null; department: string | null; avatar_url: string | null; email: string | null }>(
           (from, to) => supabase
             .from("profiles")
-            .select("user_id, display_name, phone, department, avatar_url")
+            .select("user_id, display_name, phone, department, avatar_url, email")
             .in("user_id", ids)
             .order("display_name")
             .range(from, to),
         )
       : [];
 
+    const photoByEmail = new Map(
+      allPhotos
+        .filter((p) => p.work_email && p.photo_url)
+        .map((p) => [p.work_email!.toLowerCase(), p.photo_url!]),
+    );
     const roleByUser = new Map(employeeRoles.map((r) => [r.user_id, r.role]));
     const profileByUser = new Map(staff.map((s) => [s.user_id, s]));
 
@@ -175,7 +192,7 @@ const HrEmployeeDirectory = () => {
         jobTitle: null,
         department: s.department,
         campusId: null,
-        photoUrl: s.avatar_url,
+        photoUrl: (s.email ? photoByEmail.get(s.email.toLowerCase()) : null) ?? s.avatar_url,
       });
     }
 
