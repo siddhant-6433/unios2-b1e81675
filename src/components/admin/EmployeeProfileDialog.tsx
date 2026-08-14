@@ -1,16 +1,35 @@
+// Employee profile editor — the one place an employee record is edited.
+//
+// Opened from the admin Team tab (by auth user) and from the HR directory (by
+// employee_profiles.id). Those are different keys on purpose: employees imported
+// in bulk have no auth user at all, so `user_id` cannot be the handle. Anything
+// that syncs back to `profiles` is skipped for those rows.
+
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
-import { X, User, Briefcase, GraduationCap, MapPin, Save, FileText } from "lucide-react";
+import { usePermissions } from "@/contexts/PermissionContext";
+import { useOrgUnits } from "@/hooks/useOrgUnits";
+import { downscaleImage } from "@/lib/downscaleImage";
+import { X, User, Briefcase, GraduationCap, Save, FileText, Landmark, Camera, ScrollText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
+
+type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
 interface EmployeeProfileDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  userId: string;
+  /** Auth user id. Absent for employees imported without a login. */
+  userId?: string;
+  /** employee_profiles.id. Preferred when known; required for login-less rows. */
+  employeeProfileId?: string;
   userName: string;
+  readOnly?: boolean;
 }
 
 interface EmployeeProfile {
@@ -27,6 +46,7 @@ interface EmployeeProfile {
   blood_group: string;
   nationality: string;
   physically_handicapped: boolean;
+  photo_url: string;
   work_email: string;
   personal_email: string;
   mobile_number: string;
@@ -37,6 +57,9 @@ interface EmployeeProfile {
   date_of_joining: string;
   job_title: string;
   job_title_secondary: string;
+  campus_id: string;
+  institution_id: string;
+  department_id: string;
   worker_type: string;
   time_type: string;
   notice_period_days: number;
@@ -48,108 +71,261 @@ interface EmployeeProfile {
   professional_summary: string;
 }
 
+interface BankDetails {
+  account_holder_name: string;
+  account_number: string;
+  ifsc: string;
+  bank_name: string;
+  branch: string;
+  account_type: string;
+}
+
 const emptyProfile: EmployeeProfile = {
   employee_number: "", first_name: "", middle_name: "", last_name: "", salutation: "", display_name: "",
   gender: "", date_of_birth: "", marital_status: "", blood_group: "", nationality: "India",
-  physically_handicapped: false, work_email: "", personal_email: "", mobile_number: "",
+  physically_handicapped: false, photo_url: "", work_email: "", personal_email: "", mobile_number: "",
   work_number: "", residence_number: "",
   current_address: {}, permanent_address: {},
-  date_of_joining: "", job_title: "", job_title_secondary: "", worker_type: "Permanent",
+  date_of_joining: "", job_title: "", job_title_secondary: "",
+  campus_id: "", institution_id: "", department_id: "",
+  worker_type: "Permanent",
   time_type: "Full Time", notice_period_days: 90, employment_status: "Working",
   pan_number: "", aadhaar_number: "", education: [], experience: [], professional_summary: "",
 };
 
-const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: EmployeeProfileDialogProps) => {
+const emptyBank: BankDetails = {
+  account_holder_name: "", account_number: "", ifsc: "", bank_name: "", branch: "", account_type: "Savings",
+};
+
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
+const EmployeeProfileDialog = ({
+  open, onClose, onSuccess, userId, employeeProfileId, userName, readOnly = false,
+}: EmployeeProfileDialogProps) => {
   const [profile, setProfile] = useState<EmployeeProfile>(emptyProfile);
+  const [bank, setBank] = useState<BankDetails>(emptyBank);
+  const [bankLoaded, setBankLoaded] = useState(false);
+  const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoStage, setPhotoStage] = useState<"processing" | "uploading" | null>(null);
   const [isNew, setIsNew] = useState(true);
   const { toast } = useToast();
+  const { can } = usePermissions();
+  const org = useOrgUnits();
+
+  const canEditBank = can("hr", "bank_edit");
+  const editable = !readOnly;
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
+    setBankLoaded(false);
+    setBank(emptyBank);
 
     (async () => {
-      // Fetch base profile (display_name, phone) — email not fetchable from frontend (auth.users is restricted)
-      const [profileRes, empRes] = await Promise.all([
-        (supabase.from("profiles") as any).select("display_name, phone, campus, salutation").eq("user_id", userId).maybeSingle(),
-        supabase.from("employee_profiles").select("*").eq("user_id", userId).maybeSingle(),
-      ]);
+      // Look the employee row up by whichever key the caller had.
+      const empQuery = employeeProfileId
+        ? supabase.from("employee_profiles").select("*").eq("id", employeeProfileId).maybeSingle()
+        : supabase.from("employee_profiles").select("*").eq("user_id", userId!).maybeSingle();
 
-      const baseProfile = profileRes.data;
-      const empData = empRes.data;
-      const authEmail = "";
+      const [empRes, profileRes] = await Promise.all([
+        empQuery,
+        userId
+          ? supabase.from("profiles").select("display_name, phone, salutation").eq("user_id", userId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
 
       if (empRes.error) {
         toast({ title: "Error", description: empRes.error.message, variant: "destructive" });
       }
 
+      const empData = empRes.data as EmployeeProfileRow | null;
+      const baseProfile = profileRes.data as { display_name?: string; phone?: string; salutation?: string } | null;
+      const resolvedUserId = (empData?.user_id as string | null) ?? userId ?? null;
+      setLinkedUserId(resolvedUserId);
+
       if (empData) {
+        const str = (k: string) => (empData[k] as string | null) || "";
         setProfile({
           id: empData.id,
-          employee_number: empData.employee_number || "",
-          first_name: empData.first_name || "",
-          middle_name: empData.middle_name || "",
-          last_name: empData.last_name || "",
-          salutation: (baseProfile as any)?.salutation || "",
-          display_name: empData.display_name || baseProfile?.display_name || userName,
-          gender: empData.gender || "",
-          date_of_birth: empData.date_of_birth || "",
-          marital_status: empData.marital_status || "",
-          blood_group: empData.blood_group || "",
-          nationality: empData.nationality || "India",
-          physically_handicapped: empData.physically_handicapped || false,
-          work_email: empData.work_email || authEmail || "",
-          personal_email: empData.personal_email || "",
+          employee_number: str("employee_number"),
+          first_name: str("first_name"),
+          middle_name: str("middle_name"),
+          last_name: str("last_name"),
+          salutation: baseProfile?.salutation || "",
+          display_name: str("display_name") || baseProfile?.display_name || userName,
+          gender: str("gender"),
+          date_of_birth: str("date_of_birth"),
+          marital_status: str("marital_status"),
+          blood_group: str("blood_group"),
+          nationality: str("nationality") || "India",
+          physically_handicapped: Boolean(empData.physically_handicapped),
+          photo_url: str("photo_url"),
+          work_email: str("work_email"),
+          personal_email: str("personal_email"),
           // Prefer employee_profiles.mobile_number, fall back to profiles.phone (OTP login number)
-          mobile_number: empData.mobile_number || baseProfile?.phone || "",
-          work_number: empData.work_number || "",
-          residence_number: empData.residence_number || "",
-          current_address: (empData.current_address as any) || {},
-          permanent_address: (empData.permanent_address as any) || {},
-          date_of_joining: empData.date_of_joining || "",
-          job_title: empData.job_title || "",
-          job_title_secondary: empData.job_title_secondary || "",
-          worker_type: empData.worker_type || "Permanent",
-          time_type: empData.time_type || "Full Time",
-          notice_period_days: empData.notice_period_days || 90,
-          employment_status: empData.employment_status || "Working",
-          pan_number: empData.pan_number || "",
-          aadhaar_number: empData.aadhaar_number || "",
-          education: (empData.education as any) || [],
-          experience: (empData.experience as any) || [],
-          professional_summary: empData.professional_summary || "",
+          mobile_number: str("mobile_number") || baseProfile?.phone || "",
+          work_number: str("work_number"),
+          residence_number: str("residence_number"),
+          current_address: (empData.current_address as never) || {},
+          permanent_address: (empData.permanent_address as never) || {},
+          date_of_joining: str("date_of_joining"),
+          job_title: str("job_title"),
+          job_title_secondary: str("job_title_secondary"),
+          campus_id: str("campus_id"),
+          institution_id: str("institution_id"),
+          department_id: str("department_id"),
+          worker_type: str("worker_type") || "Permanent",
+          time_type: str("time_type") || "Full Time",
+          notice_period_days: (empData.notice_period_days as number | null) ?? 90,
+          employment_status: str("employment_status") || "Working",
+          pan_number: str("pan_number"),
+          aadhaar_number: str("aadhaar_number"),
+          education: (empData.education as never) || [],
+          experience: (empData.experience as never) || [],
+          professional_summary: str("professional_summary"),
         });
         setIsNew(false);
       } else {
-        // No employee_profiles row yet — pre-fill from profiles + auth
+        // No employee_profiles row yet — pre-fill from profiles.
         setProfile({
           ...emptyProfile,
-          salutation: (baseProfile as any)?.salutation || "",
+          salutation: baseProfile?.salutation || "",
           display_name: baseProfile?.display_name || userName,
           first_name: (baseProfile?.display_name || userName).split(" ")[0] || "",
           last_name: (baseProfile?.display_name || userName).split(" ").slice(1).join(" ") || "",
           mobile_number: baseProfile?.phone || "",
-          work_email: authEmail,
         });
         setIsNew(true);
       }
       setLoading(false);
     })();
-  }, [open, userId]);
+  }, [open, userId, employeeProfileId, userName, toast]);
+
+  // Bank details are a separate table behind hr:bank_edit — fetch only when the
+  // caller can actually see them, so a principal's dialog makes no doomed query.
+  useEffect(() => {
+    if (!open || !canEditBank || !profile.id || bankLoaded) return;
+    (async () => {
+      const { data } = await supabase
+        .from("employee_bank_details")
+        .select("account_holder_name, account_number, ifsc, bank_name, branch, account_type")
+        .eq("employee_profile_id", profile.id)
+        .maybeSingle();
+      if (data) setBank({ ...emptyBank, ...(data as Partial<BankDetails>) });
+      setBankLoaded(true);
+    })();
+  }, [open, canEditBank, profile.id, bankLoaded]);
 
   if (!open) return null;
 
-  const set = (field: keyof EmployeeProfile, value: any) => setProfile((p) => ({ ...p, [field]: value }));
+  const set = <K extends keyof EmployeeProfile>(field: K, value: EmployeeProfile[K]) =>
+    setProfile((p) => ({ ...p, [field]: value }));
   const setAddr = (type: "current_address" | "permanent_address", field: string, value: string) =>
     setProfile((p) => ({ ...p, [type]: { ...p[type], [field]: value } }));
 
+  const handlePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Not an image", description: "Choose a JPEG, PNG or WebP file.", variant: "destructive" });
+      return;
+    }
+    if (!profile.id) {
+      toast({ title: "Save first", description: "Save the profile once before adding a photo.", variant: "destructive" });
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      // Same white-background treatment student and applicant photos get, via
+      // the shared process-passport-photo function. If Gemini is down or out of
+      // quota we still store the original — a photo beats no photo, and the
+      // toast says which one landed.
+      setPhotoStage("processing");
+      const original = await fileToDataUrl(file);
+      let processed = original;
+      let bgRemoved = false;
+      try {
+        const { data: fn, error: fnErr } = await supabase.functions.invoke("process-passport-photo", {
+          body: { image: original },
+        });
+        if (!fnErr && fn?.processedImage) {
+          processed = fn.processedImage as string;
+          bgRemoved = true;
+        }
+      } catch {
+        // fall through to the original
+      }
+
+      setPhotoStage("uploading");
+      // Shrunk client-side: these render at 40–96px and Supabase's image
+      // transformation quota is metered.
+      const blob = await downscaleImage(await dataUrlToBlob(processed), { maxEdge: 800 });
+      const path = `${profile.id}/photo.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("employee-photos")
+        .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+
+      const { data: pub } = supabase.storage.from("employee-photos").getPublicUrl(path);
+      // Cache-bust: the path is stable across re-uploads.
+      const url = `${pub.publicUrl}?v=${Date.now()}`;
+
+      const { data, error } = await supabase
+        .from("employee_profiles")
+        .update({ photo_url: url } as never)
+        .eq("id", profile.id)
+        .select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("You don't have permission to edit this employee.");
+
+      set("photo_url", url);
+      toast({
+        title: "Photo updated",
+        description: bgRemoved
+          ? "Background replaced with plain white."
+          : "Saved as-is — background removal was unavailable.",
+      });
+      onSuccess?.();
+    } catch (err) {
+      toast({
+        title: "Photo upload failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingPhoto(false);
+      setPhotoStage(null);
+    }
+  };
+
   const handleSave = async () => {
+    if (canEditBank && bank.account_number.trim() && !IFSC_RE.test(bank.ifsc.trim().toUpperCase())) {
+      toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
-        user_id: userId,
+        user_id: linkedUserId,
         employee_number: profile.employee_number || null,
         first_name: profile.first_name || null,
         middle_name: profile.middle_name || null,
@@ -171,6 +347,9 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
         date_of_joining: profile.date_of_joining || null,
         job_title: profile.job_title || null,
         job_title_secondary: profile.job_title_secondary || null,
+        campus_id: profile.campus_id || null,
+        institution_id: profile.institution_id || null,
+        department_id: profile.department_id || null,
         worker_type: profile.worker_type || null,
         time_type: profile.time_type || null,
         notice_period_days: profile.notice_period_days,
@@ -182,31 +361,63 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
         professional_summary: profile.professional_summary || null,
       };
 
+      let profileId = profile.id;
       if (isNew) {
-        const { error } = await supabase.from("employee_profiles").insert(payload);
+        const { data, error } = await supabase
+          .from("employee_profiles").insert(payload as never).select("id").single();
         if (error) throw error;
+        profileId = data.id;
+        setProfile((p) => ({ ...p, id: data.id }));
         setIsNew(false);
       } else {
-        const { error } = await supabase.from("employee_profiles").update(payload).eq("user_id", userId);
+        // .select() so an RLS-filtered update reports 0 rows instead of a
+        // silent "success" that changed nothing.
+        const { data, error } = await supabase
+          .from("employee_profiles").update(payload as never).eq("id", profile.id!).select("id");
         if (error) throw error;
+        if (!data?.length) throw new Error("You don't have permission to edit this employee.");
       }
 
-      // Sync back to profiles via SECURITY DEFINER RPC (bypasses RLS on profiles table)
-      const normalizedPhone = profile.mobile_number
-        ? (profile.mobile_number.startsWith("+") ? profile.mobile_number : `+${profile.mobile_number.replace(/\D/g, "")}`)
-        : null;
-      await supabase.rpc("admin_update_profile" as any, {
-        p_user_id:      userId,
-        p_display_name: profile.display_name || null,
-        p_email:        profile.work_email || null,
-        p_phone:        normalizedPhone,
-        p_salutation:   profile.salutation ?? "",
-      } as any);
+      if (canEditBank && profileId && Object.values(bank).some((v) => v.trim())) {
+        const { error } = await supabase
+          .from("employee_bank_details")
+          .upsert({
+            employee_profile_id: profileId,
+            account_holder_name: bank.account_holder_name.trim() || profile.display_name || null,
+            account_number: bank.account_number.trim() || null,
+            ifsc: bank.ifsc.trim().toUpperCase() || null,
+            bank_name: bank.bank_name.trim() || null,
+            branch: bank.branch.trim() || null,
+            account_type: bank.account_type || null,
+          } as never, { onConflict: "employee_profile_id" });
+        if (error) throw new Error(`Bank details: ${error.message}`);
+      }
+
+      // Sync name/email/phone back to `profiles` — only meaningful when this
+      // employee actually has a login. The RPC's error used to be discarded,
+      // which hid a hard 'Forbidden' for every non-super_admin.
+      if (linkedUserId) {
+        const normalizedPhone = profile.mobile_number
+          ? (profile.mobile_number.startsWith("+") ? profile.mobile_number : `+${profile.mobile_number.replace(/\D/g, "")}`)
+          : null;
+        const { error } = await supabase.rpc("admin_update_profile" as never, {
+          p_user_id: linkedUserId,
+          p_display_name: profile.display_name || null,
+          p_email: profile.work_email || null,
+          p_phone: normalizedPhone,
+          p_salutation: profile.salutation ?? "",
+        } as never);
+        if (error) throw new Error(`Employee saved, but the login profile could not be updated: ${error.message}`);
+      }
 
       toast({ title: "Saved", description: "Employee profile updated successfully." });
       onSuccess?.();
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
@@ -230,31 +441,74 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   const labelCls = "block text-[11px] font-medium text-muted-foreground mb-1";
+  const initials = (profile.display_name || userName || "U")
+    .split(" ").filter(Boolean).map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  const tabCls = "rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-3xl max-h-[90vh] rounded-2xl bg-card card-shadow mx-4 animate-fade-in flex flex-col overflow-hidden">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      {/* Radix portals this to <body>. The hand-rolled `fixed inset-0` version it
+          replaced was positioned by the nearest transformed ancestor instead of the
+          viewport — the HR directory page carries `animate-fade-in`, whose keyframes
+          set a transform — so the modal opened near the bottom of a long list. */}
+      <DialogContent className="max-w-3xl max-h-[90vh] p-0 gap-0 flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 pb-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-              <Briefcase className="h-5 w-5 text-primary" />
-            </div>
+            {profile.photo_url ? (
+              <img
+                src={profile.photo_url}
+                alt={profile.display_name || userName}
+                className="h-14 w-14 rounded-xl object-cover border border-border bg-white"
+              />
+            ) : (
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                {initials}
+              </div>
+            )}
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Employee Profile</h2>
-              <p className="text-xs text-muted-foreground">{userName}</p>
+              <DialogTitle className="text-lg font-semibold text-foreground">Employee Profile</DialogTitle>
+              <p className="text-xs text-muted-foreground">
+                {profile.display_name || userName}
+                {!linkedUserId && <span className="ml-2 text-muted-foreground/70">· no login linked</span>}
+              </p>
+              {editable && (
+                <label
+                  className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    uploadingPhoto || !profile.id
+                      ? "text-muted-foreground/60 cursor-not-allowed"
+                      : "text-foreground hover:bg-muted cursor-pointer"
+                  }`}
+                  title={profile.id ? undefined : "Save the profile once before adding a photo"}
+                >
+                  {uploadingPhoto ? <ButtonOrb state="working" /> : <Camera className="h-3.5 w-3.5" />}
+                  {photoStage === "processing"
+                    ? "Removing background…"
+                    : photoStage === "uploading"
+                      ? "Uploading…"
+                      : profile.photo_url ? "Change photo" : "Add photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={uploadingPhoto || !profile.id}
+                    onChange={handlePhoto}
+                  />
+                </label>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
-              {saving ? "Saving…" : "Save"}
-            </button>
+            {editable && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {saving ? <ButtonOrb state="working" onFilled /> : <Save className="h-4 w-4" />}
+                {saving ? "Saving…" : "Save"}
+              </button>
+            )}
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1">
               <X className="h-5 w-5" />
             </button>
@@ -267,24 +521,20 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
             <OrbLoader state="working" />
           </div>
         ) : (
-          <div className="overflow-y-auto flex-1 p-6">
+          <fieldset disabled={!editable} className="overflow-y-auto flex-1 p-6 disabled:opacity-100">
             <Tabs defaultValue="personal" className="w-full">
               <TabsList className="bg-muted/50 border border-border rounded-xl p-1 h-auto flex-wrap mb-6">
-                <TabsTrigger value="personal" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <User className="h-3.5 w-3.5 mr-1" />Personal
-                </TabsTrigger>
-                <TabsTrigger value="job" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <Briefcase className="h-3.5 w-3.5 mr-1" />Job
-                </TabsTrigger>
-                <TabsTrigger value="education" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <GraduationCap className="h-3.5 w-3.5 mr-1" />Education
-                </TabsTrigger>
-                <TabsTrigger value="experience" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <Briefcase className="h-3.5 w-3.5 mr-1" />Experience
-                </TabsTrigger>
-                <TabsTrigger value="identity" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <FileText className="h-3.5 w-3.5 mr-1" />Identity
-                </TabsTrigger>
+                <TabsTrigger value="personal" className={tabCls}><User className="h-3.5 w-3.5 mr-1" />Personal</TabsTrigger>
+                <TabsTrigger value="job" className={tabCls}><Briefcase className="h-3.5 w-3.5 mr-1" />Job</TabsTrigger>
+                <TabsTrigger value="education" className={tabCls}><GraduationCap className="h-3.5 w-3.5 mr-1" />Education</TabsTrigger>
+                <TabsTrigger value="experience" className={tabCls}><Briefcase className="h-3.5 w-3.5 mr-1" />Experience</TabsTrigger>
+                <TabsTrigger value="identity" className={tabCls}><FileText className="h-3.5 w-3.5 mr-1" />Identity</TabsTrigger>
+                {canEditBank && (
+                  <TabsTrigger value="bank" className={tabCls}><Landmark className="h-3.5 w-3.5 mr-1" />Bank</TabsTrigger>
+                )}
+                {profile.id && editable && (
+                  <TabsTrigger value="letters" className={tabCls}><ScrollText className="h-3.5 w-3.5 mr-1" />Letters</TabsTrigger>
+                )}
               </TabsList>
 
               {/* Personal */}
@@ -358,6 +608,46 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
 
               {/* Job */}
               <TabsContent value="job" className="space-y-5">
+                <Section title="Posting">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className={labelCls}>Campus</label>
+                      <select
+                        value={profile.campus_id}
+                        onChange={(e) => setProfile((p) => ({ ...p, campus_id: e.target.value, institution_id: "", department_id: "" }))}
+                        className={inputCls}
+                      >
+                        <option value="">Select</option>
+                        {org.campuses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Institution</label>
+                      <select
+                        value={profile.institution_id}
+                        onChange={(e) => setProfile((p) => ({ ...p, institution_id: e.target.value, department_id: "" }))}
+                        className={inputCls}
+                        disabled={!profile.campus_id}
+                      >
+                        <option value="">Select</option>
+                        {org.institutionsFor(profile.campus_id).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Department</label>
+                      <select
+                        value={profile.department_id}
+                        onChange={(e) => set("department_id", e.target.value)}
+                        className={inputCls}
+                        disabled={!profile.institution_id}
+                      >
+                        <option value="">Select</option>
+                        {org.departmentsFor(profile.institution_id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </Section>
+
                 <Section title="Job Details">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <Field label="Date of Joining" value={profile.date_of_joining} onChange={(v) => set("date_of_joining", v)} type="date" />
@@ -454,11 +744,44 @@ const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: E
                   </div>
                 </Section>
               </TabsContent>
+
+              {/* Bank */}
+              {canEditBank && (
+                <TabsContent value="bank" className="space-y-5">
+                  <Section title="Salary Account">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <Field label="Account Holder Name" value={bank.account_holder_name} onChange={(v) => setBank((b) => ({ ...b, account_holder_name: v }))} placeholder={profile.display_name} />
+                      <Field label="Account Number" value={bank.account_number} onChange={(v) => setBank((b) => ({ ...b, account_number: v }))} />
+                      <Field label="IFSC" value={bank.ifsc} onChange={(v) => setBank((b) => ({ ...b, ifsc: v.toUpperCase() }))} placeholder="HDFC0001234" />
+                      <Field label="Bank Name" value={bank.bank_name} onChange={(v) => setBank((b) => ({ ...b, bank_name: v }))} />
+                      <Field label="Branch" value={bank.branch} onChange={(v) => setBank((b) => ({ ...b, branch: v }))} />
+                      <div>
+                        <label className={labelCls}>Account Type</label>
+                        <select value={bank.account_type} onChange={(e) => setBank((b) => ({ ...b, account_type: e.target.value }))} className={inputCls}>
+                          <option value="Savings">Savings</option>
+                          <option value="Current">Current</option>
+                          <option value="Salary">Salary</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Every change to these fields is recorded with your name and the time.
+                    </p>
+                  </Section>
+                </TabsContent>
+              )}
+              {profile.id && editable && (
+                <TabsContent value="letters" className="space-y-5">
+                  <Section title="Employment letters">
+                    <LettersPanel employeeProfileId={profile.id} />
+                  </Section>
+                </TabsContent>
+              )}
             </Tabs>
-          </div>
+          </fieldset>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 

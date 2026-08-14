@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.lead-ingest]
 verify_jwt = false
 
+[functions.placement-report-request]
+verify_jwt = false
+
 [functions.collegedunia-ingest]
 verify_jwt = false
 

@@ -521,7 +521,10 @@ Buttons:
 
         {/* WHATSAPP TEMPLATES — DB-mirrored from Meta, live status via webhook */}
         <TabsContent value="whatsapp" className="mt-4">
-          <WhatsAppTemplateTab />
+          <WhatsAppTemplateTab
+            visibilityByKey={Object.fromEntries(waSettings.map(s => [s.template_key, s.show_in_lead_picker]))}
+            onToggleVisibility={toggleWaSetting}
+          />
         </TabsContent>
 
         {/* COURSE DATA — fields that flow into the course_info_v1 template */}

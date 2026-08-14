@@ -18,6 +18,12 @@ import {
   loadVerifiedAdmissionsContext,
   renderCourseFactsBlock,
 } from "../_shared/nimt-admissions-context.ts";
+import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
+
+// Course → owning institution is the only reliable Mirai signal (the Avantika
+// campus is shared with B.Ed), same as generate-apply-link. Beacon = NIMT School.
+const MIRAI_INSTITUTION_ID = "d8c95a30-ecc6-4b41-8bed-987c960dc44a";
+const APPLY_PORTAL_BASE = "https://uni.nimt.ac.in/apply";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,7 +137,7 @@ COURSES:
 {{COURSE_FACTS}}
 
 ADMISSIONS:
-- Apply online: https://uni.nimt.ac.in/apply/nimt (also: apply.nimt.ac.in)
+- Apply online: {{APPLY_URL}} — ALWAYS share exactly this link when asking the student to apply; do not substitute a different apply URL.
 - Application fee: Rs 500-1,000 (varies by course)
 - Application window: January–July | Admission deadline: September | Academic year: Aug/Sep
 - Helpline: +91 9555192192
@@ -164,12 +170,14 @@ FACILITIES:
  * dropping the course list, so the model deflects to a counsellor instead of
  * inventing figures.
  */
-function renderKnowledgeBase(courseFactsBlock: string): string {
-  return KNOWLEDGE_BASE.replace(
-    "{{COURSE_FACTS}}",
-    courseFactsBlock
-      || "(Course details unavailable right now — do NOT state any course duration, eligibility, entrance exam, seats or fee. Tell the student a counsellor will confirm, and share +91 9555192192.)",
-  );
+function renderKnowledgeBase(courseFactsBlock: string, applyUrl: string): string {
+  return KNOWLEDGE_BASE
+    .replace(
+      "{{COURSE_FACTS}}",
+      courseFactsBlock
+        || "(Course details unavailable right now — do NOT state any course duration, eligibility, entrance exam, seats or fee. Tell the student a counsellor will confirm, and share +91 9555192192.)",
+    )
+    .replace("{{APPLY_URL}}", applyUrl);
 }
 
 type SupabaseAdminClient = ReturnType<typeof createClient<Record<string, unknown>>>;
@@ -481,6 +489,7 @@ function buildSystemPrompt(
   goldenAnswersContext: string,
   leadStage: string | null,
   courseFactsBlock: string,
+  applyUrl: string,
 ): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
@@ -587,7 +596,7 @@ ${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContex
 ${replyExamplesContext ? `\n\nORGANISATION REPLY EXAMPLES:\nUse these as examples of how NIMT counsellors answer similar WhatsApp queries. Do not copy personal details, phone numbers, emails, or promises from examples. Verified course brief and knowledge base override examples if they conflict.\n${replyExamplesContext}` : ""}
 
 KNOWLEDGE BASE:
-${renderKnowledgeBase(courseFactsBlock)}`;
+${renderKnowledgeBase(courseFactsBlock, applyUrl)}`;
 }
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
@@ -694,7 +703,7 @@ Deno.serve(async (req) => {
     // ── Find or create lead ──────────────────────────────────────────────────
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, name, course_id, person_role, counsellor_id")
+      .select("id, name, course_id, person_role, counsellor_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
       .eq("is_mirror", false)
       .limit(1);
@@ -836,6 +845,21 @@ Deno.serve(async (req) => {
     // Call Gemini with dynamic system prompt
     // Course figures come from course_facts, not from a constant in this file.
     const courseFactsBlock = await renderCourseFactsBlock(admin);
+    // Route the apply link by the lead's institution: colleges → /apply/nimt,
+    // NIMT (Beacon) school → /apply/beacon, Mirai school → /apply/mirai. Reuses
+    // the same resolver as generate-apply-link so the link matches the login flow.
+    let isMiraiInstitution = false;
+    if (existingCourseId) {
+      const { data: courseRow } = await admin
+        .from("courses")
+        .select("departments:department_id ( institution_id )")
+        .eq("id", existingCourseId)
+        .maybeSingle();
+      isMiraiInstitution = (courseRow as any)?.departments?.institution_id === MIRAI_INSTITUTION_ID;
+    }
+    const applyPortal = resolveApplyPortal(existingLead, [], { isMiraiInstitution });
+    const applyUrl = `${APPLY_PORTAL_BASE}/${applyPortal}`;
+
     const systemPrompt = buildSystemPrompt(
       hasName,
       hasCourse,
@@ -845,6 +869,7 @@ Deno.serve(async (req) => {
       goldenAnswersContext,
       lead_stage,
       courseFactsBlock,
+      applyUrl,
     );
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`;
     const geminiBody = JSON.stringify({

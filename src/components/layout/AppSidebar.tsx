@@ -11,9 +11,9 @@ import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, LogOut, CreditCard,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
-  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
+  ChevronDown, Phone, Calendar, CalendarDays, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt, FileMinus2,
-  Briefcase, CalendarOff, CalendarDays, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
+  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
   Library, Barcode, DoorOpen, Share2,
@@ -23,7 +23,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
+import { fetchActionBadgeCounts, fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
 import { canSeePolicyItem, isAcademicPartnerPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -155,6 +155,7 @@ const hrSubMenu: MenuItem[] = [
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
+  { title: "Payroll", url: "/hr-payroll", icon: IndianRupee, permission: "hr:payroll_run" },
 ];
 
 const managementMenu: MenuItem[] = [
@@ -250,12 +251,23 @@ export function AppSidebar() {
       return;
     }
 
-    setWaUnread(Number(data?.wa_unread || 0));
     setNewLeadCount(Number(data?.new_leads_total || 0));
     setTatDefaults(Number(data?.tat_defaults || 0));
     setPendingFollowupCount(Number(data?.overdue || 0) + Number(data?.today || 0));
     setMissedCallbackCount(Number(data?.ai_needs_followup || 0));
     setPriorityInterestedCount(Number(data?.priority_interested_total || 0));
+
+    // The WhatsApp badge counts CONVERSATIONS needing a reply — the same
+    // number, computed the same way, as the navbar pill and the inbox's
+    // "Needs Reply" chip. wa_unread counted unread MESSAGES (lead-joined, RLS),
+    // which is why the badge said 18 while the inbox said 40.
+    const { data: waData } = await fetchWhatsAppReplyStateCounts({
+      p_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
+      p_business_key: null,
+      p_include_outbound_only: false,
+    });
+    const waRow = Array.isArray(waData) ? waData[0] : waData;
+    setWaUnread(Number(waRow?.needs_reply || 0));
   }, [role, profile?.id]);
 
   const fetchPendingApprovals = useCallback(async () => {
