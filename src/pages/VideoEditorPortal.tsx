@@ -35,10 +35,25 @@ type VideoRow = {
   youtube_posted_on: string | null;
   is_billable: boolean;
   posted_month: string | null;
+  video_bill_id: string | null;
   created_at: string;
 };
 
 type EditorRow = { id: string; name: string; per_video_rate: number; active: boolean };
+
+type BillRow = {
+  id: string; brand: VideoBrand; bill_month: string;
+  video_count: number; per_video_rate: number; total_amount: number;
+  status: "draft" | "approved" | "paid"; paid_at: string | null;
+};
+
+// Per-video bill/payment status shown to the editor.
+const VIDEO_BILL_STATUS: Record<string, { label: string; color: string }> = {
+  none:     { label: "Not billed", color: "bg-muted text-muted-foreground" },
+  draft:    { label: "Pending",    color: "bg-warning/10 text-warning-foreground" },
+  approved: { label: "Approved",   color: "bg-info/10 text-info-foreground" },
+  paid:     { label: "Paid",       color: "bg-success/10 text-success" },
+};
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
@@ -91,6 +106,8 @@ export default function VideoEditorPortal() {
   const { toast } = useToast();
   const [editor, setEditor] = useState<EditorRow | null>(null);
   const [videos, setVideos] = useState<VideoRow[]>([]);
+  const [bills, setBills] = useState<BillRow[]>([]);
+  const [billingMonth, setBillingMonth] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [showSubmit, setShowSubmit] = useState(false);
@@ -127,12 +144,12 @@ export default function VideoEditorPortal() {
   };
 
   const fetchVideos = async (editorId: string) => {
-    const { data } = await supabase
-      .from("videos" as any)
-      .select("*")
-      .eq("editor_id", editorId)
-      .order("created_at", { ascending: false });
-    setVideos((data as any) || []);
+    const [vRes, bRes] = await Promise.all([
+      supabase.from("videos" as any).select("*").eq("editor_id", editorId).order("created_at", { ascending: false }),
+      supabase.from("video_bills" as any).select("id, brand, bill_month, video_count, per_video_rate, total_amount, status, paid_at").eq("editor_id", editorId),
+    ]);
+    setVideos((vRes.data as any) || []);
+    setBills((bRes.data as any) || []);
     setLoading(false);
   };
 
@@ -167,6 +184,31 @@ export default function VideoEditorPortal() {
     }
     return Array.from(map.values()).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 6);
   }, [videos, editor]);
+
+  const billById = useMemo(() => new Map(bills.map(b => [b.id, b])), [bills]);
+
+  // Per-video bill/payment status for the breakdown modal.
+  const videoStatus = (v: VideoRow) => {
+    const bill = v.video_bill_id ? billById.get(v.video_bill_id) : undefined;
+    const key = bill?.status ?? "none";
+    return { ...(VIDEO_BILL_STATUS[key] ?? VIDEO_BILL_STATUS.none), paidAt: bill?.status === "paid" ? bill.paid_at : null };
+  };
+
+  // The selected month's billable videos, grouped by brand.
+  const breakdown = useMemo(() => {
+    if (!billingMonth || !editor) return null;
+    const monthVideos = videos.filter(v => v.is_billable && v.posted_month?.slice(0, 7) === billingMonth);
+    const byBrand = new Map<VideoBrand, VideoRow[]>();
+    for (const v of monthVideos) {
+      if (!byBrand.has(v.brand)) byBrand.set(v.brand, []);
+      byBrand.get(v.brand)!.push(v);
+    }
+    const rate = Number(editor.per_video_rate);
+    const groups = [...byBrand.entries()]
+      .map(([brand, vids]) => ({ brand, vids, amount: vids.length * rate }))
+      .sort((a, b) => VIDEO_BRAND_LABEL[a.brand].localeCompare(VIDEO_BRAND_LABEL[b.brand]));
+    return { groups, total: monthVideos.length, amount: monthVideos.length * rate };
+  }, [billingMonth, videos, editor]);
 
   const handleSubmitVideo = async () => {
     if (!editor) return;
@@ -352,11 +394,13 @@ export default function VideoEditorPortal() {
             <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-3">Monthly Billable Summary</p>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {monthlySummary.map(m => (
-                <div key={m.month} className="rounded-xl border border-border p-3">
+                <button key={m.month} onClick={() => setBillingMonth(m.month)}
+                  className="rounded-xl border border-border p-3 text-left hover:border-primary/50 hover:bg-muted/30 transition-colors">
                   <p className="text-[10px] text-muted-foreground">{new Date(m.month + "-01").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
                   <p className="text-lg font-bold">{m.count} <span className="text-xs font-normal text-muted-foreground">videos</span></p>
                   <p className="text-xs text-success font-medium">₹{m.amount.toLocaleString("en-IN")}</p>
-                </div>
+                  <p className="text-[9px] text-primary mt-1">View breakdown →</p>
+                </button>
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground mt-3">
@@ -584,6 +628,68 @@ export default function VideoEditorPortal() {
               {savingSocial ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />} Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Monthly billing breakdown */}
+      <Dialog open={!!billingMonth} onOpenChange={(o) => { if (!o) setBillingMonth(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {billingMonth && new Date(billingMonth + "-01").toLocaleDateString("en-IN", { month: "long", year: "numeric" })} · billing breakdown
+            </DialogTitle>
+          </DialogHeader>
+          {breakdown && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 text-sm">
+                <span className="font-semibold">{breakdown.total} videos</span>
+                <span className="text-success font-semibold">₹{breakdown.amount.toLocaleString("en-IN")}</span>
+                <span className="text-[11px] text-muted-foreground ml-auto">Counts videos posted on Instagram, LinkedIn AND YouTube.</span>
+              </div>
+              {breakdown.groups.map(g => (
+                <div key={g.brand} className="rounded-xl border border-border/60 overflow-hidden">
+                  <div className="flex items-center justify-between bg-muted/40 px-3 py-2 text-xs font-semibold">
+                    <span>{VIDEO_BRAND_LABEL[g.brand]}</span>
+                    <span className="text-muted-foreground">{g.vids.length} videos · ₹{g.amount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-muted-foreground border-b border-border/40">
+                        <th className="px-3 py-1.5 font-medium">Title</th>
+                        <th className="px-2 py-1.5 font-medium">Instagram</th>
+                        <th className="px-2 py-1.5 font-medium">LinkedIn</th>
+                        <th className="px-2 py-1.5 font-medium">YouTube</th>
+                        <th className="px-2 py-1.5 font-medium text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.vids.map(v => {
+                        const st = videoStatus(v);
+                        const cell = (url: string | null, posted: string | null) => url
+                          ? <a href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{posted ? fmtPostedAt(posted) : "Posted"}</a>
+                          : <span className="text-muted-foreground">—</span>;
+                        return (
+                          <tr key={v.id} className="border-b border-border/30 last:border-0">
+                            <td className="px-3 py-1.5 font-medium text-foreground">{v.title}</td>
+                            <td className="px-2 py-1.5">{cell(v.instagram_url, v.instagram_posted_on)}</td>
+                            <td className="px-2 py-1.5">{cell(v.linkedin_url, v.linkedin_posted_on)}</td>
+                            <td className="px-2 py-1.5">{cell(v.youtube_url, v.youtube_posted_on)}</td>
+                            <td className="px-2 py-1.5 text-center">
+                              <Badge className={`border-0 text-[9px] font-semibold ${st.color}`}>{st.label}</Badge>
+                              {st.paidAt && <div className="text-[9px] text-muted-foreground">{fmtPostedAt(st.paidAt)}</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+              {breakdown.total === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">No billable videos this month.</p>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
