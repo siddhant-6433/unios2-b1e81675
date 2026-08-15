@@ -321,8 +321,47 @@ export const ADMISSIONS_INFO = `How to Apply:
 3. Receive offer letter upon shortlisting
 4. Confirm seat by paying admission fee
 Application Fee: Rs 500-1,000 (varies by course)
-Applications: January-July | Admission deadline: September | Academic year: August/September
+Applications for the current session open in January and admission continues until seats fill (typically September); academic year starts August/September. If today's date is past that usual window, do NOT tell the student admissions are closed — offer to check current seat availability.
 Helpline: +91 9555192192 | apply.nimt.ac.in`;
+
+// ── Temporal context ────────────────────────────────────────────────────────
+// Every LLM prompt in this repo used to omit today's date entirely, so the
+// model dated counselling rounds from its training priors — it told students
+// in mid-August that counselling "usually starts a bit later" and promised
+// rounds in months that had already passed.
+//
+// IST, not UTC: toISOString() after 18:30 IST reports yesterday to the model.
+// `now` is injectable so this is testable without freezing the clock.
+export function buildTemporalContext(now: Date = new Date()): string {
+  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const y = ist.getFullYear();
+  const m = ist.getMonth() + 1; // 1-12
+  // The academic session rolls over in April, when the next year's admissions open.
+  const session = m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+  const dateStr = ist.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  return `CURRENT DATE AND SESSION (authoritative — overrides anything you think you know):
+Today is ${dateStr} (IST). The current admission session is ${session}.
+- Never describe a month that has already passed as upcoming. Check the month against today before saying "starts in", "will begin", or "upcoming".
+- Never say a session's counselling "has not started yet" unless a LIVE COUNSELLING UPDATES block below explicitly says so. With no dated source, say the team will confirm the current round and share +91 9555192192.
+- The student's own information about a live counselling round may be more current than yours. Do not contradict it — offer to confirm.`;
+}
+
+/** Compact single line for latency-sensitive voice prompts. */
+export function buildTemporalLine(now: Date = new Date()): string {
+  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const y = ist.getFullYear();
+  const m = ist.getMonth() + 1;
+  const session = m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+  const dateStr = ist.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+  return `${dateStr} (IST), admission session ${session}`;
+}
 
 // ── Curated course facts (single source of truth) ───────────────────────────
 // public.course_facts is the authority for duration, eligibility, entrance

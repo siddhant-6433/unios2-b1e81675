@@ -14,6 +14,7 @@ import { applyLeadTransition } from "../_shared/lead-transition.ts";
 import { logGeminiUsage } from "../_shared/geminiUsage.ts";
 import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 import {
+  buildTemporalContext,
   FEE_STRUCTURE_URL,
   loadVerifiedAdmissionsContext,
   renderCourseFactsBlock,
@@ -139,7 +140,7 @@ COURSES:
 ADMISSIONS:
 - Apply online: {{APPLY_URL}} — ALWAYS share exactly this link when asking the student to apply; do not substitute a different apply URL.
 - Application fee: Rs 500-1,000 (varies by course)
-- Application window: January–July | Admission deadline: September | Academic year: Aug/Sep
+- Applications for the current session open in January; admission continues until seats fill (typically September). Academic year starts Aug/Sep. If today is past that usual window, do NOT say admissions are closed — offer to check current seat availability.
 - Helpline: +91 9555192192
 
 SCHOLARSHIPS:
@@ -542,6 +543,8 @@ LEAD STAGE BEHAVIOR (current stage: ${leadStage}):
 - Follow the behavior for the current stage. If stage is unknown, default to "new_lead" behavior.` : "";
 
   return `You are the NIMT Admissions Assistant — a helpful, warm, and knowledgeable guide for students and parents exploring admissions at NIMT Educational Institutions (National Institute of Management and Technology).
+
+${buildTemporalContext()}
 
 PERSONALITY:
 - Write like a friendly senior student who genuinely wants to help — not like a corporate brochure.

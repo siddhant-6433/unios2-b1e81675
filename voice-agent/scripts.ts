@@ -2,7 +2,7 @@
  * Conversation scripts for the NIMT Voice AI Agent.
  * Supports outbound admission calls and inbound call handling.
  */
-import { getCourseKnowledge, qualitativeHighlights } from "./knowledge.ts";
+import { buildTemporalLine, getCourseKnowledge, qualitativeHighlights } from "./knowledge.ts";
 
 export interface CallContext {
   direction: "outbound" | "inbound";
@@ -167,9 +167,12 @@ Don't oscillate. Pick on turn 2 and hold.`;
   const outboundCtx = `OUTBOUND | Lead: ${ctx.leadName || "unknown"} | Course: ${ctx.courseName || "not specified"} | Source: ${source}
 ${isPlaceholder ? "⚠️ Placeholder name — ask for real name in Step 1." : ""}${!hasCourse ? "\n⚠️ No course recorded — ask in Step 3." : ""}`;
 
-  const today = new Date().toISOString().slice(0, 10);
+  // IST, not toISOString(): after 18:30 IST the UTC date is still yesterday,
+  // and the agent was telling callers the wrong day every evening.
+  const today = buildTemporalLine();
 
   return `You are ${persona.name}, senior admissions counsellor at ${persona.org}. Live phone call. Today: ${today}. Calm, warm, efficient — never excited, never salesy.
+DATES: never say a month that has already passed is upcoming, and never claim counselling "has not started yet" — if you have no dated source, say ${seniorCounsellor} will confirm the current round.
 
 VOICE: ${voiceStyle}
 LANGUAGE: Default Hinglish. Pure Hindi reply → formal Hindi ("aap"). Pure English → English. Lock register at turn 2.
