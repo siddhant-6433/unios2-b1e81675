@@ -9,6 +9,11 @@ verify_jwt = false
 [functions.meta-leads-webhook]
 verify_jwt = false
 
+# Silence watchdog: cron sends only x-cron-secret (no JWT), so gateway JWT
+# verification must stay off or it 401s the daily check.
+[functions.meta-leadgen-silence-alert]
+verify_jwt = false
+
 [functions.invite-user]
 verify_jwt = false
 
