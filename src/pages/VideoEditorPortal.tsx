@@ -301,6 +301,10 @@ export default function VideoEditorPortal() {
       setSavingSocial(false); return;
     }
     toast({ title: "Social links saved" });
+    // System-authoritative posting dates: overwrite Instagram/YouTube posted_on
+    // with the real platform timestamps from the links (fraud-proof). LinkedIn
+    // has no public API, so its date stays as entered. Best-effort.
+    try { await supabase.functions.invoke("video-fetch-post-dates", { body: { video_id: selected.id, force: true } }); } catch { /* non-fatal */ }
     setSavingSocial(false);
     setSelected(null);
     if (editor) fetchVideos(editor.id);

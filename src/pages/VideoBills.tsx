@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Receipt, CheckCircle, IndianRupee, Building2, ChevronRight, ChevronDown, Download, Trash2 } from "lucide-react";
+import { Receipt, CheckCircle, IndianRupee, Building2, ChevronRight, ChevronDown, Download, Trash2, RefreshCw } from "lucide-react";
 import {
   VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, type VideoBrand, type VideoContentType,
 } from "@/lib/videoBrands";
@@ -98,6 +98,7 @@ export default function VideoBills() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [fetchingDates, setFetchingDates] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -205,6 +206,20 @@ export default function VideoBills() {
     fetchAll();
   };
 
+  // Pull real posting dates from Instagram/YouTube for this month's billable
+  // videos (fraud-proof; recomputes each video's bill month via the DB trigger).
+  const handleFetchDates = async () => {
+    setFetchingDates(true);
+    const { data, error } = await supabase.functions.invoke("video-fetch-post-dates", { body: { month } });
+    setFetchingDates(false);
+    const res = data as any;
+    const errMsg = error?.message || res?.error;
+    if (errMsg) { toast({ title: "Fetch failed", description: errMsg, variant: "destructive" }); return; }
+    const ig = res?.instagram?.set ?? 0, yt = res?.youtube?.set ?? 0;
+    toast({ title: `Updated ${res?.updated ?? 0} videos`, description: `Instagram ${ig}, YouTube ${yt}. Videos may move to their real posting month.` });
+    fetchAll();
+  };
+
   const handleExport = async () => {
     if (videos.length === 0) { toast({ title: "Nothing to export for this month" }); return; }
     setExporting(true);
@@ -279,6 +294,12 @@ export default function VideoBills() {
           <p className="text-sm text-muted-foreground mt-1">Generate monthly bills for video editors</p>
         </div>
         <div className="flex items-center gap-2">
+          {isSuperAdmin && (
+            <Button size="sm" variant="outline" className="gap-1.5 h-9 text-xs" disabled={fetchingDates || videos.length === 0} onClick={handleFetchDates}
+              title="Pull real Instagram/YouTube posting dates from the links">
+              {fetchingDates ? <ButtonOrb state="composing" /> : <RefreshCw className="h-3.5 w-3.5" />} Fetch dates
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="gap-1.5 h-9 text-xs" disabled={exporting || videos.length === 0} onClick={handleExport}>
             {exporting ? <ButtonOrb state="composing" /> : <Download className="h-3.5 w-3.5" />} Export to Excel
           </Button>
