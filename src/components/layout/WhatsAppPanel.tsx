@@ -227,8 +227,8 @@ export function WhatsAppPanel() {
     if (removed && !removed.is_read) setUnreadNotifCount(prev => Math.max(0, prev - 1));
   };
 
-  // Only show for roles that use WhatsApp
-  if (!role || ["student", "parent", "accountant"].includes(role)) return null;
+  // Only show for roles that use WhatsApp (video editors are external vendors)
+  if (!role || ["student", "parent", "accountant", "video_editor"].includes(role)) return null;
 
   const hasNudge = unrepliedCount > 0;
 
