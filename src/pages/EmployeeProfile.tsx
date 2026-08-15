@@ -25,6 +25,8 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { MarkExitDialog } from "@/components/hr/MarkExitDialog";
 import { AttendanceLog } from "@/components/hr/AttendanceLog";
 import { EmployeeDocuments } from "@/components/hr/EmployeeDocuments";
+import { EmploymentBadges } from "@/components/hr/EmploymentBadges";
+import { ExitBand, type ExitRow } from "@/components/hr/ExitBand";
 import { useEmployeeProfile, EmployeeProfileTabs } from "@/components/hr/employeeProfileForm";
 import {
   ArrowLeft, Mail, Phone, MapPin, IdCard, Camera, Save, LogOut, Lock,
@@ -69,6 +71,9 @@ const EmployeeProfile = () => {
   const [exitOpen, setExitOpen] = useState(false);
   const [login, setLogin] = useState<LoginState | null>(null);
   const [togglingLogin, setTogglingLogin] = useState(false);
+  const [exit, setExit] = useState<ExitRow | null>(null);
+  const [punchesToday, setPunchesToday] = useState<{ punch_in: string | null; punch_out: string | null }[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const tab = searchParams.get("tab") || "about";
   const setTab = (v: string) => setSearchParams((p) => { p.set("tab", v); return p; }, { replace: true });
@@ -77,12 +82,22 @@ const EmployeeProfile = () => {
     let cancelled = false;
     setProbing(true);
     (async () => {
-      const [cardRes, privRes] = await Promise.all([
+      const [cardRes, privRes, exitRes] = await Promise.all([
         supabase.rpc("employee_directory_card", { _q: null }),
         supabase
           .from("employee_profiles")
           .select("id, user_id, business_unit, hr_department, reports_to_name, date_of_exit, employment_status")
           .eq("id", id)
+          .maybeSingle(),
+        // The most recent exit that still means something. A reverted one is
+        // history, not a state the person is in.
+        supabase
+          .from("employee_exits")
+          .select("id, status, exit_type, resignation_date, last_working_day, expected_last_working_day, notice_waived, notice_period_days, reason")
+          .eq("employee_profile_id", id)
+          .neq("status", "reverted")
+          .order("created_at", { ascending: false })
+          .limit(1)
           .maybeSingle(),
       ]);
       if (cancelled) return;
@@ -90,6 +105,17 @@ const EmployeeProfile = () => {
       setCard(rows.find((r) => r.employee_profile_id === id) ?? null);
       const privRow = (privRes.data as PrivateHeader | null) ?? null;
       setPriv(privRow);
+      setExit((exitRes.data as ExitRow | null) ?? null);
+
+      if (privRow?.user_id) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const { data: punches } = await supabase
+          .from("employee_attendance")
+          .select("punch_in, punch_out")
+          .eq("user_id", privRow.user_id)
+          .eq("date", todayIso);
+        if (!cancelled) setPunchesToday(punches ?? []);
+      }
 
       if (privRow?.user_id) {
         const { data: prof } = await supabase
@@ -105,7 +131,7 @@ const EmployeeProfile = () => {
       if (!cancelled) setProbing(false);
     })();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, reloadKey]);
 
   // The login is banned at the auth layer by the edge function, not by writing the
   // flag — a profiles update alone revokes nothing, which is exactly the bug that
@@ -154,7 +180,6 @@ const EmployeeProfile = () => {
   const phone = ctx.profile.mobile_number || card?.mobile_number || "";
   const location = card?.work_location || "";
   const empNo = ctx.profile.employee_number || card?.employee_number || "";
-  const exited = !!priv?.date_of_exit;
 
   const initials = name.split(" ").filter(Boolean).map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
@@ -205,9 +230,15 @@ const EmployeeProfile = () => {
         <div className="pl-32 pr-6 pt-3">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold text-foreground">{name}</h1>
-            {exited && (
-              <span className="rounded-md bg-destructive/15 px-2 py-0.5 text-[11px] font-semibold text-destructive">OUT</span>
-            )}
+            {/* "OUT" used to mean exited here, which collides with Keka's OUT
+                (= not punched in). Exited is now spelled out; In/Out is attendance. */}
+            <EmploymentBadges
+              exit={exit}
+              employmentStatus={priv?.employment_status}
+              dateOfExit={priv?.date_of_exit}
+              punchesToday={punchesToday}
+              showAttendance={canSeePrivate}
+            />
             {isSelf && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">You</span>
             )}
@@ -260,6 +291,10 @@ const EmployeeProfile = () => {
           </div>
         )}
       </div>
+
+      {canSeePrivate && exit && (
+        <ExitBand exit={exit} canEdit={canEdit} onChanged={() => setReloadKey((k) => k + 1)} />
+      )}
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList className="h-auto w-full justify-start gap-0 rounded-none border-b border-border bg-transparent p-0">
@@ -324,7 +359,7 @@ const EmployeeProfile = () => {
         open={exitOpen}
         onOpenChange={setExitOpen}
         employee={ctx.profile.id ? { id: ctx.profile.id, name, employeeNumber: ctx.profile.employee_number } : null}
-        onSuccess={() => setExitOpen(false)}
+        onSuccess={() => { setExitOpen(false); setReloadKey((k) => k + 1); }}
       />
     </div>
   );

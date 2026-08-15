@@ -81,7 +81,9 @@ export function MarkExitDialog({ open, onOpenChange, employee, onSuccess }: Prop
     }
     toast({
       title: "Exit recorded",
-      description: "It is under review. Approving it starts the notice period.",
+      // Says where it went. Previously the dialog just closed and the page looked
+      // identical, which is why the record felt like it had vanished.
+      description: "It is under review on their profile — approve it there to start the notice period.",
     });
     onOpenChange(false);
     onSuccess?.();

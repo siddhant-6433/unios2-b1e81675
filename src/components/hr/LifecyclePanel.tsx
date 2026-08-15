@@ -14,6 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Button } from "@/components/ui/button";
+import { applyExitTransition, type ExitAction } from "@/lib/exitTransitions";
 import { Badge } from "@/components/ui/badge";
 import { UserCheck, LogOut, AlertTriangle } from "lucide-react";
 
@@ -40,11 +41,14 @@ interface ExitRow {
   employee_profiles: { display_name: string | null; job_title: string | null; employee_number: string | null } | null;
 }
 
-// Keka's three buckets, and the order HR works them in.
+// Keka's three buckets, and the order HR works them in. Rejected is included
+// because the fetch only excludes `reverted` — without a bucket those rows counted
+// towards the header total while rendering nowhere.
 const EXIT_BUCKETS = [
   { key: "under_review", label: "Under review", hint: "Resignations and terminations awaiting approval" },
   { key: "in_progress",  label: "Serving notice", hint: "Approved; still working" },
   { key: "completed",    label: "Exited", hint: "Last working day has passed; access revoked" },
+  { key: "rejected",     label: "Rejected", hint: "Not approved; the employee stays active" },
 ] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -105,27 +109,15 @@ export function LifecyclePanel({ onChange }: { onChange?: () => void }) {
     )) return;
 
     setBusy(id);
-    const patch: Record<string, unknown> = { status };
-    if (status === "in_progress") {
-      patch.approved_at = new Date().toISOString();
-      patch.approved_by = (await supabase.auth.getUser()).data.user?.id ?? null;
-    }
-    const { data, error } = await supabase
-      .from("employee_exits").update(patch as never).eq("id", id).select("id");
+    // Shared with the exit band on the employee's own profile, so the two screens
+    // cannot drift on what each state allows or what it stamps.
+    const result = await applyExitTransition(id, status as ExitAction);
     setBusy(null);
-    if (error || !data?.length) {
-      toast({ title: "Could not update the exit", description: error?.message ?? "No permission", variant: "destructive" });
+    if (!result.ok) {
+      toast({ title: result.title, description: result.error, variant: "destructive" });
       return;
     }
-    toast({
-      title: status === "in_progress" ? "Exit approved — notice period started"
-           : status === "completed"   ? "Exit completed"
-           : status === "reverted"    ? "Exit reverted — access restored"
-           : "Exit rejected",
-      description: status === "completed"
-        ? "Payroll excludes them from the last working day, and their login is archived."
-        : undefined,
-    });
+    toast({ title: result.title, description: result.description });
     await fetchAll();
     onChange?.();
   };

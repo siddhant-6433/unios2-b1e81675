@@ -8,7 +8,7 @@
 
 import { PageLoader } from "@/components/ui/page-loader";
 import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SelectField } from "@/components/ui/state-fields";
 import { usePermissions } from "@/contexts/PermissionContext";
@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROLE_LABELS } from "@/lib/accessPolicy";
+import { EmploymentBadges } from "@/components/hr/EmploymentBadges";
+import { needsAction, type ExitRecord } from "@/lib/employmentBadges";
 
 const EmployeeProfileDialog = lazy(() => import("@/components/admin/EmployeeProfileDialog"));
 const BulkEmployeeImportDialog = lazy(() =>
@@ -99,9 +101,22 @@ const HrEmployeeDirectory = () => {
   const [entityFilter, setEntityFilter] = useState("all");
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [editing, setEditing] = useState<Employee | null>(null);
+  const [exitsByEmployee, setExitsByEmployee] = useState<Record<string, ExitRecord>>({});
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const canEdit = can("hr", "employees_edit");
+  const canView = can("hr", "view") || canEdit;
+
+  // Tab in the URL so the toast after marking an exit can link straight here.
+  const tab = searchParams.get("tab") || "directory";
+  const setTab = (v: string) => setSearchParams((p) => { p.set("tab", v); return p; }, { replace: true });
+
+  // The count on the tab: exits awaiting approval, plus notice that has run out.
+  const exitActionCount = useMemo(
+    () => Object.values(exitsByEmployee).filter((x) => needsAction(x)).length,
+    [exitsByEmployee],
+  );
 
   // A person deserves a URL, so a row opens the profile page. Staff who exist only
   // as a login have no employee_profiles row to address yet — those still open the
@@ -118,6 +133,19 @@ const HrEmployeeDirectory = () => {
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
+    // Live exits, so a row can show "Under notice" — somebody serving notice used
+    // to be indistinguishable from an active employee in this list.
+    void supabase
+      .from("employee_exits")
+      .select("employee_profile_id, status, last_working_day, exit_type")
+      .not("status", "in", "(reverted,rejected)")
+      .then(({ data }) => {
+        const map: Record<string, ExitRecord> = {};
+        for (const row of (data ?? []) as (ExitRecord & { employee_profile_id: string })[]) {
+          map[row.employee_profile_id] = row;
+        }
+        setExitsByEmployee(map);
+      });
     // `profiles` has no role column — roles live in user_roles. Selecting
     // profiles.role 400s and leaves this page permanently empty.
     const [roles, emps, pending, changeReqs, allPhotos] = await Promise.all([
@@ -426,6 +454,13 @@ const HrEmployeeDirectory = () => {
                         {emp.employeeNumber}
                       </span>
                     )}
+                    {/* compact: the row has no room for "until 30 Sept · 46 days
+                        left", so that detail becomes the tooltip. */}
+                    <EmploymentBadges
+                      compact
+                      exit={emp.employeeProfileId ? exitsByEmployee[emp.employeeProfileId] : null}
+                      dateOfExit={emp.exitedOn}
+                    />
                   </p>
                   {/* Designation is the HR job title; role is a UniOs access level.
                       They were previously collapsed into one line, so a role read as
@@ -480,8 +515,8 @@ const HrEmployeeDirectory = () => {
         )}
       </div>
 
-      {canEdit ? (
-        <Tabs defaultValue="directory" className="space-y-6">
+      {canView ? (
+        <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList className="bg-muted/50 border border-border rounded-xl p-1 h-auto">
             <TabsTrigger value="directory" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
               <Users className="h-3.5 w-3.5 mr-1" /> Directory
@@ -494,21 +529,24 @@ const HrEmployeeDirectory = () => {
               <Inbox className="h-3.5 w-3.5 mr-1" /> Change requests
               {changeReqCount > 0 && <span className="ml-1.5 rounded-full bg-destructive/15 text-destructive px-1.5">{changeReqCount}</span>}
             </TabsTrigger>
+            {/* "Exits" leads, and it carries a count like its sibling queues — this
+                is the tab somebody hunts for straight after marking an exit. */}
             <TabsTrigger value="lifecycle" className="rounded-lg text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-              <UserCheck className="h-3.5 w-3.5 mr-1" /> Probation &amp; exits
+              <UserCheck className="h-3.5 w-3.5 mr-1" /> Exits &amp; probation
+              {exitActionCount > 0 && <span className="ml-1.5 rounded-full bg-destructive/15 text-destructive px-1.5">{exitActionCount}</span>}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="directory" className="space-y-6">{directory}</TabsContent>
-          <TabsContent value="verify">
+          {canEdit && <TabsContent value="verify">
             <Suspense fallback={<PageLoader />}>
               <EmployeeVerificationTable onChange={fetchEmployees} />
             </Suspense>
-          </TabsContent>
-          <TabsContent value="requests">
+          </TabsContent>}
+          {canEdit && <TabsContent value="requests">
             <Suspense fallback={<PageLoader />}>
               <ProfileChangeRequests onChange={fetchEmployees} />
             </Suspense>
-          </TabsContent>
+          </TabsContent>}
           <TabsContent value="lifecycle">
             <Suspense fallback={<PageLoader />}>
               <LifecyclePanel onChange={fetchEmployees} />

@@ -2,10 +2,10 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { needsAction } from "@/lib/employmentBadges";
 import {
   Users, Clock, CalendarOff, UserCheck, AlertTriangle,
-  CheckCircle, Loader2, ChevronRight, Fingerprint, TrendingUp, UserPlus,
-} from "lucide-react";
+  CheckCircle, Loader2, ChevronRight, Fingerprint, TrendingUp, UserPlus, LogOut } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ const HrDashboard = () => {
     pendingFaceRegs: 0,
     absentToday: 0,
     newJobApplicants: 0,
+    exitsToProcess: 0,
   });
   const [weeklyAttendance, setWeeklyAttendance] = useState<any[]>([]);
   const [recentPunches, setRecentPunches] = useState<any[]>([]);
@@ -37,7 +38,7 @@ const HrDashboard = () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
 
-    const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes, jobAppRes] = await Promise.all([
+    const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes, jobAppRes, exitRes] = await Promise.all([
       // Roles live in user_roles, not profiles — `profiles.role` does not exist,
       // so this select used to 400 and the employee headcount silently read 0.
       supabase.from("user_roles").select("user_id, role", { count: "planned" })
@@ -52,6 +53,10 @@ const HrDashboard = () => {
         .eq("status", "pending"),
       supabase.from("job_applicants" as any).select("id", { count: "planned", head: true })
         .eq("status", "new"),
+      // Exits that need somebody: awaiting approval, or notice that has run out.
+      // Nothing surfaced these before, so a marked exit could sit unseen.
+      supabase.from("employee_exits").select("status, last_working_day")
+        .in("status", ["under_review", "in_progress"]),
     ]);
 
     const totalEmployees = employeesRes.count || 0;
@@ -66,6 +71,8 @@ const HrDashboard = () => {
       pendingFaceRegs: faceRes.count || 0,
       absentToday: Math.max(0, totalEmployees - punchedIn - onLeave),
       newJobApplicants: jobAppRes.count || 0,
+      exitsToProcess: ((exitRes.data ?? []) as { status: string; last_working_day: string | null }[])
+        .filter((x) => needsAction(x)).length,
     });
 
     // Enrich punches with profile names
@@ -122,7 +129,7 @@ const HrDashboard = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-4">
         {[
           { label: "Total Staff", value: stats.totalEmployees, icon: Users, bg: "bg-pastel-blue", href: "/hr-directory" },
           { label: "Punched In", value: stats.punchedInToday, icon: CheckCircle, bg: "bg-pastel-green", href: "/hr-attendance" },
@@ -131,6 +138,7 @@ const HrDashboard = () => {
           { label: "Pending Leaves", value: stats.pendingLeaves, icon: Clock, bg: "bg-pastel-orange", href: "/hr-leave" },
           { label: "Face Pending", value: stats.pendingFaceRegs, icon: UserCheck, bg: "bg-pastel-purple", href: "#face-approvals" },
           { label: "New Applicants", value: stats.newJobApplicants, icon: UserPlus, bg: "bg-pastel-pink", href: "/hiring" },
+          { label: "Exits to Process", value: stats.exitsToProcess, icon: LogOut, bg: "bg-pastel-orange", href: "/hr-directory?tab=lifecycle" },
         ].map((s) => (
           <Link key={s.label} to={s.href} className="block">
             <Card className="border-border/60 shadow-none hover:shadow-sm transition-shadow cursor-pointer">

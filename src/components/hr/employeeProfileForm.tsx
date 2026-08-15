@@ -626,6 +626,12 @@ export function EmployeeProfileTabs({ ctx, defaultTab = "personal" }: { ctx: Emp
                 <option value="Terminated">Terminated</option>
                 <option value="On Notice">On Notice</option>
               </select>
+              {/* The exit trigger also owns this column, so hand-editing it here can
+                  disagree with the exit record. Mark exit is the path that keeps the
+                  two in step. */}
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Set automatically when an exit is approved — use Mark exit rather than editing this.
+              </p>
             </div>
           </div>
         </Section>
