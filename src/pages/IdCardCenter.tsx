@@ -474,14 +474,16 @@ const IdCardCenter = () => {
   }
 
   /**
-   * Build transparent cutouts (shared by both outputs). Student wave fronts show the pupil cut out
-   * over the signal-wave rings; cut from the AI-processed (pure-white bg) photo — the raw photo_url
-   * can carry a real background whiteBgCutout can't knock out (→ a boxed white-bg photo). Employee
-   * photos aren't white-bg studio shots, so they keep the boxed photo.
+   * Build transparent cutouts (shared by both outputs). Wave fronts show the subject cut out over
+   * the signal-wave rings; cut from the AI-processed (pure-white bg) photo — the raw photo_url can
+   * carry a real background whiteBgCutout can't knock out. Employees share this path too: their
+   * uploads are white-bg composited (process-passport-photo) and back-filled, so they get the same
+   * cutout. whiteBgCutout returns null when the source has no removable white bg, and that row
+   * falls back to the boxed photo in IdCardFront.
    */
   async function prepareCutouts(rows: CardPerson[]) {
     const cutoutSrc = (row: CardPerson) => row.photoProcessedUrl || row.photoUrl;
-    const pending = rows.filter((row) => row.type === "students" && cutoutSrc(row) && !cutouts[row.id]);
+    const pending = rows.filter((row) => cutoutSrc(row) && !cutouts[row.id]);
     if (!pending.length) return;
     setPreparing(true);
     const done = await Promise.all(

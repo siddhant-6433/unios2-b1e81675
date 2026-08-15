@@ -32,6 +32,7 @@ import {
   qualitativeHighlights,
   ADMISSIONS_INFO,
   getCourseKnowledge,
+  buildTemporalContext,
 } from "./knowledge.ts";
 import type {
   LeadInfo,
@@ -371,6 +372,8 @@ function buildSystemPrompt(knowledge: string, lang: string = "en"): string {
   return `You are Navya, NIMT's AI admissions counsellor on the website. You help prospective students with admission queries.
 
 Your name is Navya. Always introduce yourself as Navya if asked.
+
+${buildTemporalContext()}
 
 ${langInstruction}
 

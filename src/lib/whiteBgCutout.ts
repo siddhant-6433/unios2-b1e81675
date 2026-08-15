@@ -12,7 +12,17 @@
  * Runs entirely in the browser (canvas). Results are cached per source URL.
  */
 
-const cache = new Map<string, string>();
+const cache = new Map<string, string | null>();
+
+/**
+ * Minimum fraction of pixels the border flood fill must knock out for us to treat the source as a
+ * genuine white-bg studio photo. Below this, the image had no removable white background (e.g. an
+ * old employee snapshot with a real backdrop) — return null so the caller keeps the boxed render
+ * instead of floating an opaque rectangle over the card's rings.
+ * ponytail: 6% floor cleanly separates clean white-bg photos (knock out 20%+) from
+ * no-background ones (~0%); raise if tight headshots that fill the frame get wrongly boxed.
+ */
+const MIN_KNOCKOUT_FRACTION = 0.06;
 
 /** Neutral near-white: bright and low-saturation (blue-striped shirts fail this). */
 function isNeutralWhite(r: number, g: number, b: number): boolean {
@@ -69,12 +79,47 @@ export function subjectBounds(data: Uint8ClampedArray, w: number, h: number, min
   return { minX, minY, maxX, maxY };
 }
 
+/**
+ * Border-seeded flood fill: knock every near-white pixel connected to the image edge to alpha 0
+ * (mutates `d` in place) and return how many pixels were knocked out. Interior white (a collar
+ * surrounded by the subject) survives because it isn't reachable from the border. The count lets
+ * the caller tell a real white-bg photo (knocks out a big fraction) from one with no removable
+ * background (knocks out almost nothing).
+ */
+export function borderWhiteKnockout(d: Uint8ClampedArray, w: number, h: number): number {
+  const visited = new Uint8Array(w * h);
+  const stack: number[] = [];
+  for (let x = 0; x < w; x++) {
+    stack.push(x, (h - 1) * w + x);
+  }
+  for (let y = 0; y < h; y++) {
+    stack.push(y * w, y * w + w - 1);
+  }
+
+  let knocked = 0;
+  while (stack.length) {
+    const p = stack.pop() as number;
+    if (visited[p]) continue;
+    visited[p] = 1;
+    const i = p * 4;
+    if (!isNeutralWhite(d[i], d[i + 1], d[i + 2])) continue;
+    d[i + 3] = 0; // knock out to transparent
+    knocked++;
+    const px = p % w;
+    const py = (p / w) | 0;
+    if (px > 0) stack.push(p - 1);
+    if (px < w - 1) stack.push(p + 1);
+    if (py > 0) stack.push(p - w);
+    if (py < h - 1) stack.push(p + w);
+  }
+  return knocked;
+}
+
 /** Fraction of the subject's height added as transparent headroom above the head. */
 const HEADROOM = 0.14;
 
-export async function whiteBgCutout(url: string): Promise<string> {
-  const cached = cache.get(url);
-  if (cached) return cached;
+export async function whiteBgCutout(url: string): Promise<string | null> {
+  if (cache.has(url)) return cache.get(url) ?? null;
 
   const res = await fetch(url, { mode: "cors" });
   if (!res.ok) throw new Error(`photo fetch failed: ${res.status}`);
@@ -91,31 +136,12 @@ export async function whiteBgCutout(url: string): Promise<string> {
   bitmap.close?.();
 
   const image = ctx.getImageData(0, 0, w, h);
-  const d = image.data;
-  const visited = new Uint8Array(w * h);
+  const knocked = borderWhiteKnockout(image.data, w, h);
 
-  // Seed the flood fill from every border pixel.
-  const stack: number[] = [];
-  for (let x = 0; x < w; x++) {
-    stack.push(x, (h - 1) * w + x);
-  }
-  for (let y = 0; y < h; y++) {
-    stack.push(y * w, y * w + w - 1);
-  }
-
-  while (stack.length) {
-    const p = stack.pop() as number;
-    if (visited[p]) continue;
-    visited[p] = 1;
-    const i = p * 4;
-    if (!isNeutralWhite(d[i], d[i + 1], d[i + 2])) continue;
-    d[i + 3] = 0; // knock out to transparent
-    const px = p % w;
-    const py = (p / w) | 0;
-    if (px > 0) stack.push(p - 1);
-    if (px < w - 1) stack.push(p + 1);
-    if (py > 0) stack.push(p - w);
-    if (py < h - 1) stack.push(p + w);
+  // No meaningful white background — leave the row to the boxed render.
+  if (knocked / (w * h) < MIN_KNOCKOUT_FRACTION) {
+    cache.set(url, null);
+    return null;
   }
 
   ctx.putImageData(image, 0, 0);

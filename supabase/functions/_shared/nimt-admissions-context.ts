@@ -1,8 +1,11 @@
 import {
+  buildTemporalContext,
   CAMPUS_INFO,
   COURSE_KNOWLEDGE,
   NIMT_OVERVIEW,
 } from "../../../web-chat-server/knowledge.ts";
+
+export { buildTemporalContext };
 
 const FEE_STRUCTURE_URL = "https://nimt.ac.in/admissions/fees/";
 
@@ -319,14 +322,28 @@ async function loadCuratedCourseFacts(
 // older than the window even if the scrape kept the last good summary.
 const COUNSELLING_FRESHNESS_DAYS = 7;
 
+// With no fresh scrape the model must be told it has NO dates — returning an
+// empty string used to drop the "never state a round date" rule along with the
+// data, which is exactly how Navya ended up inventing May/June counselling.
+const NO_COUNSELLING_DATA_BLOCK = [
+  "LIVE COUNSELLING UPDATES: unavailable right now.",
+  "You have NO verified counselling round, registration, seat-allotment or reporting dates.",
+  "Do not state, estimate or imply any such date, and do not claim a round has or has not started.",
+  "Say the admissions team will confirm the current status and share +91 9555192192.",
+].join("\n");
+
 async function loadCounsellingUpdates(admin: SupabaseLike): Promise<string> {
   const cutoff = new Date(Date.now() - COUNSELLING_FRESHNESS_DAYS * 86_400_000).toISOString();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("counselling_sources")
     .select("label,url,scope,summary,fetched_at")
     .eq("is_active", true)
     .not("summary", "is", null)
     .gte("fetched_at", cutoff);
+
+  // A missing table or dead cron must not fail silently again — the scraper was
+  // erroring for ten days before anyone noticed the dates had gone stale.
+  if (error) console.warn("loadCounsellingUpdates failed:", error.message ?? error);
 
   const blocks = (data || []).map((row: any) =>
     [
@@ -335,7 +352,7 @@ async function loadCounsellingUpdates(admin: SupabaseLike): Promise<string> {
       row.summary,
     ].filter(Boolean).join("\n")
   );
-  if (!blocks.length) return "";
+  if (!blocks.length) return NO_COUNSELLING_DATA_BLOCK;
 
   return [
     "LIVE COUNSELLING UPDATES (official portals, scraped — highest priority for round/date questions):",
