@@ -37,8 +37,10 @@ async function summarise(source: { label: string; url: string; scope: string | n
   const apiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY missing");
 
-  const today = new Date().toISOString().slice(0, 10);
-  const prompt = `Today is ${today}. Below is the plain text of ${source.label} (${source.url}), the official counselling portal covering: ${source.scope || "entrance counselling"}.
+  // IST: these are Indian counselling calendars, and the 01:30 UTC cron run
+  // lands on the previous UTC day's date if we use toISOString().
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const prompt = `Today is ${today} (IST). Below is the plain text of ${source.label} (${source.url}), the official counselling portal covering: ${source.scope || "entrance counselling"}.
 
 Write a factual brief for an admissions assistant, max 12 bullet lines, covering ONLY what the page actually states:
 - which counselling round is currently open, per exam (CAHET / CNET / UPGET) and per course where stated
@@ -77,7 +79,16 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  if ((req.headers.get("Authorization") || "") !== `Bearer ${serviceRoleKey}`) {
+  // Accept the vault CRON_SECRET as well as the service-role bearer, same as
+  // whatsapp-buffer-worker: _app_config.service_role_key drifts from the edge
+  // env and silently 401s every scheduled run, which is how this scraper sat
+  // dead for ten days.
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+  const cronHeader = req.headers.get("x-cron-secret") || "";
+  const isAuthorized = authHeader === `Bearer ${serviceRoleKey}`
+    || (!!cronSecret && cronHeader === cronSecret);
+  if (!isAuthorized) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

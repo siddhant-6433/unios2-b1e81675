@@ -1,5 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { loadVerifiedAdmissionsContext } from "../_shared/nimt-admissions-context.ts";
+import {
+  buildTemporalContext,
+  loadVerifiedAdmissionsContext,
+} from "../_shared/nimt-admissions-context.ts";
 import { digits, errorMessage } from "../_shared/whatsapp-channel.ts";
 
 const corsHeaders = {
@@ -192,6 +195,9 @@ Deno.serve(async (req) => {
       .join("\n");
 
     const prompt = `You are a counsellor copilot for NIMT admissions WhatsApp conversations.
+
+${buildTemporalContext()}
+
 Return only compact JSON with keys: summary, intent, draft_reply, next_action_label, next_action_reason, confidence, should_pause_ai.
 Rules:
 - Do not claim the message was sent.
