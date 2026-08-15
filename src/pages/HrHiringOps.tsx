@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { HiringPipeline } from "@/components/hr/HiringPipeline";
+import { NotifyCandidateDialog, type NotifyPayload } from "@/components/hr/NotifyCandidateDialog";
 import {
   stageOf, stageCounts, daysInStage, nextStages, STAGE_LABEL, STATUS_FOR_STAGE,
   type HiringStage,
@@ -95,6 +96,7 @@ const HrHiringOps = () => {
   const [stage, setStage] = useState<HiringStage | null>(null);
   const [allRows, setAllRows] = useState<{ status: string | null }[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
+  const [pendingMove, setPendingMove] = useState<{ row: JobApplicantRow; next: HiringStage } | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -212,18 +214,18 @@ const HrHiringOps = () => {
     fetchAll();
   }
 
-  async function moveToStage(row: JobApplicantRow, next: HiringStage) {
-    // Ask before writing to the candidate. Notifying is opt-in per move rather
-    // than automatic on the status change: 405 people are sitting in this pipeline,
-    // most for over a month, and a trigger would have messaged every one of them
-    // the moment it shipped.
-    const notifiable = ["sourced", "interview", "preboarding", "archived"].includes(next);
-    const notify = notifiable && window.confirm(
-      next === "archived"
-        ? `Send ${row.name || "this candidate"} the "not proceeding" message on WhatsApp and email?\n\nOK to send, Cancel to move them quietly.`
-        : `Let ${row.name || "this candidate"} know they have moved to ${STAGE_LABEL[next]}?\n\nOK to send on WhatsApp and email, Cancel to move them quietly.`,
-    );
+  // Stages that have something to say get the dialog; the rest move silently.
+  const NOTIFIABLE: HiringStage[] = ["sourced", "interview", "preboarding", "archived"];
 
+  function moveToStage(row: JobApplicantRow, next: HiringStage) {
+    if (NOTIFIABLE.includes(next)) {
+      setPendingMove({ row, next });
+      return;
+    }
+    void applyMove(row, next, null);
+  }
+
+  async function applyMove(row: JobApplicantRow, next: HiringStage, notify: NotifyPayload | null) {
     setSaving(true);
     const status = STATUS_FOR_STAGE[next];
     const { error } = await supabase
@@ -238,13 +240,20 @@ const HrHiringOps = () => {
     }
     if (error) {
       setSaving(false);
+      setPendingMove(null);
       toast({ title: "Could not move the candidate", description: error.message, variant: "destructive" });
       return;
     }
 
-    if (notify) {
+    if (notify && notify.channels.length) {
       const { data, error: notifyErr } = await supabase.functions.invoke("hiring-notify", {
-        body: { applicant_id: row.id, stage: next },
+        body: {
+          applicant_id: row.id,
+          stage: next,
+          channels: notify.channels,
+          venue_id: notify.venue_id,
+          variables: notify.variables,
+        },
       });
       const results = (data as { results?: Record<string, string> } | null)?.results ?? {};
       const summary = Object.entries(results).map(([k, v]) => `${k}: ${v}`).join(" · ");
@@ -258,6 +267,7 @@ const HrHiringOps = () => {
     }
 
     setSaving(false);
+    setPendingMove(null);
     setActive(null);
     fetchAll();
   }
@@ -535,6 +545,21 @@ const HrHiringOps = () => {
           )}
         </DialogContent>
       </Dialog>
+      <NotifyCandidateDialog
+        open={pendingMove !== null}
+        stage={pendingMove?.next ?? null}
+        candidate={pendingMove ? {
+          name: pendingMove.row.name,
+          email: pendingMove.row.email,
+          phone: pendingMove.row.phone,
+        } : null}
+        busy={saving}
+        onCancel={() => setPendingMove(null)}
+        onConfirm={(payload) => {
+          if (pendingMove) void applyMove(pendingMove.row, pendingMove.next, payload);
+        }}
+      />
+
     </div>
   );
 };

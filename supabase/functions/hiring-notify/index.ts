@@ -74,6 +74,26 @@ Deno.serve(async (req) => {
 
     const name = applicant.name?.trim() || "Candidate";
     const role_ = extra.role || applicant.desired_role || "the role you applied for";
+
+    // Resolve the venue once. HR either picks one (venue_id) or types their own,
+    // and only the email carries the full address — the WhatsApp template is a
+    // fixed 4-parameter UTILITY message where a postal address reads badly.
+    let venueName = extra.interview_where?.trim() || "";
+    let venueAddress = extra.interview_address?.trim() || "";
+    let venueMapUrl = "";
+    if (body.venue_id) {
+      const { data: venue } = await admin
+        .from("hiring_venues")
+        .select("name, address, map_url")
+        .eq("id", body.venue_id)
+        .maybeSingle();
+      if (venue) {
+        venueName = venue.name ?? venueName;
+        venueAddress = venue.address ?? "";
+        venueMapUrl = venue.map_url ?? "";
+      }
+    }
+    if (!venueName) venueName = "NIMT campus";
     const results: Record<string, string> = {};
 
     // Already told them? The unique index would reject the second row anyway; this
@@ -98,7 +118,7 @@ Deno.serve(async (req) => {
       } else {
         // Params are positional in Meta templates — order must match the body text.
         const params = stage === "interview"
-          ? [name, role_, extra.interview_when ?? "to be confirmed", extra.interview_where ?? "NIMT campus"]
+          ? [name, role_, extra.interview_when ?? "to be confirmed", venueName]
           : stage === "preboarding"
             ? [name, role_, extra.joining_date ?? "to be confirmed"]
             : [name, role_];
@@ -137,7 +157,13 @@ Deno.serve(async (req) => {
               candidate_name: name,
               role: role_,
               interview_when: extra.interview_when ?? "to be confirmed",
-              interview_where: extra.interview_where ?? "NIMT campus",
+              interview_where: venueName,
+              interview_address: venueAddress || "Address will follow separately.",
+              // Substitution is plain string replace, so an absent map has to
+              // resolve to empty rather than leaving a {{map_link}} in the email.
+              map_link: venueMapUrl
+                ? `<a href="${venueMapUrl}">Open in Google Maps</a>`
+                : "",
               round_name: extra.round_name ?? "Interview",
               joining_date: extra.joining_date ?? "to be confirmed",
             },

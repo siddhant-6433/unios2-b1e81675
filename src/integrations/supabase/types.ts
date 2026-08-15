@@ -9188,6 +9188,7 @@ export type Database = {
           body_html: string
           category: string | null
           created_at: string | null
+          from_email: string | null
           id: string
           is_active: boolean | null
           name: string
@@ -9200,6 +9201,7 @@ export type Database = {
           body_html: string
           category?: string | null
           created_at?: string | null
+          from_email?: string | null
           id?: string
           is_active?: boolean | null
           name: string
@@ -9212,6 +9214,7 @@ export type Database = {
           body_html?: string
           category?: string | null
           created_at?: string | null
+          from_email?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
@@ -11779,6 +11782,57 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_unaccounted_ledger_credit"
             referencedColumns: ["student_id"]
+          },
+        ]
+      }
+      hiring_notifications: {
+        Row: {
+          applicant_id: string
+          channel: string
+          created_at: string
+          detail: string | null
+          id: string
+          sent_by: string | null
+          stage: string
+          status: string
+          template_key: string
+        }
+        Insert: {
+          applicant_id: string
+          channel: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          sent_by?: string | null
+          stage: string
+          status?: string
+          template_key: string
+        }
+        Update: {
+          applicant_id?: string
+          channel?: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          sent_by?: string | null
+          stage?: string
+          status?: string
+          template_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hiring_notifications_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hiring_notifications_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -32143,6 +32197,16 @@ export type Database = {
             referencedColumns: ["profile_id"]
           },
         ]
+      }
+      hiring_venues: {
+        Row: {
+          address: string | null
+          id: string | null
+          kind: string | null
+          map_url: string | null
+          name: string | null
+        }
+        Relationships: []
       }
       hot_engaged_leads: {
         Row: {
