@@ -10,7 +10,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Fingerprint, AlertTriangle, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Fingerprint, AlertTriangle, Clock, MapPin, Timer } from "lucide-react";
+import { PunchDetailDialog } from "@/components/hr/PunchDetailDialog";
+import { dayIsRemote, type CampusPoint } from "@/lib/punchLocation";
 import {
   buildAttendanceMonth,
   formatMinutes,
@@ -33,6 +35,35 @@ interface Props {
 
 const MONTH_LABEL = (y: number, m: number) =>
   new Date(y, m, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
+// Keka tints the whole row for a non-working day and puts a short code on the date,
+// so the eye skips them when scanning for problems. The badge is the code; the tint
+// is what makes a month readable at a glance.
+const ROW_TINT: Partial<Record<DayStatus, string>> = {
+  holiday: "bg-[#eef2d8]/60 dark:bg-lime-950/20",
+  weekly_off: "bg-muted/40",
+  on_leave: "bg-primary/[0.06]",
+  absent: "bg-destructive/[0.04]",
+};
+
+const DAY_CODE: Partial<Record<DayStatus, string>> = {
+  holiday: "HLDY",
+  weekly_off: "W-OFF",
+  on_leave: "LEAVE",
+};
+
+const CODE_STYLE: Partial<Record<DayStatus, string>> = {
+  holiday: "bg-lime-700/15 text-lime-800 dark:text-lime-300",
+  weekly_off: "bg-foreground/10 text-muted-foreground",
+  on_leave: "bg-primary/15 text-primary",
+};
+
+/** Non-working days show a single sentence instead of an empty timeline. */
+const FULL_DAY_NOTE: Partial<Record<DayStatus, string>> = {
+  holiday: "Holiday",
+  weekly_off: "Full day Weekly-off",
+  on_leave: "Full day Leave",
+};
 
 const STATUS_STYLE: Record<DayStatus, string> = {
   present: "bg-success/15 text-success",
@@ -58,6 +89,8 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [regularising, setRegularising] = useState<AttendanceDay | null>(null);
+  const [locationDay, setLocationDay] = useState<AttendanceDay | null>(null);
+  const [campuses, setCampuses] = useState<CampusPoint[]>([]);
 
   const from = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const to = `${year}-${String(month + 1).padStart(2, "0")}-${new Date(year, month + 1, 0).getDate()}`;
@@ -68,7 +101,7 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
     setLoading(true);
     const [att, emp, hol, lv] = await Promise.all([
       supabase.from("employee_attendance")
-        .select("id, date, punch_in, punch_out")
+        .select("id, date, punch_in, punch_out, location_lat, location_lng, selfie_url, face_match_score, face_match_result, liveness_score")
         .eq("user_id", userId).gte("date", from).lte("date", to)
         .order("punch_in"),
       supabase.from("employee_profiles")
@@ -81,6 +114,11 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
     ]);
 
     setPunches((att.data as PunchRow[]) ?? []);
+    // Campus coordinates decide what counts as remote. Fetched once per month view;
+    // there are five of them.
+    const { data: camp } = await supabase
+      .from("campuses").select("id, name, latitude, longitude, geofence_radius_meters");
+    setCampuses((camp as CampusPoint[]) ?? []);
     const s = (emp.data as { work_shifts?: ShiftConfig & { name: string } } | null)?.work_shifts;
     // No shift assigned yet is the norm for most of the 96 imported employees,
     // so fall back rather than render an empty screen.
@@ -159,7 +197,7 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
           <table className="w-full text-xs">
             <thead className="bg-muted">
               <tr>
-                <Th className="w-28">Date</Th>
+                <Th className="w-36">Date</Th>
                 <Th>
                   <div className="relative h-4">
                     {ticks.map((t) => (
@@ -169,10 +207,11 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
                   </div>
                 </Th>
                 <Th className="w-24">Effective</Th>
+                <Th className="w-20">Break</Th>
                 <Th className="w-24">Gross</Th>
                 <Th className="w-28">Arrival</Th>
                 <Th className="w-14">Log</Th>
-                <Th className="w-32">Status</Th>
+                <Th className="w-44">Status</Th>
               </tr>
             </thead>
             <tbody>
@@ -182,12 +221,26 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
                 return [
                   <tr key={d.date}
                     onClick={() => !dim && d.pairs.length > 0 && setExpanded(isOpen ? null : d.date)}
-                    className={`border-b border-border/30 ${dim ? "opacity-40" : "hover:bg-muted/20"} ${d.pairs.length ? "cursor-pointer" : ""}`}>
+                    className={`border-b border-border/30 ${ROW_TINT[d.status] ?? ""} ${dim ? "opacity-40" : "hover:bg-muted/20"} ${d.pairs.length ? "cursor-pointer" : ""}`}>
                     <Td>
-                      <span className={d.status === "weekly_off" || d.status === "holiday" ? "text-muted-foreground" : "text-foreground"}>
-                        {new Date(d.date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })}
+                      <span className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className={d.status === "weekly_off" || d.status === "holiday" ? "text-muted-foreground" : "text-foreground"}>
+                          {new Date(d.date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })}
+                        </span>
+                        {DAY_CODE[d.status] && (
+                          <span className={`whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-semibold ${CODE_STYLE[d.status]}`}>
+                            {DAY_CODE[d.status]}
+                          </span>
+                        )}
                       </span>
                     </Td>
+                    {FULL_DAY_NOTE[d.status] && d.pairs.length === 0 ? (
+                      // Nothing to plot and nothing to total — say what the day was.
+                      <Td className="text-muted-foreground" colSpan={6}>
+                        {d.holidayName || FULL_DAY_NOTE[d.status]}
+                      </Td>
+                    ) : (
+                    <>
                     <Td>
                       <div className="relative h-5 rounded bg-muted/50">
                         {shiftBand && (
@@ -203,19 +256,42 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
                       </div>
                     </Td>
                     <Td className="font-medium">{d.pairs.length ? formatMinutes(d.effectiveMinutes) : "—"}</Td>
+                    <Td className="text-muted-foreground">{d.pairs.length ? formatMinutes(d.breakMinutes) : "—"}</Td>
                     <Td className="text-muted-foreground">{d.grossMinutes ? formatMinutes(d.grossMinutes) : "—"}</Td>
                     <Td>
                       {!d.firstIn ? <span className="text-muted-foreground">—</span>
                         : d.lateMinutes > 0
-                          ? <span className="text-destructive">Late {formatMinutes(d.lateMinutes)}</span>
+                          ? <span className="flex items-center gap-1 text-destructive">
+                              <Timer className="h-3 w-3" /> Late {formatMinutes(d.lateMinutes)}
+                            </span>
                           : <span className="text-success">On time</span>}
                     </Td>
                     <Td className="text-muted-foreground">{d.pairs.length || "—"}</Td>
                     <Td>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[d.status]}`}>
-                        {d.holidayName || STATUS_LABEL[d.status]}
+                      <span className="flex items-center gap-1.5">
+                        <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[d.status]}`}>
+                          {d.holidayName || STATUS_LABEL[d.status]}
+                        </span>
+                        {dayIsRemote(
+                          d.pairs.map((p) => ({ location_lat: p.source?.location_lat, location_lng: p.source?.location_lng })),
+                          campuses,
+                        ) && (
+                          <span className="whitespace-nowrap rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning">
+                            Remote
+                          </span>
+                        )}
+                        {d.pairs.some((p) => p.source?.location_lat != null) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setLocationDay(d); }}
+                            title="Where these punches were taken"
+                            className="text-muted-foreground transition-colors hover:text-primary">
+                            <MapPin className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </span>
                     </Td>
+                    </>
+                    )}
                   </tr>,
                   isOpen && (
                     <tr key={`${d.date}-detail`} className="bg-muted/20">
@@ -255,6 +331,13 @@ export function AttendanceLog({ userId, employeeProfileId, canRegularise = true 
           )}
         </div>
       )}
+
+      <PunchDetailDialog
+        open={locationDay !== null}
+        onOpenChange={(o) => !o && setLocationDay(null)}
+        day={locationDay}
+        campuses={campuses}
+      />
 
       <RegulariseDialog
         day={regularising}
@@ -362,8 +445,10 @@ const Stat = ({ label, value, strong, tone }: { label: string; value: number; st
 const Th = ({ children, className = "" }: { children?: React.ReactNode; className?: string }) => (
   <th className={`border-b border-border px-3 py-2.5 text-left font-semibold text-muted-foreground ${className}`}>{children}</th>
 );
-const Td = ({ children, className = "" }: { children?: React.ReactNode; className?: string }) => (
-  <td className={`px-3 py-2 text-foreground ${className}`}>{children}</td>
+const Td = ({ children, className = "", colSpan }: {
+  children?: React.ReactNode; className?: string; colSpan?: number;
+}) => (
+  <td colSpan={colSpan} className={`px-3 py-2 text-foreground ${className}`}>{children}</td>
 );
 
 export default AttendanceLog;

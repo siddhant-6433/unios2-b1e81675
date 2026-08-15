@@ -15,6 +15,14 @@ export interface PunchRow {
   date: string;                 // yyyy-mm-dd
   punch_in: string | null;
   punch_out: string | null;
+  // Where and how the punch was taken. Present on every row the mobile app has
+  // written; absent for anything imported or corrected by hand.
+  location_lat?: number | null;
+  location_lng?: number | null;
+  selfie_url?: string | null;
+  face_match_score?: number | null;
+  face_match_result?: string | null;
+  liveness_score?: number | null;
 }
 
 export interface ShiftConfig {
@@ -57,6 +65,8 @@ export interface AttendancePair {
   in: Date | null;
   out: Date | null;
   minutes: number;
+  /** The originating row, so the detail view can show the selfie and coordinates. */
+  source?: PunchRow;
 }
 
 export interface AttendanceDay {
@@ -67,6 +77,8 @@ export interface AttendanceDay {
   lastOut: Date | null;
   effectiveMinutes: number;
   grossMinutes: number;
+  /** Gross minus effective: time on site but not inside a punch pair. */
+  breakMinutes: number;
   lateMinutes: number;
   status: DayStatus;
   holidayName?: string;
@@ -177,7 +189,7 @@ export function buildAttendanceMonth(opts: BuildOptions): AttendanceMonth {
         // An unclosed punch contributes no time. Guessing an end here would
         // quietly invent hours nobody worked.
         const minutes = pin && pout ? Math.max(0, (pout.getTime() - pin.getTime()) / 60_000) : 0;
-        return { in: pin, out: pout, minutes };
+        return { in: pin, out: pout, minutes, source: r };
       })
       .filter((p) => p.in || p.out)
       .sort((a, b) => (a.in?.getTime() ?? 0) - (b.in?.getTime() ?? 0));
@@ -187,6 +199,8 @@ export function buildAttendanceMonth(opts: BuildOptions): AttendanceMonth {
     const lastOut = [...pairs].reverse().find((p) => p.out)?.out ?? null;
     const grossMinutes =
       firstIn && lastOut ? Math.max(0, (lastOut.getTime() - firstIn.getTime()) / 60_000) : 0;
+    // What Keka calls "break taken" — inside the working span but not clocked in.
+    const breakMinutes = Math.max(0, grossMinutes - effectiveMinutes);
 
     if (firstIn) windowStartMin = Math.min(windowStartMin, Math.floor(minutesOfDay(firstIn) / 60) * 60);
     if (lastOut) windowEndMin = Math.max(windowEndMin, Math.ceil(minutesOfDay(lastOut) / 60) * 60);
@@ -220,6 +234,7 @@ export function buildAttendanceMonth(opts: BuildOptions): AttendanceMonth {
       lastOut,
       effectiveMinutes,
       grossMinutes,
+      breakMinutes,
       lateMinutes,
       status,
       holidayName,
