@@ -76,7 +76,9 @@ const BILL_STATUS: Record<string, { label: string; color: string }> = {
 // the URL exists but no date was recorded), else a muted dash.
 function platformCell(url: string | null, posted: string | null) {
   if (!url) return <span className="text-muted-foreground">—</span>;
-  const label = posted ? new Date(posted).toLocaleDateString("en-IN") : "Posted · date n/a";
+  // IG/YouTube carry auto-fetched dates; LinkedIn has no public API so it shows
+  // just "Posted" (the link is proof of posting; its date doesn't drive billing).
+  const label = posted ? new Date(posted).toLocaleDateString("en-IN") : "Posted";
   return <a href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{label}</a>;
 }
 

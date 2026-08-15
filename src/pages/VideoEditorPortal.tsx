@@ -56,11 +56,6 @@ function isoToLocalInput(iso: string | null): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-function localInputToISO(local: string): string | null {
-  if (!local) return null;
-  const d = new Date(local);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
 function fmtPostedAt(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -273,13 +268,16 @@ export default function VideoEditorPortal() {
   const handleSaveSocial = async () => {
     if (!selected) return;
     setSavingSocial(true);
+    // Only URLs are entered. IG/YouTube dates are cleared here and repopulated
+    // from the platform by video-fetch-post-dates below (fraud-proof). LinkedIn
+    // has no date. This also clears stale dates when a URL is changed.
     const payload: any = {
       instagram_url: socialForm.instagram_url.trim() || null,
-      instagram_posted_on: localInputToISO(socialForm.instagram_posted_on),
+      instagram_posted_on: null,
       linkedin_url:  socialForm.linkedin_url.trim() || null,
-      linkedin_posted_on:  localInputToISO(socialForm.linkedin_posted_on),
+      linkedin_posted_on:  null,
       youtube_url:   socialForm.youtube_url.trim() || null,
-      youtube_posted_on:   localInputToISO(socialForm.youtube_posted_on),
+      youtube_posted_on:   null,
     };
     const { error } = await supabase.from("videos" as any).update(payload).eq("id", selected.id);
     if (error) {
@@ -539,7 +537,7 @@ export default function VideoEditorPortal() {
           <DialogHeader><DialogTitle>{selected?.title}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Add the platform URL and posting date for each platform. All three required for billing.
+              Paste the post URL for each platform — all three required for billing. Posting dates are read automatically from Instagram &amp; YouTube; you don't enter them.
             </p>
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -553,8 +551,6 @@ export default function VideoEditorPortal() {
                 </label>
                 <input className={inputCls} placeholder="Instagram URL"
                   value={socialForm.instagram_url} onChange={e => setSocialForm(p => ({ ...p, instagram_url: e.target.value }))} />
-                <input type="datetime-local" className={inputCls}
-                  value={socialForm.instagram_posted_on} onChange={e => setSocialForm(p => ({ ...p, instagram_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium flex items-center gap-1.5"><Linkedin className="h-3.5 w-3.5 text-info-foreground" /> LinkedIn
@@ -567,8 +563,6 @@ export default function VideoEditorPortal() {
                 </label>
                 <input className={inputCls} placeholder="LinkedIn URL"
                   value={socialForm.linkedin_url} onChange={e => setSocialForm(p => ({ ...p, linkedin_url: e.target.value }))} />
-                <input type="datetime-local" className={inputCls}
-                  value={socialForm.linkedin_posted_on} onChange={e => setSocialForm(p => ({ ...p, linkedin_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium flex items-center gap-1.5"><Youtube className="h-3.5 w-3.5 text-destructive" /> YouTube
@@ -581,8 +575,6 @@ export default function VideoEditorPortal() {
                 </label>
                 <input className={inputCls} placeholder="YouTube URL"
                   value={socialForm.youtube_url} onChange={e => setSocialForm(p => ({ ...p, youtube_url: e.target.value }))} />
-                <input type="datetime-local" className={inputCls}
-                  value={socialForm.youtube_posted_on} onChange={e => setSocialForm(p => ({ ...p, youtube_posted_on: e.target.value }))} />
               </div>
             </div>
           </div>
