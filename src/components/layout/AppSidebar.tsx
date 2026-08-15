@@ -386,8 +386,8 @@ export function AppSidebar() {
           </div>
         </div>
 
-        {/* Campus Selector */}
-        {!collapsed && !isPartnerPortalRole && campuses.length > 0 && (
+        {/* Campus Selector — hidden for external vendors (partner portals, video editors) */}
+        {!collapsed && !isPartnerPortalRole && role !== "video_editor" && campuses.length > 0 && (
           <div className="px-3 pb-3">
             <select
               value={selectedCampusId}
