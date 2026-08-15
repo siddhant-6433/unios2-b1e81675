@@ -17,6 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
+import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
+import { isValidIfsc } from "@/lib/bankDetails";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -97,8 +99,6 @@ const emptyBank: BankDetails = {
   account_holder_name: "", account_number: "", ifsc: "", bank_name: "", branch: "", account_type: "Savings",
 };
 
-const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -117,6 +117,7 @@ const EmployeeProfileDialog = ({
 }: EmployeeProfileDialogProps) => {
   const [profile, setProfile] = useState<EmployeeProfile>(emptyProfile);
   const [bank, setBank] = useState<BankDetails>(emptyBank);
+  const [bankVerified, setBankVerified] = useState<BankVerification | null>(null);
   const [bankLoaded, setBankLoaded] = useState(false);
   const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -224,10 +225,14 @@ const EmployeeProfileDialog = ({
     (async () => {
       const { data } = await supabase
         .from("employee_bank_details")
-        .select("account_holder_name, account_number, ifsc, bank_name, branch, account_type")
+        .select("account_holder_name, account_number, ifsc, bank_name, branch, account_type, bank_verified_name, bank_verified_at, bank_verification_ref, bank_verification_status")
         .eq("employee_profile_id", profile.id)
         .maybeSingle();
-      if (data) setBank({ ...emptyBank, ...(data as Partial<BankDetails>) });
+      if (data) {
+        const d = data as any;
+        setBank({ ...emptyBank, account_holder_name: d.account_holder_name || "", account_number: d.account_number || "", ifsc: d.ifsc || "", bank_name: d.bank_name || "", branch: d.branch || "", account_type: d.account_type || "Savings" });
+        setBankVerified({ status: d.bank_verification_status || "unverified", name: d.bank_verified_name || null, ref: d.bank_verification_ref || null, at: d.bank_verified_at || null });
+      }
       setBankLoaded(true);
     })();
   }, [open, canEditBank, profile.id, bankLoaded]);
@@ -317,7 +322,7 @@ const EmployeeProfileDialog = ({
   };
 
   const handleSave = async () => {
-    if (canEditBank && bank.account_number.trim() && !IFSC_RE.test(bank.ifsc.trim().toUpperCase())) {
+    if (canEditBank && bank.account_number.trim() && !isValidIfsc(bank.ifsc)) {
       toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
       return;
     }
@@ -389,6 +394,10 @@ const EmployeeProfileDialog = ({
             bank_name: bank.bank_name.trim() || null,
             branch: bank.branch.trim() || null,
             account_type: bank.account_type || null,
+            bank_verified_name: bankVerified?.name ?? null,
+            bank_verified_at: bankVerified?.at ?? null,
+            bank_verification_ref: bankVerified?.ref ?? null,
+            bank_verification_status: bankVerified?.status ?? "unverified",
           } as never, { onConflict: "employee_profile_id" });
         if (error) throw new Error(`Bank details: ${error.message}`);
       }
@@ -749,12 +758,21 @@ const EmployeeProfileDialog = ({
               {canEditBank && (
                 <TabsContent value="bank" className="space-y-5">
                   <Section title="Salary Account">
+                    <BankDetailsFields
+                      value={{
+                        holderName: bank.account_holder_name, accountNumber: bank.account_number,
+                        ifsc: bank.ifsc, bankName: bank.bank_name, branch: bank.branch,
+                      }}
+                      onChange={v => setBank(b => ({
+                        ...b, account_holder_name: v.holderName, account_number: v.accountNumber,
+                        ifsc: v.ifsc, bank_name: v.bankName, branch: v.branch || "",
+                      }))}
+                      showUpi={false}
+                      showBranch
+                      verification={bankVerified ? { status: bankVerified.status, name: bankVerified.name } : undefined}
+                      onVerification={setBankVerified}
+                    />
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      <Field label="Account Holder Name" value={bank.account_holder_name} onChange={(v) => setBank((b) => ({ ...b, account_holder_name: v }))} placeholder={profile.display_name} />
-                      <Field label="Account Number" value={bank.account_number} onChange={(v) => setBank((b) => ({ ...b, account_number: v }))} />
-                      <Field label="IFSC" value={bank.ifsc} onChange={(v) => setBank((b) => ({ ...b, ifsc: v.toUpperCase() }))} placeholder="HDFC0001234" />
-                      <Field label="Bank Name" value={bank.bank_name} onChange={(v) => setBank((b) => ({ ...b, bank_name: v }))} />
-                      <Field label="Branch" value={bank.branch} onChange={(v) => setBank((b) => ({ ...b, branch: v }))} />
                       <div>
                         <label className={labelCls}>Account Type</label>
                         <select value={bank.account_type} onChange={(e) => setBank((b) => ({ ...b, account_type: e.target.value }))} className={inputCls}>

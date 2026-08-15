@@ -18,6 +18,8 @@ import { ConsultantPayoutsTab } from "@/components/consultant/ConsultantPayoutsT
 import { ConsultantDetailDialog } from "@/components/consultant/ConsultantDetailDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
+import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
+import { isValidIfsc } from "@/lib/bankDetails";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
@@ -230,6 +232,7 @@ const Consultants = () => {
     payout_model: "commission_pct_first_year",
     bank_account_name: "", bank_account_number: "", bank_ifsc: "", bank_name: "", bank_upi: "",
   });
+  const [bankVerified, setBankVerified] = useState<BankVerification | null>(null);
   const [feeRemittances, setFeeRemittances] = useState<FeeCollectionRemittance[]>([]);
   const [remittanceForm, setRemittanceForm] = useState({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
   const [remittanceSaving, setRemittanceSaving] = useState(false);
@@ -305,6 +308,11 @@ const Consultants = () => {
         return;
       }
     }
+    // An account number needs a well-formed IFSC (was previously unvalidated).
+    if (form.bank_account_number.trim() && !isValidIfsc(form.bank_ifsc)) {
+      toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     const payload: ConsultantSavePayload = {
       name: form.name.trim(),
@@ -323,7 +331,11 @@ const Consultants = () => {
       bank_ifsc: form.bank_ifsc.trim().toUpperCase() || null,
       bank_name: form.bank_name.trim() || null,
       bank_upi: form.bank_upi.trim() || null,
-    };
+      bank_verified_name: bankVerified?.name ?? null,
+      bank_verified_at: bankVerified?.at ?? null,
+      bank_verification_ref: bankVerified?.ref ?? null,
+      bank_verification_status: bankVerified?.status ?? "unverified",
+    } as ConsultantSavePayload;
 
     const { error } = editingId
       ? await supabase.from("consultants").update(payload as any).eq("id", editingId)
@@ -337,11 +349,19 @@ const Consultants = () => {
   const resetForm = () => {
     setShowForm(false); setEditingId(null);
     setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "", payout_model: "commission_pct_first_year", bank_account_name: "", bank_account_number: "", bank_ifsc: "", bank_name: "", bank_upi: "" });
+    setBankVerified(null);
     setFeeRemittances([]);
     setRemittanceForm({ amount_remitted: "", amount_collected: "", remittance_ref: "", note: "" });
   };
 
   const editConsultant = (c: Consultant) => {
+    const cv = c as any;
+    setBankVerified({
+      status: cv.bank_verification_status || "unverified",
+      name: cv.bank_verified_name || null,
+      ref: cv.bank_verification_ref || null,
+      at: cv.bank_verified_at || null,
+    });
     setForm({
       name: c.name, organization: c.organization || "", phone: c.phone || "", email: c.email || "",
       city: c.city || "", stage: c.stage, commission_type: c.commission_type || "percentage",
@@ -822,28 +842,18 @@ const Consultants = () => {
                 <label className="block text-[11px] font-semibold uppercase text-muted-foreground">Bank / Payout Account</label>
                 <span className="text-[10px] text-muted-foreground">Used on the accountant payout sheet</span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Account Holder Name</label>
-                  <input value={form.bank_account_name} onChange={e => setForm(p => ({ ...p, bank_account_name: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Account Number</label>
-                  <input value={form.bank_account_number} onChange={e => setForm(p => ({ ...p, bank_account_number: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">IFSC</label>
-                  <input value={form.bank_ifsc} onChange={e => setForm(p => ({ ...p, bank_ifsc: e.target.value.toUpperCase() }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Bank Name</label>
-                  <input value={form.bank_name} onChange={e => setForm(p => ({ ...p, bank_name: e.target.value }))} className={inputCls} />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">UPI ID (optional)</label>
-                  <input value={form.bank_upi} onChange={e => setForm(p => ({ ...p, bank_upi: e.target.value }))} className={inputCls} />
-                </div>
-              </div>
+              <BankDetailsFields
+                value={{
+                  holderName: form.bank_account_name, accountNumber: form.bank_account_number,
+                  ifsc: form.bank_ifsc, bankName: form.bank_name, upi: form.bank_upi,
+                }}
+                onChange={v => setForm(p => ({
+                  ...p, bank_account_name: v.holderName, bank_account_number: v.accountNumber,
+                  bank_ifsc: v.ifsc, bank_name: v.bankName, bank_upi: v.upi || "",
+                }))}
+                verification={bankVerified ? { status: bankVerified.status, name: bankVerified.name } : undefined}
+                onVerification={setBankVerified}
+              />
             </div>
             {editingId && (
               <div className="border-t border-border pt-4">

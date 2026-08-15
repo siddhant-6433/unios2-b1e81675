@@ -62,11 +62,12 @@ Deno.serve(async (req) => {
       .not("zoho_bill_id", "is", null);
     query = onlyPayoutId ? query.eq("id", onlyPayoutId) : query.neq("status", "paid").limit(200);
     const { data: pending } = await query;
-    if (!pending?.length) return json({ ok: true, checked: 0, marked: 0 });
 
     const token = await zohoAccessToken();
     let marked = 0;
-    for (const p of pending) {
+    let checked = 0;
+    for (const p of (pending || [])) {
+      checked++;
       const billRes = await zohoApi(token, "GET", `/bills/${p.zoho_bill_id}`);
       const bill = billRes.data?.bill;
       if (!bill) continue;
@@ -130,7 +131,33 @@ Deno.serve(async (req) => {
         } catch (e) { console.error("payout whatsapp failed", String(e)); }
       }
     }
-    return json({ ok: true, checked: pending.length, marked });
+
+    // ---- Video bills (same pattern, simpler — no WhatsApp, no PDF) -----------
+    if (!onlyPayoutId) {
+      const { data: videoBills } = await admin.from("video_bills")
+        .select("id, zoho_bill_id, total_amount, status")
+        .not("zoho_bill_id", "is", null)
+        .neq("status", "paid")
+        .limit(200);
+      for (const vb of (videoBills || [])) {
+        checked++;
+        const billRes = await zohoApi(token, "GET", `/bills/${vb.zoho_bill_id}`);
+        const bill = billRes.data?.bill;
+        if (!bill) continue;
+        const isPaid = bill.status === "paid" || (Number(bill.total) > 0 && Number(bill.balance) === 0);
+        if (!isPaid) continue;
+
+        const pay = extractPayment(bill);
+        await admin.from("video_bills").update({
+          status: "paid",
+          paid_at: new Date().toISOString(),
+          zoho_payment_id: pay.payment_id,
+        }).eq("id", vb.id);
+        marked++;
+      }
+    }
+
+    return json({ ok: true, checked, marked });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

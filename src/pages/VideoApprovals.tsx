@@ -15,6 +15,8 @@ import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
   type VideoBrand, type VideoContentType, type VideoStatus,
 } from "@/lib/videoBrands";
+import { BankDetailsFields } from "@/components/bank/BankDetailsFields";
+import { isValidIfsc } from "@/lib/bankDetails";
 
 type VideoRow = {
   id: string;
@@ -40,6 +42,10 @@ type VideoRow = {
 type EditorRow = {
   id: string; user_id: string | null; name: string; email: string | null;
   phone: string | null; per_video_rate: number; active: boolean;
+  bank_account_name?: string | null; bank_account_number?: string | null;
+  bank_ifsc?: string | null; bank_name?: string | null; bank_upi?: string | null;
+  bank_verified_name?: string | null; bank_verified_at?: string | null;
+  bank_verification_ref?: string | null; bank_verification_status?: string | null;
 };
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
@@ -267,6 +273,9 @@ export default function VideoApprovals() {
     if (!editorForm.name.trim()) {
       toast({ title: "Name is required", variant: "destructive" }); return;
     }
+    if (editorForm.bank_account_number?.trim() && !isValidIfsc(editorForm.bank_ifsc)) {
+      toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" }); return;
+    }
     setSavingEditor(true);
     const payload: any = {
       user_id: editorForm.user_id || null,
@@ -275,6 +284,15 @@ export default function VideoApprovals() {
       phone: editorForm.phone?.trim() || null,
       per_video_rate: Number(editorForm.per_video_rate) || 0,
       active: editorForm.active,
+      bank_account_name: editorForm.bank_account_name?.trim() || null,
+      bank_account_number: editorForm.bank_account_number?.trim() || null,
+      bank_ifsc: editorForm.bank_ifsc?.trim().toUpperCase() || null,
+      bank_name: editorForm.bank_name?.trim() || null,
+      bank_upi: editorForm.bank_upi?.trim() || null,
+      bank_verified_name: editorForm.bank_verified_name ?? null,
+      bank_verified_at: editorForm.bank_verified_at ?? null,
+      bank_verification_ref: editorForm.bank_verification_ref ?? null,
+      bank_verification_status: editorForm.bank_verification_status ?? "unverified",
     };
     let error;
     if (editorForm.id) {
@@ -607,6 +625,24 @@ export default function VideoApprovals() {
                   <input value={editorForm.email || ""} onChange={e => setEditorForm(p => p ? { ...p, email: e.target.value } : p)} className={inputCls} /></div>
                 <div><label className="text-xs font-medium mb-1 block">Phone</label>
                   <input value={editorForm.phone || ""} onChange={e => setEditorForm(p => p ? { ...p, phone: e.target.value } : p)} className={inputCls} /></div>
+              </div>
+              <div className="border-t border-border pt-3 space-y-2">
+                <label className="block text-[11px] font-semibold uppercase text-muted-foreground">Bank / Payout Account</label>
+                <BankDetailsFields
+                  value={{
+                    holderName: editorForm.bank_account_name || "", accountNumber: editorForm.bank_account_number || "",
+                    ifsc: editorForm.bank_ifsc || "", bankName: editorForm.bank_name || "", upi: editorForm.bank_upi || "",
+                  }}
+                  onChange={v => setEditorForm(p => p ? {
+                    ...p, bank_account_name: v.holderName, bank_account_number: v.accountNumber,
+                    bank_ifsc: v.ifsc, bank_name: v.bankName, bank_upi: v.upi || "",
+                  } : p)}
+                  verification={{ status: editorForm.bank_verification_status || "unverified", name: editorForm.bank_verified_name || null }}
+                  onVerification={v => setEditorForm(p => p ? {
+                    ...p, bank_verification_status: v.status, bank_verified_name: v.name,
+                    bank_verification_ref: v.ref, bank_verified_at: v.at,
+                  } : p)}
+                />
               </div>
               <label className="flex items-center gap-2 text-xs font-medium">
                 <input type="checkbox" checked={editorForm.active}
