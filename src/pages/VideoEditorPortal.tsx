@@ -537,7 +537,7 @@ export default function VideoEditorPortal() {
           <DialogHeader><DialogTitle>{selected?.title}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Paste the post URL for each platform — all three required for billing. Posting dates are read automatically from Instagram &amp; YouTube; you don't enter them.
+              Paste the post URL for each platform — all three required for billing. Posting dates are read automatically from the links; you don't enter them.
             </p>
             <div className="space-y-3">
               <div className="space-y-1.5">

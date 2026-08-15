@@ -6,7 +6,10 @@
 //     the pasted permalink's shortcode. Reuses META_PAGE_ACCESS_TOKEN
 //     (already has instagram_basic).
 //   - YouTube: Data API videos.list -> snippet.publishedAt (needs YOUTUBE_API_KEY).
-//   - LinkedIn: no public read API — left as-is (manual/display only).
+//   - LinkedIn: no API needed — the post's timestamp is encoded in the activity
+//     id in the URL (first 41 bits = Unix ms; ms = id >> 22). Verified to match
+//     the Instagram cross-post time to within a minute. Tamper-proof (baked into
+//     the real post URL), free, offline.
 //
 // Modes:
 //   { video_id }        -> one video (callable by its owning editor OR super_admin)
@@ -46,10 +49,21 @@ const ytVideoId = (url: string | null): string | null => {
   return m ? m[1] : null;
 };
 
+// LinkedIn post time from the activity id in the URL (id >> 22 = Unix ms).
+const linkedinDate = (url: string | null): string | null => {
+  if (!url) return null;
+  const m = url.match(/activity[:-](\d{6,})/);
+  if (!m) return null;
+  try {
+    const d = new Date(Number(BigInt(m[1]) >> 22n));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch { return null; }
+};
+
 type Vid = {
   id: string; brand: string; editor_id: string;
-  instagram_url: string | null; youtube_url: string | null;
-  instagram_posted_on: string | null; youtube_posted_on: string | null;
+  instagram_url: string | null; youtube_url: string | null; linkedin_url: string | null;
+  instagram_posted_on: string | null; youtube_posted_on: string | null; linkedin_posted_on: string | null;
 };
 
 // Page an IG account's media, collecting timestamps for the wanted shortcodes.
@@ -101,7 +115,7 @@ Deno.serve(async (req) => {
 
     // Resolve the target video set.
     let targets: Vid[] = [];
-    const sel = "id, brand, editor_id, instagram_url, youtube_url, instagram_posted_on, youtube_posted_on";
+    const sel = "id, brand, editor_id, instagram_url, youtube_url, linkedin_url, instagram_posted_on, youtube_posted_on, linkedin_posted_on";
     if (body.video_id) {
       const { data: v } = await admin.from("videos").select(sel).eq("id", body.video_id).maybeSingle();
       if (!v) return json({ error: "Video not found" }, 404);
@@ -146,13 +160,15 @@ Deno.serve(async (req) => {
     const ytDates = ytKey ? await fetchYtDates([...new Set(ytIdByVideo.values())], ytKey) : new Map<string, string>();
 
     // Apply.
-    let updated = 0, igSet = 0, ytSet = 0, igMiss = 0, ytMiss = 0;
+    let updated = 0, igSet = 0, ytSet = 0, liSet = 0, igMiss = 0, ytMiss = 0;
     for (const v of targets) {
       const patch: Record<string, string> = {};
       const sc = scByVideo.get(v.id);
       if (sc) { const ts = igDates.get(sc); if (ts) { patch.instagram_posted_on = ts; igSet++; } else igMiss++; }
       const yid = ytIdByVideo.get(v.id);
       if (yid) { const ts = ytDates.get(yid); if (ts) { patch.youtube_posted_on = ts; ytSet++; } else ytMiss++; }
+      // LinkedIn: decode from the URL (no API), fill when missing or forced.
+      if (force || !v.linkedin_posted_on) { const ts = linkedinDate(v.linkedin_url); if (ts) { patch.linkedin_posted_on = ts; liSet++; } }
       if (Object.keys(patch).length) {
         const { error } = await admin.from("videos").update(patch).eq("id", v.id);
         if (!error) updated++;
@@ -163,6 +179,7 @@ Deno.serve(async (req) => {
       ok: true, targets: targets.length, updated,
       instagram: { set: igSet, not_found: igMiss, token: igToken ? "present" : "MISSING META_PAGE_ACCESS_TOKEN" },
       youtube: { set: ytSet, not_found: ytMiss, key: ytKey ? "present" : "MISSING YOUTUBE_API_KEY (skipped)" },
+      linkedin: { set: liSet },
     });
   } catch (e) {
     return json({ error: String(e) }, 500);
