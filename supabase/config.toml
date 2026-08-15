@@ -243,3 +243,8 @@ verify_jwt = false
 # gateway can't validate as a JWT. The function checks the bearer itself.
 [functions.counselling-watch]
 verify_jwt = false
+
+# One-time backfill (super_admin JWT or x-backfill-token). The function does its
+# own auth, so the gateway must not JWT-gate the token path.
+[functions.backfill-employee-photos]
+verify_jwt = false

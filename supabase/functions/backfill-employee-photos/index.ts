@@ -110,15 +110,17 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run !== false;
     const limit = Math.max(1, Math.min(Number(body.limit || 10), 50));
+    const offset = Math.max(0, Number(body.offset || 0));
     const throttleMs = Math.max(0, Math.min(Number(body.throttle_ms ?? 500), 5000));
     const onlyEmployeeId = typeof body.employee_id === "string" ? body.employee_id : null;
 
+    // Order by id (stable): re-runs and photo_url updates never reshuffle the page window.
     let query = admin
       .from("employee_profiles")
       .select("id, user_id, display_name, photo_url")
       .not("photo_url", "is", null)
-      .order("updated_at", { ascending: false })
-      .limit(limit);
+      .order("id", { ascending: true })
+      .range(offset, offset + limit - 1);
     if (onlyEmployeeId) query = query.eq("id", onlyEmployeeId);
 
     const { data: employees, error: employeesError } = await query;
@@ -195,6 +197,8 @@ Deno.serve(async (req) => {
       ok: true,
       dry_run: dryRun,
       limit,
+      offset,
+      seen: results.length,
       processed: results.filter((r) => r.status === "processed").length,
       would_process: results.filter((r) => r.status === "would_process").length,
       skipped: results.filter((r) => r.status === "skipped").length,
