@@ -10,6 +10,7 @@
 
 import { normalizeHeader, resolveColumns } from "./libraryImport";
 import { normalizeStudentImportDate } from "./studentImportDate";
+import { IFSC_RE } from "./bankDetails";
 
 export { normalizeHeader, resolveColumns };
 
@@ -162,7 +163,6 @@ export function normalizePhone(raw: unknown): string {
 }
 
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export interface ParsedEmployeeRow {

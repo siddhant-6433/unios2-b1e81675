@@ -592,6 +592,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "academic_partner_payouts_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "academic_partner_payouts_batch_id_fkey"
             columns: ["batch_id"]
             isOneToOne: false
@@ -1131,6 +1138,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "admissions_ai_reply_examples_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "admissions_ai_reply_examples_course_id_fkey"
             columns: ["course_id"]
             isOneToOne: false
@@ -1606,6 +1620,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "ai_call_records_followup_done_by_fkey"
+            columns: ["followup_done_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "ai_call_records_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -1914,6 +1935,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "alumni_verification_requests_assigned_handler_profile_id_fkey"
+            columns: ["assigned_handler_profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "alumni_verification_requests_assignment_rule_id_fkey"
             columns: ["assignment_rule_id"]
             isOneToOne: false
@@ -2128,6 +2156,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "application_doc_reviews_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -2803,6 +2838,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "applications_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "applications_family_id_fkey"
             columns: ["family_id"]
             isOneToOne: false
@@ -2993,6 +3035,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "apply_magic_tokens_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "apply_magic_tokens_lead_id_fkey"
@@ -4004,6 +4053,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "automation_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       batches: {
@@ -4215,6 +4271,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "cahet_registrations_registered_by_fkey"
+            columns: ["registered_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -4950,6 +5013,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "commission_edit_requests_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "commission_edit_requests_reviewed_by_fkey"
             columns: ["reviewed_by"]
             isOneToOne: false
@@ -5004,6 +5074,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "commission_edit_requests_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -5171,6 +5248,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "concessions_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "concessions_fee_ledger_id_fkey"
             columns: ["fee_ledger_id"]
             isOneToOne: false
@@ -5246,6 +5330,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "concessions_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "concessions_student_id_fkey"
@@ -5485,6 +5576,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "consultant_credit_note_applications_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "consultant_credit_note_applications_credit_note_id_fkey"
             columns: ["credit_note_id"]
             isOneToOne: false
@@ -5688,6 +5786,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "consultant_credit_notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -5939,6 +6044,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "consultant_fee_collection_remittances_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "consultant_fee_collection_remittances_student_id_fkey"
@@ -6274,6 +6386,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "consultant_lead_commissions_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       consultant_payouts: {
@@ -6417,6 +6536,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "consultant_payouts_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "consultant_payouts_consultant_id_fkey"
@@ -6600,6 +6726,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "consultant_payouts_paid_by_fkey"
+            columns: ["paid_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       consultant_voice_messages: {
@@ -6683,6 +6816,10 @@ export type Database = {
           bank_ifsc: string | null
           bank_name: string | null
           bank_upi: string | null
+          bank_verification_ref: string | null
+          bank_verification_status: string
+          bank_verified_at: string | null
+          bank_verified_name: string | null
           city: string | null
           commission_type: string | null
           commission_value: number | null
@@ -6718,6 +6855,10 @@ export type Database = {
           bank_ifsc?: string | null
           bank_name?: string | null
           bank_upi?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           city?: string | null
           commission_type?: string | null
           commission_value?: number | null
@@ -6753,6 +6894,10 @@ export type Database = {
           bank_ifsc?: string | null
           bank_name?: string | null
           bank_upi?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           city?: string | null
           commission_type?: string | null
           commission_value?: number | null
@@ -6778,6 +6923,51 @@ export type Database = {
           updated_at?: string
           user_id?: string | null
           zoho_vendor_id?: string | null
+        }
+        Relationships: []
+      }
+      counselling_sources: {
+        Row: {
+          changed_at: string | null
+          content_hash: string | null
+          created_at: string
+          fetched_at: string | null
+          id: string
+          is_active: boolean
+          label: string
+          last_error: string | null
+          scope: string | null
+          source_key: string
+          summary: string | null
+          url: string
+        }
+        Insert: {
+          changed_at?: string | null
+          content_hash?: string | null
+          created_at?: string
+          fetched_at?: string | null
+          id?: string
+          is_active?: boolean
+          label: string
+          last_error?: string | null
+          scope?: string | null
+          source_key: string
+          summary?: string | null
+          url: string
+        }
+        Update: {
+          changed_at?: string | null
+          content_hash?: string | null
+          created_at?: string
+          fetched_at?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string
+          last_error?: string | null
+          scope?: string | null
+          source_key?: string
+          summary?: string | null
+          url?: string
         }
         Relationships: []
       }
@@ -6887,6 +7077,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "counsellor_daily_kpis_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       counsellor_designations: {
@@ -6978,6 +7175,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "counsellor_designations_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "counsellor_designations_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
@@ -7032,6 +7236,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "counsellor_designations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -7119,6 +7330,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "counsellor_score_events_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "counsellor_score_events_lead_id_fkey"
@@ -7274,6 +7492,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "counsellor_targets_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -7971,6 +8196,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "day_closures_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       departments: {
@@ -8183,6 +8415,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "direct_dial_overrides_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "direct_dial_overrides_lead_id_fkey"
@@ -8789,6 +9028,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "email_campaigns_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "email_campaigns_list_id_fkey"
             columns: ["list_id"]
             isOneToOne: false
@@ -8954,6 +9200,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "email_messages_sent_by_fkey"
+            columns: ["sent_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "email_messages_template_id_fkey"
             columns: ["template_id"]
             isOneToOne: false
@@ -8967,6 +9220,7 @@ export type Database = {
           body_html: string
           category: string | null
           created_at: string | null
+          from_email: string | null
           id: string
           is_active: boolean | null
           name: string
@@ -8979,6 +9233,7 @@ export type Database = {
           body_html: string
           category?: string | null
           created_at?: string | null
+          from_email?: string | null
           id?: string
           is_active?: boolean | null
           name: string
@@ -8991,6 +9246,7 @@ export type Database = {
           body_html?: string
           category?: string | null
           created_at?: string | null
+          from_email?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
@@ -9116,6 +9372,10 @@ export type Database = {
           account_number: string | null
           account_type: string | null
           bank_name: string | null
+          bank_verification_ref: string | null
+          bank_verification_status: string
+          bank_verified_at: string | null
+          bank_verified_name: string | null
           branch: string | null
           created_at: string
           employee_profile_id: string
@@ -9129,6 +9389,10 @@ export type Database = {
           account_number?: string | null
           account_type?: string | null
           bank_name?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           branch?: string | null
           created_at?: string
           employee_profile_id: string
@@ -9142,6 +9406,10 @@ export type Database = {
           account_number?: string | null
           account_type?: string | null
           bank_name?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           branch?: string | null
           created_at?: string
           employee_profile_id?: string
@@ -9160,6 +9428,42 @@ export type Database = {
           },
         ]
       }
+      employee_document_types: {
+        Row: {
+          code: string
+          created_at: string
+          folder: string
+          has_expiry: boolean
+          id: string
+          is_active: boolean
+          is_mandatory: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          folder?: string
+          has_expiry?: boolean
+          id?: string
+          is_active?: boolean
+          is_mandatory?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          folder?: string
+          has_expiry?: boolean
+          id?: string
+          is_active?: boolean
+          is_mandatory?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       employee_documents: {
         Row: {
           created_at: string
@@ -9176,6 +9480,8 @@ export type Database = {
           mime_type: string | null
           notes: string | null
           original_file_name: string | null
+          review_note: string | null
+          status: string
           storage_provider: string
           updated_at: string
           uploaded_at: string
@@ -9199,6 +9505,8 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           original_file_name?: string | null
+          review_note?: string | null
+          status?: string
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
@@ -9222,6 +9530,8 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           original_file_name?: string | null
+          review_note?: string | null
+          status?: string
           storage_provider?: string
           updated_at?: string
           uploaded_at?: string
@@ -9242,51 +9552,66 @@ export type Database = {
       }
       employee_exits: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           clearance: Json
           created_at: string
           created_by: string | null
           employee_profile_id: string
           exit_interview_note: string | null
           exit_type: string
+          expected_last_working_day: string | null
           final_settlement_amount: number | null
           id: string
           last_working_day: string | null
+          notice_period_days: number | null
           notice_waived: boolean
           reason: string | null
+          rejected_reason: string | null
           resignation_date: string | null
           settled_on: string | null
           status: string
           updated_at: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           clearance?: Json
           created_at?: string
           created_by?: string | null
           employee_profile_id: string
           exit_interview_note?: string | null
           exit_type?: string
+          expected_last_working_day?: string | null
           final_settlement_amount?: number | null
           id?: string
           last_working_day?: string | null
+          notice_period_days?: number | null
           notice_waived?: boolean
           reason?: string | null
+          rejected_reason?: string | null
           resignation_date?: string | null
           settled_on?: string | null
           status?: string
           updated_at?: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           clearance?: Json
           created_at?: string
           created_by?: string | null
           employee_profile_id?: string
           exit_interview_note?: string | null
           exit_type?: string
+          expected_last_working_day?: string | null
           final_settlement_amount?: number | null
           id?: string
           last_working_day?: string | null
+          notice_period_days?: number | null
           notice_waived?: boolean
           reason?: string | null
+          rejected_reason?: string | null
           resignation_date?: string | null
           settled_on?: string | null
           status?: string
@@ -9536,6 +9861,7 @@ export type Database = {
         Row: {
           aadhaar_number: string | null
           blood_group: string | null
+          business_unit: string | null
           campus_id: string | null
           confirmed_on: string | null
           created_at: string
@@ -9556,6 +9882,7 @@ export type Database = {
           first_name: string | null
           gender: string | null
           hr_department: string | null
+          hr_location_id: string | null
           hr_sub_department: string | null
           id: string
           import_batch_id: string | null
@@ -9605,6 +9932,7 @@ export type Database = {
         Insert: {
           aadhaar_number?: string | null
           blood_group?: string | null
+          business_unit?: string | null
           campus_id?: string | null
           confirmed_on?: string | null
           created_at?: string
@@ -9625,6 +9953,7 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           hr_department?: string | null
+          hr_location_id?: string | null
           hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
@@ -9674,6 +10003,7 @@ export type Database = {
         Update: {
           aadhaar_number?: string | null
           blood_group?: string | null
+          business_unit?: string | null
           campus_id?: string | null
           confirmed_on?: string | null
           created_at?: string
@@ -9694,6 +10024,7 @@ export type Database = {
           first_name?: string | null
           gender?: string | null
           hr_department?: string | null
+          hr_location_id?: string | null
           hr_sub_department?: string | null
           id?: string
           import_batch_id?: string | null
@@ -9774,6 +10105,13 @@ export type Database = {
             columns: ["designation_id"]
             isOneToOne: false
             referencedRelation: "designations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_hr_location_id_fkey"
+            columns: ["hr_location_id"]
+            isOneToOne: false
+            referencedRelation: "hr_locations"
             referencedColumns: ["id"]
           },
           {
@@ -10912,6 +11250,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "feedback_responses_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "feedback_responses_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -11484,6 +11829,57 @@ export type Database = {
           },
         ]
       }
+      hiring_notifications: {
+        Row: {
+          applicant_id: string
+          channel: string
+          created_at: string
+          detail: string | null
+          id: string
+          sent_by: string | null
+          stage: string
+          status: string
+          template_key: string
+        }
+        Insert: {
+          applicant_id: string
+          channel: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          sent_by?: string | null
+          stage: string
+          status?: string
+          template_key: string
+        }
+        Update: {
+          applicant_id?: string
+          channel?: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          sent_by?: string | null
+          stage?: string
+          status?: string
+          template_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hiring_notifications_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hiring_notifications_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       holidays: {
         Row: {
           campus_id: string | null
@@ -11917,6 +12313,61 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "hr_letter_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_locations: {
+        Row: {
+          address: string | null
+          campus_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          is_office: boolean
+          legal_entity_id: string | null
+          name: string
+        }
+        Insert: {
+          address?: string | null
+          campus_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_office?: boolean
+          legal_entity_id?: string | null
+          name: string
+        }
+        Update: {
+          address?: string | null
+          campus_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_office?: boolean
+          legal_entity_id?: string | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_locations_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_locations_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "course_marketing_info"
+            referencedColumns: ["campus_id"]
+          },
+          {
+            foreignKeyName: "hr_locations_legal_entity_id_fkey"
+            columns: ["legal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "legal_entities"
             referencedColumns: ["id"]
           },
         ]
@@ -14092,6 +14543,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "incentive_config_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       incentive_flags: {
@@ -14184,6 +14642,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "incentive_flags_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "incentive_flags_lead_id_fkey"
@@ -14297,6 +14762,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "incentive_flags_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       incentive_ledger: {
@@ -14392,6 +14864,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "incentive_ledger_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "incentive_ledger_lead_id_fkey"
@@ -14540,6 +15019,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "incentive_month_inputs_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "incentive_month_inputs_entered_by_fkey"
             columns: ["entered_by"]
             isOneToOne: false
@@ -14594,6 +15080,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "incentive_month_inputs_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -14725,6 +15218,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "incentive_statements_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "incentive_statements_counsellor_id_fkey"
             columns: ["counsellor_id"]
             isOneToOne: false
@@ -14779,6 +15279,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "incentive_statements_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -14978,6 +15485,110 @@ export type Database = {
           },
         ]
       }
+      interview_feedback: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          panelist: string
+          rating: number | null
+          recommend: string | null
+          round_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          panelist: string
+          rating?: number | null
+          recommend?: string | null
+          round_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          panelist?: string
+          rating?: number | null
+          recommend?: string | null
+          round_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_feedback_round_id_fkey"
+            columns: ["round_id"]
+            isOneToOne: false
+            referencedRelation: "interview_rounds"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      interview_rounds: {
+        Row: {
+          applicant_id: string
+          created_at: string
+          created_by: string | null
+          duration_mins: number
+          id: string
+          location: string | null
+          mode: string
+          panel: string[]
+          result: string | null
+          round_name: string
+          round_number: number
+          scheduled_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          applicant_id: string
+          created_at?: string
+          created_by?: string | null
+          duration_mins?: number
+          id?: string
+          location?: string | null
+          mode?: string
+          panel?: string[]
+          result?: string | null
+          round_name: string
+          round_number?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          applicant_id?: string
+          created_at?: string
+          created_by?: string | null
+          duration_mins?: number
+          id?: string
+          location?: string | null
+          mode?: string
+          panel?: string[]
+          result?: string | null
+          round_name?: string
+          round_number?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interview_rounds_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interview_rounds_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jd_category_mappings: {
         Row: {
           category: string
@@ -15040,6 +15651,48 @@ export type Database = {
           },
         ]
       }
+      job_applicant_activities: {
+        Row: {
+          applicant_id: string
+          created_at: string
+          description: string
+          id: string
+          type: string
+          user_id: string | null
+        }
+        Insert: {
+          applicant_id: string
+          created_at?: string
+          description: string
+          id?: string
+          type?: string
+          user_id?: string | null
+        }
+        Update: {
+          applicant_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_applicant_activities_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_applicant_activities_applicant_id_fkey"
+            columns: ["applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_applicants: {
         Row: {
           ai_confidence: number | null
@@ -15060,10 +15713,12 @@ export type Database = {
           lead_id: string | null
           name: string | null
           notes: string | null
+          rating: number | null
           resume_url: string | null
           source_channel: string
           source_message_id: string | null
           source_phone: string | null
+          stage_changed_at: string
           status: string
           updated_at: string
         }
@@ -15086,10 +15741,12 @@ export type Database = {
           lead_id?: string | null
           name?: string | null
           notes?: string | null
+          rating?: number | null
           resume_url?: string | null
           source_channel?: string
           source_message_id?: string | null
           source_phone?: string | null
+          stage_changed_at?: string
           status?: string
           updated_at?: string
         }
@@ -15112,10 +15769,12 @@ export type Database = {
           lead_id?: string | null
           name?: string | null
           notes?: string | null
+          rating?: number | null
           resume_url?: string | null
           source_channel?: string
           source_message_id?: string | null
           source_phone?: string | null
+          stage_changed_at?: string
           status?: string
           updated_at?: string
         }
@@ -15542,6 +16201,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "lead_activities_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       lead_allocation_rules: {
@@ -15690,6 +16356,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "lead_assignment_history_assigned_by_profile_id_fkey"
+            columns: ["assigned_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "lead_assignment_history_assigned_to_fkey"
             columns: ["assigned_to"]
             isOneToOne: false
@@ -15744,6 +16417,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_assignment_history_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "lead_assignment_history_lead_id_fkey"
@@ -15870,6 +16550,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_assignment_history_previous_counsellor_id_fkey"
+            columns: ["previous_counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -16131,6 +16818,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "lead_association_requests_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       lead_bucket_backlog_alerts: {
@@ -16238,6 +16932,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_counsellors_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "lead_counsellors_lead_id_fkey"
@@ -16555,6 +17256,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_documents_verified_by_fkey"
+            columns: ["verified_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -16916,6 +17624,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "lead_list_assignment_batches_assigned_by_profile_id_fkey"
+            columns: ["assigned_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "lead_list_assignment_batches_list_id_fkey"
             columns: ["list_id"]
             isOneToOne: false
@@ -17014,6 +17729,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_list_members_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "lead_list_members_call_log_id_fkey"
@@ -17202,6 +17924,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "lead_lists_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       lead_merges: {
@@ -17341,6 +18070,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_merges_merged_by_fkey"
+            columns: ["merged_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -17620,6 +18356,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "lead_payments_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "lead_payments_student_id_fkey"
@@ -18350,6 +19093,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "leads_course_id_fkey"
@@ -19739,6 +20489,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "library_members_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "library_members_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
@@ -20000,6 +20757,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "library_staff_assignments_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -21567,6 +22331,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "optional_fee_heads_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "optional_fee_heads_fee_code_id_fkey"
             columns: ["fee_code_id"]
             isOneToOne: false
@@ -22115,6 +22886,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "payments_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "payments_student_id_fkey"
@@ -23629,6 +24407,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "score_penalty_log_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "score_penalty_log_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -23790,6 +24575,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "source_ad_spend_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -23958,6 +24750,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "staff_incentive_payouts_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "staff_incentive_payouts_campus_id_fkey"
             columns: ["campus_id"]
             isOneToOne: false
@@ -24118,6 +24917,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "staff_incentive_payouts_recipient_profile_id_fkey"
+            columns: ["recipient_profile_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       staff_incentive_plans: {
@@ -24259,6 +25065,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "staff_incentive_plans_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -27101,6 +27914,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "updeled_registrations_registered_by_fkey"
+            columns: ["registered_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       user_admin_audit_log: {
@@ -27431,6 +28251,11 @@ export type Database = {
           status: string
           total_amount: number
           video_count: number
+          zoho_bill_id: string | null
+          zoho_bill_number: string | null
+          zoho_payment_id: string | null
+          zoho_sync_error: string | null
+          zoho_synced_at: string | null
         }
         Insert: {
           approved_at?: string | null
@@ -27446,6 +28271,11 @@ export type Database = {
           status?: string
           total_amount: number
           video_count: number
+          zoho_bill_id?: string | null
+          zoho_bill_number?: string | null
+          zoho_payment_id?: string | null
+          zoho_sync_error?: string | null
+          zoho_synced_at?: string | null
         }
         Update: {
           approved_at?: string | null
@@ -27461,6 +28291,11 @@ export type Database = {
           status?: string
           total_amount?: number
           video_count?: number
+          zoho_bill_id?: string | null
+          zoho_bill_number?: string | null
+          zoho_payment_id?: string | null
+          zoho_sync_error?: string | null
+          zoho_synced_at?: string | null
         }
         Relationships: [
           {
@@ -27475,6 +28310,15 @@ export type Database = {
       video_editors: {
         Row: {
           active: boolean
+          bank_account_name: string | null
+          bank_account_number: string | null
+          bank_ifsc: string | null
+          bank_name: string | null
+          bank_upi: string | null
+          bank_verification_ref: string | null
+          bank_verification_status: string
+          bank_verified_at: string | null
+          bank_verified_name: string | null
           created_at: string
           email: string | null
           id: string
@@ -27484,9 +28328,19 @@ export type Database = {
           phone: string | null
           updated_at: string
           user_id: string | null
+          zoho_vendor_id: string | null
         }
         Insert: {
           active?: boolean
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_ifsc?: string | null
+          bank_name?: string | null
+          bank_upi?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           created_at?: string
           email?: string | null
           id?: string
@@ -27496,9 +28350,19 @@ export type Database = {
           phone?: string | null
           updated_at?: string
           user_id?: string | null
+          zoho_vendor_id?: string | null
         }
         Update: {
           active?: boolean
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_ifsc?: string | null
+          bank_name?: string | null
+          bank_upi?: string | null
+          bank_verification_ref?: string | null
+          bank_verification_status?: string
+          bank_verified_at?: string | null
+          bank_verified_name?: string | null
           created_at?: string
           email?: string | null
           id?: string
@@ -27508,6 +28372,7 @@ export type Database = {
           phone?: string | null
           updated_at?: string
           user_id?: string | null
+          zoho_vendor_id?: string | null
         }
         Relationships: []
       }
@@ -27675,6 +28540,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "visit_followup_nudges_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "visit_followup_nudges_lead_id_fkey"
@@ -28001,6 +28873,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "voice_knowledge_gaps_answered_by_fkey"
+            columns: ["answered_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "voice_knowledge_gaps_call_id_fkey"
@@ -28893,6 +29772,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "whatsapp_campaigns_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "whatsapp_campaigns_list_id_fkey"
             columns: ["list_id"]
             isOneToOne: false
@@ -29537,6 +30423,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "whatsapp_messages_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "whatsapp_messages_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -29647,6 +30540,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_read_by_fkey"
+            columns: ["read_by"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -30554,6 +31454,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "admissions_ai_reply_examples_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "admissions_ai_reply_examples_course_id_fkey"
             columns: ["course_id"]
             isOneToOne: false
@@ -30821,6 +31728,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -31118,6 +32032,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "feedback_responses_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       counsellor_funnel_stats: {
@@ -31357,7 +32278,24 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
+      }
+      hiring_venues: {
+        Row: {
+          address: string | null
+          id: string | null
+          kind: string | null
+          map_url: string | null
+          name: string | null
+        }
+        Relationships: []
       }
       hot_engaged_leads: {
         Row: {
@@ -31431,6 +32369,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -31509,6 +32454,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -31868,6 +32820,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       pending_approvals: {
@@ -32030,6 +32989,13 @@ export type Database = {
             referencedColumns: ["counsellor_profile_id"]
           },
           {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
+          {
             foreignKeyName: "leads_course_id_fkey"
             columns: ["course_id"]
             isOneToOne: false
@@ -32124,6 +33090,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -32227,6 +33200,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       sla_warning_leads: {
@@ -32314,6 +33294,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
           {
             foreignKeyName: "leads_course_id_fkey"
@@ -32687,6 +33674,14 @@ export type Database = {
           source: string | null
           student_id: string | null
           transaction_ref: string | null
+        }
+        Relationships: []
+      }
+      v_assignable_counsellors: {
+        Row: {
+          display_name: string | null
+          profile_id: string | null
+          user_id: string | null
         }
         Relationships: []
       }
@@ -33273,6 +34268,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       visits_needing_confirmation: {
@@ -33416,6 +34418,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -33561,6 +34570,13 @@ export type Database = {
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
           },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
+          },
         ]
       }
       visits_unclosed_today: {
@@ -33703,6 +34719,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "team_leader_defaults_summary"
             referencedColumns: ["counsellor_profile_id"]
+          },
+          {
+            foreignKeyName: "leads_counsellor_id_fkey"
+            columns: ["counsellor_id"]
+            isOneToOne: false
+            referencedRelation: "v_assignable_counsellors"
+            referencedColumns: ["profile_id"]
           },
         ]
       }
@@ -34407,6 +35430,8 @@ export type Database = {
           closed_date: string
         }[]
       }
+      close_due_employee_exits: { Args: never; Returns: number }
+      close_due_employee_exits_internal: { Args: never; Returns: number }
       cloud_dialer_bootstrap: { Args: never; Returns: Json }
       cloud_dialer_campaign_queue: {
         Args: { p_counsellor_id?: string; p_limit?: number; p_list_id: string }
@@ -34627,6 +35652,30 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      employee_directory_card: {
+        Args: { _q?: string }
+        Returns: {
+          display_name: string
+          employee_number: string
+          employee_profile_id: string
+          job_title: string
+          mobile_number: string
+          photo_url: string
+          work_email: string
+          work_location: string
+        }[]
+      }
+      employee_pending_documents: {
+        Args: { _employee_id: string }
+        Returns: {
+          code: string
+          folder: string
+          is_mandatory: boolean
+          name: string
+          review_note: string
+          status: string
+        }[]
       }
       employee_self_editable_fields: { Args: never; Returns: string[] }
       exam_mark_registered: {
@@ -34911,6 +35960,11 @@ export type Database = {
           status: string
           total_amount: number
           video_count: number
+          zoho_bill_id: string | null
+          zoho_bill_number: string | null
+          zoho_payment_id: string | null
+          zoho_sync_error: string | null
+          zoho_synced_at: string | null
         }
         SetofOptions: {
           from: "*"
@@ -35262,6 +36316,7 @@ export type Database = {
         Args: never
         Returns: boolean
       }
+      get_super_admin_emails: { Args: never; Returns: string[] }
       get_unassigned_leads_bucket: {
         Args: never
         Returns: {
@@ -35375,6 +36430,17 @@ export type Database = {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
       }
+      hire_job_applicant: {
+        Args: {
+          _applicant_id: string
+          _campus_id?: string
+          _ctc_annual?: number
+          _department_id?: string
+          _job_title?: string
+          _joining_date?: string
+        }
+        Returns: string
+      }
       hr_staff_directory: {
         Args: never
         Returns: {
@@ -35417,6 +36483,10 @@ export type Database = {
         Args: { _batch_id?: string; _course_id: string; _user_id: string }
         Returns: boolean
       }
+      is_active_staff_profile: {
+        Args: { _profile_id: string }
+        Returns: boolean
+      }
       is_bpt_or_bmrit_course: {
         Args: { p_course_id: string }
         Returns: boolean
@@ -35433,6 +36503,7 @@ export type Database = {
         Returns: boolean
       }
       is_incentive_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_login_blocked: { Args: { _user_id: string }; Returns: boolean }
       is_personal_dashboard_user: { Args: never; Returns: boolean }
       is_pgdm_diploma_request: {
         Args: { _request_id: string }
@@ -35810,6 +36881,15 @@ export type Database = {
         Args: { _action: string; _details?: Json; _request_id: string }
         Returns: undefined
       }
+      login_ban_drift: {
+        Args: never
+        Returns: {
+          currently_banned: boolean
+          display_name: string
+          should_be_banned: boolean
+          user_id: string
+        }[]
+      }
       lookup_application_for_otp: {
         Args: { p_application_id: string }
         Returns: {
@@ -36036,6 +37116,17 @@ export type Database = {
         Args: { _student_id: string }
         Returns: Json
       }
+      raise_employee_exit: {
+        Args: {
+          _employee_profile_id: string
+          _exit_type: string
+          _last_working_day?: string
+          _notice_waived?: boolean
+          _reason?: string
+          _resignation_date: string
+        }
+        Returns: string
+      }
       recalculate_offer_letter_net_fee: {
         Args: { _offer_letter_id: string }
         Returns: undefined
@@ -36048,6 +37139,7 @@ export type Database = {
         Args: { _lead_id: string }
         Returns: undefined
       }
+      reconcile_login_bans_internal: { Args: never; Returns: number }
       reconcile_stale_live_calls: {
         Args: { p_stale_after_seconds?: number }
         Returns: number
@@ -36302,6 +37394,10 @@ export type Database = {
         Args: { _decision: string; _notes?: string; _request_id: string }
         Returns: Json
       }
+      review_employee_document: {
+        Args: { _document_id: string; _note?: string; _status: string }
+        Returns: undefined
+      }
       review_lead_association_request: {
         Args: {
           _approved: boolean
@@ -36441,6 +37537,10 @@ export type Database = {
           bank_ifsc: string | null
           bank_name: string | null
           bank_upi: string | null
+          bank_verification_ref: string | null
+          bank_verification_status: string
+          bank_verified_at: string | null
+          bank_verified_name: string | null
           city: string | null
           commission_type: string | null
           commission_value: number | null

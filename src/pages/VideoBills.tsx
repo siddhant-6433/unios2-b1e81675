@@ -7,12 +7,18 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Receipt, CheckCircle, IndianRupee } from "lucide-react";
+import { Receipt, CheckCircle, IndianRupee, Building2 } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, type VideoBrand,
 } from "@/lib/videoBrands";
+import { videoBillSlipBase64 } from "@/components/video/videoBillSlip";
 
-type EditorRow = { id: string; name: string; per_video_rate: number; active: boolean };
+type EditorRow = {
+  id: string; name: string; per_video_rate: number; active: boolean;
+  bank_account_name?: string | null; bank_account_number?: string | null;
+  bank_ifsc?: string | null; bank_name?: string | null; bank_upi?: string | null;
+  bank_verified_name?: string | null; bank_verification_status?: string | null;
+};
 
 type VideoRow = {
   id: string; editor_id: string; brand: VideoBrand;
@@ -31,6 +37,10 @@ type BillRow = {
   generated_at: string;
   approved_at: string | null;
   paid_at: string | null;
+  zoho_bill_id: string | null;
+  zoho_bill_number: string | null;
+  zoho_synced_at: string | null;
+  zoho_sync_error: string | null;
 };
 
 function monthOptions(): { value: string; label: string }[] {
@@ -65,11 +75,12 @@ export default function VideoBills() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
   const [marking, setMarking] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<string | null>(null);
 
   const fetchAll = async () => {
     setLoading(true);
     const [eRes, vRes, bRes] = await Promise.all([
-      supabase.from("video_editors" as any).select("id, name, per_video_rate, active"),
+      supabase.from("video_editors" as any).select("id, name, per_video_rate, active, bank_account_name, bank_account_number, bank_ifsc, bank_name, bank_upi, bank_verified_name, bank_verification_status"),
       supabase.from("videos" as any).select("id, editor_id, brand, is_billable, posted_month").eq("is_billable", true).eq("posted_month", month),
       supabase.from("video_bills" as any).select("*").eq("bill_month", month),
     ]);
@@ -131,9 +142,35 @@ export default function VideoBills() {
     if (status === "approved") patch.approved_at = new Date().toISOString();
     if (status === "paid")     patch.paid_at     = new Date().toISOString();
     const { error } = await supabase.from("video_bills" as any).update(patch).eq("id", bill.id);
-    if (error) toast({ title: "Update failed", description: error.message, variant: "destructive" });
-    else { toast({ title: `Bill marked ${status}` }); fetchAll(); }
+    if (error) { toast({ title: "Update failed", description: error.message, variant: "destructive" }); setMarking(null); return; }
+    // Best-effort: record the payment in Zoho if the bill was synced.
+    if (status === "paid" && bill.zoho_bill_id) {
+      const { error: zErr } = await supabase.functions.invoke("zoho-video-bill-sync", {
+        body: { bill_id: bill.id, action: "record_payment" },
+      });
+      if (zErr) toast({ title: "Marked paid, but Zoho payment sync failed", variant: "destructive" });
+    }
+    toast({ title: `Bill marked ${status}` }); fetchAll();
     setMarking(null);
+  };
+
+  const handleZohoSync = async (bill: BillRow) => {
+    setSyncing(bill.id);
+    const editor = editors.find(e => e.id === bill.editor_id);
+    const pdf_base64 = editor
+      ? videoBillSlipBase64(editor, {
+          brand: bill.brand, bill_month: bill.bill_month, video_count: bill.video_count,
+          per_video_rate: bill.per_video_rate, total_amount: bill.total_amount, status: bill.status,
+        })
+      : undefined;
+    const { data, error } = await supabase.functions.invoke("zoho-video-bill-sync", {
+      body: { bill_id: bill.id, action: "create_bill", pdf_base64 },
+    });
+    setSyncing(null);
+    const errMsg = error?.message || (data as { error?: string } | null)?.error;
+    if (errMsg) { toast({ title: "Zoho sync failed", description: errMsg, variant: "destructive" }); return; }
+    toast({ title: "Sent to Zoho Books" });
+    fetchAll();
   };
 
   const totalForMonth = bills.reduce((s, b) => s + Number(b.total_amount), 0);
@@ -217,9 +254,19 @@ export default function VideoBills() {
                         <td className="px-3 py-3 text-right">₹{rate.toLocaleString("en-IN")}</td>
                         <td className="px-3 py-3 text-right font-semibold">₹{amount.toLocaleString("en-IN")}</td>
                         <td className="px-3 py-3 text-center">
-                          {bill
-                            ? <Badge className={`border-0 text-[10px] font-semibold ${BILL_STATUS[bill.status].color}`}>{BILL_STATUS[bill.status].label}</Badge>
-                            : <span className="text-[10px] text-muted-foreground">Not generated</span>}
+                          <div className="flex flex-col items-center gap-0.5">
+                            {bill
+                              ? <Badge className={`border-0 text-[10px] font-semibold ${BILL_STATUS[bill.status].color}`}>{BILL_STATUS[bill.status].label}</Badge>
+                              : <span className="text-[10px] text-muted-foreground">Not generated</span>}
+                            {bill?.zoho_bill_id && (
+                              <Badge className="border-0 bg-primary/10 text-primary text-[9px] gap-0.5" title={bill.zoho_synced_at ? `Synced ${new Date(bill.zoho_synced_at).toLocaleString("en-IN")}` : ""}>
+                                <Building2 className="h-2.5 w-2.5" />Zoho {bill.zoho_bill_number || "✓"}
+                              </Badge>
+                            )}
+                            {bill?.zoho_sync_error && (
+                              <span className="text-[9px] text-destructive" title={bill.zoho_sync_error}>Zoho error</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-3 text-center">
                           {isSuperAdmin && (
@@ -235,6 +282,12 @@ export default function VideoBills() {
                                 <Button size="sm" className="gap-1 h-7 text-xs bg-info hover:bg-info/60" disabled={marking === bill.id}
                                   onClick={() => handleMark(bill, "approved")}>
                                   {marking === bill.id ? <ButtonOrb state="composing" onFilled /> : <CheckCircle className="h-3 w-3" />} Approve
+                                </Button>
+                              )}
+                              {bill?.status === "approved" && !bill.zoho_bill_id && (
+                                <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === bill.id}
+                                  onClick={() => handleZohoSync(bill)} title={bill.zoho_sync_error || "Create a bill in Zoho Books"}>
+                                  {syncing === bill.id ? <ButtonOrb state="composing" /> : <Building2 className="h-3 w-3" />} Send to Zoho
                                 </Button>
                               )}
                               {bill?.status === "approved" && (
