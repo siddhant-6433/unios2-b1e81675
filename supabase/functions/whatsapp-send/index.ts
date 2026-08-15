@@ -65,6 +65,12 @@ Help: 7428499849, 9667641872, 9555192192`;
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
+  // Hiring. Registered here rather than relying on the dynamic whatsapp_templates
+  // fallback, which only accepts zero-placeholder templates — these carry 2-4.
+  hiring_application_received: { name: "hiring_application_received", params: ["candidate_name", "role"] },
+  hiring_interview_invite: { name: "hiring_interview_invite", params: ["candidate_name", "role", "interview_when", "interview_where"] },
+  hiring_offer_extended: { name: "hiring_offer_extended", params: ["candidate_name", "role", "joining_date"] },
+  hiring_not_proceeding: { name: "hiring_not_proceeding", params: ["candidate_name", "role"] },
   // Navya (AI voice agent): staff alert when a campus visit is booked mid-call.
   navya_visit_alert: { name: "navya_visit_alert", params: ["staff_name", "student_name", "course_name", "visit_datetime", "owner_name"] },
   // Navya: transactional post-call details (UTILITY — replaces marketing-capped
