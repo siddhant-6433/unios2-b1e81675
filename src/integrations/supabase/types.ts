@@ -28398,6 +28398,7 @@ export type Database = {
           status: Database["public"]["Enums"]["video_status"]
           title: string
           updated_at: string
+          video_bill_id: string | null
           youtube_posted_on: string | null
           youtube_url: string | null
         }
@@ -28422,6 +28423,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["video_status"]
           title: string
           updated_at?: string
+          video_bill_id?: string | null
           youtube_posted_on?: string | null
           youtube_url?: string | null
         }
@@ -28446,6 +28448,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["video_status"]
           title?: string
           updated_at?: string
+          video_bill_id?: string | null
           youtube_posted_on?: string | null
           youtube_url?: string | null
         }
@@ -28455,6 +28458,13 @@ export type Database = {
             columns: ["editor_id"]
             isOneToOne: false
             referencedRelation: "video_editors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "videos_video_bill_id_fkey"
+            columns: ["video_bill_id"]
+            isOneToOne: false
+            referencedRelation: "video_bills"
             referencedColumns: ["id"]
           },
         ]
@@ -35601,6 +35611,7 @@ export type Database = {
         Args: { _reason: string; _student_id: string }
         Returns: undefined
       }
+      delete_video_bill: { Args: { _bill: string }; Returns: undefined }
       dialer_claim_existing_lead: { Args: { _lead_id: string }; Returns: Json }
       dialer_create_lead: {
         Args: { _name: string; _phone: string }
