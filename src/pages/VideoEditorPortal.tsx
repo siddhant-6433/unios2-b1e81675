@@ -210,6 +210,21 @@ export default function VideoEditorPortal() {
     return { groups, total: monthVideos.length, amount: monthVideos.length * rate };
   }, [billingMonth, videos, editor]);
 
+  // Look up which prior video a duplicate URL collides with. The dedup is
+  // global, so the match usually belongs to another editor and RLS hides it —
+  // this SECURITY DEFINER RPC names it. Returns a "" suffix on any miss so the
+  // caller can always append it to the toast description safely.
+  const describeCollision = async (url: string): Promise<string> => {
+    try {
+      const { data } = await supabase.rpc("find_video_by_url" as any, { p_url: url });
+      const hit = (data as any)?.[0];
+      if (!hit) return "";
+      const when = hit.created_at ? new Date(hit.created_at).toLocaleDateString() : "";
+      const who = hit.editor_name ? ` by ${hit.editor_name}` : "";
+      return ` Already used on "${hit.title}"${who}${when ? ` (submitted ${when})` : ""}.`;
+    } catch { return ""; }
+  };
+
   const handleSubmitVideo = async () => {
     if (!editor) return;
     if (!form.title.trim() || !form.drive_url.trim()) {
@@ -275,10 +290,11 @@ export default function VideoEditorPortal() {
       // 23505 = the global normalized-drive_url unique index: this video link was
       // already submitted (by anyone, in any status — pending, approved, published).
       const isDup = (error as any).code === "23505";
+      const collision = isDup ? await describeCollision(form.drive_url.trim()) : "";
       toast({
         title: isDup ? "Duplicate video" : "Submission failed",
         description: isDup
-          ? "This video link has already been submitted for approval or approved. Each video can only be submitted once."
+          ? `This video link has already been submitted for approval or approved.${collision} Each video can only be submitted once.`
           : error.message,
         variant: "destructive",
       });
@@ -331,10 +347,14 @@ export default function VideoEditorPortal() {
       const platform = msg.includes("instagram") ? "Instagram"
         : msg.includes("linkedin") ? "LinkedIn"
         : msg.includes("youtube") ? "YouTube" : "social media";
+      const dupUrl = platform === "Instagram" ? socialForm.instagram_url
+        : platform === "LinkedIn" ? socialForm.linkedin_url
+        : platform === "YouTube" ? socialForm.youtube_url : "";
+      const collision = isDup && dupUrl ? await describeCollision(dupUrl.trim()) : "";
       toast({
         title: isDup ? "Duplicate social link" : "Save failed",
         description: isDup
-          ? `This ${platform} URL is already attached to another video. Each post can only back one video.`
+          ? `This ${platform} URL is already attached to another video.${collision} Each post can only back one video.`
           : error.message,
         variant: "destructive",
       });
