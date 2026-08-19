@@ -16,6 +16,7 @@ import {
   type VideoBrand, type VideoContentType, type VideoStatus,
 } from "@/lib/videoBrands";
 import { BankDetailsFields } from "@/components/bank/BankDetailsFields";
+import { VideoHistory } from "@/components/video/VideoHistory";
 import { isValidIfsc } from "@/lib/bankDetails";
 
 type VideoRow = {
@@ -520,6 +521,8 @@ export default function VideoApprovals() {
               </a>
 
               <PostedLinks v={selected} />
+
+              <VideoHistory videoId={selected.id} />
 
               {selected.status === "rejected" && (selected.rejection_reason || selected.rejection_screenshots?.length) && (
                 <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
