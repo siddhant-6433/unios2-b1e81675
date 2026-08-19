@@ -22,6 +22,12 @@ interface Resolved {
   gateway: string | null;
   short_url: string | null;
   gateways?: { gateway: string; display_name: string }[];
+  institution_name?: string | null;
+  course_name?: string | null;
+  display_id?: string | null;
+  photo_url?: string | null;
+  fee_due_date?: string | null;
+  expires_at?: string | null;
 }
 
 declare global {
@@ -278,6 +284,12 @@ export default function PayLink() {
 
         {(step === "ready" || step === "paying") && link && (
           <div className="space-y-4">
+            {(link.institution_name || link.course_name) && (
+              <div className="text-center text-sm text-muted-foreground space-y-0.5">
+                {link.institution_name && <p className="font-semibold text-foreground">{link.institution_name}</p>}
+                {link.course_name && <p>{link.course_name}</p>}
+              </div>
+            )}
             <div className="text-center">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">{link.purpose_label}</p>
               <p className="mt-1 text-3xl font-bold text-foreground">
@@ -285,10 +297,25 @@ export default function PayLink() {
               </p>
               {link.note && <p className="mt-1 text-sm text-muted-foreground">{link.note}</p>}
             </div>
-            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">Payer: </span>
-              <span className="font-medium text-foreground">{link.payer_name}</span>
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+              {link.photo_url && (
+                <img src={link.photo_url} alt="" className="h-10 w-10 rounded-full object-cover shrink-0" />
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{link.payer_name}</p>
+                {link.display_id && <p className="text-xs text-muted-foreground font-mono">{link.display_id}</p>}
+              </div>
             </div>
+            {(link.fee_due_date || link.expires_at) && (
+              <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {link.fee_due_date && (
+                  <span>Due: {new Date(link.fee_due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                )}
+                {link.expires_at && (
+                  <span>Link expires: {new Date(link.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                )}
+              </div>
+            )}
             {options.length > 1 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pay using</p>
