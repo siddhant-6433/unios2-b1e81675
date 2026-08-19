@@ -387,17 +387,17 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         const class_roll_no = get("class_roll_no", "class_roll_number");
         const rawAdmissionDate = get("admission_date") || get("admissiondate") || get("date_of_admission") || get("dateofadmission");
         const admission_date = normalizeStudentImportDate(rawAdmissionDate);
-        const admission_no = get("admission_no", "admissionno", "admission_number", "student_admission_number");
+        const admission_no = get("admission_no", "admissionno", "admision_no", "admission_number", "student_admission_number");
         const school_admission_no = get("school_admission_no", "school_admission_number") || admission_no;
         const father_name  = get("father_name", "father");
-        const father_phone = normalizePhone(get("father_phone", "father_mobile", "father_other_mobile"));
+        const father_phone = normalizePhone(get("father_phone", "father_mobile", "father_s_mobile", "father_other_mobile"));
         const father_email = get("father_email");
         const father_occupation = get("father_occupation");
         const father_qualification = get("father_qualification");
         const father_income = get("father_income");
         const father_aadhar = get("father_aadhar", "father_aadhaar", "father_aadhaar_number", "father_aadhar_number");
         const mother_name  = get("mother_name", "mother");
-        const mother_phone = normalizePhone(get("mother_phone", "mother_mobile", "mother_other_mobile"));
+        const mother_phone = normalizePhone(get("mother_phone", "mother_mobile", "mother_s_mobile", "mother_other_mobile"));
         const mother_email = get("mother_email");
         const mother_occupation = get("mother_occupation");
         const mother_aadhar = get("mother_aadhar", "mother_aadhaar", "mother_aadhaar_number", "mother_aadhar_number");
@@ -526,9 +526,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
         admission_date: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
         date_of_admission: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
-        admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
+        admission_no: r.admission_no || null, // ponytail: preserve CSV admission_no for all institution types
         school_admission_no: (isSchool && r.school_admission_no) ? r.school_admission_no : null,
-        pre_admission_no: (isSchool && r.admission_no)
+        pre_admission_no: r.admission_no
           ? null
           : `IMP-${Date.now().toString(36).toUpperCase()}-${i + j}`,
         section: r.section || null,
@@ -614,6 +614,11 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           failed += batch.length - data.length;
           errors.push(`Batch ${Math.floor(i / 50) + 1} inserted ${data.length} of ${batch.length} students.`);
         }
+        // ponytail: auto-provision fees for imported students (same as Beacon dialog)
+        const studentIds = data.map((s: any) => s.id);
+        supabase.functions.invoke("provision-student-fees", {
+          body: { student_ids: studentIds },
+        }).catch(err => console.error("Fee provisioning failed:", err));
       }
     }
 

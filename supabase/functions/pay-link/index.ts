@@ -155,14 +155,37 @@ Deno.serve(async (req) => {
       link.status = "expired";
     }
 
-    // Resolve payer name for display.
+    // Resolve payer name, ID, photo, institution/course for display.
     let payerName = "Candidate";
+    let institutionName: string | null = null;
+    let courseName: string | null = null;
+    let feeDueDate: string | null = null;
+    let displayId: string | null = null;
+    let photoUrl: string | null = null;
     if (link.lead_id) {
-      const { data } = await admin.from("leads").select("name").eq("id", link.lead_id).maybeSingle();
+      const { data } = await admin.from("leads").select("name, application_no, photo_url, courses:course_id(name, departments(institutions(name)))").eq("id", link.lead_id).maybeSingle();
       payerName = data?.name || payerName;
-    } else if (link.student_id) {
-      const { data } = await admin.from("students").select("name").eq("id", link.student_id).maybeSingle();
+      displayId = data?.application_no || null;
+      photoUrl = data?.photo_url || null;
+      institutionName = (data?.courses as any)?.departments?.institutions?.name || null;
+      courseName = (data?.courses as any)?.name || null;
+    }
+    if (link.student_id) {
+      const { data } = await admin.from("students").select("name, admission_no, pre_admission_no, photo_url, lead_id, courses:course_id(name, departments(institutions(name)))").eq("id", link.student_id).maybeSingle();
       payerName = data?.name || payerName;
+      // ponytail: admission_no > pre_admission_no > lead application_no
+      displayId = data?.admission_no || data?.pre_admission_no || displayId || null;
+      photoUrl = data?.photo_url || photoUrl || null;
+      institutionName = (data?.courses as any)?.departments?.institutions?.name || institutionName || null;
+      courseName = (data?.courses as any)?.name || courseName || null;
+      // If no displayId yet and student has a linked lead, grab application_no
+      if (!displayId && data?.lead_id && !link.lead_id) {
+        const { data: ld } = await admin.from("leads").select("application_no").eq("id", data.lead_id).maybeSingle();
+        displayId = ld?.application_no || null;
+      }
+      // Earliest unpaid fee due date for context
+      const { data: dueFee } = await admin.from("fee_ledger").select("due_date").eq("student_id", link.student_id).in("status", ["due", "overdue"]).order("due_date", { ascending: true }).limit(1).maybeSingle();
+      feeDueDate = dueFee?.due_date || null;
     }
 
     if (action === "resolve") {
@@ -185,6 +208,12 @@ Deno.serve(async (req) => {
         status: link.status,
         gateway: link.gateway || null,
         short_url: link.short_url || null,
+        institution_name: institutionName,
+        course_name: courseName,
+        display_id: displayId,
+        photo_url: photoUrl,
+        fee_due_date: feeDueDate,
+        expires_at: link.expires_at || null,
       });
     }
 

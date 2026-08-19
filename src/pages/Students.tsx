@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
-import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload, Filter, BookOpen, Layers, X, Download } from "lucide-react";
+import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload, Filter, BookOpen, Layers, X, Download, Banknote } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import {
@@ -268,9 +269,13 @@ const Students = () => {
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const { role } = useAuth();
+  const { toast } = useToast();
   const canSeeContact = can("students", "view_contact");
   const canCreateStudents = can("students", "create");
   const canExportStudents = role === "super_admin" || role === "principal";
+  // ponytail: same roles that can see StudentFeePanel's Auto-Assign
+  const canAssignFees = ["super_admin", "campus_admin", "principal", "accountant", "admission_head"].includes(role || "");
+  const [assigning, setAssigning] = useState(false);
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -447,6 +452,33 @@ const Students = () => {
     setTermFilters([]);
   };
 
+  // ponytail: bulk assign fees to all currently filtered students via the existing edge fn
+  const bulkAssignFees = async () => {
+    if (!canAssignFees || assigning) return;
+    const ids = filtered.map((s) => s.id);
+    if (ids.length === 0) return;
+    setAssigning(true);
+    try {
+      // edge fn already handles dedup (skips existing ledger rows)
+      const BATCH = 50;
+      let ok = 0;
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch = ids.slice(i, i + BATCH);
+        const { error } = await supabase.functions.invoke("provision-student-fees", {
+          body: { student_ids: batch },
+        });
+        if (error) throw error;
+        ok += batch.length;
+      }
+      toast({ title: "Fees assigned", description: `Provisioned fees for ${ok} students.` });
+    } catch (e: any) {
+      console.error("bulk assign fees error:", e);
+      toast({ title: "Error", description: e.message || "Failed to assign fees", variant: "destructive" });
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   const exportStudents = async () => {
     if (!canExportStudents) return;
     setExporting(true);
@@ -529,12 +561,20 @@ const Students = () => {
               className="w-full rounded-xl border border-input bg-background pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
           </div>
 
-          {canExportStudents && (
-            <Button type="button" variant="outline" onClick={exportStudents} disabled={exporting || filtered.length === 0} className="h-10 rounded-xl gap-1.5 sm:ml-auto">
-              {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
-              Download CSV
-            </Button>
-          )}
+          <div className="flex gap-2 sm:ml-auto">
+            {canAssignFees && (
+              <Button type="button" variant="outline" onClick={bulkAssignFees} disabled={assigning || filtered.length === 0} className="h-10 rounded-xl gap-1.5">
+                {assigning ? <ButtonOrb state="working" /> : <Banknote className="h-4 w-4" />}
+                Bulk Assign Fees
+              </Button>
+            )}
+            {canExportStudents && (
+              <Button type="button" variant="outline" onClick={exportStudents} disabled={exporting || filtered.length === 0} className="h-10 rounded-xl gap-1.5">
+                {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
+                Download CSV
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
