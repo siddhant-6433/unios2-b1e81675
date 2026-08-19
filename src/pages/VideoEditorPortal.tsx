@@ -15,6 +15,7 @@ import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPES, CONTENT_TYPE_LABEL,
   STATUS_BADGE, type VideoBrand, type VideoContentType, type VideoStatus,
 } from "@/lib/videoBrands";
+import { VideoHistory } from "@/components/video/VideoHistory";
 
 type VideoRow = {
   id: string;
@@ -540,6 +541,7 @@ export default function VideoEditorPortal() {
                 </div>
               );
             })()}
+            {form.id && <VideoHistory videoId={form.id} />}
             <div>
               <label className="text-xs font-medium mb-1 block">Brand *</label>
               <select value={form.brand} onChange={e => setForm(p => ({ ...p, brand: e.target.value as VideoBrand }))} className={inputCls}>
