@@ -338,6 +338,18 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(orchestrator).toContain("responsePolicy === \"suppress\"");
   });
 
+  it("replies as the school (not NIMT college) for school WhatsApp numbers", () => {
+    // School numbers (Beacon Avantika II / Mirai) reply school-scoped: no NIMT
+    // course menu/KB, and college enrichment is skipped for them.
+    expect(aiReply).toContain("SCHOOL_CHANNELS");
+    expect(aiReply).toContain("buildSchoolSystemPrompt");
+    expect(aiReply).toContain("SCHOOL_CHANNELS[business_phone_number_id]");
+    expect(aiReply).toContain("!school && !hasCourse ? detectCourseOption(message)");
+    // Inbox exposes a school-name tab per number.
+    expect(inbox).toContain("NIMT Beacon School Avantika II");
+    expect(inbox).toContain("Mirai Experiential School");
+  });
+
   it("persists raw inbound provider events before routing", () => {
     expect(inboundEventsMigration).toContain("create table if not exists public.whatsapp_inbound_events");
     expect(inboundEventsMigration).toContain("provider_event_id text");
