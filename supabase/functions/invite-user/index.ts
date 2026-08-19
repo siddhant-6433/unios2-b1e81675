@@ -38,16 +38,6 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: callerRole } = await adminClient.rpc("get_user_role", {
-      _user_id: callerId,
-    });
-
-    if (callerRole !== "super_admin") {
-      return new Response(JSON.stringify({ error: "Forbidden: super_admin only" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids } = await req.json();
 
@@ -59,6 +49,33 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    }
+
+    // Authorization. Super_admin may invite any role (admin panel). HR staff with
+    // hr:employees_edit may provision logins from the verify screen, but only for
+    // non-privileged staff roles — never super_admin/campus_admin — so an HR editor
+    // can't escalate. Keep this in sync with PROVISIONABLE_ROLES in
+    // src/components/hr/EmployeeVerificationTable.tsx.
+    const HR_PROVISIONABLE_ROLES = new Set([
+      "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher",
+      "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden", "librarian",
+    ]);
+    const { data: callerRole } = await adminClient.rpc("get_user_role", {
+      _user_id: callerId,
+    });
+    let authorized = callerRole === "super_admin";
+    if (!authorized && HR_PROVISIONABLE_ROLES.has(role)) {
+      const { data: canEditHr } = await adminClient.rpc("has_permission", {
+        _user_id: callerId,
+        _perm: "hr:employees_edit",
+      });
+      authorized = canEditHr === true;
+    }
+    if (!authorized) {
+      return new Response(JSON.stringify({ error: "Forbidden: not permitted to invite this role" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     let newUser: any;

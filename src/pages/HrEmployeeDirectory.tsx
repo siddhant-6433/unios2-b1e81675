@@ -39,6 +39,8 @@ interface Employee {
   department: string | null;
   campusId: string | null;
   photoUrl: string | null;
+  /** Only set for employee_profiles rows — used to hint how to create a login. */
+  workEmail?: string | null;
 }
 
 const roleLabels = ROLE_LABELS as Record<string, string>;
@@ -99,10 +101,10 @@ const HrEmployeeDirectory = () => {
           .select("user_id, role")
           .range(from, to),
       ),
-      fetchAll<{ id: string; user_id: string | null; display_name: string | null; mobile_number: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null }>(
+      fetchAll<{ id: string; user_id: string | null; display_name: string | null; mobile_number: string | null; work_email: string | null; job_title: string | null; department_id: string | null; campus_id: string | null; photo_url: string | null }>(
         (from, to) => supabase
           .from("employee_profiles")
-          .select("id, user_id, display_name, mobile_number, job_title, department_id, campus_id, photo_url")
+          .select("id, user_id, display_name, mobile_number, work_email, job_title, department_id, campus_id, photo_url")
           .eq("verification_status", "verified")
           .order("display_name")
           .range(from, to),
@@ -162,6 +164,7 @@ const HrEmployeeDirectory = () => {
         department: departmentName(e.department_id),
         campusId: e.campus_id,
         photoUrl: e.photo_url,
+        workEmail: e.work_email,
       };
     });
 
@@ -304,6 +307,13 @@ const HrEmployeeDirectory = () => {
                 {emp.role && (
                   <Badge variant="secondary" className="shrink-0 text-[11px] font-normal">
                     {roleLabels[emp.role] || emp.role.replace(/_/g, " ")}
+                  </Badge>
+                )}
+                {/* Verified employees with no auth account never reach the admin panel.
+                    Surface it here so a login can be created (add an email if missing). */}
+                {emp.employeeProfileId && !emp.userId && (
+                  <Badge variant="outline" className="shrink-0 text-[11px] font-normal text-amber-600 border-amber-300">
+                    {emp.workEmail ? "No login" : "No login — add email"}
                   </Badge>
                 )}
                 {emp.phone && (

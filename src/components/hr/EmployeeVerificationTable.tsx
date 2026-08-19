@@ -28,9 +28,29 @@ interface PendingEmployee {
   institution_id: string | null;
   department_id: string | null;
   import_batch_id: string | null;
+  // Null for imported staff who have no login yet — the reason we can provision one on verify.
+  user_id: string | null;
 }
 
 const EDITABLE_TEXT = ["display_name", "employee_number", "job_title"] as const;
+
+// Roles the verify screen may provision a login for. Deliberately excludes
+// super_admin / campus_admin so an HR editor can't mint an admin — invite-user
+// enforces the same allow-list server-side for non-super-admin callers.
+const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
+  { value: "principal", label: "Principal" },
+  { value: "admission_head", label: "Admission Head" },
+  { value: "counsellor", label: "Counsellor" },
+  { value: "accountant", label: "Accountant" },
+  { value: "faculty", label: "Faculty" },
+  { value: "teacher", label: "Teacher" },
+  { value: "data_entry", label: "Data Entry" },
+  { value: "office_admin", label: "Office Administrator" },
+  { value: "office_assistant", label: "Office Assistant" },
+  { value: "school_coordinator", label: "School Coordinator" },
+  { value: "hostel_warden", label: "Hostel Warden" },
+  { value: "librarian", label: "Librarian" },
+];
 
 export function EmployeeVerificationTable({ onChange }: { onChange?: () => void }) {
   const { toast } = useToast();
@@ -43,6 +63,10 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [bulkCampus, setBulkCampus] = useState("");
   const [bulkInstitution, setBulkInstitution] = useState("");
+  // Role chosen per row for login provisioning on verify. Not a DB column on
+  // employee_profiles — kept client-side and passed to invite-user.
+  const [roleById, setRoleById] = useState<Record<string, string>>({});
+  const [bulkRole, setBulkRole] = useState("");
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -52,7 +76,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     for (let from = 0; ; from += 1000) {
       const { data, error } = await supabase
         .from("employee_profiles")
-        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id")
+        .select("id, employee_number, display_name, job_title, mobile_number, work_email, date_of_joining, campus_id, institution_id, department_id, import_batch_id, user_id")
         .eq("verification_status", "pending")
         .order("created_at", { ascending: false })
         .range(from, from + 999);
@@ -91,8 +115,21 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
       return next;
     });
 
+  const campusName = useCallback(
+    (id: string | null) => (id ? org.campuses.find((c) => c.id === id)?.name ?? null : null),
+    [org.campuses],
+  );
+
   const applyBulk = () => {
-    if (!bulkCampus || selected.size === 0) return;
+    if ((!bulkCampus && !bulkRole) || selected.size === 0) return;
+    if (bulkRole) {
+      setRoleById((m) => {
+        const next = { ...m };
+        selected.forEach((id) => { next[id] = bulkRole; });
+        return next;
+      });
+    }
+    if (!bulkCampus) return;
     setRows((rs) =>
       rs.map((r) =>
         selected.has(r.id)
@@ -120,6 +157,8 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
     const uid = userData.user?.id ?? null;
 
     let failed = 0;
+    let provisioned = 0;
+    let provisionFailed = 0;
     for (const id of ids) {
       const r = rows.find((x) => x.id === id);
       if (!r) continue;
@@ -147,7 +186,37 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
         .update(patch as never)
         .eq("id", id)
         .select("id");
-      if (error || !data?.length) failed++;
+      if (error || !data?.length) { failed++; continue; }
+
+      // Provision a login on verify: only when this row has an email, a role was
+      // chosen, and it isn't already linked to an auth user. No email → no login
+      // (flagged "no login — add email" in the table); no role → verified only.
+      const role = roleById[id];
+      if (verify && r.work_email && role && !r.user_id) {
+        try {
+          const { data: inv, error: invErr } = await supabase.functions.invoke("invite-user", {
+            body: {
+              email: r.work_email,
+              role,
+              display_name: r.display_name?.trim() || undefined,
+              phone: r.mobile_number || undefined,
+              campus: campusName(r.campus_id) || undefined,
+            },
+          });
+          const newUserId = (inv as { user_id?: string } | null)?.user_id;
+          if (invErr || !newUserId) { provisionFailed++; continue; }
+          // Back-fill the link so the employee now appears in the admin panel.
+          const { data: linked, error: linkErr } = await supabase
+            .from("employee_profiles")
+            .update({ user_id: newUserId } as never)
+            .eq("id", id)
+            .select("id");
+          if (linkErr || !linked?.length) provisionFailed++;
+          else provisioned++;
+        } catch {
+          provisionFailed++;
+        }
+      }
     }
 
     setBusy(false);
@@ -158,7 +227,17 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
         variant: "destructive",
       });
     } else {
-      toast({ title: verify ? `${ids.length} employees verified` : "Changes saved" });
+      toast({
+        title: verify ? `${ids.length} employees verified` : "Changes saved",
+        description: verify && provisioned > 0 ? `${provisioned} login${provisioned === 1 ? "" : "s"} created` : undefined,
+      });
+    }
+    if (provisionFailed > 0) {
+      toast({
+        title: `${provisionFailed} login${provisionFailed === 1 ? "" : "s"} could not be created`,
+        description: "The employee is verified but has no account yet. Check the email and your permission to invite users.",
+        variant: "destructive",
+      });
     }
     await fetchRows();
     onChange?.();
@@ -221,7 +300,14 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
             {org.institutionsFor(bulkCampus).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
         </div>
-        <Button size="sm" variant="outline" disabled={!bulkCampus || selected.size === 0} onClick={applyBulk}>
+        <div className="min-w-[160px]">
+          <label className="block text-[11px] font-medium text-muted-foreground mb-1">Login role</label>
+          <select value={bulkRole} onChange={(e) => setBulkRole(e.target.value)} className={selectCls}>
+            <option value="">No login</option>
+            {PROVISIONABLE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+        </div>
+        <Button size="sm" variant="outline" disabled={(!bulkCampus && !bulkRole) || selected.size === 0} onClick={applyBulk}>
           Apply to {selected.size} selected
         </Button>
         <div className="flex-1" />
@@ -259,6 +345,7 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
               <th className="px-3 py-2 font-medium">Campus</th>
               <th className="px-3 py-2 font-medium">Institution</th>
               <th className="px-3 py-2 font-medium">Department</th>
+              <th className="px-3 py-2 font-medium">Login role</th>
               <th className="px-3 py-2 w-20"></th>
             </tr>
           </thead>
@@ -308,6 +395,22 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
                     <option value="">—</option>
                     {org.departmentsFor(r.institution_id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
+                </td>
+                <td className="px-3 py-2">
+                  {r.user_id ? (
+                    <span className="text-muted-foreground">Has login</span>
+                  ) : r.work_email ? (
+                    <select
+                      className={selectCls}
+                      value={roleById[r.id] ?? ""}
+                      onChange={(e) => setRoleById((m) => ({ ...m, [r.id]: e.target.value }))}
+                    >
+                      <option value="">No login</option>
+                      {PROVISIONABLE_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                    </select>
+                  ) : (
+                    <span className="text-amber-600 whitespace-nowrap">No login — add email</span>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
