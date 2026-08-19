@@ -406,18 +406,28 @@ const PRIMARY_META_WHATSAPP_NUMBER = "919667641872";
 const PRIMARY_META_PNID = "1075269918995469";
 const SECONDARY_META_PNID = "108464108729604";
 const SECONDARY_META_WHATSAPP_NUMBER = "918130107839";
+// School numbers on the same Meta app — inbox tabs labelled by school name.
+// Labels carry no digit run, so formatInboxLabel passes them through verbatim.
+const AVANTIKA_PNID = "1274023025796842";
+const AVANTIKA_WHATSAPP_NUMBER = "919599931443";
+const MIRAI_PNID = "1110238142172240";
+const MIRAI_WHATSAPP_NUMBER = "919220522282";
 const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
 const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
   [PRIMARY_META_PNID]: PRIMARY_META_WHATSAPP_NUMBER,
   [SECONDARY_META_PNID]: SECONDARY_META_WHATSAPP_NUMBER,
   [COEXIST_META_PNID]: PLIVO_WHATSAPP_NUMBER,
   [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
+  [AVANTIKA_PNID]: AVANTIKA_WHATSAPP_NUMBER,
+  [MIRAI_PNID]: MIRAI_WHATSAPP_NUMBER,
 };
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
   { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "meta" },
   { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667641872 Inbox", provider: "meta" },
   { id: SECONDARY_META_WHATSAPP_NUMBER, label: "8130107839 Inbox", provider: "meta" },
   { id: "917428499849", label: "7428499849 Inbox", provider: "meta" },
+  { id: AVANTIKA_WHATSAPP_NUMBER, label: "NIMT Beacon School Avantika II", provider: "meta" },
+  { id: MIRAI_WHATSAPP_NUMBER, label: "Mirai Experiential School", provider: "meta" },
 ];
 
 const digitsOnly = (value: string | null | undefined) => (value || "").replace(/\D/g, "");
