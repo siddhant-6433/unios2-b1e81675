@@ -19,6 +19,7 @@ import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
 import { isValidIfsc } from "@/lib/bankDetails";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin } from "@/lib/employeeLogin";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -120,6 +121,8 @@ const EmployeeProfileDialog = ({
   const [bankVerified, setBankVerified] = useState<BankVerification | null>(null);
   const [bankLoaded, setBankLoaded] = useState(false);
   const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionRole, setProvisionRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -321,6 +324,41 @@ const EmployeeProfileDialog = ({
     }
   };
 
+  // Create a login for an already-saved employee who has none. Mirrors the
+  // verify-queue path (invite-user → back-fill user_id) via the shared helper.
+  const handleGenerateLogin = async () => {
+    if (isNew || !profile.id) {
+      toast({ title: "Save the profile first", description: "Save this employee once before creating a login.", variant: "destructive" });
+      return;
+    }
+    if (!profile.work_email.trim()) {
+      toast({ title: "Add a work email", description: "A login needs a work email. Add one and Save, then try again.", variant: "destructive" });
+      return;
+    }
+    if (!provisionRole) {
+      toast({ title: "Pick a role", description: "Choose the role this login should have.", variant: "destructive" });
+      return;
+    }
+    setProvisioning(true);
+    try {
+      const newUserId = await provisionEmployeeLogin({
+        employeeProfileId: profile.id,
+        email: profile.work_email.trim(),
+        role: provisionRole,
+        displayName: profile.display_name || undefined,
+        phone: profile.mobile_number || undefined,
+        campus: org.campuses.find((c) => c.id === profile.campus_id)?.name || undefined,
+      });
+      setLinkedUserId(newUserId);
+      toast({ title: "Login created", description: "An activation invite was sent to the work email." });
+      onSuccess?.();
+    } catch (err) {
+      toast({ title: "Could not create login", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
   const handleSave = async () => {
     if (canEditBank && bank.account_number.trim() && !isValidIfsc(bank.ifsc)) {
       toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
@@ -481,6 +519,27 @@ const EmployeeProfileDialog = ({
                 {profile.display_name || userName}
                 {!linkedUserId && <span className="ml-2 text-muted-foreground/70">· no login linked</span>}
               </p>
+              {editable && !isNew && !linkedUserId && can("hr", "employees_edit") && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <select
+                    value={provisionRole}
+                    onChange={(e) => setProvisionRole(e.target.value)}
+                    disabled={provisioning}
+                    className="rounded-lg border border-input bg-background px-2 py-1 text-[11px]"
+                  >
+                    <option value="">Login role…</option>
+                    {PROVISIONABLE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button
+                    onClick={handleGenerateLogin}
+                    disabled={provisioning}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    {provisioning ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
+                    {provisioning ? "Creating…" : "Generate login"}
+                  </button>
+                </div>
+              )}
               {editable && (
                 <label
                   className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium transition-colors ${
