@@ -33,7 +33,28 @@ interface Concession {
   value: number;
   reason: string | null;
   status: string;
+  created_at?: string | null;
+  requested_by_name?: string | null;
+  approved_by_name?: string | null;
 }
+
+// Concession on a head is a blend of two sources: per-row requests in
+// `concessions`, and the share of an approved offer-letter waiver allocated by
+// sync_fee_ledger_concessions. Only the first was ever shown here, so a waiver
+// granted on the offer letter appeared as an unexplained number with no history
+// and nothing to remove.
+interface OfferWaiver {
+  waiver_id: string;
+  term: string;
+  amount: number;
+  reason: string | null;
+  requested_by_name: string | null;
+  approved_by_name: string | null;
+  created_at: string;
+}
+
+const shortDate = (v?: string | null) =>
+  v ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : null;
 
 const effectiveAmount = (type: string, value: number, total: number) =>
   type === "flat" ? value : Math.round((total * value) / 100);
@@ -47,6 +68,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState<Concession[]>([]);
+  const [waivers, setWaivers] = useState<OfferWaiver[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const isSuperAdmin = role === "super_admin";
@@ -58,17 +80,32 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const reset = () => { setType("flat"); setValue(""); setReason(""); setEditingId(null); };
 
   const fetchExisting = async () => {
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from("concessions")
-      .select("id, type, value, reason, status")
+      .select("id, type, value, reason, status, created_at, requested_by_name, approved_by_name")
       .eq("fee_ledger_id", fee.id)
       .in("status", ["approved", "pending_principal", "pending_super_admin"])
       .order("created_at", { ascending: true });
     setExisting(((data as Concession[]) || []).filter((c) => c.type === "flat" || c.type === "percentage"));
   };
 
+  // Waivers granted on the offer letter for THIS head's term. The sync splits a
+  // term's waiver across that term's heads, so we show the waivers plus the
+  // share that actually landed here.
+  const fetchWaivers = async () => {
+    if (!fee.student_id || !fee.term) return;
+    const { data } = await (supabase as any)
+      .from("v_student_offer_waivers")
+      .select("waiver_id, term, amount, reason, requested_by_name, approved_by_name, created_at")
+      .eq("student_id", fee.student_id)
+      .eq("term", fee.term)
+      .eq("status", "approved")
+      .order("created_at", { ascending: true });
+    setWaivers((data as OfferWaiver[]) || []);
+  };
+
   useEffect(() => {
-    if (open) fetchExisting();
+    if (open) { fetchExisting(); fetchWaivers(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -76,7 +113,30 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
     setSaving(false);
     reset();
     await fetchExisting();
+    await fetchWaivers();
     onDone();
+  };
+
+  // Revoking raises the student's balance, so it is super-admin only, needs a
+  // reason, and the RPC writes a concession_audit row before re-syncing.
+  const revokeWaiver = async (w: OfferWaiver) => {
+    const why = window.prompt(
+      `Revoke the ₹${w.amount.toLocaleString("en-IN")} offer waiver on ${fee.fee_codes?.code || "this head"}?\n` +
+      `This raises the student's balance. Reason (required):`,
+    );
+    if (why === null) return;
+    if (!why.trim()) { toast({ title: "A reason is required", variant: "destructive" }); return; }
+    setSaving(true);
+    const { error } = await (supabase.rpc as any)("revoke_offer_waiver", {
+      _waiver_id: w.waiver_id, _reason: why.trim(),
+    });
+    if (error) {
+      setSaving(false);
+      toast({ title: "Could not revoke the waiver", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Waiver revoked", description: `₹${w.amount.toLocaleString("en-IN")} removed from the ledger.` });
+    await afterWrite();
   };
 
   // ── add a new concession ──────────────────────────────────────────────
@@ -159,6 +219,13 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const editingConcession = existing.find((c) => c.id === editingId) || null;
   const showAddForm = !editingId;
 
+  // What the offer waiver actually contributed to THIS row: the head's total
+  // concession minus the approved per-row requests on it.
+  const manualApproved = existing
+    .filter((c) => c.status === "approved")
+    .reduce((s, c) => s + effectiveAmount(c.type, Number(c.value), total), 0);
+  const waiverShare = Math.max(0, Math.round((Number(fee.concession || 0) - manualApproved) * 100) / 100);
+
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <PopoverTrigger asChild>
@@ -200,6 +267,10 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                           {c.reason}
                         </p>
                       )}
+                      <p className="truncate text-[10px] text-muted-foreground/70">
+                        {c.approved_by_name || c.requested_by_name || "—"}
+                        {shortDate(c.created_at) ? ` · ${shortDate(c.created_at)}` : ""}
+                      </p>
                     </div>
                     {canEdit && (
                       <div className="flex shrink-0 gap-0.5">
@@ -220,6 +291,51 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Offer-letter waivers backing this head. Read-only apart from revoke:
+            the amount is granted on the offer, not here. */}
+        {waivers.length > 0 && (
+          <div className="space-y-1.5 border-t border-border pt-2.5">
+            <p className="text-[11px] font-medium text-foreground">
+              From the offer letter
+              {waiverShare > 0 && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · −₹{waiverShare.toLocaleString("en-IN")} on this head
+                </span>
+              )}
+            </p>
+            {waivers.map((w) => (
+              <div key={w.waiver_id} className="rounded-lg border border-input px-2.5 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-success">−₹{w.amount.toLocaleString("en-IN")}</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">{w.term.replace(/_/g, " ")}</span>
+                    {w.reason && (
+                      <p className="truncate text-[10px] text-muted-foreground" title={w.reason}>{w.reason}</p>
+                    )}
+                    <p className="truncate text-[10px] text-muted-foreground/70">
+                      {w.approved_by_name || w.requested_by_name || "—"}
+                      {shortDate(w.created_at) ? ` · ${shortDate(w.created_at)}` : ""}
+                    </p>
+                  </div>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => revokeWaiver(w)}
+                      disabled={saving}
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
+                      title="Revoke this waiver" aria-label="Revoke this offer waiver"
+                    ><Trash2 className="h-3 w-3" /></button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {waivers.length > 1 && (
+              <p className="text-[10px] text-muted-foreground/70">
+                Split across this term's heads by the fee engine.
+              </p>
+            )}
           </div>
         )}
 
