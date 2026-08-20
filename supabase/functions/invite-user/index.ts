@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids } = await req.json();
+    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids, lookup } = await req.json();
 
     if (!email || !role) {
       return new Response(
@@ -76,6 +76,39 @@ Deno.serve(async (req) => {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Lookup-only mode: detect an existing account for this email OR phone before
+    // creating a duplicate. Uses the service-role RPC (not callable from the
+    // browser) which normalises phone to digits and prefers an email match.
+    if (lookup) {
+      const { data: existingId } = await adminClient.rpc("find_auth_user_by_email_or_phone", {
+        _email: email || null,
+        _phone: phone || null,
+      });
+      if (!existingId) {
+        return new Response(JSON.stringify({ existing: false }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: prof } = await adminClient
+        .from("profiles")
+        .select("display_name, email, phone")
+        .eq("user_id", existingId)
+        .maybeSingle();
+      const { data: roleRow } = await adminClient
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", existingId)
+        .maybeSingle();
+      return new Response(JSON.stringify({
+        existing: true,
+        user_id: existingId,
+        display_name: prof?.display_name ?? null,
+        email: prof?.email ?? null,
+        phone: prof?.phone ?? null,
+        role: roleRow?.role ?? null,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     let newUser: any;

@@ -19,7 +19,7 @@ import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
 import { isValidIfsc } from "@/lib/bankDetails";
-import { PROVISIONABLE_ROLES, provisionEmployeeLogin } from "@/lib/employeeLogin";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, type ExistingUserMatch } from "@/lib/employeeLogin";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -123,6 +123,9 @@ const EmployeeProfileDialog = ({
   const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionRole, setProvisionRole] = useState("");
+  // Set when a login lookup finds an existing account for this email/phone —
+  // offer to map instead of creating a duplicate.
+  const [existingMatch, setExistingMatch] = useState<ExistingUserMatch | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -140,6 +143,7 @@ const EmployeeProfileDialog = ({
     setLoading(true);
     setBankLoaded(false);
     setBank(emptyBank);
+    setExistingMatch(null);
 
     (async () => {
       // Look the employee row up by whichever key the caller had.
@@ -341,6 +345,17 @@ const EmployeeProfileDialog = ({
     }
     setProvisioning(true);
     try {
+      // Detect a pre-existing account for this email/phone before creating a
+      // duplicate — if found, offer to map instead of inviting.
+      const match = await lookupExistingUser({
+        email: profile.work_email.trim(),
+        phone: profile.mobile_number || undefined,
+        role: provisionRole,
+      });
+      if (match) {
+        setExistingMatch(match);
+        return;
+      }
       const newUserId = await provisionEmployeeLogin({
         employeeProfileId: profile.id,
         email: profile.work_email.trim(),
@@ -354,6 +369,23 @@ const EmployeeProfileDialog = ({
       onSuccess?.();
     } catch (err) {
       toast({ title: "Could not create login", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  // Map the employee to the already-existing account the lookup surfaced.
+  const handleMapExisting = async () => {
+    if (!profile.id || !existingMatch) return;
+    setProvisioning(true);
+    try {
+      await linkEmployeeLogin(profile.id, existingMatch.user_id);
+      setLinkedUserId(existingMatch.user_id);
+      setExistingMatch(null);
+      toast({ title: "Employee linked", description: "This employee is now mapped to the existing account." });
+      onSuccess?.();
+    } catch (err) {
+      toast({ title: "Could not link account", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setProvisioning(false);
     }
@@ -536,8 +568,30 @@ const EmployeeProfileDialog = ({
                     className="inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
                   >
                     {provisioning ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
-                    {provisioning ? "Creating…" : "Generate login"}
+                    {provisioning ? "Checking…" : "Generate login"}
                   </button>
+                </div>
+              )}
+              {editable && !isNew && !linkedUserId && existingMatch && (
+                <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                  <p>
+                    A user already exists for this email/phone:{" "}
+                    <span className="font-medium">{existingMatch.display_name || existingMatch.email || existingMatch.phone}</span>
+                    {existingMatch.role ? ` · ${existingMatch.role}` : ""}.
+                  </p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      onClick={handleMapExisting}
+                      disabled={provisioning}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-2.5 py-1 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {provisioning ? <ButtonOrb state="working" onFilled /> : null}
+                      Map to this employee
+                    </button>
+                    <button onClick={() => setExistingMatch(null)} disabled={provisioning} className="text-amber-800 hover:underline">
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
               {editable && (

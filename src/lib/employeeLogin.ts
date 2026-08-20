@@ -24,6 +24,48 @@ export const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
   { value: "librarian", label: "Librarian" },
 ];
 
+export interface ExistingUserMatch {
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
+  phone: string | null;
+  role: string | null;
+}
+
+/**
+ * Link an existing auth user to an employee_profiles row (the "map" operation).
+ * .select() so an RLS-filtered no-op surfaces as 0 rows instead of a silent
+ * success. Throws on failure.
+ */
+export async function linkEmployeeLogin(employeeProfileId: string, userId: string): Promise<void> {
+  const { data: linked, error: linkErr } = await supabase
+    .from("employee_profiles")
+    .update({ user_id: userId } as never)
+    .eq("id", employeeProfileId)
+    .select("id");
+  if (linkErr || !linked?.length) {
+    throw new Error("Could not link the account to this employee.");
+  }
+}
+
+/**
+ * Detect an existing account for this email OR phone before creating a
+ * duplicate. Goes through invite-user's lookup mode because the underlying RPC
+ * is service-role only. Returns the match, or null if none.
+ */
+export async function lookupExistingUser(args: {
+  email: string;
+  phone?: string;
+  role: string;
+}): Promise<ExistingUserMatch | null> {
+  const { data, error } = await supabase.functions.invoke("invite-user", {
+    body: { lookup: true, email: args.email, phone: args.phone || undefined, role: args.role },
+  });
+  if (error) throw new Error(error.message || "Could not check for an existing account.");
+  const res = data as { existing?: boolean } & ExistingUserMatch | null;
+  return res?.existing ? { user_id: res.user_id, display_name: res.display_name, email: res.email, phone: res.phone, role: res.role } : null;
+}
+
 /**
  * Create an auth login for an employee and link it back to their
  * employee_profiles row. Returns the new user_id. Throws with a human-readable
@@ -51,15 +93,6 @@ export async function provisionEmployeeLogin(args: {
     throw new Error(invErr?.message || "Could not create the account. Check the email and your permission to invite users.");
   }
 
-  // Back-fill the link. .select() so an RLS-filtered no-op surfaces as 0 rows
-  // instead of a silent success.
-  const { data: linked, error: linkErr } = await supabase
-    .from("employee_profiles")
-    .update({ user_id: newUserId } as never)
-    .eq("id", args.employeeProfileId)
-    .select("id");
-  if (linkErr || !linked?.length) {
-    throw new Error("The account was created but could not be linked to this employee.");
-  }
+  await linkEmployeeLogin(args.employeeProfileId, newUserId);
   return newUserId;
 }
