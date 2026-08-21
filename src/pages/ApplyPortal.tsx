@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
-import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
+import { ApplicationData, DEFAULT_APPLICATION, APPLICANT_EDITABLE_FIELDS, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "@/components/apply/eligibilityRules";
 import { StepProgress } from "@/components/apply/StepProgress";
 import { CourseSelector } from "@/components/apply/CourseSelector";
@@ -2207,6 +2207,19 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     toast({ title: "Application created", description: `ID: ${appId}` });
   };
 
+  // Re-fetch this application from the server and reload it into the editor.
+  // Used when a save loses an optimistic-concurrency check (the row moved since
+  // we loaded it) so we show the latest state instead of overwriting it.
+  const reloadCurrentApp = async () => {
+    if (!app) return;
+    const { data: rows } = await (supabase as any).rpc(
+      "get_applicant_applications_by_phone",
+      { _phone: phone },
+    );
+    const fresh = (rows || []).find((r: any) => r.id === app.id);
+    if (fresh) loadAppIntoEditor(fresh);
+  };
+
   const saveSection = async (updates: Partial<ApplicationData>, sectionKey?: string): Promise<boolean> => {
     if (!app) return false;
     setSaving(true);
@@ -2221,16 +2234,26 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       if (!flags.includes('result_awaited')) flags.push('result_awaited');
     }
 
-    // Strip fields that exist in the frontend type but have no DB column
-    const { passport_number: _pn, passport_photo_path: _ppp, ...cleanUpdates } = updates as any;
+    // Whitelist the write to applicant-editable columns only. handleStepNext
+    // spreads the ENTIRE editor snapshot in; without this filter a stale tab
+    // would flush server-owned columns (payment_status, payment_ref,
+    // fee_receipt_url, admission_doc_status, …) back to their loaded values and
+    // un-pay a settled application. See APPLICANT_EDITABLE_FIELDS.
+    const allowed = new Set<string>(APPLICANT_EDITABLE_FIELDS as readonly string[]);
+    const saveData: any = { completed_sections: newSections, flags };
+    for (const [k, v] of Object.entries(updates as Record<string, unknown>)) {
+      if (allowed.has(k)) saveData[k] = v;
+    }
 
-    const saveData: any = {
-      ...cleanUpdates,
-      completed_sections: newSections,
-      flags,
-    };
+    // Optimistic concurrency: only write if the row hasn't advanced since we
+    // loaded it. Guards against a stale snapshot silently overwriting newer
+    // edits (or a payment that landed mid-session). Skipped when we don't yet
+    // have a loaded updated_at (freshly created draft — nothing to race).
+    const loadedUpdatedAt = (app as any).updated_at as string | undefined;
 
     let error: { message: string } | null = null;
+    let staleConflict = false;
+    let newUpdatedAt: string | null = null;
     try {
       if (onBehalfContext) {
         await runOnBehalfApplicationAction("update", {
@@ -2238,14 +2261,25 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           payload: saveData,
         });
       } else {
-        const res = await supabase
-          .from("applications")
-          .update(saveData)
-          .eq("id", app.id);
+        let q = supabase.from("applications").update(saveData).eq("id", app.id);
+        if (loadedUpdatedAt) q = q.eq("updated_at", loadedUpdatedAt);
+        const res = await q.select("updated_at").maybeSingle();
         error = res.error;
+        if (!res.error && !res.data && loadedUpdatedAt) staleConflict = true;
+        newUpdatedAt = (res.data as any)?.updated_at ?? null;
       }
     } catch (err: any) {
       error = { message: err.message || "Save failed" };
+    }
+
+    if (staleConflict) {
+      toast({
+        title: "Your application was updated elsewhere",
+        description: "Reloading the latest version — please redo this step if needed.",
+      });
+      await reloadCurrentApp();
+      setSaving(false);
+      return false;
     }
 
     if (error) {
@@ -2263,7 +2297,13 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
         .eq("id", app.lead_id);
     }
 
-    setApp(prev => prev ? { ...prev, ...updates, completed_sections: newSections, flags } : prev);
+    setApp(prev => prev ? {
+      ...prev,
+      ...updates,
+      completed_sections: newSections,
+      flags,
+      ...(newUpdatedAt ? { updated_at: newUpdatedAt } as any : {}),
+    } : prev);
     setSaving(false);
     return true;
   };
@@ -2726,7 +2766,9 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           data={app}
           onChange={onChange}
           onNext={async () => {
-            const ok = await saveSection({ payment_status: app.payment_status }, 'payment');
+            // payment_status is server-owned (set by settlement); only mark the
+            // section complete here — never write payment_status from the client.
+            const ok = await saveSection({}, 'payment');
             if (ok) setStep(step + 1);
           }}
           onBack={backHandler}
