@@ -19,8 +19,9 @@ import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
 import { isValidIfsc } from "@/lib/bankDetails";
-import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, getUserRoles, addUserRole, removeUserRole, type ExistingUserMatch } from "@/lib/employeeLogin";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, getUserRoles, addUserRole, removeUserRole, resendLoginNotice, type ExistingUserMatch } from "@/lib/employeeLogin";
 import { useAuth } from "@/contexts/AuthContext";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -124,6 +125,8 @@ const EmployeeProfileDialog = ({
   const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionRole, setProvisionRole] = useState("");
+  const [provisionNotify, setProvisionNotify] = useState(true);
+  const [resending, setResending] = useState(false);
   // Set when a login lookup finds an existing account for this email/phone —
   // offer to map instead of creating a duplicate.
   const [existingMatch, setExistingMatch] = useState<ExistingUserMatch | null>(null);
@@ -346,6 +349,10 @@ const EmployeeProfileDialog = ({
       toast({ title: "Add a work email", description: "A login needs a work email. Add one and Save, then try again.", variant: "destructive" });
       return;
     }
+    if (!profile.mobile_number.trim()) {
+      toast({ title: "Add a mobile number", description: "Staff log in by WhatsApp OTP, so a mobile number is required. Add one and Save, then try again.", variant: "destructive" });
+      return;
+    }
     if (!provisionRole) {
       toast({ title: "Pick a role", description: "Choose the role this login should have.", variant: "destructive" });
       return;
@@ -370,14 +377,41 @@ const EmployeeProfileDialog = ({
         displayName: profile.display_name || undefined,
         phone: profile.mobile_number || undefined,
         campus: org.campuses.find((c) => c.id === profile.campus_id)?.name || undefined,
+        notify: provisionNotify,
       });
       setLinkedUserId(newUserId);
-      toast({ title: "Login created", description: "An activation invite was sent to the work email." });
+      toast({
+        title: "Login created",
+        description: provisionNotify
+          ? "Login details sent to the employee via WhatsApp + email."
+          : "Login created (no notification sent).",
+      });
       onSuccess?.();
     } catch (err) {
       toast({ title: "Could not create login", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
       setProvisioning(false);
+    }
+  };
+
+  // Re-send the "your login is ready" WhatsApp + email to a linked employee.
+  const handleResendLogin = async () => {
+    if (!linkedUserId) return;
+    setResending(true);
+    try {
+      const res = await resendLoginNotice(linkedUserId);
+      const parts = [res.whatsapp_sent ? "WhatsApp" : null, res.email_sent ? "email" : null].filter(Boolean);
+      toast({
+        title: parts.length ? "Login details resent" : "Nothing to send",
+        description: parts.length
+          ? `Sent via ${parts.join(" + ")}.`
+          : "This employee has no mobile number or email on file.",
+        variant: parts.length ? undefined : "destructive",
+      });
+    } catch (err) {
+      toast({ title: "Could not resend", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setResending(false);
     }
   };
 
@@ -611,7 +645,21 @@ const EmployeeProfileDialog = ({
                     {provisioning ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
                     {provisioning ? "Checking…" : "Generate login"}
                   </button>
+                  <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer">
+                    <input type="checkbox" checked={provisionNotify} onChange={(e) => setProvisionNotify(e.target.checked)} disabled={provisioning} />
+                    Notify via WhatsApp + email
+                  </label>
                 </div>
+              )}
+              {editable && linkedUserId && can("hr", "employees_edit") && (
+                <button
+                  onClick={handleResendLogin}
+                  disabled={resending}
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {resending ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
+                  {resending ? "Sending…" : "Resend login details"}
+                </button>
               )}
               {editable && !isNew && !linkedUserId && existingMatch && (
                 <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
@@ -659,6 +707,9 @@ const EmployeeProfileDialog = ({
                   </select>
                   {rolesBusy && <ButtonOrb state="working" />}
                 </div>
+              )}
+              {editable && linkedUserId && canManageRoles && !profile.mobile_number.trim() && (
+                <p className="mt-1 text-[11px] text-amber-600">⚠ No mobile number set — this user can't log in via WhatsApp OTP. Add one above and Save.</p>
               )}
               {editable && (
                 <label
@@ -773,9 +824,18 @@ const EmployeeProfileDialog = ({
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <Field label="Work Email" value={profile.work_email} onChange={(v) => set("work_email", v)} type="email" />
                     <Field label="Personal Email" value={profile.personal_email} onChange={(v) => set("personal_email", v)} type="email" />
-                    <Field label="Mobile Number" value={profile.mobile_number} onChange={(v) => set("mobile_number", v)} type="tel" />
-                    <Field label="Work Number" value={profile.work_number} onChange={(v) => set("work_number", v)} type="tel" />
-                    <Field label="Residence Number" value={profile.residence_number} onChange={(v) => set("residence_number", v)} type="tel" />
+                    <div>
+                      <label className={labelCls}>Mobile Number</label>
+                      <PhoneInput value={profile.mobile_number} onChange={(v) => set("mobile_number", v)} disabled={!editable} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Work Number</label>
+                      <PhoneInput value={profile.work_number} onChange={(v) => set("work_number", v)} disabled={!editable} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Residence Number</label>
+                      <PhoneInput value={profile.residence_number} onChange={(v) => set("residence_number", v)} disabled={!editable} />
+                    </div>
                   </div>
                 </Section>
 

@@ -100,6 +100,7 @@ export async function provisionEmployeeLogin(args: {
   displayName?: string;
   phone?: string;
   campus?: string;
+  notify?: boolean; // send the WhatsApp + email welcome (default true, invite-user side)
 }): Promise<string> {
   const { data: inv, error: invErr } = await supabase.functions.invoke("invite-user", {
     body: {
@@ -108,6 +109,7 @@ export async function provisionEmployeeLogin(args: {
       display_name: args.displayName || undefined,
       phone: args.phone || undefined,
       campus: args.campus || undefined,
+      notify: args.notify,
     },
   });
   const newUserId = (inv as { user_id?: string } | null)?.user_id;
@@ -117,4 +119,17 @@ export async function provisionEmployeeLogin(args: {
 
   await linkEmployeeLogin(args.employeeProfileId, newUserId);
   return newUserId;
+}
+
+/**
+ * Re-send the "your login is ready" WhatsApp + email to an existing user.
+ * Callable by super_admin or hr:employees_edit (enforced server-side).
+ */
+export async function resendLoginNotice(userId: string): Promise<{ whatsapp_sent: boolean; email_sent: boolean }> {
+  const { data, error } = await supabase.functions.invoke("resend-login-notice", {
+    body: { user_id: userId },
+  });
+  if (error) throw new Error(error.message || "Could not resend the login notification.");
+  const res = (data as { whatsapp_sent?: boolean; email_sent?: boolean } | null) ?? {};
+  return { whatsapp_sent: !!res.whatsapp_sent, email_sent: !!res.email_sent };
 }

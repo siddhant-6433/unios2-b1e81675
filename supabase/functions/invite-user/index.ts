@@ -39,7 +39,10 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids, lookup } = await req.json();
+    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids, lookup, notify } = await req.json();
+    // Whether to send the WhatsApp + email "login ready" notifications. Default on
+    // (backward compatible) — callers pass notify:false to create silently.
+    const sendNotify = notify !== false;
 
     if (!email || !role) {
       return new Response(
@@ -219,7 +222,7 @@ Deno.serve(async (req) => {
       const actionLink: string | undefined = useResend
         ? (data as any)?.properties?.action_link
         : undefined;
-      if (useResend && actionLink && !inviteError) {
+      if (sendNotify && useResend && actionLink && !inviteError) {
         try {
           const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
           const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
@@ -362,8 +365,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Send WhatsApp staff_welcome if phone is provided
-    if (normalizedPhone) {
+    // Send WhatsApp staff_welcome if phone is provided (and notifications enabled)
+    if (sendNotify && normalizedPhone) {
       try {
         const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
         const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
@@ -416,8 +419,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Send welcome email with credentials (if password was set)
-    if (password) {
+    // Send welcome email with credentials (if password was set and notifications enabled)
+    if (sendNotify && password) {
       const resendApiKey = Deno.env.get("RESEND_API_KEY");
       if (resendApiKey) {
         try {
