@@ -196,6 +196,14 @@ async function settleLeadPaymentsFromSweep(
     supabaseUrl: string;
     serviceKey: string;
     lookbackDays: number;
+    /**
+     * Narrow window in minutes, for the fast poller. When set it replaces the
+     * day-based window: a UPI-intent payment settles within minutes, so the
+     * every-2-min sweep only needs to look at the last few hours. Without this
+     * the fast cron would re-retrieve every pending row of the last week on
+     * every tick — thousands of pointless EaseBuzz calls a day.
+     */
+    windowMinutes?: number;
     dryRun?: boolean;
     leadPaymentId?: string;
     /**
@@ -220,7 +228,9 @@ async function settleLeadPaymentsFromSweep(
 
   // +2 days of slack over the EaseBuzz window: a txn initiated just before
   // midnight can settle on the next calendar day.
-  const since = new Date(Date.now() - (opts.lookbackDays + 2) * 86400000).toISOString();
+  const since = opts.windowMinutes
+    ? new Date(Date.now() - opts.windowMinutes * 60000).toISOString()
+    : new Date(Date.now() - (opts.lookbackDays + 2) * 86400000).toISOString();
   let q = admin
     .from("lead_payments")
     .select("id, amount, transaction_ref, lead_id, type, created_at")
@@ -1348,21 +1358,27 @@ Deno.serve(async (req) => {
       // rows that don't carry a transaction date and never contained our
       // txnids — it paged to the cap (8,000 rows) and matched nothing. The
       // per-txn retrieve below is exact, and we only have tens of pending rows.
+      const windowMinutes = body.window_minutes != null
+        ? Math.min(Math.max(Number(body.window_minutes), 1), 10080)
+        : undefined;
+
       const out = await settleLeadPaymentsFromSweep(admin, [], {
         supabaseUrl, serviceKey,
         lookbackDays,
+        windowMinutes,
         dryRun,
         retrieve: { merchantKey, merchantSalt, hosts: retrieveHosts },
         leadPaymentId: (body.lead_payment_id as string | undefined)?.trim() || undefined,
       });
 
-      console.log(`[easebuzz] reconcile-lead-payments: scanned=${out.scanned} settled=${out.settled.length} would_settle=${out.would_settle.length} skipped=${out.skipped.length} dry_run=${dryRun}`);
+      console.log(`[easebuzz] reconcile-lead-payments: window=${windowMinutes ? windowMinutes + "m" : lookbackDays + "d"} scanned=${out.scanned} settled=${out.settled.length} would_settle=${out.would_settle.length} skipped=${out.skipped.length} dry_run=${dryRun}`);
 
       return new Response(
         JSON.stringify({
           ok: true,
           dry_run: dryRun,
           lookback_days: lookbackDays,
+          window_minutes: windowMinutes ?? null,
           scanned: out.scanned,
           settled: out.settled,
           would_settle: out.would_settle,
