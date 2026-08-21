@@ -78,8 +78,9 @@ interface UserWithRole {
   email: string | null;
   phone: string | null;
   campus: string | null;
-  role: AppRole | null;
+  role: AppRole | null;      // primary (highest-privilege) role, for stable order/category
   role_id: string | null;
+  roles: AppRole[];          // every role the user holds (additive)
   last_sign_in_at: string | null;
   profile_updated_at: string | null;
   login_disabled: boolean;
@@ -211,6 +212,7 @@ const AdminPanel = () => {
         campus: row.campus,
         role: row.role ?? null,
         role_id: row.role_id ?? null,
+        roles: row.role ? [row.role as AppRole] : [],
         last_sign_in_at: row.last_sign_in_at || null,
         profile_updated_at: row.profile_updated_at || null,
         login_disabled: !!row.login_disabled,
@@ -218,6 +220,29 @@ const AdminPanel = () => {
         archived_at: row.archived_at || null,
         deleted_at: row.deleted_at || null,
       }));
+
+      // Attach the FULL role set per user (the directory RPC returns only the
+      // primary). One extra query for the visible page; admins can read all
+      // user_roles by RLS. Roles are additive, so the cell shows every role.
+      const ids = merged.map((m) => m.user_id);
+      if (ids.length > 0) {
+        const { data: roleRows } = await supabase
+          .from("user_roles")
+          .select("user_id, role")
+          .in("user_id", ids);
+        if (roleRows) {
+          const byUser = new Map<string, AppRole[]>();
+          for (const rr of roleRows as { user_id: string; role: AppRole }[]) {
+            const list = byUser.get(rr.user_id) ?? [];
+            list.push(rr.role);
+            byUser.set(rr.user_id, list);
+          }
+          for (const m of merged) {
+            const list = byUser.get(m.user_id);
+            if (list && list.length > 0) m.roles = list;
+          }
+        }
+      }
 
       setUsers(merged);
     } catch (err: any) {
@@ -282,17 +307,11 @@ const AdminPanel = () => {
       if (error) throw error;
 
       // Ensure the user has role=publisher; otherwise they can't pass RLS on the
-      // publisher-portal page or leads queries.
-      const { data: existingRole } = await supabase
+      // publisher-portal page or leads queries. Additive — a user may hold other
+      // roles too, so add publisher without touching the rest (idempotent).
+      await supabase
         .from("user_roles")
-        .select("id, role")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (!existingRole) {
-        await supabase.from("user_roles").insert({ user_id: userId, role: "publisher" });
-      } else if (existingRole.role !== "publisher") {
-        await supabase.from("user_roles").update({ role: "publisher" }).eq("id", existingRole.id);
-      }
+        .upsert({ user_id: userId, role: "publisher" }, { onConflict: "user_id,role", ignoreDuplicates: true });
 
       toast({ title: "Linked", description: "Publisher linked & role set to publisher." });
       setLinkingPubId(null);
@@ -307,78 +326,81 @@ const AdminPanel = () => {
     }
   };
 
-  const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
-    setSavingUser(userId);
+  // Roles are ADDITIVE — a user may hold several (e.g. office_assistant + a role
+  // with HR access) and their permissions are the union. These add/remove one
+  // role row (user_roles writes are super_admin-only by RLS) and carry the
+  // consultant/partner/publisher profile side-effects.
+  const addRole = async (userId: string, role: AppRole) => {
     const user = users.find((u) => u.user_id === userId);
     if (!user) return;
-
+    setSavingUser(userId);
     try {
-      if (newRole === "none") {
-        if (user.role_id) {
-          const { error } = await supabase.from("user_roles").delete().eq("id", user.role_id);
-          if (error) throw error;
-        }
-      } else if (user.role_id) {
-        const { error } = await supabase.from("user_roles").update({ role: newRole }).eq("id", user.role_id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: newRole });
-        if (error) throw error;
-      }
+      const { error } = await supabase
+        .from("user_roles")
+        .upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
+      if (error) throw error;
 
-      // Auto-create consultant profile when role is set to consultant
-      if (newRole === "consultant") {
+      // Auto-create consultant profile when the consultant role is added.
+      if (role === "consultant") {
         const { data: existing } = await supabase.from("consultants").select("id").eq("user_id", userId).maybeSingle();
         if (!existing) {
           const { error: cErr } = await supabase.from("consultants").insert({
             name: user.display_name || "Unnamed Consultant",
-            email: user.email || null,
-            phone: user.phone || null,
-            user_id: userId,
-            stage: "active",
+            email: user.email || null, phone: user.phone || null, user_id: userId, stage: "active",
           });
           if (cErr) console.error("Failed to create consultant profile:", cErr.message);
         }
       }
 
-      // Auto-create academic partner profile when role is set to a partner portal role.
-      if (PARTNER_PORTAL_ROLES.includes(newRole as AppRole)) {
+      // Auto-create academic partner profile when a partner portal role is added.
+      if (PARTNER_PORTAL_ROLES.includes(role)) {
         const { data: existing } = await supabase.from("academic_partners").select("id").eq("user_id", userId).maybeSingle();
         if (!existing) {
           const { error: apErr } = await supabase.from("academic_partners").insert({
             name: user.display_name || "Unnamed Academic Partner",
-            email: user.email || null,
-            phone: user.phone || null,
-            user_id: userId,
-            status: "active",
+            email: user.email || null, phone: user.phone || null, user_id: userId, status: "active",
           });
           if (apErr) console.error("Failed to create academic partner profile:", apErr.message);
         }
       }
 
-      // Unlink consultant profile if role changed away from consultant
-      if (user.role === "consultant" && newRole !== "consultant") {
-        await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
-      }
-
-      // Unlink academic partner profile if role changed away from partner portal roles.
-      if (user.role && PARTNER_PORTAL_ROLES.includes(user.role) && !PARTNER_PORTAL_ROLES.includes(newRole as AppRole)) {
-        await supabase.from("academic_partners").update({ user_id: null }).eq("user_id", userId);
-      }
-
-      // Unlink publisher profile if role changed away from publisher
-      if (user.role === "publisher" && newRole !== "publisher") {
-        await supabase.from("publishers").update({ user_id: null }).eq("user_id", userId);
-      }
-
-      toast({ title: "Role updated", description: `Role ${newRole === "none" ? "removed" : `set to ${newRole.replace("_", " ")}`} successfully.` });
+      toast({ title: "Role added", description: `${ROLE_LABELS[role] || role} added.` });
       await fetchUsers();
       await fetchCounts();
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
       setSavingUser(null);
-      setEditingUser(null);
+    }
+  };
+
+  const removeRole = async (userId: string, role: AppRole) => {
+    const user = users.find((u) => u.user_id === userId);
+    if (!user) return;
+    setSavingUser(userId);
+    try {
+      const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", role);
+      if (error) throw error;
+
+      const remaining = (user.roles || []).filter((r) => r !== role);
+      // Unlink a linked profile only when no remaining role still needs it.
+      if (role === "consultant") {
+        await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
+      }
+      if (PARTNER_PORTAL_ROLES.includes(role) && !remaining.some((r) => PARTNER_PORTAL_ROLES.includes(r))) {
+        await supabase.from("academic_partners").update({ user_id: null }).eq("user_id", userId);
+      }
+      if (role === "publisher") {
+        await supabase.from("publishers").update({ user_id: null }).eq("user_id", userId);
+      }
+
+      toast({ title: "Role removed", description: `${ROLE_LABELS[role] || role} removed.` });
+      await fetchUsers();
+      await fetchCounts();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSavingUser(null);
     }
   };
 
@@ -913,19 +935,34 @@ const AdminPanel = () => {
                           </td>
                           <td className="px-4 py-3">
                             {isEditing ? (
-                              <div className="flex items-center gap-2">
-                                <select defaultValue={user.role || "none"} onChange={(e) => handleRoleChange(user.user_id, e.target.value as AppRole | "none")} disabled={isSaving}
-                                  className="rounded-lg border border-input bg-card px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-                                  <option value="none">No Role</option>
-                                  {ALL_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {/* Each held role is a removable chip; roles are additive. */}
+                                {user.roles.map((r) => (
+                                  <span key={r} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(r)}`}>
+                                    {ALL_ROLES.find((x) => x.value === r)?.label || r}
+                                    <button onClick={() => removeRole(user.user_id, r)} disabled={isSaving} title="Remove role" className="hover:text-destructive">
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                                <select value="" onChange={(e) => { if (e.target.value) addRole(user.user_id, e.target.value as AppRole); }} disabled={isSaving}
+                                  className="rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+                                  <option value="">+ Add role…</option>
+                                  {ALL_ROLES.filter((r) => !user.roles.includes(r.value)).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                                 </select>
                                 {isSaving && <ButtonOrb state="working" />}
                                 <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
                               </div>
                             ) : (
-                              <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(user.role)}`}>
-                                {user.role ? ALL_ROLES.find((r) => r.value === user.role)?.label || user.role : "No Role"}
-                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {user.roles.length > 0 ? user.roles.map((r) => (
+                                  <span key={r} className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(r)}`}>
+                                    {ALL_ROLES.find((x) => x.value === r)?.label || r}
+                                  </span>
+                                )) : (
+                                  <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(null)}`}>No Role</span>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="px-4 py-3">

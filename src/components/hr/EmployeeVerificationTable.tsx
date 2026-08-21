@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageLoader } from "@/components/ui/page-loader";
 import { CheckCircle, Trash2, AlertTriangle } from "lucide-react";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin } from "@/lib/employeeLogin";
 
 interface PendingEmployee {
   id: string;
@@ -33,24 +34,6 @@ interface PendingEmployee {
 }
 
 const EDITABLE_TEXT = ["display_name", "employee_number", "job_title"] as const;
-
-// Roles the verify screen may provision a login for. Deliberately excludes
-// super_admin / campus_admin so an HR editor can't mint an admin — invite-user
-// enforces the same allow-list server-side for non-super-admin callers.
-const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
-  { value: "principal", label: "Principal" },
-  { value: "admission_head", label: "Admission Head" },
-  { value: "counsellor", label: "Counsellor" },
-  { value: "accountant", label: "Accountant" },
-  { value: "faculty", label: "Faculty" },
-  { value: "teacher", label: "Teacher" },
-  { value: "data_entry", label: "Data Entry" },
-  { value: "office_admin", label: "Office Administrator" },
-  { value: "office_assistant", label: "Office Assistant" },
-  { value: "school_coordinator", label: "School Coordinator" },
-  { value: "hostel_warden", label: "Hostel Warden" },
-  { value: "librarian", label: "Librarian" },
-];
 
 export function EmployeeVerificationTable({ onChange }: { onChange?: () => void }) {
   const { toast } = useToast();
@@ -194,25 +177,15 @@ export function EmployeeVerificationTable({ onChange }: { onChange?: () => void 
       const role = roleById[id];
       if (verify && r.work_email && role && !r.user_id) {
         try {
-          const { data: inv, error: invErr } = await supabase.functions.invoke("invite-user", {
-            body: {
-              email: r.work_email,
-              role,
-              display_name: r.display_name?.trim() || undefined,
-              phone: r.mobile_number || undefined,
-              campus: campusName(r.campus_id) || undefined,
-            },
+          await provisionEmployeeLogin({
+            employeeProfileId: id,
+            email: r.work_email,
+            role,
+            displayName: r.display_name?.trim(),
+            phone: r.mobile_number || undefined,
+            campus: campusName(r.campus_id) || undefined,
           });
-          const newUserId = (inv as { user_id?: string } | null)?.user_id;
-          if (invErr || !newUserId) { provisionFailed++; continue; }
-          // Back-fill the link so the employee now appears in the admin panel.
-          const { data: linked, error: linkErr } = await supabase
-            .from("employee_profiles")
-            .update({ user_id: newUserId } as never)
-            .eq("id", id)
-            .select("id");
-          if (linkErr || !linked?.length) provisionFailed++;
-          else provisioned++;
+          provisioned++;
         } catch {
           provisionFailed++;
         }

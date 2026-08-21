@@ -38137,6 +38137,7 @@ export type Database = {
         | "academic_partner_offer_letter"
         | "school_coordinator"
         | "non_teaching"
+        | "hr_executive"
       consultant_payout_model:
         | "commission_pct_first_year"
         | "commission_fixed"
@@ -38373,6 +38374,7 @@ export const Constants = {
         "academic_partner_offer_letter",
         "school_coordinator",
         "non_teaching",
+        "hr_executive",
       ],
       consultant_payout_model: [
         "commission_pct_first_year",

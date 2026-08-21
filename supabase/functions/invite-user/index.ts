@@ -39,7 +39,10 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids } = await req.json();
+    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source, team_ids, lookup, notify } = await req.json();
+    // Whether to send the WhatsApp + email "login ready" notifications. Default on
+    // (backward compatible) — callers pass notify:false to create silently.
+    const sendNotify = notify !== false;
 
     if (!email || !role) {
       return new Response(
@@ -57,7 +60,7 @@ Deno.serve(async (req) => {
     // can't escalate. Keep this in sync with PROVISIONABLE_ROLES in
     // src/components/hr/EmployeeVerificationTable.tsx.
     const HR_PROVISIONABLE_ROLES = new Set([
-      "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher",
+      "principal", "admission_head", "hr_executive", "counsellor", "accountant", "faculty", "teacher",
       "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden", "librarian",
     ]);
     const { data: callerRole } = await adminClient.rpc("get_user_role", {
@@ -76,6 +79,41 @@ Deno.serve(async (req) => {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Lookup-only mode: detect an existing account for this email OR phone before
+    // creating a duplicate. Uses the service-role RPC (not callable from the
+    // browser) which normalises phone to digits and prefers an email match.
+    if (lookup) {
+      const { data: existingId } = await adminClient.rpc("find_auth_user_by_email_or_phone", {
+        _email: email || null,
+        _phone: phone || null,
+      });
+      if (!existingId) {
+        return new Response(JSON.stringify({ existing: false }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: prof } = await adminClient
+        .from("profiles")
+        .select("display_name, email, phone")
+        .eq("user_id", existingId)
+        .maybeSingle();
+      // A user may hold several roles — don't .maybeSingle() (it throws on >1).
+      const { data: roleRow } = await adminClient
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", existingId)
+        .limit(1)
+        .maybeSingle();
+      return new Response(JSON.stringify({
+        existing: true,
+        user_id: existingId,
+        display_name: prof?.display_name ?? null,
+        email: prof?.email ?? null,
+        phone: prof?.phone ?? null,
+        role: roleRow?.role ?? null,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     let newUser: any;
@@ -184,7 +222,7 @@ Deno.serve(async (req) => {
       const actionLink: string | undefined = useResend
         ? (data as any)?.properties?.action_link
         : undefined;
-      if (useResend && actionLink && !inviteError) {
+      if (sendNotify && useResend && actionLink && !inviteError) {
         try {
           const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
           const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
@@ -292,30 +330,14 @@ Deno.serve(async (req) => {
         .upsert(profileUpdate, { onConflict: "user_id" });
     }
 
-    // Assign role — replace any existing role row so we can also re-role existing users.
-    const { data: existingRole } = await adminClient
-      .from("user_roles")
-      .select("id, role")
-      .eq("user_id", newUser.user.id)
-      .maybeSingle();
-
-    if (existingRole) {
-      if (existingRole.role !== role) {
-        const { error: updRoleErr } = await adminClient
-          .from("user_roles")
-          .update({ role })
-          .eq("id", existingRole.id);
-        if (updRoleErr) {
-          return new Response(JSON.stringify({ error: updRoleErr.message }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      }
-    } else {
+    // Ensure the requested role exists — ADDITIVE and idempotent. Users can hold
+    // multiple roles (UNIQUE(user_id, role)); inviting/provisioning must never
+    // wipe a role the user already has. Role removal is done explicitly elsewhere
+    // (admin panel / employee dialog), not here.
+    {
       const { error: roleError } = await adminClient
         .from("user_roles")
-        .insert({ user_id: newUser.user.id, role });
+        .upsert({ user_id: newUser.user.id, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
       if (roleError) {
         return new Response(JSON.stringify({ error: roleError.message }), {
           status: 400,
@@ -343,8 +365,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Send WhatsApp staff_welcome if phone is provided
-    if (normalizedPhone) {
+    // Send WhatsApp staff_welcome if phone is provided (and notifications enabled)
+    if (sendNotify && normalizedPhone) {
       try {
         const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
         const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
@@ -397,8 +419,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Send welcome email with credentials (if password was set)
-    if (password) {
+    // Send welcome email with credentials (if password was set and notifications enabled)
+    if (sendNotify && password) {
       const resendApiKey = Deno.env.get("RESEND_API_KEY");
       if (resendApiKey) {
         try {

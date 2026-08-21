@@ -19,6 +19,9 @@ import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
 import { isValidIfsc } from "@/lib/bankDetails";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, getUserRoles, addUserRole, removeUserRole, resendLoginNotice, type ExistingUserMatch } from "@/lib/employeeLogin";
+import { useAuth } from "@/contexts/AuthContext";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -120,6 +123,17 @@ const EmployeeProfileDialog = ({
   const [bankVerified, setBankVerified] = useState<BankVerification | null>(null);
   const [bankLoaded, setBankLoaded] = useState(false);
   const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionRole, setProvisionRole] = useState("");
+  const [provisionNotify, setProvisionNotify] = useState(true);
+  const [resending, setResending] = useState(false);
+  // Set when a login lookup finds an existing account for this email/phone —
+  // offer to map instead of creating a duplicate.
+  const [existingMatch, setExistingMatch] = useState<ExistingUserMatch | null>(null);
+  // Roles held by the linked login (additive). Editable by super_admin only,
+  // since user_roles writes are super_admin-only by RLS.
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [rolesBusy, setRolesBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -127,9 +141,11 @@ const EmployeeProfileDialog = ({
   const [isNew, setIsNew] = useState(true);
   const { toast } = useToast();
   const { can } = usePermissions();
+  const { realRole } = useAuth();
   const org = useOrgUnits();
 
   const canEditBank = can("hr", "bank_edit");
+  const canManageRoles = realRole === "super_admin";
   const editable = !readOnly;
 
   useEffect(() => {
@@ -137,6 +153,7 @@ const EmployeeProfileDialog = ({
     setLoading(true);
     setBankLoaded(false);
     setBank(emptyBank);
+    setExistingMatch(null);
 
     (async () => {
       // Look the employee row up by whichever key the caller had.
@@ -321,6 +338,134 @@ const EmployeeProfileDialog = ({
     }
   };
 
+  // Create a login for an already-saved employee who has none. Mirrors the
+  // verify-queue path (invite-user → back-fill user_id) via the shared helper.
+  const handleGenerateLogin = async () => {
+    if (isNew || !profile.id) {
+      toast({ title: "Save the profile first", description: "Save this employee once before creating a login.", variant: "destructive" });
+      return;
+    }
+    if (!profile.work_email.trim()) {
+      toast({ title: "Add a work email", description: "A login needs a work email. Add one and Save, then try again.", variant: "destructive" });
+      return;
+    }
+    if (!profile.mobile_number.trim()) {
+      toast({ title: "Add a mobile number", description: "Staff log in by WhatsApp OTP, so a mobile number is required. Add one and Save, then try again.", variant: "destructive" });
+      return;
+    }
+    if (!provisionRole) {
+      toast({ title: "Pick a role", description: "Choose the role this login should have.", variant: "destructive" });
+      return;
+    }
+    setProvisioning(true);
+    try {
+      // Detect a pre-existing account for this email/phone before creating a
+      // duplicate — if found, offer to map instead of inviting.
+      const match = await lookupExistingUser({
+        email: profile.work_email.trim(),
+        phone: profile.mobile_number || undefined,
+        role: provisionRole,
+      });
+      if (match) {
+        setExistingMatch(match);
+        return;
+      }
+      const newUserId = await provisionEmployeeLogin({
+        employeeProfileId: profile.id,
+        email: profile.work_email.trim(),
+        role: provisionRole,
+        displayName: profile.display_name || undefined,
+        phone: profile.mobile_number || undefined,
+        campus: org.campuses.find((c) => c.id === profile.campus_id)?.name || undefined,
+        notify: provisionNotify,
+      });
+      setLinkedUserId(newUserId);
+      toast({
+        title: "Login created",
+        description: provisionNotify
+          ? "Login details sent to the employee via WhatsApp + email."
+          : "Login created (no notification sent).",
+      });
+      onSuccess?.();
+    } catch (err) {
+      toast({ title: "Could not create login", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  // Re-send the "your login is ready" WhatsApp + email to a linked employee.
+  const handleResendLogin = async () => {
+    if (!linkedUserId) return;
+    setResending(true);
+    try {
+      const res = await resendLoginNotice(linkedUserId);
+      const parts = [res.whatsapp_sent ? "WhatsApp" : null, res.email_sent ? "email" : null].filter(Boolean);
+      toast({
+        title: parts.length ? "Login details resent" : "Nothing to send",
+        description: parts.length
+          ? `Sent via ${parts.join(" + ")}.`
+          : "This employee has no mobile number or email on file.",
+        variant: parts.length ? undefined : "destructive",
+      });
+    } catch (err) {
+      toast({ title: "Could not resend", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setResending(false);
+    }
+  };
+
+  // Map the employee to the already-existing account the lookup surfaced.
+  const handleMapExisting = async () => {
+    if (!profile.id || !existingMatch) return;
+    setProvisioning(true);
+    try {
+      await linkEmployeeLogin(profile.id, existingMatch.user_id);
+      setLinkedUserId(existingMatch.user_id);
+      setExistingMatch(null);
+      toast({ title: "Employee linked", description: "This employee is now mapped to the existing account." });
+      onSuccess?.();
+    } catch (err) {
+      toast({ title: "Could not link account", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  // Load the linked login's roles (additive) when a user is linked.
+  useEffect(() => {
+    if (!open || !linkedUserId || !canManageRoles) { setUserRoles([]); return; }
+    getUserRoles(linkedUserId).then(setUserRoles).catch(() => setUserRoles([]));
+  }, [open, linkedUserId, canManageRoles]);
+
+  const handleAddRole = async (role: string) => {
+    if (!linkedUserId || !role) return;
+    setRolesBusy(true);
+    try {
+      await addUserRole(linkedUserId, role);
+      setUserRoles(await getUserRoles(linkedUserId));
+      toast({ title: "Role added" });
+    } catch (err) {
+      toast({ title: "Could not add role", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRolesBusy(false);
+    }
+  };
+
+  const handleRemoveRole = async (role: string) => {
+    if (!linkedUserId) return;
+    setRolesBusy(true);
+    try {
+      await removeUserRole(linkedUserId, role);
+      setUserRoles(await getUserRoles(linkedUserId));
+      toast({ title: "Role removed" });
+    } catch (err) {
+      toast({ title: "Could not remove role", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRolesBusy(false);
+    }
+  };
+
   const handleSave = async () => {
     if (canEditBank && bank.account_number.trim() && !isValidIfsc(bank.ifsc)) {
       toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
@@ -481,6 +626,91 @@ const EmployeeProfileDialog = ({
                 {profile.display_name || userName}
                 {!linkedUserId && <span className="ml-2 text-muted-foreground/70">· no login linked</span>}
               </p>
+              {editable && !isNew && !linkedUserId && can("hr", "employees_edit") && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <select
+                    value={provisionRole}
+                    onChange={(e) => setProvisionRole(e.target.value)}
+                    disabled={provisioning}
+                    className="rounded-lg border border-input bg-background px-2 py-1 text-[11px]"
+                  >
+                    <option value="">Login role…</option>
+                    {PROVISIONABLE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button
+                    onClick={handleGenerateLogin}
+                    disabled={provisioning}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    {provisioning ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
+                    {provisioning ? "Checking…" : "Generate login"}
+                  </button>
+                  <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer">
+                    <input type="checkbox" checked={provisionNotify} onChange={(e) => setProvisionNotify(e.target.checked)} disabled={provisioning} />
+                    Notify via WhatsApp + email
+                  </label>
+                </div>
+              )}
+              {editable && linkedUserId && can("hr", "employees_edit") && (
+                <button
+                  onClick={handleResendLogin}
+                  disabled={resending}
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {resending ? <ButtonOrb state="working" /> : <User className="h-3.5 w-3.5" />}
+                  {resending ? "Sending…" : "Resend login details"}
+                </button>
+              )}
+              {editable && !isNew && !linkedUserId && existingMatch && (
+                <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                  <p>
+                    A user already exists for this email/phone:{" "}
+                    <span className="font-medium">{existingMatch.display_name || existingMatch.email || existingMatch.phone}</span>
+                    {existingMatch.role ? ` · ${existingMatch.role}` : ""}.
+                  </p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      onClick={handleMapExisting}
+                      disabled={provisioning}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-2.5 py-1 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {provisioning ? <ButtonOrb state="working" onFilled /> : null}
+                      Map to this employee
+                    </button>
+                    <button onClick={() => setExistingMatch(null)} disabled={provisioning} className="text-amber-800 hover:underline">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {editable && linkedUserId && canManageRoles && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground">Roles:</span>
+                  {userRoles.map((r) => (
+                    <span key={r} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                      {PROVISIONABLE_ROLES.find((x) => x.value === r)?.label || r.replace(/_/g, " ")}
+                      <button onClick={() => handleRemoveRole(r)} disabled={rolesBusy} title="Remove role" className="hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <select
+                    value=""
+                    onChange={(e) => { if (e.target.value) handleAddRole(e.target.value); }}
+                    disabled={rolesBusy}
+                    className="rounded-lg border border-input bg-background px-2 py-0.5 text-[11px]"
+                  >
+                    <option value="">+ Add role…</option>
+                    {PROVISIONABLE_ROLES.filter((r) => !userRoles.includes(r.value)).map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                  {rolesBusy && <ButtonOrb state="working" />}
+                </div>
+              )}
+              {editable && linkedUserId && canManageRoles && !profile.mobile_number.trim() && (
+                <p className="mt-1 text-[11px] text-amber-600">⚠ No mobile number set — this user can't log in via WhatsApp OTP. Add one above and Save.</p>
+              )}
               {editable && (
                 <label
                   className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium transition-colors ${
@@ -530,7 +760,11 @@ const EmployeeProfileDialog = ({
             <OrbLoader state="working" />
           </div>
         ) : (
-          <fieldset disabled={!editable} className="overflow-y-auto flex-1 p-6 disabled:opacity-100">
+          // The <div> is the scroll container (flex-1 min-h-0 under the pinned
+          // header). A <fieldset> can't reliably constrain flex children in
+          // Chrome, so it sits INSIDE and only carries the readOnly `disabled`.
+          <div className="overflow-y-auto flex-1 min-h-0 p-6">
+           <fieldset disabled={!editable} className="min-w-0 border-0 m-0 p-0 disabled:opacity-100">
             <Tabs defaultValue="personal" className="w-full">
               <TabsList className="bg-muted/50 border border-border rounded-xl p-1 h-auto flex-wrap mb-6">
                 <TabsTrigger value="personal" className={tabCls}><User className="h-3.5 w-3.5 mr-1" />Personal</TabsTrigger>
@@ -590,9 +824,18 @@ const EmployeeProfileDialog = ({
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <Field label="Work Email" value={profile.work_email} onChange={(v) => set("work_email", v)} type="email" />
                     <Field label="Personal Email" value={profile.personal_email} onChange={(v) => set("personal_email", v)} type="email" />
-                    <Field label="Mobile Number" value={profile.mobile_number} onChange={(v) => set("mobile_number", v)} type="tel" />
-                    <Field label="Work Number" value={profile.work_number} onChange={(v) => set("work_number", v)} type="tel" />
-                    <Field label="Residence Number" value={profile.residence_number} onChange={(v) => set("residence_number", v)} type="tel" />
+                    <div>
+                      <label className={labelCls}>Mobile Number</label>
+                      <PhoneInput value={profile.mobile_number} onChange={(v) => set("mobile_number", v)} disabled={!editable} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Work Number</label>
+                      <PhoneInput value={profile.work_number} onChange={(v) => set("work_number", v)} disabled={!editable} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Residence Number</label>
+                      <PhoneInput value={profile.residence_number} onChange={(v) => set("residence_number", v)} disabled={!editable} />
+                    </div>
                   </div>
                 </Section>
 
@@ -796,7 +1039,8 @@ const EmployeeProfileDialog = ({
                 </TabsContent>
               )}
             </Tabs>
-          </fieldset>
+           </fieldset>
+          </div>
         )}
       </DialogContent>
     </Dialog>

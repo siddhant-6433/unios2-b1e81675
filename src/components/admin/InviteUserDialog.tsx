@@ -71,6 +71,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
     }
   }, [open, defaultRole, defaultPublisherSource]);
   const [password, setPassword] = useState("");
+  const [notifyNewUser, setNotifyNewUser] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -108,6 +109,14 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
     e.preventDefault();
     if (!email.trim() || !role) return;
 
+    // Staff sign in by WhatsApp phone OTP, so a mobile number is required for a
+    // staff login. External roles (students/families/partners) don't OTP in.
+    const EXTERNAL_ROLES = ["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"];
+    if (!EXTERNAL_ROLES.includes(role) && !phone.trim()) {
+      toast({ title: "Mobile number required", description: "Staff log in via WhatsApp OTP — enter a mobile number for this login.", variant: "destructive" });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const { data, error } = await supabase.functions.invoke("invite-user", {
@@ -121,6 +130,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
           password: password.trim() || undefined,
           publisher_id: role === "publisher" ? publisherId : undefined,
           publisher_source: role === "publisher" ? publisherSource : undefined,
+          notify: notifyNewUser,
         },
       });
 
@@ -264,6 +274,11 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
             </label>
             <PhoneInput value={phone} onChange={setPhone} />
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <input type="checkbox" checked={notifyNewUser} onChange={(e) => setNotifyNewUser(e.target.checked)} />
+            Notify the user of their new login via WhatsApp + email
+          </label>
 
           <div className="relative">
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">

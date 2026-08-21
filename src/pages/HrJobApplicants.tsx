@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search } from "lucide-react";
+import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,15 @@ interface JobApplicantRow {
   lead_source: string | null;
   last_message_preview: string | null;
   inbound_message_count: number | null;
+}
+
+interface InterviewRow {
+  id: string;
+  scheduled_at: string;
+  mode: string;
+  status: string;
+  location: string | null;
+  meeting_link: string | null;
 }
 
 const STATUS_TABS: { key: Status; label: string }[] = [
@@ -79,6 +88,24 @@ const HrJobApplicants = () => {
   const [activeNotes, setActiveNotes] = useState("");
   const [activeRole, setActiveRole] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Interview scheduling
+  const [interviews, setInterviews] = useState<InterviewRow[]>([]);
+  const [showInterviewForm, setShowInterviewForm] = useState(false);
+  const [interviewDateTime, setInterviewDateTime] = useState("");
+  const [interviewMode, setInterviewMode] = useState<"in_person" | "phone" | "video">("in_person");
+  const [interviewLocation, setInterviewLocation] = useState("");
+  const [interviewMeetingLink, setInterviewMeetingLink] = useState("");
+  const [interviewNotes, setInterviewNotes] = useState("");
+  const [interviewSaving, setInterviewSaving] = useState(false);
+
+  // Offer letter
+  const [showOfferForm, setShowOfferForm] = useState(false);
+  const [offerRole, setOfferRole] = useState("");
+  const [offerCtc, setOfferCtc] = useState("");
+  const [offerJoiningDate, setOfferJoiningDate] = useState("");
+  const [offerLegalEntity, setOfferLegalEntity] = useState("");
+  const [offerSaving, setOfferSaving] = useState(false);
 
   useEffect(() => { fetchAll(); }, [tab]);
 
@@ -130,6 +157,90 @@ const HrJobApplicants = () => {
     setActive(row);
     setActiveNotes("");
     setActiveRole(row.desired_role || "");
+    setShowInterviewForm(false);
+    setInterviewDateTime("");
+    setInterviewMode("in_person");
+    setInterviewLocation("");
+    setInterviewMeetingLink("");
+    setInterviewNotes("");
+    setShowOfferForm(false);
+    setOfferRole(row.desired_role || "");
+    setOfferCtc("");
+    setOfferJoiningDate("");
+    setOfferLegalEntity("");
+    setInterviews([]);
+    fetchInterviews(row.id);
+  }
+
+  async function fetchInterviews(applicantId: string) {
+    const { data, error } = await supabase
+      .from("interviews" as any)
+      .select("id, scheduled_at, mode, status, location, meeting_link")
+      .eq("job_applicant_id", applicantId)
+      .order("scheduled_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setInterviews((data as any[]) || []);
+  }
+
+  async function scheduleInterview() {
+    if (!active || !interviewDateTime) return;
+    setInterviewSaving(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const { error } = await supabase.from("interviews" as any).insert({
+      job_applicant_id: active.id,
+      scheduled_at: new Date(interviewDateTime).toISOString(),
+      mode: interviewMode,
+      location: interviewLocation || null,
+      meeting_link: interviewMeetingLink || null,
+      notes: interviewNotes || null,
+      created_by: userData.user?.id,
+    });
+    if (error) {
+      setInterviewSaving(false);
+      toast({ title: "Failed to schedule interview", description: error.message, variant: "destructive" });
+      return;
+    }
+    const { error: statusError } = await supabase
+      .from("job_applicants" as any)
+      .update({ status: "interview" })
+      .eq("id", active.id);
+    setInterviewSaving(false);
+    if (statusError) {
+      toast({ title: "Interview scheduled, but status update failed", description: statusError.message, variant: "destructive" });
+    } else {
+      toast({ title: "Interview scheduled" });
+    }
+    setShowInterviewForm(false);
+    setInterviewDateTime("");
+    setInterviewLocation("");
+    setInterviewMeetingLink("");
+    setInterviewNotes("");
+    fetchInterviews(active.id);
+    fetchAll();
+  }
+
+  async function generateOfferLetter() {
+    if (!active) return;
+    setOfferSaving(true);
+    const { error } = await supabase.rpc("generate_hr_offer_letter" as any, {
+      _job_applicant_id: active.id,
+      _details: {
+        offered_role: offerRole || active.desired_role || null,
+        offered_ctc: offerCtc || null,
+        joining_date: offerJoiningDate || null,
+        legal_entity: offerLegalEntity || null,
+      },
+    });
+    setOfferSaving(false);
+    if (error) {
+      toast({ title: "Failed to generate offer letter", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Offer letter submitted for approval" });
+    setShowOfferForm(false);
   }
 
   async function updateStatus(id: string, status: string) {
@@ -364,6 +475,12 @@ const HrJobApplicants = () => {
                   <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "rejected")} disabled={saving}>
                     <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
                   </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowInterviewForm(v => !v)}>
+                    <CalendarClock className="h-3.5 w-3.5 mr-1" /> Schedule interview
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowOfferForm(v => !v)}>
+                    <FileText className="h-3.5 w-3.5 mr-1" /> Generate offer letter
+                  </Button>
                   <Button size="sm" variant="outline" asChild>
                     <Link to={`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`}>
                       <MessageSquare className="h-3.5 w-3.5 mr-1" /> Open chat
@@ -380,6 +497,140 @@ const HrJobApplicants = () => {
                     </Button>
                   </div>
                 </div>
+
+                {interviews.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Scheduled interviews</p>
+                    {interviews.map(iv => (
+                      <div key={iv.id} className="flex items-center justify-between text-[12.5px]">
+                        <span>
+                          {new Date(iv.scheduled_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                          {" · "}<span className="capitalize">{iv.mode.replace("_", " ")}</span>
+                          {" · "}<span className="capitalize text-muted-foreground">{iv.status}</span>
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => navigate(`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`)}
+                        >
+                          <MessageSquare className="h-3 w-3 mr-1" /> Notify on WhatsApp
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {showInterviewForm && (
+                  <div className="rounded-lg border border-border p-3 space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Schedule interview</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Date & time</label>
+                        <input
+                          type="datetime-local"
+                          value={interviewDateTime}
+                          onChange={e => setInterviewDateTime(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Mode</label>
+                        <select
+                          value={interviewMode}
+                          onChange={e => setInterviewMode(e.target.value as typeof interviewMode)}
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        >
+                          <option value="in_person">In person</option>
+                          <option value="phone">Phone</option>
+                          <option value="video">Video</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Location</label>
+                        <input
+                          value={interviewLocation}
+                          onChange={e => setInterviewLocation(e.target.value)}
+                          placeholder="e.g. Campus office"
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Meeting link</label>
+                        <input
+                          value={interviewMeetingLink}
+                          onChange={e => setInterviewMeetingLink(e.target.value)}
+                          placeholder="e.g. https://meet.google.com/..."
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Notes</label>
+                      <Textarea
+                        value={interviewNotes}
+                        onChange={e => setInterviewNotes(e.target.value)}
+                        placeholder="Optional notes for the interviewer..."
+                        className="mt-1"
+                        rows={2}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setShowInterviewForm(false)}>Cancel</Button>
+                      <Button size="sm" onClick={scheduleInterview} disabled={interviewSaving || !interviewDateTime}>
+                        {interviewSaving ? "Scheduling..." : "Schedule"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {showOfferForm && (
+                  <div className="rounded-lg border border-border p-3 space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Generate offer letter</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Offered role</label>
+                        <input
+                          value={offerRole}
+                          onChange={e => setOfferRole(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Offered CTC</label>
+                        <input
+                          value={offerCtc}
+                          onChange={e => setOfferCtc(e.target.value)}
+                          placeholder="e.g. 4,80,000 per annum"
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Joining date</label>
+                        <input
+                          type="date"
+                          value={offerJoiningDate}
+                          onChange={e => setOfferJoiningDate(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Legal entity (optional)</label>
+                        <input
+                          value={offerLegalEntity}
+                          onChange={e => setOfferLegalEntity(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setShowOfferForm(false)}>Cancel</Button>
+                      <Button size="sm" onClick={generateOfferLetter} disabled={offerSaving || !offerRole || !offerJoiningDate}>
+                        {offerSaving ? "Submitting..." : "Generate"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
