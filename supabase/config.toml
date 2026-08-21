@@ -238,6 +238,11 @@ verify_jwt = false
 [functions.pay-link]
 verify_jwt = false
 
+# Validates the staff JWT itself, then forwards it to create-payment-link per
+# student. verify_jwt=false so the manual auth (and clear 401s) run in-function.
+[functions.fee-notify-bulk]
+verify_jwt = false
+
 [functions.zoho-books-webhook]
 verify_jwt = false
 

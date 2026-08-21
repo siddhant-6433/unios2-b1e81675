@@ -173,6 +173,11 @@ Deno.serve(async (req) => {
           }))
         : null;
     const expiresDays = Number.isFinite(Number(parsed.expires_days)) ? Number(parsed.expires_days) : 7;
+    // Live fee_due link: pay-link recomputes base + late fine from the ledger at
+    // pay-time. `amount` here is only a send-time snapshot for display/audit.
+    const liveFee = parsed.live_fee === true;
+    const feeTerm = parsed.fee_term ? String(parsed.fee_term) : null;
+    const feeCampaignId = isUuid(parsed.fee_campaign_id) ? String(parsed.fee_campaign_id) : null;
     const sendChannel = String(parsed.send_channel || "none"); // 'whatsapp' | 'email' | 'both' | 'none'
     const wantsWhatsApp = sendChannel === "whatsapp" || sendChannel === "both";
     const wantsEmail = sendChannel === "email" || sendChannel === "both";
@@ -189,7 +194,10 @@ Deno.serve(async (req) => {
     // gateway='choice' skips both hosted links: gateway/short_url stay null and
     // the public /pay/<token> page shows a gateway picker. That is the cheap
     // path — Razorpay's hosted link locks the payer into Razorpay's MDR.
-    const gatewayPref = String(parsed.gateway || "auto").toLowerCase();
+    // Live links must not mint a hosted gateway link (that bakes a fixed amount);
+    // the amount is resolved at pay-time on the branded /pay page, so treat them
+    // like a payer-choice link — no hosted short_url.
+    const gatewayPref: string = liveFee ? "choice" : String(parsed.gateway || "auto").toLowerCase();
     const payerChoice = gatewayPref === "choice";
 
     if (!["pre_admission_token", "fee_due", "custom"].includes(purpose)) {
@@ -197,6 +205,11 @@ Deno.serve(async (req) => {
     }
     if (!leadId && !studentId) return json({ error: "lead_id or student_id is required" }, 400);
     if (!Number.isFinite(amount) || amount <= 0) return json({ error: "amount must be > 0" }, 400);
+    // A live link is billed off the student's ledger at pay-time, so it needs an
+    // admitted student and a term to bill.
+    if (liveFee && (!studentId || !feeTerm)) {
+      return json({ error: "live_fee links require student_id and fee_term" }, 400);
+    }
 
     // Validate the breakup (trust boundary): positive amounts, known fee heads,
     // and total == amount.
@@ -345,6 +358,9 @@ Deno.serve(async (req) => {
         amount,
         note: effectiveNote,
         allocations,
+        live_fee: liveFee,
+        fee_term: liveFee ? feeTerm : null,
+        fee_campaign_id: feeCampaignId,
         created_by: user.id,
         consultant_id: consultantId,
         expires_at: new Date(Date.now() + expiresDays * 86400000).toISOString(),
@@ -365,7 +381,7 @@ Deno.serve(async (req) => {
     const wantRazorpay = !payerChoice && (gatewayPref === "razorpay" || gatewayPref === "auto");
     const wantEasebuzz = !payerChoice && (gatewayPref === "easebuzz" || gatewayPref === "auto");
 
-    if (wantRazorpay && keyId && keySecret && gatewayPref !== "easebuzz") {
+    if (wantRazorpay && keyId && keySecret) {
       const rp = await razorpayCreatePaymentLink(keyId, keySecret, {
         amount: Math.round(amount * 100),
         currency: "INR",
