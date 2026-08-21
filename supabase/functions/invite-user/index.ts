@@ -96,10 +96,12 @@ Deno.serve(async (req) => {
         .select("display_name, email, phone")
         .eq("user_id", existingId)
         .maybeSingle();
+      // A user may hold several roles — don't .maybeSingle() (it throws on >1).
       const { data: roleRow } = await adminClient
         .from("user_roles")
         .select("role")
         .eq("user_id", existingId)
+        .limit(1)
         .maybeSingle();
       return new Response(JSON.stringify({
         existing: true,
@@ -325,30 +327,14 @@ Deno.serve(async (req) => {
         .upsert(profileUpdate, { onConflict: "user_id" });
     }
 
-    // Assign role — replace any existing role row so we can also re-role existing users.
-    const { data: existingRole } = await adminClient
-      .from("user_roles")
-      .select("id, role")
-      .eq("user_id", newUser.user.id)
-      .maybeSingle();
-
-    if (existingRole) {
-      if (existingRole.role !== role) {
-        const { error: updRoleErr } = await adminClient
-          .from("user_roles")
-          .update({ role })
-          .eq("id", existingRole.id);
-        if (updRoleErr) {
-          return new Response(JSON.stringify({ error: updRoleErr.message }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      }
-    } else {
+    // Ensure the requested role exists — ADDITIVE and idempotent. Users can hold
+    // multiple roles (UNIQUE(user_id, role)); inviting/provisioning must never
+    // wipe a role the user already has. Role removal is done explicitly elsewhere
+    // (admin panel / employee dialog), not here.
+    {
       const { error: roleError } = await adminClient
         .from("user_roles")
-        .insert({ user_id: newUser.user.id, role });
+        .upsert({ user_id: newUser.user.id, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
       if (roleError) {
         return new Response(JSON.stringify({ error: roleError.message }), {
           status: 400,

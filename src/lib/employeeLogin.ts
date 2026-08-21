@@ -24,6 +24,27 @@ export const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
   { value: "librarian", label: "Librarian" },
 ];
 
+/** Every role a user currently holds (additive). */
+export async function getUserRoles(userId: string): Promise<string[]> {
+  const { data, error } = await supabase.from("user_roles").select("role").eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => (r as { role: string }).role);
+}
+
+/** Add a role (idempotent). Writes are super_admin-only by RLS. */
+export async function addUserRole(userId: string, role: string): Promise<void> {
+  const { error } = await supabase
+    .from("user_roles")
+    .upsert({ user_id: userId, role } as never, { onConflict: "user_id,role", ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
+}
+
+/** Remove one role. Writes are super_admin-only by RLS. */
+export async function removeUserRole(userId: string, role: string): Promise<void> {
+  const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", role as never);
+  if (error) throw new Error(error.message);
+}
+
 export interface ExistingUserMatch {
   user_id: string;
   display_name: string | null;

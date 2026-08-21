@@ -19,7 +19,8 @@ import { LettersPanel } from "@/components/hr/LettersPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
 import { isValidIfsc } from "@/lib/bankDetails";
-import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, type ExistingUserMatch } from "@/lib/employeeLogin";
+import { PROVISIONABLE_ROLES, provisionEmployeeLogin, lookupExistingUser, linkEmployeeLogin, getUserRoles, addUserRole, removeUserRole, type ExistingUserMatch } from "@/lib/employeeLogin";
+import { useAuth } from "@/contexts/AuthContext";
 
 type EmployeeProfileRow = Database["public"]["Tables"]["employee_profiles"]["Row"];
 
@@ -126,6 +127,10 @@ const EmployeeProfileDialog = ({
   // Set when a login lookup finds an existing account for this email/phone —
   // offer to map instead of creating a duplicate.
   const [existingMatch, setExistingMatch] = useState<ExistingUserMatch | null>(null);
+  // Roles held by the linked login (additive). Editable by super_admin only,
+  // since user_roles writes are super_admin-only by RLS.
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [rolesBusy, setRolesBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -133,9 +138,11 @@ const EmployeeProfileDialog = ({
   const [isNew, setIsNew] = useState(true);
   const { toast } = useToast();
   const { can } = usePermissions();
+  const { realRole } = useAuth();
   const org = useOrgUnits();
 
   const canEditBank = can("hr", "bank_edit");
+  const canManageRoles = realRole === "super_admin";
   const editable = !readOnly;
 
   useEffect(() => {
@@ -391,6 +398,40 @@ const EmployeeProfileDialog = ({
     }
   };
 
+  // Load the linked login's roles (additive) when a user is linked.
+  useEffect(() => {
+    if (!open || !linkedUserId || !canManageRoles) { setUserRoles([]); return; }
+    getUserRoles(linkedUserId).then(setUserRoles).catch(() => setUserRoles([]));
+  }, [open, linkedUserId, canManageRoles]);
+
+  const handleAddRole = async (role: string) => {
+    if (!linkedUserId || !role) return;
+    setRolesBusy(true);
+    try {
+      await addUserRole(linkedUserId, role);
+      setUserRoles(await getUserRoles(linkedUserId));
+      toast({ title: "Role added" });
+    } catch (err) {
+      toast({ title: "Could not add role", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRolesBusy(false);
+    }
+  };
+
+  const handleRemoveRole = async (role: string) => {
+    if (!linkedUserId) return;
+    setRolesBusy(true);
+    try {
+      await removeUserRole(linkedUserId, role);
+      setUserRoles(await getUserRoles(linkedUserId));
+      toast({ title: "Role removed" });
+    } catch (err) {
+      toast({ title: "Could not remove role", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRolesBusy(false);
+    }
+  };
+
   const handleSave = async () => {
     if (canEditBank && bank.account_number.trim() && !isValidIfsc(bank.ifsc)) {
       toast({ title: "Check the IFSC", description: "An account number needs a valid IFSC (e.g. HDFC0001234).", variant: "destructive" });
@@ -594,6 +635,31 @@ const EmployeeProfileDialog = ({
                   </div>
                 </div>
               )}
+              {editable && linkedUserId && canManageRoles && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground">Roles:</span>
+                  {userRoles.map((r) => (
+                    <span key={r} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                      {PROVISIONABLE_ROLES.find((x) => x.value === r)?.label || r.replace(/_/g, " ")}
+                      <button onClick={() => handleRemoveRole(r)} disabled={rolesBusy} title="Remove role" className="hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <select
+                    value=""
+                    onChange={(e) => { if (e.target.value) handleAddRole(e.target.value); }}
+                    disabled={rolesBusy}
+                    className="rounded-lg border border-input bg-background px-2 py-0.5 text-[11px]"
+                  >
+                    <option value="">+ Add role…</option>
+                    {PROVISIONABLE_ROLES.filter((r) => !userRoles.includes(r.value)).map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                  {rolesBusy && <ButtonOrb state="working" />}
+                </div>
+              )}
               {editable && (
                 <label
                   className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[11px] font-medium transition-colors ${
@@ -643,7 +709,11 @@ const EmployeeProfileDialog = ({
             <OrbLoader state="working" />
           </div>
         ) : (
-          <fieldset disabled={!editable} className="overflow-y-auto flex-1 p-6 disabled:opacity-100">
+          // The <div> is the scroll container (flex-1 min-h-0 under the pinned
+          // header). A <fieldset> can't reliably constrain flex children in
+          // Chrome, so it sits INSIDE and only carries the readOnly `disabled`.
+          <div className="overflow-y-auto flex-1 min-h-0 p-6">
+           <fieldset disabled={!editable} className="min-w-0 border-0 m-0 p-0 disabled:opacity-100">
             <Tabs defaultValue="personal" className="w-full">
               <TabsList className="bg-muted/50 border border-border rounded-xl p-1 h-auto flex-wrap mb-6">
                 <TabsTrigger value="personal" className={tabCls}><User className="h-3.5 w-3.5 mr-1" />Personal</TabsTrigger>
@@ -909,7 +979,8 @@ const EmployeeProfileDialog = ({
                 </TabsContent>
               )}
             </Tabs>
-          </fieldset>
+           </fieldset>
+          </div>
         )}
       </DialogContent>
     </Dialog>
