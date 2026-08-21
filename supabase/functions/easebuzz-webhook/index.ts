@@ -132,6 +132,7 @@ Deno.serve(async (req) => {
     if (leadPaymentId && /^[0-9a-f-]{36}$/i.test(leadPaymentId)) {
       const settled = await settleLeadPaymentRow(admin, leadPaymentId, paymentRef, {
         gateway: "easebuzz",
+        bankRefNum: params.get("bank_ref_num"),
         source: "webhook",
         notify: true,
         supabaseUrl,

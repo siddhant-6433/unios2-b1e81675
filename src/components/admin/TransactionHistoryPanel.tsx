@@ -154,6 +154,7 @@ export default function TransactionHistoryPanel() {
   const [togglingId, setTogglingId]       = useState<string | null>(null);
   const [reconciling, setReconciling]     = useState(false);
   const [iciciVerifyingId, setIciciVerifyingId] = useState<string | null>(null);
+  const [leadVerifyingId, setLeadVerifyingId] = useState<string | null>(null);
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
   // Admission numbers of students whose fee is consultant-managed (cashier note).
   const [consultantManagedNos, setConsultantManagedNos] = useState<Set<string>>(new Set());
@@ -368,10 +369,13 @@ export default function TransactionHistoryPanel() {
     setReconcileResult(null);
     let updated = 0;
     let skipped = 0;
-    // Reconcile only applies to applications-table rows. lead_payment rows
-    // shown in this view come from the offer flow and have their own
-    // confirm path; we mustn't call verify-payment with their synthetic ID.
+    // verify-payment is keyed on applications.pending_txnid, so it only works
+    // for applications-table rows — a lead_payment's synthetic LP-… id means
+    // nothing to it. Lead payments are settled by the same date sweep the UDF1
+    // button uses (matched on txnid), so route them there instead of skipping
+    // them entirely: a stuck lead payment used to have no manual escape hatch.
     const pending = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment");
+    const pendingLead = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0 && t.source === "lead_payment");
     for (const txn of pending) {
       try {
         const { data } = await supabase.functions.invoke("easebuzz-payment", {
@@ -381,7 +385,29 @@ export default function TransactionHistoryPanel() {
         else if (data?.error) skipped++;
       } catch (_) { skipped++; }
     }
-    setReconcileResult(`Reconciled ${updated} of ${pending.length} pending payments${skipped ? ` (${skipped} unverifiable — try Mark Paid by UTR)` : ""}`);
+
+    let leadNote = "";
+    if (pendingLead.length > 0) {
+      try {
+        const { data } = await supabase.functions.invoke("easebuzz-payment", {
+          body: { action: "reconcile-by-udf1", days_back: 30 },
+        });
+        console.log("[reconcile-pending] lead payment sweep:", data);
+        const lp = data?.lead_payments;
+        const settledLead = lp?.settled?.length || 0;
+        updated += settledLead;
+        const dupes = (lp?.skipped || []).filter((x: any) => x.reason === "duplicate_of_existing_receipt").length;
+        leadNote = ` · ${settledLead}/${pendingLead.length} candidate payments settled` +
+          (dupes ? ` · ${dupes} skipped as possible duplicates of an existing receipt — check manually` : "");
+      } catch (e: any) {
+        leadNote = ` · candidate-payment sweep failed: ${e.message}`;
+      }
+    }
+
+    setReconcileResult(
+      `Reconciled ${updated} of ${pending.length + pendingLead.length} pending payments` +
+      `${skipped ? ` (${skipped} unverifiable — try Mark Paid by UTR)` : ""}${leadNote}`
+    );
     if (updated > 0) fetchAppTxns();
     setReconciling(false);
   };
@@ -408,18 +434,65 @@ export default function TransactionHistoryPanel() {
       if (data?.error) throw new Error(data.error + (data.attempts ? ` — see browser console for raw EaseBuzz response` : ""));
       const r = data?.reconciled?.length || 0;
       const s = data?.skipped?.length || 0;
+      const lp = data?.lead_payments;
+      const lpSettled = lp?.settled?.length || 0;
+      const lpDupes = (lp?.skipped || []).filter((x: any) => x.reason === "duplicate_of_existing_receipt").length;
       const win = data?.window ? `${data.window.start_iso}→${data.window.end_iso}` : "?";
       setReconcileResult(
-        `EaseBuzz UDF1 sweep · window ${win} · ` +
+        `EaseBuzz sweep · window ${win} · ` +
         `attempt=${data?.chosen_attempt || "none-succeeded"} · ` +
         `${data?.eb_txns_in_window ?? 0} txns · ${data?.eb_successful_with_udf1 ?? 0} success+udf1 · ` +
-        `matched: ${r}${s ? ` · skipped: ${s}` : ""} · open DevTools console for raw EB payload`
+        `applications matched: ${r}${s ? ` (${s} skipped)` : ""} · ` +
+        `candidate payments settled: ${lpSettled}/${lp?.scanned ?? 0}` +
+        (lpDupes ? ` · ${lpDupes} look like duplicates of an existing receipt — verify before marking paid` : "") +
+        ` · open DevTools console for raw EB payload`
       );
-      if (r > 0) fetchAppTxns();
+      if (r > 0 || lpSettled > 0) fetchAppTxns();
     } catch (e: any) {
       setReconcileResult(`Reconcile by UDF1 failed: ${e.message}`);
     } finally {
       setReconciling(false);
+    }
+  };
+
+  // Verify ONE pending candidate payment against EaseBuzz. Matched on the
+  // txnid we persisted at initiate, so it works even when the candidate paid
+  // inside a UPI app and never came back to the browser (the surl path, which
+  // is otherwise the only settlement route for these rows).
+  const verifyLeadPayment = async (t: AppTransaction) => {
+    if (!t.lead_payment_id) return;
+    setLeadVerifyingId(t.lead_payment_id);
+    setReconcileResult(null);
+    try {
+      const ageDays = Math.ceil((Date.now() - new Date(t.created_at || Date.now()).getTime()) / 86400000);
+      const { data, error } = await supabase.functions.invoke("easebuzz-payment", {
+        body: {
+          action: "reconcile-by-udf1",
+          days_back: Math.max(1, Math.min(30, ageDays + 1)),
+          lead_payment_id: t.lead_payment_id,
+        },
+      });
+      console.log("[verify-lead-payment] response:", data);
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      const lp = data?.lead_payments;
+      if (lp?.settled?.length) {
+        setReconcileResult(`${t.full_name}: settled ${fmtAmount(lp.settled[0].amount)} (EaseBuzz ${lp.settled[0].easepayid}). Receipt is generating.`);
+        fetchAppTxns();
+        return;
+      }
+      const why = lp?.skipped?.[0];
+      const reasons: Record<string, string> = {
+        no_success_txn_in_window: "EaseBuzz has no successful transaction for this attempt — the candidate did not complete the payment.",
+        amount_mismatch: `Amount mismatch: we expected ${fmtAmount(t.fee_amount)}, EaseBuzz settled ${fmtAmount(why?.got || 0)}. Not settled — check manually.`,
+        duplicate_of_existing_receipt: `Already receipted as payment ${why?.other_receipt || why?.other_payment} — this looks like the same money entered twice. Not settled.`,
+        already_settled: "Already settled.",
+      };
+      setReconcileResult(`${t.full_name}: ${reasons[why?.reason] || why?.reason || "no match found at EaseBuzz"}`);
+    } catch (e: any) {
+      setReconcileResult(`Verify failed: ${e.message}`);
+    } finally {
+      setLeadVerifyingId(null);
     }
   };
 
@@ -990,6 +1063,18 @@ export default function TransactionHistoryPanel() {
                               <Receipt className="h-3.5 w-3.5" /> Receipt
                             </button>
                           )
+                        ) : t.payment_status === "pending" && t.fee_amount > 0 && t.source === "lead_payment" ? (
+                          <button
+                            onClick={() => verifyLeadPayment(t)}
+                            disabled={leadVerifyingId === t.lead_payment_id}
+                            className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-60"
+                            title="Ask EaseBuzz whether this payment actually succeeded, and settle it if so"
+                          >
+                            {leadVerifyingId === t.lead_payment_id
+                              ? <ButtonOrb state="solving" />
+                              : <CheckCircle2 className="h-3.5 w-3.5" />}
+                            Verify with EaseBuzz
+                          </button>
                         ) : t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment" ? (
                           <div className="flex flex-wrap gap-1.5">
                             <button

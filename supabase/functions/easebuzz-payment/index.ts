@@ -5,6 +5,7 @@ import {
   settlePaymentLink,
   settleStudentFeePayment,
 } from "../_shared/gateway-settlement.ts";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +22,289 @@ async function sha512(message: string): Promise<string> {
 
 function easebuzzAmount(txn: any): number {
   return Number(txn?.amount ?? txn?.total_debit_amount ?? txn?.net_debit_amount ?? 0);
+}
+
+/**
+ * Pull EaseBuzz's own transaction list for the last N days.
+ *
+ * Endpoint contract (verified against EaseBuzz Java SDK, and the only
+ * EaseBuzz read API observed working in production):
+ *   POST https://dashboard.easebuzz.in/transaction/v2/retrieve/date
+ *   Body: { key, merchant_email, hash, date_range:{start_date,end_date} }
+ *   Hash: SHA512(merchant_key|merchant_email|start_date|end_date|salt)
+ *   Response: { status, data: [ {txnid, easepayid, amount, status, udf1..}, ], next }
+ *
+ * The date format EaseBuzz accepts is inconsistent across SDK versions, so we
+ * try each candidate shape until one returns rows. Pagination is ~20 rows per
+ * page via a top-level base64 `next` cursor — following it is mandatory or a
+ * success sitting on page 2 is invisible while a userCancelled retry on page 1
+ * gets reported instead.
+ */
+async function fetchEasebuzzTxnsByDate(opts: {
+  merchantKey: string;
+  merchantSalt: string;
+  merchantEmail: string;
+  dashboardBase: string;
+  daysBack: number;
+  maxPages?: number;
+}): Promise<{ rows: any[]; attempts: any[]; chosen: string | null; firstParsed: any; window: { start_iso: string; end_iso: string; days_back: number } }> {
+  const fmtIso = (d: Date) => d.toISOString().slice(0, 10);                       // YYYY-MM-DD
+  const fmtDmy = (d: Date) => { const s = d.toISOString().slice(0, 10).split("-"); return `${s[2]}-${s[1]}-${s[0]}`; }; // DD-MM-YYYY
+  const now = new Date();
+  const from = new Date(Date.now() - opts.daysBack * 86400000);
+  const endIso = fmtIso(now), startIso = fmtIso(from);
+  const endDmy = fmtDmy(now), startDmy = fmtDmy(from);
+  const { merchantKey, merchantSalt, merchantEmail, dashboardBase } = opts;
+  const maxPages = opts.maxPages ?? 50;
+
+  const candidates: Array<{ label: string; startDate: string; endDate: string; body: any }> = [
+    { label: "v2_iso_daterange", startDate: startIso, endDate: endIso,
+      body: { key: merchantKey, merchant_email: merchantEmail, date_range: { start_date: startIso, end_date: endIso } } },
+    { label: "v2_dmy_daterange", startDate: startDmy, endDate: endDmy,
+      body: { key: merchantKey, merchant_email: merchantEmail, date_range: { start_date: startDmy, end_date: endDmy } } },
+    { label: "v2_iso_flat", startDate: startIso, endDate: endIso,
+      body: { key: merchantKey, merchant_email: merchantEmail, start_date: startIso, end_date: endIso } },
+  ];
+
+  const attempts: any[] = [];
+  const allRows: any[] = [];
+  let chosen: string | null = null;
+  let anyParsed: any = null;
+
+  for (const c of candidates) {
+    // Hash sequence per Java SDK: merchant_key|merchant_email|start_date|end_date|salt
+    const reqHash = await sha512(`${merchantKey}|${merchantEmail}|${c.startDate}|${c.endDate}|${merchantSalt}`);
+    let cursor: string | null = null;
+    let pageNum = 0;
+    let firstParsed: any = null;
+    let totalRows = 0;
+    let stopReason = "ok";
+    while (pageNum < maxPages) {
+      pageNum++;
+      const payload: any = { ...c.body, hash: reqHash };
+      if (cursor) payload.cursor = cursor;
+      let httpStatus = 0; let raw = "";
+      try {
+        const ebRes = await fetch(`${dashboardBase}/transaction/v2/retrieve/date`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        httpStatus = ebRes.status;
+        raw = await ebRes.text();
+      } catch (e) {
+        stopReason = `fetch_error:${String(e)}`;
+        break;
+      }
+      let parsed: any; try { parsed = JSON.parse(raw); } catch { parsed = { _unparsed: raw.slice(0, 500) }; }
+      if (pageNum === 1) firstParsed = parsed;
+      if (httpStatus !== 200 || parsed?.status === false) { stopReason = `http_${httpStatus}_ebStatus_${parsed?.status}`; break; }
+      const pageRows: any[] = Array.isArray(parsed?.data)
+        ? parsed.data
+        : Array.isArray(parsed?.data?.transaction_details) ? parsed.data.transaction_details : [];
+      totalRows += pageRows.length;
+      allRows.push(...pageRows);
+      cursor = parsed?.next || null;
+      console.log(`[easebuzz] date-sweep attempt=${c.label} page=${pageNum} rows=${pageRows.length} next=${cursor ? "yes" : "no"}`);
+      if (!cursor) { stopReason = "exhausted"; break; }
+    }
+    attempts.push({ label: c.label, pages: pageNum, total_rows: totalRows, stop: stopReason, sample: firstParsed });
+    if (!anyParsed && firstParsed) anyParsed = firstParsed;
+    if (totalRows > 0) { chosen = c.label; break; }
+  }
+
+  return {
+    rows: allRows, attempts, chosen, firstParsed: anyParsed,
+    window: { start_iso: startIso, end_iso: endIso, days_back: opts.daysBack },
+  };
+}
+
+/**
+ * Single-transaction lookup: POST /transaction/v2/retrieve, hash SHA512(key|txnid|salt).
+ *
+ * Which host serves this differs between EaseBuzz plans — `pay.easebuzz.in`
+ * has been returning an HTML page (`<!DOCTYPE …`), which blew up as
+ * "Unexpected token '<'" on every verify-payment call. Rather than guess,
+ * try each host and take the first that answers with JSON.
+ */
+async function easebuzzRetrieveTxn(
+  txnid: string,
+  cfg: { merchantKey: string; merchantSalt: string; hosts: string[] },
+): Promise<{ txn: any | null; error?: string; nonJson?: string; raw?: any }> {
+  const hash = await sha512(`${cfg.merchantKey}|${txnid}|${cfg.merchantSalt}`);
+  let lastNonJson: string | undefined;
+  let lastError: string | undefined;
+  for (const host of cfg.hosts) {
+    let raw = "";
+    try {
+      const res = await fetch(`${host}/transaction/v2/retrieve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ key: cfg.merchantKey, txnid, hash }).toString(),
+      });
+      raw = await res.text();
+    } catch (e) {
+      lastError = String(e);
+      continue;
+    }
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch {
+      lastNonJson = raw.slice(0, 200);
+      console.error(`[easebuzz] retrieve ${host} returned non-JSON: ${lastNonJson}`);
+      continue;
+    }
+    if (parsed?.status === 1 || parsed?.status === true) {
+      // dashboard.easebuzz.in returns the txn under `msg`; the PHP SDK's wrapper
+      // documents `data`. Accept either — reading only `data` made every
+      // successful lookup look like "no such transaction".
+      const payload = parsed.msg ?? parsed.data;
+      const txn = Array.isArray(payload) ? payload[0] : payload;
+      // status:1 with an empty payload means "we have no such txnid", not success.
+      if (txn && typeof txn === "object") return { txn, raw: parsed };
+      return { txn: null, error: "eb_no_data", raw: parsed };
+    }
+    return { txn: null, error: parsed?.error_desc || parsed?.message || `eb_status_${parsed?.status}`, raw: parsed };
+  }
+  return { txn: null, error: lastError || "EaseBuzz retrieve returned no JSON from any host", nonJson: lastNonJson };
+}
+
+/** EaseBuzz statuses that mean "the money is ours". */
+function isEasebuzzSuccess(txn: any): boolean {
+  const st = String(txn?.status || txn?.txn_status || "").toLowerCase();
+  return st === "success" || st === "settled" || st === "captured";
+}
+
+/** Bank/UPI reference (RRN) — the one id a human also sees on their statement. */
+function easebuzzBankRef(txn: any): string | null {
+  const raw = String(txn?.bank_ref_num ?? txn?.bank_ref_no ?? "").trim();
+  if (!raw || raw.toUpperCase() === "NA") return null;
+  return raw;
+}
+
+/**
+ * Settle pending `lead_payments` rows against an EaseBuzz date sweep.
+ *
+ * Matching is on `txnid` — the merchant reference WE generated at initiate
+ * (`LP<lead_payment_id first 8><epoch ms>`) and persisted on the row. That's an
+ * exact key, unlike udf1 (which for lead payments is the lead id, not an
+ * application id, which is why the UDF1 sweep could never match these rows).
+ */
+async function settleLeadPaymentsFromSweep(
+  admin: any,
+  rows: any[],
+  opts: {
+    supabaseUrl: string;
+    serviceKey: string;
+    lookbackDays: number;
+    dryRun?: boolean;
+    leadPaymentId?: string;
+    /**
+     * Per-txn fallback. The listing API has been observed returning a window
+     * that doesn't contain our txns at all, so never trust "not in the sweep"
+     * as "did not pay" — ask EaseBuzz about the specific txnid before giving up.
+     */
+    retrieve?: { merchantKey: string; merchantSalt: string; hosts: string[] };
+  },
+): Promise<{ scanned: number; settled: any[]; skipped: any[]; would_settle: any[] }> {
+  const byTxnid = new Map<string, any>();
+  for (const t of rows) {
+    if (!isEasebuzzSuccess(t)) continue;
+    const txnid = String(t?.txnid || "").trim();
+    if (!txnid) continue;
+    const existing = byTxnid.get(txnid);
+    if (!existing) { byTxnid.set(txnid, t); continue; }
+    const prev = new Date(existing?.addedon || existing?.transaction_date || 0).getTime();
+    const curr = new Date(t?.addedon || t?.transaction_date || 0).getTime();
+    if (curr > prev) byTxnid.set(txnid, t);
+  }
+
+  // +2 days of slack over the EaseBuzz window: a txn initiated just before
+  // midnight can settle on the next calendar day.
+  const since = new Date(Date.now() - (opts.lookbackDays + 2) * 86400000).toISOString();
+  let q = admin
+    .from("lead_payments")
+    .select("id, amount, transaction_ref, lead_id, type, created_at")
+    .eq("gateway", "easebuzz")
+    .eq("status", "pending")
+    .like("transaction_ref", "LP%")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (opts.leadPaymentId) q = q.eq("id", opts.leadPaymentId);
+  else q = q.gte("created_at", since);
+
+  const { data: pending, error } = await q;
+  if (error) throw new Error(`lead_payments query failed: ${error.message}`);
+
+  const settled: any[] = [];
+  const would_settle: any[] = [];
+  const skipped: any[] = [];
+
+  for (const row of pending || []) {
+    const txnid = String(row.transaction_ref);
+    let match = byTxnid.get(txnid);
+    let matchedVia = "date_sweep";
+    if (!match && opts.retrieve) {
+      const r = await easebuzzRetrieveTxn(txnid, opts.retrieve);
+      if (r.txn && isEasebuzzSuccess(r.txn)) { match = r.txn; matchedVia = "per_txn_retrieve"; }
+      else if (!match) {
+        skipped.push({ id: row.id, txnid, reason: "no_success_txn", eb_status: r.txn?.status || r.error || "not_found", eb_raw: JSON.stringify(r.raw ?? r.nonJson ?? null).slice(0, 300) });
+        continue;
+      }
+    }
+    if (!match) { skipped.push({ id: row.id, txnid, reason: "no_success_txn_in_window" }); continue; }
+
+    // Never settle for an amount that doesn't match what we asked for.
+    const got = easebuzzAmount(match);
+    const expected = Number(row.amount || 0);
+    if (expected > 0 && Math.abs(expected - got) > 0.01) {
+      skipped.push({ id: row.id, txnid, reason: "amount_mismatch", expected, got });
+      continue;
+    }
+
+    const easepayid = String(match?.easepayid || match?.mihpayid || txnid).trim();
+    const bankRef = easebuzzBankRef(match);
+
+    // Duplicate guard: the same money may already have been keyed in by hand
+    // as an offline payment. Flag it for a human instead of minting a second
+    // receipt. `bank_ref_num` is the operator-visible RRN, so it's the field a
+    // manual entry is most likely to carry.
+    const dupOr = [
+      `transaction_ref.eq.${easepayid}`,
+      ...(bankRef ? [`bank_ref_num.eq.${bankRef}`, `transaction_ref.eq.${bankRef}`] : []),
+    ].join(",");
+    const { data: dup } = await admin
+      .from("lead_payments")
+      .select("id, receipt_no, gateway, transaction_ref")
+      .eq("status", "confirmed")
+      .neq("id", row.id)
+      .or(dupOr)
+      .limit(1)
+      .maybeSingle();
+    if (dup?.id) {
+      skipped.push({ id: row.id, txnid, reason: "duplicate_of_existing_receipt", other_payment: dup.id, other_receipt: dup.receipt_no });
+      continue;
+    }
+
+    if (opts.dryRun) {
+      would_settle.push({ id: row.id, lead_id: row.lead_id, txnid, easepayid, bank_ref_num: bankRef, amount: got, matched_via: matchedVia });
+      continue;
+    }
+
+    const result = await settleLeadPaymentRow(admin, row.id, easepayid, {
+      gateway: "easebuzz",
+      claimId: easepayid,
+      bankRefNum: bankRef,
+      source: "reconcile",
+      notify: true,
+      supabaseUrl: opts.supabaseUrl,
+      serviceKey: opts.serviceKey,
+    });
+    if (!result.ok) { skipped.push({ id: row.id, txnid, reason: "settle_failed", detail: result.message }); continue; }
+    if (result.already) { skipped.push({ id: row.id, txnid, reason: "already_settled" }); continue; }
+    settled.push({ id: row.id, lead_id: row.lead_id, txnid, easepayid, bank_ref_num: bankRef, amount: got, matched_via: matchedVia });
+  }
+
+  return { scanned: pending?.length ?? 0, settled, skipped, would_settle };
 }
 
 function returnPage(title: string, message: string, isSuccess: boolean): Response {
@@ -134,6 +418,12 @@ Deno.serve(async (req) => {
       ? "https://testpay.easebuzz.in"
       : "https://pay.easebuzz.in";
 
+    // Single-txn retrieve is served by dashboard.* on our plan; pay.* answers
+    // with an HTML page. Keep both and let easebuzzRetrieveTxn pick.
+    const retrieveHosts = ebEnv === "test"
+      ? ["https://testdashboard.easebuzz.in", "https://testpay.easebuzz.in"]
+      : ["https://dashboard.easebuzz.in", "https://pay.easebuzz.in"];
+
     const rawBody = await req.text();
     const contentType = req.headers.get("content-type") || "";
 
@@ -237,6 +527,7 @@ Deno.serve(async (req) => {
           // Claim-once: pending→confirmed only; never inserts a second row.
           const settled = await settleLeadPaymentRow(admin, udf2, paymentRef, {
             gateway: "easebuzz",
+            bankRefNum: params.get("bank_ref_num"),
             source: "surl",
             notify: true,
             supabaseUrl,
@@ -579,25 +870,14 @@ Deno.serve(async (req) => {
         );
       }
 
-      const hashInput = `${merchantKey}|${txnid}|${merchantSalt}`;
-      const hash = await sha512(hashInput);
-      const formData = new URLSearchParams({ key: merchantKey, txnid, hash });
-
-      const res = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString(),
-      });
-
-      const data = await res.json();
-      if (!res.ok || data.status !== 1) {
+      const retrieved = await easebuzzRetrieveTxn(txnid, { merchantKey, merchantSalt, hosts: retrieveHosts });
+      if (!retrieved.txn) {
         return new Response(
-          JSON.stringify({ error: data.error_desc || "Failed to verify payment" }),
-          { status: res.ok ? 400 : res.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: retrieved.error || "Failed to verify payment", non_json: retrieved.nonJson }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
-      const txn = Array.isArray(data.data) ? data.data[0] : data.data;
+      const txn = retrieved.txn;
 
       // If payment is confirmed as success, update the DB directly
       // (covers cases where surl callback was missed — popup closed early, etc.)
@@ -755,96 +1035,24 @@ Deno.serve(async (req) => {
       const daysBack = Math.min(Math.max(Number(body.days_back) || 7, 1), 30);
       const onlyAppId = (body.application_id as string | undefined)?.trim() || undefined;
 
-      // ISO date format. We also try DD-MM-YYYY below if ISO returns empty —
-      // EaseBuzz's docs are inconsistent across SDK versions on this.
-      const fmtIso = (d: Date) => d.toISOString().slice(0, 10);                       // YYYY-MM-DD
-      const fmtDmy = (d: Date) => { const s = d.toISOString().slice(0,10).split("-"); return `${s[2]}-${s[1]}-${s[0]}`; }; // DD-MM-YYYY
-      const endIso   = fmtIso(new Date());
-      const startIso = fmtIso(new Date(Date.now() - daysBack * 86400000));
-      const endDmy   = fmtDmy(new Date());
-      const startDmy = fmtDmy(new Date(Date.now() - daysBack * 86400000));
-
       // EaseBuzz dashboard endpoints sit on dashboard.* not pay.*
       const dashboardBase = ebEnv === "test"
         ? "https://testdashboard.easebuzz.in"
         : "https://dashboard.easebuzz.in";
 
-      // Try each (date_format, payload_shape) candidate until one returns a
-      // populated `data` array. Echo every attempt back in the response so
-      // we can see exactly what EaseBuzz returned without grepping logs.
-      const candidates: Array<{ label: string; startDate: string; endDate: string; body: any }> = [
-        // 1. v2 JSON with ISO dates inside date_range (Java SDK style)
-        { label: "v2_iso_daterange", startDate: startIso, endDate: endIso,
-          body: { key: merchantKey, merchant_email: merchantEmail, date_range: { start_date: startIso, end_date: endIso } } },
-        // 2. v2 JSON with DD-MM-YYYY dates inside date_range
-        { label: "v2_dmy_daterange", startDate: startDmy, endDate: endDmy,
-          body: { key: merchantKey, merchant_email: merchantEmail, date_range: { start_date: startDmy, end_date: endDmy } } },
-        // 3. flat fields (some SDKs send start_date/end_date at top level)
-        { label: "v2_iso_flat",      startDate: startIso, endDate: endIso,
-          body: { key: merchantKey, merchant_email: merchantEmail, start_date: startIso, end_date: endIso } },
-      ];
-
-      const attempts: any[] = [];
-      let ebData: any = null;
-      let chosen: typeof candidates[number] | null = null;
-      // EaseBuzz `/transaction/v2/retrieve/date` paginates at ~20 rows per
-      // page. The first page returns a base64 `next` cursor. We MUST follow
-      // pagination or we'll miss any successful txn that wasn't in the most
-      // recent 20 (which is exactly the Naaz Bano case — her success was on
-      // page 2; userCancelled retry was on page 1 and got reported instead).
-      const allRows: any[] = [];
-      for (const c of candidates) {
-        // Hash sequence per Java SDK: merchant_key|merchant_email|start_date|end_date|salt
-        const reqHash = await sha512(`${merchantKey}|${merchantEmail}|${c.startDate}|${c.endDate}|${merchantSalt}`);
-        let cursor: string | null = null;
-        let pageNum = 0;
-        let firstParsed: any = null;
-        let totalRows = 0;
-        let stopReason = "ok";
-        while (pageNum < 50) { // hard cap on pages so we can't infinite-loop
-          pageNum++;
-          const payload: any = { ...c.body, hash: reqHash };
-          if (cursor) payload.cursor = cursor;
-          let httpStatus = 0; let raw = "";
-          try {
-            const ebRes = await fetch(`${dashboardBase}/transaction/v2/retrieve/date`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            httpStatus = ebRes.status;
-            raw = await ebRes.text();
-          } catch (e) {
-            stopReason = `fetch_error:${String(e)}`;
-            break;
-          }
-          let parsed: any; try { parsed = JSON.parse(raw); } catch { parsed = { _unparsed: raw.slice(0, 500) }; }
-          if (pageNum === 1) firstParsed = parsed;
-          if (httpStatus !== 200 || parsed?.status === false) { stopReason = `http_${httpStatus}_ebStatus_${parsed?.status}`; break; }
-          const pageRows: any[] = Array.isArray(parsed?.data)
-            ? parsed.data
-            : Array.isArray(parsed?.data?.transaction_details) ? parsed.data.transaction_details : [];
-          totalRows += pageRows.length;
-          allRows.push(...pageRows);
-          // Pagination cursor is at top level on this endpoint (`next`).
-          // When it's null/undefined/empty we've reached the end.
-          cursor = parsed?.next || null;
-          console.log(`[easebuzz] reconcile-by-udf1 attempt=${c.label} page=${pageNum} rows=${pageRows.length} next=${cursor ? "yes" : "no"}`);
-          if (!cursor) { stopReason = "exhausted"; break; }
-        }
-        attempts.push({ label: c.label, pages: pageNum, total_rows: totalRows, stop: stopReason, sample: firstParsed });
-        if (totalRows > 0) { ebData = firstParsed; chosen = c; break; }
-        if (!ebData && firstParsed) ebData = firstParsed;
-      }
-
-      if (!ebData) {
+      const sweep = await fetchEasebuzzTxnsByDate({
+        merchantKey, merchantSalt, merchantEmail, dashboardBase, daysBack,
+      });
+      const attempts = sweep.attempts;
+      if (!sweep.firstParsed) {
         return new Response(
           JSON.stringify({ error: "EaseBuzz API: no usable response from any attempt", attempts }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      const chosen = sweep.chosen ? { label: sweep.chosen } : null;
 
-      const rows: any[] = allRows;
+      const rows: any[] = sweep.rows;
       const byUdf1 = new Map<string, any>();
       for (const t of rows) {
         const st = String(t?.status || t?.txn_status || "").toLowerCase();
@@ -919,7 +1127,8 @@ Deno.serve(async (req) => {
 
         const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, app.application_id, refTag, {
           gateway: "easebuzz",
-          orderId: String(txn.txnid || ""),
+          orderId: String(match?.txnid || ""),
+          claimId: easepayid,
           source: "reconcile",
           fireReceipt: true,
         });
@@ -960,25 +1169,10 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Single-txn retrieve uses different hash: SHA512(key|txnid|salt)
-        const hashInput = `${merchantKey}|${txnid}|${merchantSalt}`;
-        const hash = await sha512(hashInput);
-        const formData = new URLSearchParams({ key: merchantKey, txnid, hash });
-
-        let txn: any = null;
-        try {
-          const ebRes = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: formData.toString(),
-          });
-          const raw = await ebRes.text();
-          let parsed: any; try { parsed = JSON.parse(raw); } catch { parsed = null; }
-          if (parsed?.status === 1) {
-            txn = Array.isArray(parsed.data) ? parsed.data[0] : parsed.data;
-          }
-        } catch (e) {
-          fallback_attempts.push({ application_id: app.application_id, txnid, error: String(e) });
+        const retrieved = await easebuzzRetrieveTxn(txnid, { merchantKey, merchantSalt, hosts: retrieveHosts });
+        const txn: any = retrieved.txn;
+        if (!txn && retrieved.error) {
+          fallback_attempts.push({ application_id: app.application_id, txnid, error: retrieved.error });
           continue;
         }
 
@@ -1022,6 +1216,7 @@ Deno.serve(async (req) => {
         const settled = await settleApplicationFee(admin, supabaseUrl, serviceKey, app.application_id, refTag, {
           gateway: "easebuzz",
           orderId: String(txnid || ""),
+          claimId: easepayid,
           source: "reconcile",
           fireReceipt: true,
         });
@@ -1069,14 +1264,30 @@ Deno.serve(async (req) => {
         return false;
       });
 
+      // ── Pass 3: lead payments in the same sweep ──────────────────
+      // Same EaseBuzz rows, matched by txnid instead of udf1. Without this the
+      // Finance button reports "matched: 0" on a candidate whose money is
+      // sitting settled at EaseBuzz, because lead payments carry udf1=lead_id.
+      const leadOut = await settleLeadPaymentsFromSweep(admin, rows, {
+        supabaseUrl, serviceKey, lookbackDays: daysBack,
+        retrieve: { merchantKey, merchantSalt, hosts: retrieveHosts },
+        leadPaymentId: (body.lead_payment_id as string | undefined)?.trim() || undefined,
+      });
+
       return new Response(
         JSON.stringify({
           ok: true,
-          window: { start_iso: startIso, end_iso: endIso, days_back: daysBack },
+          window: sweep.window,
           chosen_attempt: chosen?.label || null,
           eb_txns_in_window: rows.length,
           eb_successful_with_udf1: byUdf1.size,
           pending_scanned: pending?.length ?? 0,
+          lead_payments: {
+            scanned: leadOut.scanned,
+            settled: leadOut.settled,
+            skipped_count: leadOut.skipped.length,
+            skipped: leadOut.skipped.slice(0, 30),
+          },
           reconciled,
           skipped_count: skipped.length,
           // Flat summary fields — these are what you'll inspect in DevTools
@@ -1092,115 +1303,76 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ── Reconcile pending LEAD payments (cron) ─────────────────────
+    // ── Reconcile pending LEAD payments ───────────────────────────
     // The surl return POST is the only settlement path for lead payments and
     // it never fires when the candidate pays inside a UPI app and closes the
-    // browser tab. The S2S webhook is the other fallback, but it depends on
-    // dashboard config we don't control from code. This polls EaseBuzz for
-    // every pending lead_payments row that has an LP… txnid and settles the
-    // ones EaseBuzz reports as genuinely successful.
+    // browser tab (the S2S webhook is the other fallback, but it depends on
+    // EaseBuzz dashboard config we don't control from code). This pulls
+    // EaseBuzz's own transaction list for the window and settles every pending
+    // row whose txnid EaseBuzz reports as successful.
+    //
+    // Matching is by txnid, NOT udf1 — for lead payments udf1 is the lead id,
+    // so the `reconcile-by-udf1` application matcher can never hit these rows.
+    // Diagnostic: what does EaseBuzz actually say about one txnid? Used when a
+    // candidate insists they paid and the row is still pending.
+    if (action === "retrieve-txn") {
+      const adminAuth = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      if (!(await isServiceCaller(req, adminAuth))) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const t = String(body.txnid || "").trim();
+      if (!t) return new Response(JSON.stringify({ error: "txnid required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const out: any = {};
+      for (const host of retrieveHosts) {
+        const r = await easebuzzRetrieveTxn(t, { merchantKey, merchantSalt, hosts: [host] });
+        out[host] = { txn: r.txn, error: r.error, non_json: r.nonJson, raw: r.raw };
+      }
+      return new Response(JSON.stringify({ ok: true, txnid: t, hosts: out }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "reconcile-lead-payments") {
-      // Cron-only: this settles money, so require the service role key.
-      if ((req.headers.get("Authorization") || "") !== `Bearer ${serviceKey}`) {
+      // This settles money: service-role callers only.
+      const adminAuth = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      if (!(await isServiceCaller(req, adminAuth))) {
         return new Response(
           JSON.stringify({ error: "Forbidden" }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const admin = adminAuth;
       const lookbackDays = Math.min(Math.max(Number(body.lookback_days ?? 7), 1), 90);
-      const since = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+      const dryRun = body.dry_run === true;
 
-      const { data: pending, error: pendErr } = await admin
-        .from("lead_payments")
-        .select("id, amount, transaction_ref, lead_id, type, created_at")
-        .eq("gateway", "easebuzz")
-        .eq("status", "pending")
-        .like("transaction_ref", "LP%")
-        .gte("created_at", since)
-        .order("created_at", { ascending: false })
-        .limit(200);
+      // No date sweep here. EaseBuzz's /transaction/v2/retrieve/date returns
+      // rows that don't carry a transaction date and never contained our
+      // txnids — it paged to the cap (8,000 rows) and matched nothing. The
+      // per-txn retrieve below is exact, and we only have tens of pending rows.
+      const out = await settleLeadPaymentsFromSweep(admin, [], {
+        supabaseUrl, serviceKey,
+        lookbackDays,
+        dryRun,
+        retrieve: { merchantKey, merchantSalt, hosts: retrieveHosts },
+        leadPaymentId: (body.lead_payment_id as string | undefined)?.trim() || undefined,
+      });
 
-      if (pendErr) {
-        console.error("[easebuzz] reconcile-lead-payments query error:", pendErr.message);
-        return new Response(
-          JSON.stringify({ error: pendErr.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const settledRows: any[] = [];
-      const skipped: any[] = [];
-
-      for (const row of pending || []) {
-        const txnid = String(row.transaction_ref);
-
-        // Single-txn retrieve hash: SHA512(key|txnid|salt)
-        const hash = await sha512(`${merchantKey}|${txnid}|${merchantSalt}`);
-        let txn: any = null;
-        try {
-          const ebRes = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ key: merchantKey, txnid, hash }).toString(),
-          });
-          const parsed = JSON.parse(await ebRes.text());
-          if (parsed?.status === 1) {
-            txn = Array.isArray(parsed.data) ? parsed.data[0] : parsed.data;
-          }
-        } catch (e) {
-          skipped.push({ id: row.id, txnid, reason: "eb_fetch_error", detail: String(e) });
-          continue;
-        }
-
-        const ebStatus = String(txn?.status || "not_found").toLowerCase();
-        if (ebStatus !== "success") {
-          skipped.push({ id: row.id, txnid, reason: `eb_status_${ebStatus}` });
-          continue;
-        }
-
-        // Never settle for an amount that doesn't match what we asked for.
-        const got = easebuzzAmount(txn);
-        const expected = Number(row.amount || 0);
-        if (expected > 0 && Math.abs(expected - got) > 0.01) {
-          skipped.push({ id: row.id, txnid, reason: "amount_mismatch", expected, got });
-          continue;
-        }
-
-        const easepayid = String(txn.easepayid || txn.mihpayid || txnid).trim();
-        const settled = await settleLeadPaymentRow(admin, row.id, easepayid, {
-          gateway: "easebuzz",
-          source: "reconcile",
-          notify: true,
-          supabaseUrl,
-          serviceKey,
-        });
-        if (!settled.ok) {
-          skipped.push({ id: row.id, txnid, reason: "settle_failed", detail: settled.message });
-          continue;
-        }
-        if (settled.already) {
-          skipped.push({ id: row.id, txnid, reason: "already_settled" });
-          continue;
-        }
-        settledRows.push({ id: row.id, lead_id: row.lead_id, txnid, easepayid, amount: got });
-      }
-
-      console.log(`[easebuzz] reconcile-lead-payments: scanned=${pending?.length ?? 0} settled=${settledRows.length} skipped=${skipped.length}`);
+      console.log(`[easebuzz] reconcile-lead-payments: scanned=${out.scanned} settled=${out.settled.length} would_settle=${out.would_settle.length} skipped=${out.skipped.length} dry_run=${dryRun}`);
 
       return new Response(
         JSON.stringify({
           ok: true,
+          dry_run: dryRun,
           lookback_days: lookbackDays,
-          scanned: pending?.length ?? 0,
-          settled: settledRows,
-          skipped_count: skipped.length,
-          skipped: skipped.slice(0, 30),
+          scanned: out.scanned,
+          settled: out.settled,
+          would_settle: out.would_settle,
+          skipped_count: out.skipped.length,
+          skipped: out.skipped.slice(0, 50),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
 
     return new Response(
       JSON.stringify({ error: "Unknown action" }),
