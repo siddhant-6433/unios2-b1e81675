@@ -73,16 +73,23 @@ export function UpdeledSprintTicker() {
   useEffect(() => {
     if (!eligible || dismissed || onSprintPage) return;
     let cancelled = false;
+    let interval: number | undefined;
     async function load() {
       const { data, error } = await updeledStatsRpc.rpc("updeled_sprint_stats", { p_counsellor_id: profileId });
       if (cancelled || error || !data) return;
       const s = Array.isArray(data) ? data[0] : data;
       setStats(s as SprintStats);
+      // Only keep polling while the sprint is live. An expired sprint renders
+      // nothing (days === 0 below) but used to keep hitting this ~0.8s RPC every
+      // 2 min per tab — pure DB waste. Poll once on mount to learn the deadline
+      // (an admin can extend it), then schedule the interval only if it's future.
+      const deadlineIso = effectiveUpdeledDeadline(s.deadline_at || DEADLINE_FALLBACK);
+      if (interval === undefined && new Date(deadlineIso).getTime() > Date.now()) {
+        interval = window.setInterval(load, 120_000);
+      }
     }
     load();
-    // Refresh every 2 minutes so registrations from another tab show up.
-    const interval = window.setInterval(load, 120_000);
-    return () => { cancelled = true; window.clearInterval(interval); };
+    return () => { cancelled = true; if (interval !== undefined) window.clearInterval(interval); };
   }, [eligible, dismissed, onSprintPage, profileId]);
 
   if (!eligible || dismissed || onSprintPage) return null;
