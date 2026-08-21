@@ -70,6 +70,7 @@ const AdmissionAnalytics   = lazy(() => import("./pages/AdmissionAnalytics"));
 const CounsellorDashboard  = lazy(() => import("./pages/CounsellorDashboard"));
 const WhatsAppInbox        = lazy(() => import("./pages/WhatsAppInbox"));
 const WhatsAppHealth       = lazy(() => import("./pages/WhatsAppHealth"));
+const SystemHealth         = lazy(() => import("./pages/SystemHealth"));
 const AutomationRules      = lazy(() => import("./pages/AutomationRules"));
 const ConsultantPortal     = lazy(() => import("./pages/ConsultantPortal"));
 const AcademicPartnerPortal = lazy(() => import("./pages/AcademicPartnerPortal"));
@@ -370,6 +371,7 @@ const App = () => (
                       <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />
                       <Route path="/admin/navya-knowledge" element={<RequireRole roles={["super_admin"]}><NavyaKnowledge /></RequireRole>} />
                       <Route path="/admin/navya" element={<RequireRole roles={["super_admin"]}><NavyaVoiceAgent /></RequireRole>} />
+                      <Route path="/admin/system-health" element={<RequireRole roles={["super_admin"]}><SystemHealth /></RequireRole>} />
                       <Route path="/id-card-center" element={<IdCardCenter />} />
                       <Route path="/settings" element={<RequirePermission module="user_management" action="view"><Settings /></RequirePermission>} />
 
