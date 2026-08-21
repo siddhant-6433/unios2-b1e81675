@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Search, Loader2, User, GraduationCap, FileText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
+import { StudentAvatar } from "@/components/ui/student-avatar";
+import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface SearchResult {
   type: "lead" | "student" | "application";
@@ -21,7 +23,19 @@ interface SearchResult {
   status?: string;
   leadId?: string;
   ownerName?: string;
+  photoUrl?: string;
+  // A lead/application row for someone who is already a student: kept but ranked
+  // below the student and dimmed, so the student row reads as the canonical one.
+  isSecondary?: boolean;
 }
+
+const typeLabels: Record<SearchResult["type"], string> = {
+  lead: "Lead", student: "Student", application: "Application",
+};
+
+// Compare people across leads/students/applications by their most stable keys.
+const normPhone = (p?: string | null) => (p || "").replace(/\D/g, "").slice(-10);
+const normId = (v?: string | null) => (v || "").trim().toLowerCase();
 
 const stageLabels: Record<string, string> = {
   new_lead: "New", ai_called: "AI Called", counsellor_call: "In Follow Up",
@@ -74,13 +88,25 @@ export function HeaderSearch() {
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .eq("is_mirror", false)
         .limit(8),
-      supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status")
+      supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status, photo_url, lead_id")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,pre_admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(5),
       supabase.from("applications").select("id, application_id, lead_id, full_name, phone, status")
         .ilike("application_id", `%${q}%`)
         .limit(5),
     ]);
+
+    // Identity keys of people who are already students — used to demote their
+    // older lead/application rows below the student row.
+    const studentPhones = new Set<string>();
+    const studentIds = new Set<string>();
+    (studentsRes.data || []).forEach((s: any) => {
+      if (normPhone(s.phone).length === 10) studentPhones.add(normPhone(s.phone));
+      [s.admission_no, s.pre_admission_no].forEach((v) => { if (normId(v)) studentIds.add(normId(v)); });
+    });
+    const matchesStudent = (phone?: string | null, ...ids: (string | null | undefined)[]) =>
+      (normPhone(phone).length === 10 && studentPhones.has(normPhone(phone))) ||
+      ids.some((v) => normId(v) && studentIds.has(normId(v)));
 
     const all: SearchResult[] = [];
     (leadsRes.data || []).forEach((l: any) => {
@@ -92,6 +118,8 @@ export function HeaderSearch() {
         secondaryLabel: l.admission_no && l.pre_admission_no ? "PAN" : undefined,
         stage: l.stage,
         ownerName: l.counsellor_profile?.display_name || undefined,
+        leadId: l.id,
+        isSecondary: matchesStudent(l.phone, l.admission_no, l.pre_admission_no),
       });
     });
     // Applications surfaced separately so an app lookup works even if the lead row
@@ -103,9 +131,10 @@ export function HeaderSearch() {
         type: "application", id: a.id, name: a.full_name || "(no name)", phone: a.phone || "",
         identifier: a.application_id, identifierLabel: "App",
         status: a.status, leadId: a.lead_id,
+        isSecondary: matchesStudent(a.phone),
       });
     });
-    (studentsRes.data || []).forEach(s => {
+    (studentsRes.data || []).forEach((s: any) => {
       all.push({
         type: "student", id: s.id, name: s.name, phone: s.phone || "",
         identifier: s.admission_no || s.pre_admission_no || undefined,
@@ -113,8 +142,26 @@ export function HeaderSearch() {
         secondaryIdentifier: s.admission_no && s.pre_admission_no ? s.pre_admission_no : undefined,
         secondaryLabel: s.admission_no && s.pre_admission_no ? "PAN" : undefined,
         status: s.status,
+        leadId: s.lead_id || undefined,
+        photoUrl: s.photo_url || undefined,
       });
     });
+
+    // Fill photos for rows without one from the lead's latest application (one
+    // batched call). Students prefer their own photo_url; leads/apps rely on this.
+    const leadIds = all.map((r) => r.leadId).filter(Boolean) as string[];
+    if (leadIds.length) {
+      const photoByLead = await getApplicationPhotoUrlsByLeadId(leadIds);
+      all.forEach((r) => {
+        if (!r.photoUrl && r.leadId) r.photoUrl = photoByLead.get(r.leadId) || undefined;
+      });
+    }
+
+    // Rank: student rows first, then leads/applications, then already-a-student
+    // duplicates last. Stable sort preserves the group order built above.
+    const rank = (r: SearchResult) => (r.type === "student" ? 0 : r.isSecondary ? 2 : 1);
+    all.sort((a, b) => rank(a) - rank(b));
+
     setResults(all);
     setLoading(false);
   };
@@ -183,20 +230,29 @@ export function HeaderSearch() {
                 <button
                   key={`${r.type}-${r.id}`}
                   onClick={() => handleClick(r)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left"
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left ${r.isSecondary ? "opacity-60" : ""}`}
                 >
-                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    r.type === "lead" ? "bg-info/10 text-info-foreground" :
-                    r.type === "application" ? "bg-warning/10 text-warning-foreground" :
-                    "bg-success/10 text-success"
-                  }`}>
-                    {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
-                     r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
-                     <GraduationCap className="h-3.5 w-3.5" />}
-                  </div>
+                  {r.photoUrl ? (
+                    <StudentAvatar src={r.photoUrl} name={r.name} className="h-8 w-8 rounded-lg" />
+                  ) : (
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                      r.type === "lead" ? "bg-info/10 text-info-foreground" :
+                      r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+                      "bg-success/10 text-success"
+                    }`}>
+                      {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
+                       r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
+                       <GraduationCap className="h-3.5 w-3.5" />}
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-foreground truncate">{r.name}</p>
+                      <Badge className={`text-[9px] px-1 py-0 border-0 shrink-0 ${
+                        r.type === "lead" ? "bg-info/10 text-info-foreground" :
+                        r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+                        "bg-success/10 text-success"
+                      }`}>{typeLabels[r.type]}</Badge>
                       {r.identifierLabel && (
                         <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
                       )}

@@ -480,8 +480,12 @@ const StudentProfile = () => {
     // and hiding those in JSX would still ship them to the browser. The RPC
     // OMITS fields the caller may not see, so an un-gated field renders blank
     // rather than leaking. Row access is still RLS; the RPC is SECURITY INVOKER.
+    // photo_url is read directly here (not just via the RPC) so the header photo
+    // survives a stale/un-applied student_profile_for_viewer migration. It merges
+    // last in `{ ...shaped, ...lookups }` below, so the direct column read wins.
+    // ponytail: photo_url is a public URL, not one of the masked-PII fields the RPC guards.
     const LOOKUPS =
-      "id, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+      "id, photo_url, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
 
     let { data: found } = await supabase.from("students")
       .select(LOOKUPS).eq("admission_no", admissionNo).maybeSingle();
@@ -650,20 +654,23 @@ const StudentProfile = () => {
         setLeadDocs((ldRes.data ?? []) as LeadDocument[]);
 
         const applicationId = Array.isArray(appRes.data) ? appRes.data[0]?.application_id : null;
+        let resolvedAppPhoto: string | null = null;
         if (applicationId) {
           const { data: fnData } = await supabase.functions.invoke("list-app-docs", {
             body: { application_id: applicationId },
           }).catch(() => ({ data: null }));
           const docs = (fnData?.docs ?? []) as { name: string; url: string; path: string }[];
           setAppDocs(docs);
-          const photoDoc = findApplicationPhotoDoc(docs);
-          if (photoDoc?.url) {
-            setApplicationPhotoUrl(photoDoc.url);
-          } else if (!currentStudent.photo_url) {
-            const photoByLead = await getApplicationPhotoUrlsByLeadId([currentStudent.lead_id]);
-            setApplicationPhotoUrl(photoByLead.get(currentStudent.lead_id) || null);
-          }
+          resolvedAppPhoto = findApplicationPhotoDoc(docs)?.url || null;
         }
+        // Parity with the Students list (src/pages/Students.tsx): when the student
+        // row has no photo, pull it off the lead's latest application — regardless
+        // of whether app docs loaded or an application row even exists here.
+        if (!resolvedAppPhoto && !currentStudent.photo_url) {
+          const photoByLead = await getApplicationPhotoUrlsByLeadId([currentStudent.lead_id]);
+          resolvedAppPhoto = photoByLead.get(currentStudent.lead_id) || null;
+        }
+        if (resolvedAppPhoto) setApplicationPhotoUrl(resolvedAppPhoto);
       }
     }
     if (!silent) setLoading(false);
