@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isCronCaller } from "../_shared/service-auth.ts";
 
 /**
  * Razorpay Standard Checkout settlement.
@@ -15,7 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-razorpay-signature",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-razorpay-signature, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -1091,6 +1092,9 @@ Deno.serve(async (req) => {
 
     // Cron: find unpaid apps with Razorpay pending_txnid + pending lead_payments with order_ refs.
     if (action === "reconcile-stranded") {
+      if (!isCronCaller(req)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
       const settled: any[] = [];
       const skipped: any[] = [];
       const errors: any[] = [];
@@ -1161,7 +1165,7 @@ Deno.serve(async (req) => {
       const provided =
         req.headers.get("x-cron-secret") ||
         String(parsed.cron_secret || "");
-      if (!cronSecret || provided !== cronSecret) {
+      if (!isCronCaller(req) && (!cronSecret || provided !== cronSecret)) {
         return json({ error: "Unauthorized" }, 401);
       }
       if (!webhookSecret) {

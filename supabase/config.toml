@@ -248,3 +248,42 @@ verify_jwt = false
 # gateway can't validate as a JWT. The function checks the bearer itself.
 [functions.counselling-watch]
 verify_jwt = false
+
+# --- Cron-invoked functions migrated to x-cron-secret auth (sb_secret_ key
+# rotation broke gateway JWT verification for all pg_cron→edge calls). ---
+
+[functions.campaign-dispatcher]
+verify_jwt = false
+
+[functions.post-visit-nudge-cron]
+verify_jwt = false
+
+[functions.counsellor-score-cron]
+verify_jwt = false
+
+[functions.feedback-sender-cron]
+verify_jwt = false
+
+[functions.visit-confirmation-cron]
+verify_jwt = false
+
+[functions.visit-closure-cron]
+verify_jwt = false
+
+[functions.ai-call-failed-handler]
+verify_jwt = false
+
+[functions.payment-link-reconcile-cron]
+verify_jwt = false
+
+[functions.tat-defaults-cron]
+verify_jwt = false
+
+[functions.incentive-month-close-cron]
+verify_jwt = false
+
+[functions.alumni-notify]
+verify_jwt = false
+
+[functions.email-ai-reply]
+verify_jwt = false

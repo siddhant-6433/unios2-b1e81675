@@ -1,9 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isCronCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 function esc(s: unknown): string {
@@ -24,7 +25,7 @@ Deno.serve(async (req) => {
   // as counsellor-call-miner/index.ts.
   const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
-  let isServiceRole = token === serviceRoleKey;
+  let isServiceRole = isCronCaller(req) || token === serviceRoleKey;
   if (!isServiceRole && token.split(".").length === 3) {
     try {
       const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
