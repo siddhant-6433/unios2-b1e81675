@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
-import { ListChecks, ChevronRight, AlertTriangle } from "lucide-react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { ListChecks, ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
  * Assigner-facing view of the call lists that have been handed to counsellors.
@@ -91,25 +94,43 @@ export function CallListProgressPanel() {
   // Team leaders also get rows back from the RPC (scoped to their own members),
   // so let the query run and let an empty result hide the panel.
   const { data: lists = [], isLoading } = useCallListOverview({ enabled: role !== "counsellor" });
+  const [open, setOpen] = useState(() => localStorage.getItem("dash-calllists-open") === "true");
 
   if (isLoading || lists.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <ListChecks className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Assigned call lists</span>
-          <Badge variant="outline" className="text-[10px]">{lists.length} active</Badge>
+    <Collapsible
+      defaultOpen={false}
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        localStorage.setItem("dash-calllists-open", String(v));
+      }}
+      className="rounded-xl border border-border bg-card"
+    >
+      <CollapsibleTrigger asChild>
+        <div className="flex w-full cursor-pointer items-center justify-between rounded-lg border-b border-border px-4 py-2.5 transition-colors hover:bg-muted/50">
+          <div className="flex items-center gap-2">
+            <ListChecks className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">Assigned call lists</span>
+            <Badge variant="outline" className="text-[10px]">{lists.length} active</Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            {canSee && (
+              <Link
+                to="/lists"
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                Manage lists <ChevronRight className="h-3 w-3" />
+              </Link>
+            )}
+            <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+          </div>
         </div>
-        {canSee && (
-          <Link to="/lists" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Manage lists <ChevronRight className="h-3 w-3" />
-          </Link>
-        )}
-      </div>
+      </CollapsibleTrigger>
 
-      <div className="divide-y divide-border">
+      <CollapsibleContent className="divide-y divide-border">
         {lists.map((list) => {
           const denom = list.dialable ?? list.total;
           const pct = denom ? Math.round((list.worked / denom) * 100) : 0;
@@ -180,7 +201,7 @@ export function CallListProgressPanel() {
             </div>
           );
         })}
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
