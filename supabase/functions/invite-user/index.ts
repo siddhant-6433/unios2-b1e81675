@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     // can't escalate. Keep this in sync with PROVISIONABLE_ROLES in
     // src/components/hr/EmployeeVerificationTable.tsx.
     const HR_PROVISIONABLE_ROLES = new Set([
-      "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher",
+      "principal", "admission_head", "hr_executive", "counsellor", "accountant", "faculty", "teacher",
       "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden", "librarian",
     ]);
     const { data: callerRole } = await adminClient.rpc("get_user_role", {

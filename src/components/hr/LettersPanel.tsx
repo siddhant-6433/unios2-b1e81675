@@ -11,10 +11,27 @@ import { Button } from "@/components/ui/button";
 import { FileText, Printer } from "lucide-react";
 
 interface Template { code: string; name: string }
+type LetterStatus = "draft" | "pending_approval" | "approved" | "rejected" | "issued";
 interface Letter {
   id: string; letter_name: string; subject: string | null; body: string;
   reference_no: string | null; issued_on: string;
+  status: LetterStatus; rejection_reason: string | null;
 }
+
+const STATUS_BADGE: Record<LetterStatus, string> = {
+  draft: "bg-muted text-muted-foreground",
+  pending_approval: "bg-amber-100 text-amber-800",
+  approved: "bg-blue-100 text-blue-800",
+  issued: "bg-green-100 text-green-800",
+  rejected: "bg-red-100 text-red-800",
+};
+const STATUS_LABEL: Record<LetterStatus, string> = {
+  draft: "Draft",
+  pending_approval: "Pending approval",
+  approved: "Approved",
+  issued: "Issued",
+  rejected: "Rejected",
+};
 
 export function LettersPanel({ employeeProfileId }: { employeeProfileId: string }) {
   const { toast } = useToast();
@@ -25,9 +42,8 @@ export function LettersPanel({ employeeProfileId }: { employeeProfileId: string 
   const [open, setOpen] = useState<Letter | null>(null);
 
   const fetchLetters = useCallback(async () => {
-    const { data } = await supabase
-      .from("hr_letters")
-      .select("id, letter_name, subject, body, reference_no, issued_on")
+    const { data } = await (supabase.from("hr_letters" as any) as any)
+      .select("id, letter_name, subject, body, reference_no, issued_on, status, rejection_reason")
       .eq("employee_profile_id", employeeProfileId)
       .order("issued_on", { ascending: false });
     setLetters((data as Letter[]) ?? []);
@@ -46,7 +62,7 @@ export function LettersPanel({ employeeProfileId }: { employeeProfileId: string 
   const generate = async () => {
     if (!code) return;
     setBusy(true);
-    const { error } = await supabase.rpc("generate_hr_letter", {
+    const { data, error } = await (supabase as any).rpc("generate_hr_letter", {
       _employee_profile_id: employeeProfileId, _template_code: code,
     });
     setBusy(false);
@@ -54,13 +70,17 @@ export function LettersPanel({ employeeProfileId }: { employeeProfileId: string 
       toast({ title: "Could not generate the letter", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Letter generated" });
+    // ponytail: don't trust the RPC's return shape for status — refetch and let the badge drive it
+    const status = (data && typeof data === "object" ? (data as any).status : null) as LetterStatus | null;
+    const ready = status === "approved" || status === "issued";
+    toast({ title: ready ? "Letter ready to issue" : "Submitted for approval",
+      description: ready ? undefined : "A super admin needs to approve this document before it can be printed." });
     await fetchLetters();
   };
 
   // Printing opens the stored text in its own window: no PDF pipeline needed for a
   // plain letter, and the browser's print dialog already saves as PDF.
-  const print = (l: Letter) => {
+  const openPrintWindow = (l: Letter, body: string) => {
     const w = window.open("", "_blank", "width=800,height=900");
     if (!w) return;
     w.document.write(`<html><head><title>${l.reference_no || l.letter_name}</title>
@@ -68,10 +88,23 @@ export function LettersPanel({ employeeProfileId }: { employeeProfileId: string 
       h1{font-size:15px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
       .ref{color:#666;font-size:12px;margin-bottom:32px}</style></head><body>
       <h1>${l.letter_name}</h1><div class="ref">Ref: ${l.reference_no ?? "—"} · ${l.issued_on}</div>
-      ${l.body.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string))}
+      ${body.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string))}
       </body></html>`);
     w.document.close();
     w.print();
+  };
+
+  // Print/download must go through issue_hr_document: it enforces the approval gate
+  // server-side and flips the row to "issued" on success.
+  const print = async (l: Letter) => {
+    const { data, error } = await (supabase as any).rpc("issue_hr_document", { _letter_id: l.id });
+    if (error) {
+      toast({ title: "Could not issue the document", description: error.message, variant: "destructive" });
+      return;
+    }
+    const body = typeof data === "string" ? data : l.body;
+    openPrintWindow(l, body);
+    await fetchLetters();
   };
 
   return (
@@ -99,17 +132,27 @@ export function LettersPanel({ employeeProfileId }: { employeeProfileId: string 
           {letters.map((l) => (
             <div key={l.id} className="flex items-center gap-3 p-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground">{l.letter_name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-foreground">{l.letter_name}</p>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_BADGE[l.status] ?? STATUS_BADGE.draft}`}>
+                    {STATUS_LABEL[l.status] ?? "Draft"}
+                  </span>
+                </div>
                 <p className="text-[11px] text-muted-foreground">
                   {l.reference_no} · issued {l.issued_on}
                 </p>
+                {l.status === "rejected" && l.rejection_reason && (
+                  <p className="text-[11px] text-red-700 mt-0.5">{l.rejection_reason}</p>
+                )}
               </div>
               <Button size="sm" variant="ghost" onClick={() => setOpen(open?.id === l.id ? null : l)}>
                 {open?.id === l.id ? "Hide" : "View"}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => print(l)}>
-                <Printer className="h-3.5 w-3.5" />
-              </Button>
+              {(l.status === "approved" || l.status === "issued") && (
+                <Button size="sm" variant="outline" onClick={() => print(l)}>
+                  <Printer className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           ))}
         </div>

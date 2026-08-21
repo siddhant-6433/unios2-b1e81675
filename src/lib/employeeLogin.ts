@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 export const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
   { value: "principal", label: "Principal" },
   { value: "admission_head", label: "Admission Head" },
+  { value: "hr_executive", label: "HR Executive" },
   { value: "counsellor", label: "Counsellor" },
   { value: "accountant", label: "Accountant" },
   { value: "faculty", label: "Faculty" },

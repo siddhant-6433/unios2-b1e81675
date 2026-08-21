@@ -22,7 +22,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "hr_document_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -51,6 +51,18 @@ interface CertificateApprovalItem {
   submitted_by_name: string | null;
   submitted_at: string | null;
   pdf_path: string | null;
+}
+
+interface HrDocumentApprovalItem {
+  id: string;
+  letter_name: string;
+  letter_code: string | null;
+  target_name: string | null;
+  submitted_by_name: string | null;
+  submitted_at: string | null;
+  status: string;
+  subject: string | null;
+  body: string | null;
 }
 
 // Paid students whose admission number is held by the mandatory-document gate.
@@ -211,7 +223,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -268,6 +280,7 @@ export default function Inbox() {
     offer_approvals: 0,
     offer_edits: 0,
     certificate_approvals: 0,
+    hr_document_approvals: 0,
     pending_an_generation: 0,
     contact_changes: 0,
     applications: 0,
@@ -333,6 +346,14 @@ export default function Inbox() {
       label: "Certificate Approvals",
       icon: FileText,
       count: counts.certificate_approvals,
+      roles: ["super_admin"],
+      color: "text-emerald-600",
+    },
+    {
+      id: "hr_document_approvals",
+      label: "HR Document Approvals",
+      icon: FilePen,
+      count: counts.hr_document_approvals,
       roles: ["super_admin"],
       color: "text-emerald-600",
     },
@@ -517,6 +538,14 @@ export default function Inbox() {
             .select("id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
+
+      // HR document approvals — super_admin only
+      isSuperAdmin
+        ? supabase
+            .from("hr_letters" as any)
+            .select("id")
+            .eq("status", "pending_approval")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -539,6 +568,7 @@ export default function Inbox() {
       fee_concessions: get(10),
       pending_an_generation: get(11),
       offer_edits: get(12),
+      hr_document_approvals: get(13),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
@@ -850,6 +880,53 @@ export default function Inbox() {
             submitted_at: r.pgdm_certificate_submitted_at,
             pdf_path: r.pgdm_certificate_pdf_path,
           } as CertificateApprovalItem));
+        commitItems(cat, nextItems);
+      } else if (cat === "hr_document_approvals") {
+        const { data, error } = await supabase
+          .from("hr_letters" as any)
+          .select("id, letter_name, letter_code, subject, body, status, submitted_by, submitted_at, employee_profile_id, job_applicant_id")
+          .eq("status", "pending_approval")
+          .order("submitted_at", { ascending: true });
+        if (error) throw error;
+        const rows = (data || []) as any[];
+        const submitterIds = [...new Set(rows.map(r => r.submitted_by).filter(Boolean))];
+        const nameById: Record<string, string> = {};
+        if (submitterIds.length) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("user_id, display_name, email")
+            .in("user_id", submitterIds);
+          for (const p of (profs || []) as any[]) nameById[p.user_id] = p.display_name || p.email || "";
+        }
+        const empIds = [...new Set(rows.map(r => r.employee_profile_id).filter(Boolean))];
+        const appIds = [...new Set(rows.map(r => r.job_applicant_id).filter(Boolean))];
+        const empNameById: Record<string, string> = {};
+        const appNameById: Record<string, string> = {};
+        if (empIds.length) {
+          const { data: emps } = await supabase
+            .from("employee_profiles" as any)
+            .select("id, display_name")
+            .in("id", empIds);
+          for (const e of (emps || []) as any[]) empNameById[e.id] = e.display_name || "";
+        }
+        if (appIds.length) {
+          const { data: apps } = await supabase
+            .from("job_applicants" as any)
+            .select("id, name")
+            .in("id", appIds);
+          for (const a of (apps || []) as any[]) appNameById[a.id] = a.name || "";
+        }
+        const nextItems = rows.map((r: any) => ({
+            id: r.id,
+            letter_name: r.letter_name,
+            letter_code: r.letter_code,
+            target_name: (r.employee_profile_id && empNameById[r.employee_profile_id]) || (r.job_applicant_id && appNameById[r.job_applicant_id]) || null,
+            submitted_by_name: nameById[r.submitted_by] || null,
+            submitted_at: r.submitted_at,
+            status: r.status,
+            subject: r.subject,
+            body: r.body,
+          } as HrDocumentApprovalItem));
         commitItems(cat, nextItems);
       } else if (cat === "pending_an_generation") {
         const { data, error } = await supabase.rpc("list_pending_an_generation");
@@ -1203,6 +1280,53 @@ export default function Inbox() {
     }
   };
 
+  const approveHrDocument = async (doc: HrDocumentApprovalItem) => {
+    if (!isSuperAdmin) return;
+    const notes = window.prompt("Approval notes (optional):") ?? undefined;
+    setProcessing(doc.id);
+    try {
+      const { error } = await (supabase as any).rpc("approve_hr_document", {
+        _letter_id: doc.id,
+        _notes: notes || null,
+      });
+      if (error) throw error;
+      toast({ title: "Document approved" });
+      setSelectedItem(null);
+      loadItems("hr_document_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Approval failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const rejectHrDocument = async (doc: HrDocumentApprovalItem) => {
+    if (!isSuperAdmin) return;
+    const reason = window.prompt("Reason for rejection:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({ title: "Reason required", description: "A reason is needed to reject this document.", variant: "destructive" });
+      return;
+    }
+    setProcessing(doc.id);
+    try {
+      const { error } = await (supabase as any).rpc("reject_hr_document", {
+        _letter_id: doc.id,
+        _reason: reason.trim(),
+      });
+      if (error) throw error;
+      toast({ title: "Document rejected" });
+      setSelectedItem(null);
+      loadItems("hr_document_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Rejection failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   // Super-admin override: generate the admission number despite the document gate.
   const bypassAn = async (p: PendingAnItem) => {
     if (!isSuperAdmin) return;
@@ -1499,6 +1623,24 @@ export default function Inbox() {
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
             {c.submitted_by_name ? `by ${c.submitted_by_name} · ` : ""}{fmtTime(c.submitted_at)}
+          </p>
+        </button>
+      );
+    }
+
+    if (selected === "hr_document_approvals") {
+      const h = item as HrDocumentApprovalItem;
+      return (
+        <button key={h.id} className={baseClass} onClick={() => setSelectedItem(h)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{h.target_name || h.letter_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{h.letter_name}</p>
+            </div>
+            <span className="text-[10px] text-emerald-600 font-medium shrink-0">Approve</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {h.submitted_by_name ? `by ${h.submitted_by_name} · ` : ""}{fmtTime(h.submitted_at)}
           </p>
         </button>
       );
@@ -2048,6 +2190,54 @@ export default function Inbox() {
           <p className="text-[10px] text-muted-foreground text-center">
             To correct details, open in Student Services and use Regenerate.
           </p>
+        </div>
+      );
+    }
+
+    if (selected === "hr_document_approvals") {
+      const h = selectedItem as HrDocumentApprovalItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{h.target_name || h.letter_name}</h3>
+            <p className="text-sm text-muted-foreground">{h.letter_name}{h.letter_code ? ` · ${h.letter_code}` : ""}</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Submitted By" value={h.submitted_by_name || "—"} highlight />
+            <Row label="Submitted On" value={fmtDate(h.submitted_at)} />
+          </div>
+
+          {(h.subject || h.body) && (
+            <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+              {h.subject && (
+                <p className="text-sm font-medium text-foreground">{h.subject}</p>
+              )}
+              {h.body && (
+                <pre className="whitespace-pre-wrap font-sans text-sm text-foreground">{h.body}</pre>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === h.id}
+              onClick={() => approveHrDocument(h)}
+            >
+              {processing === h.id ? <ButtonOrb state="working" onFilled /> : <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === h.id}
+              onClick={() => rejectHrDocument(h)}
+            >
+              Reject
+            </Button>
+          </div>
         </div>
       );
     }
