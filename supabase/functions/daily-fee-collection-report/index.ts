@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -212,6 +213,67 @@ function buildHtml(rows: FeeRow[], label: string): string {
   `;
 }
 
+/**
+ * Money that reached the gateway but never reached the ledger.
+ *
+ * A candidate who pays inside a UPI app and closes the tab leaves the row
+ * pending: no receipt, no ledger credit, nothing on any screen finance looks
+ * at. That failure is silent by construction, so it rides along on the one
+ * report finance already reads every morning.
+ */
+async function buildStuckSection(supabase: any): Promise<string> {
+  const dayAgo = new Date(Date.now() - 86400000).toISOString();
+
+  const [stuckRes, webhookRes] = await Promise.all([
+    supabase
+      .from("lead_payments")
+      .select("id, amount, gateway, transaction_ref, created_at, leads(name, phone)")
+      .eq("status", "pending")
+      .eq("payment_mode", "gateway")
+      .lt("created_at", dayAgo)
+      .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("gateway_settlements")
+      .select("id")
+      .eq("gateway", "easebuzz")
+      .eq("source", "webhook")
+      .gte("created_at", dayAgo)
+      .limit(1),
+  ]);
+
+  const stuck = (stuckRes.data || []) as any[];
+  const webhookSilent = !(webhookRes.data || []).length;
+  if (!stuck.length && !webhookSilent) return "";
+
+  const total = stuck.reduce((s, r) => s + amt(r.amount), 0);
+  const rowsHtml = stuck.slice(0, 25).map((r) => `
+    <tr>
+      <td style="${TD}">${escapeHtml(r.leads?.name || "—")}</td>
+      <td style="${TD}">${escapeHtml(r.leads?.phone || "")}</td>
+      <td style="${TDR}">${inr(amt(r.amount))}</td>
+      <td style="${TD}">${escapeHtml(r.gateway || "")}</td>
+      <td style="${TD}">${escapeHtml(String(r.created_at).slice(0, 16).replace("T", " "))}</td>
+    </tr>`).join("");
+
+  return `
+    <div style="border:1px solid #fca5a5;background:#fef2f2;border-radius:8px;padding:14px;margin:0 0 20px">
+      <h3 style="margin:0 0 6px;color:#b91c1c">⚠ Gateway payments not in the ledger</h3>
+      ${webhookSilent ? `<p style="margin:0 0 8px;color:#7f1d1d;font-size:13px"><strong>No EaseBuzz webhook has been received in 24 hours.</strong> If candidates are paying, the S2S webhook is not reaching us — every payment then depends on the candidate returning to the browser.</p>` : ""}
+      ${stuck.length ? `
+      <p style="margin:0 0 8px;color:#7f1d1d;font-size:13px">${stuck.length} payment${stuck.length === 1 ? "" : "s"} totalling <strong>${inr(total)}</strong> have been pending for more than 24 hours. Open Finance → Transaction History and use <em>Verify with EaseBuzz</em> on each. Do not record them manually first — that issues two receipts for one payment.</p>
+      <table style="border-collapse:collapse;font-size:13px;min-width:520px;background:#fff">
+        <thead><tr style="background:#fee2e2">
+          <th style="${TH}">Candidate</th><th style="${TH}">Phone</th>
+          <th style="${TH};text-align:right">Amount</th><th style="${TH}">Gateway</th><th style="${TH}">Started</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      ${stuck.length > 25 ? `<p style="margin:8px 0 0;color:#7f1d1d;font-size:12px">…and ${stuck.length - 25} more.</p>` : ""}` : ""}
+    </div>`;
+}
+
 function buildCsv(rows: FeeRow[]): string {
   const header = ["Receipt No", "Name", "Course", "Campus", "Payment Mode", "Amount", "Fee Type", "Cashier", "Paid At"];
   const lines = rows.map((r) => [
@@ -236,7 +298,8 @@ Deno.serve(async (req) => {
   const cronSecret = req.headers.get("x-cron-secret");
   const auth = req.headers.get("Authorization") || "";
   const authorizedByCron = !!expectedCronSecret && cronSecret === expectedCronSecret;
-  const authorizedByServiceRole = auth === `Bearer ${serviceRoleKey}`;
+  const authorizedByServiceRole = auth === `Bearer ${serviceRoleKey}`
+    || await isServiceCaller(req, createClient(Deno.env.get("SUPABASE_URL")!, serviceRoleKey, { auth: { persistSession: false } }));
 
   if (!authorizedByCron && !authorizedByServiceRole) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -278,7 +341,11 @@ Deno.serve(async (req) => {
 
   const rows = (data || []) as FeeRow[];
   const total = rows.reduce((s, r) => s + amt(r.amount), 0);
-  const html = buildHtml(rows, bounds.label);
+  const stuckHtml = await buildStuckSection(supabase).catch((e) => {
+    console.error("stuck-payment section failed", e);
+    return "";
+  });
+  const html = stuckHtml + buildHtml(rows, bounds.label);
   const csv = buildCsv(rows);
   // Optional per-call recipient override (manual test / re-send); falls back to env then hardcoded list.
   const recipientsOverride = Array.isArray(body?.recipients)
@@ -289,7 +356,7 @@ Deno.serve(async (req) => {
     .map((email) => email.trim())
     .filter(Boolean);
   const from = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
-  const subject = `Daily Fee Collection — ${bounds.label}`;
+  const subject = (stuckHtml ? "⚠ " : "") + `Daily Fee Collection — ${bounds.label}`;
 
   const emailRes = await fetch("https://api.resend.com/emails", {
     method: "POST",
