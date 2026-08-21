@@ -1,9 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isCronCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const MIN_REPLY_LENGTH = 35;
@@ -166,7 +167,9 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
-    const auth = await userRole(admin, authHeader, serviceRoleKey);
+    const auth = isCronCaller(req)
+      ? { ok: true, userId: null, role: "service_role" }
+      : await userRole(admin, authHeader, serviceRoleKey);
     if (!auth.ok) {
       return new Response(JSON.stringify({ error: auth.error || "Unauthorized" }), {
         status: auth.status || 401,

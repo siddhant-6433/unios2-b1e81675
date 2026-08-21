@@ -18,7 +18,20 @@ function bearerOf(req: Request): string {
   return (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
 }
 
+/**
+ * Check x-cron-secret header against CRON_SECRET env var.
+ * Standalone — no DB or admin client needed.
+ */
+export function isCronCaller(req: Request): boolean {
+  const envSecret = (Deno.env.get("CRON_SECRET") || "").trim();
+  if (!envSecret) return false;
+  return req.headers.get("x-cron-secret") === envSecret;
+}
+
 export async function isServiceCaller(req: Request, admin: AdminClient): Promise<boolean> {
+  // Fast path: cron-secret header matches — no DB lookup needed.
+  if (isCronCaller(req)) return true;
+
   const bearer = bearerOf(req);
   // Never treat an absent/short header as a service caller.
   if (bearer.length < 20) return false;

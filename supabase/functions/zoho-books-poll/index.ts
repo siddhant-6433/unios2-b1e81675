@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { zohoConfigured, zohoAccessToken, zohoApi, zohoGetPdf } from "../_shared/zoho.ts";
+import { isCronCaller } from "../_shared/service-auth.ts";
 
 const json = (p: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(p), { status, headers: { "Content-Type": "application/json" } });
@@ -44,12 +45,13 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-    // Accept the runtime env key OR the key pg_cron sends (stored in _app_config).
+    // Accept the runtime env key OR the key pg_cron sends (stored in _app_config)
+    // OR the x-cron-secret header.
     const authHeader = req.headers.get("Authorization") || "";
     const { data: cfg } = await admin.from("_app_config").select("value").eq("key", "service_role_key").maybeSingle();
     const allowed = [`Bearer ${serviceKey}`];
     if (cfg?.value) allowed.push(`Bearer ${cfg.value}`);
-    if (!allowed.includes(authHeader)) return json({ error: "Unauthorized" }, 401);
+    if (!isCronCaller(req) && !allowed.includes(authHeader)) return json({ error: "Unauthorized" }, 401);
     if (!zohoConfigured()) return json({ error: "Zoho not configured" }, 400);
 
     const body = await req.json().catch(() => ({}));

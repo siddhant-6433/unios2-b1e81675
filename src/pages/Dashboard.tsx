@@ -18,6 +18,7 @@ import { CallListProgressPanel } from "@/components/dashboard/CallListProgressPa
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
+const DevHealthWidget = lazy(() => import("@/components/dashboard/DevHealthWidget"));
 
 const AnimatedNumber = memo(({ value }: { value: number }) => {
   const display = useCountUp(value);
@@ -174,6 +175,13 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>
+
+      {/* ── Dev health (super_admin only) ── */}
+      {isSuperAdmin && (
+        <Suspense fallback={null}>
+          <DevHealthWidget />
+        </Suspense>
+      )}
 
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
