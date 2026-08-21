@@ -148,6 +148,23 @@ export const DEFAULT_APPLICATION: Omit<ApplicationData, 'id' | 'application_id'>
   submitted_at: null,
 };
 
+/**
+ * Columns the applicant portal is allowed to write. saveSection() filters its
+ * payload to this set so a stale full-row editor snapshot can never clobber
+ * server-owned/settlement columns (payment_status, payment_ref, fee_receipt_url,
+ * pending_txnid, admission_doc_status(_at), status, submitted_at, form_pdf_url,
+ * mandatory_docs_complete, id/lead_id/created_at/updated_at, …). Whitelist, not
+ * denylist: a newly-added server column is protected by default.
+ */
+export const APPLICANT_EDITABLE_FIELDS = [
+  "full_name", "gender", "dob", "nationality", "category", "aadhaar",
+  "phone", "email", "whatsapp_verified",
+  "address", "father", "mother", "guardian", "apaar_id", "pen_number",
+  "academic_details", "result_status", "extracurricular", "school_details",
+  "course_selections", "fee_amount", "program_category", "institution_id",
+  "session_id", "completed_sections", "flags",
+] as const;
+
 export const FEE_MAP: Record<string, number> = {
   school: 500,
   undergraduate: 1000,

@@ -19,11 +19,13 @@ const CREATE_FIELDS = new Set([
   "academic_details", "result_status", "extracurricular", "school_details",
 ]);
 
+// payment_status / payment_ref are settlement-owned (razorpay-payment sets them
+// server-side via the admin client). Never accept them from an on-behalf client
+// payload — a stale snapshot could otherwise regress a settled application.
 const UPDATE_FIELDS = new Set([
   "session_id", "course_selections", "full_name", "email", "dob", "address", "father",
   "mother", "guardian", "academic_details", "result_status", "extracurricular",
   "school_details", "fee_amount", "program_category", "completed_sections", "flags",
-  "payment_status", "payment_ref",
 ]);
 
 function pickAllowed(input: Record<string, unknown>, allowed: Set<string>) {
