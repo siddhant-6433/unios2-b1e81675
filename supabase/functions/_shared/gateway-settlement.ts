@@ -74,11 +74,11 @@ export async function claimGatewayPayment(
     if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
       return { claimed: false, already: true };
     }
-    if (/gateway_settlements|does not exist|PGRST/i.test(error.message || "")) {
-      console.error("[gateway-settlement] table unavailable:", error.message);
-      // Fail open only if the ledger table is missing — still rely on entity claims.
-      return { claimed: true, already: false, error: error.message };
-    }
+    // Fail CLOSED. This used to fail open when the ledger table errored, which
+    // is how a `source` CHECK violation silently disabled at-most-once for two
+    // weeks. A refused settle leaves the row pending and the reconcile sweep
+    // picks it up; a double settle mints a second receipt for the same rupee.
+    console.error("[gateway-settlement] claim failed:", error.code, error.message);
     return { claimed: false, already: false, error: error.message };
   }
 
@@ -99,6 +99,14 @@ export async function settleApplicationFee(
   opts: {
     gateway: GatewayName;
     orderId?: string | null;
+    /**
+     * Key to claim in gateway_settlements. Defaults to `paymentId`, but callers
+     * that decorate payment_ref for provenance (RECON_UDF1_…, MANUAL_…) must
+     * pass the BARE gateway id here — otherwise the unique
+     * (gateway, gateway_payment_id) index can't dedupe a reconcile against the
+     * surl/webhook that already settled the same money.
+     */
+    claimId?: string | null;
     source?: SettlementSource;
     fireReceipt?: boolean;
   },
@@ -107,7 +115,7 @@ export async function settleApplicationFee(
   const payId = String(paymentId || "").trim();
   if (!appId || !payId) return { ok: false, message: "application_id and payment id required" };
 
-  const claim = await claimGatewayPayment(admin, opts.gateway, payId, {
+  const claim = await claimGatewayPayment(admin, opts.gateway, opts.claimId || payId, {
     orderId: opts.orderId || null,
     context: "application_fee",
     entityType: "application",
@@ -234,6 +242,10 @@ export async function settleLeadPaymentRow(
   paymentId: string,
   opts: {
     gateway: GatewayName;
+    /** Bare gateway id to claim; see settleApplicationFee.claimId. */
+    claimId?: string | null;
+    /** Bank/UPI RRN — the reference a human reads off their statement. */
+    bankRefNum?: string | null;
     source?: SettlementSource;
     notify?: boolean;
     supabaseUrl?: string;
@@ -244,7 +256,10 @@ export async function settleLeadPaymentRow(
   const payId = String(paymentId || "").trim();
   if (!lpId || !payId) return { ok: false, message: "lead_payment_id and payment id required" };
 
-  const claim = await claimGatewayPayment(admin, opts.gateway, payId, {
+  const bankRef = String(opts.bankRefNum || "").trim();
+  const bankRefPatch = bankRef && bankRef.toUpperCase() !== "NA" ? { bank_ref_num: bankRef } : {};
+
+  const claim = await claimGatewayPayment(admin, opts.gateway, opts.claimId || payId, {
     context: "lead_payment",
     entityType: "lead_payment",
     entityId: lpId,
@@ -276,7 +291,7 @@ export async function settleLeadPaymentRow(
     if (String(current.transaction_ref).startsWith("IC") || String(current.transaction_ref).startsWith("LP") || String(current.transaction_ref).startsWith("EB") || String(current.transaction_ref).startsWith("order_")) {
       await admin
         .from("lead_payments")
-        .update({ transaction_ref: payId, gateway: opts.gateway })
+        .update({ transaction_ref: payId, gateway: opts.gateway, ...bankRefPatch })
         .eq("id", lpId)
         .eq("status", "confirmed");
       return {
@@ -300,6 +315,7 @@ export async function settleLeadPaymentRow(
       status: "confirmed",
       transaction_ref: payId,
       gateway: opts.gateway,
+      ...bankRefPatch,
     })
     .eq("id", lpId)
     .eq("status", "pending")

@@ -259,9 +259,10 @@ async function provisionStudent(
   });
 
   // 5. Compute due dates
-  // Determine the academic year from session or default to current year
-  const now = new Date();
-  const academicYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  // Anchor to the student's admission year so cohorts get correct offsets:
+  // a 2025-admit sees year_2 due in 2026, a 2026-admit sees year_2 due in 2027.
+  const admDate = student.admission_date ? new Date(student.admission_date + "T00:00:00") : new Date();
+  const academicYear = admDate.getMonth() >= 3 ? admDate.getFullYear() : admDate.getFullYear() - 1;
 
   // 6. If force_reprovision, delete existing unpaid entries
   if (forceReprovision) {
@@ -275,7 +276,10 @@ async function provisionStudent(
   // 7. Build ledger rows
   const rows = filtered.map((item: any) => {
     const term = item.term;
-    const dueDay = Math.min(Math.max(Number(item.due_day || 10), 1), 28);
+    const rawDueDay = Math.max(Number(item.due_day || 10), 1);
+    // ponytail: clamp to actual last day of month, not hard 28 — Aug 31, Oct 31 etc. are valid
+    const clampDay = (y: number, m: number, d: number) => Math.min(d, new Date(y, m, 0).getDate());
+    const dueDay = rawDueDay; // clamped per-month below when building the date
     let dueDate: string | null = null;
 
     // 0. Absolute per-head due date (precise dd-mm-yyyy) wins — late fines run on this.
@@ -285,7 +289,9 @@ async function provisionStudent(
     // 1. Explicit per-head config (course-wise due date): month + year offset.
     if (!dueDate && item.due_month) {
       const y = academicYear + Number(item.due_year_offset || 0);
-      dueDate = `${y}-${String(item.due_month).padStart(2, "0")}-${String(dueDay).padStart(2, "0")}`;
+      const m = Number(item.due_month);
+      const d = clampDay(y, m, dueDay);
+      dueDate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     }
     // 2. Stetho semester / quarter maps.
     if (!dueDate) {
@@ -297,7 +303,11 @@ async function provisionStudent(
     //    so multi-year heads never collide on one date.
     if (!dueDate) {
       const ym = term.match(/^year_([1-9])$/);
-      if (ym) dueDate = `${academicYear + (Number(ym[1]) - 1)}-04-${String(dueDay).padStart(2, "0")}`;
+      if (ym) {
+        const y = academicYear + (Number(ym[1]) - 1);
+        const d = clampDay(y, 4, dueDay);
+        dueDate = `${y}-04-${String(d).padStart(2, "0")}`;
+      }
     }
     // 4. Fallback: due at session start.
     if (!dueDate) {

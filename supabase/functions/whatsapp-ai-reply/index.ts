@@ -26,6 +26,31 @@ import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
 const MIRAI_INSTITUTION_ID = "d8c95a30-ecc6-4b41-8bed-987c960dc44a";
 const APPLY_PORTAL_BASE = "https://uni.nimt.ac.in/apply";
 
+// School WhatsApp numbers that share our Meta app but must NOT get the NIMT
+// college admissions menu/knowledge base. Keyed by Meta phone_number_id (the
+// value that flows in as business_phone_number_id) — NOT the display number.
+// Mirror of the HR pnid pattern, but here we still WANT an AI reply, just
+// school-scoped. Fill in the real phone_number_id (from
+// whatsapp_channels.meta_phone_number_id or the Meta app) and the school
+// systemPrompt/knowledge before this branch does anything.
+// TODO(school-numbers): fill the systemPrompt copy with real school KB.
+const SCHOOL_CHANNELS: Record<string, { schoolName: string; systemPrompt: string }> = {
+  "1274023025796842": {
+    schoolName: "NIMT Beacon School Avantika II",
+    systemPrompt:
+      "You are the admissions assistant for NIMT Beacon School, Avantika II campus — a K-12 school (NOT the NIMT college). " +
+      "You help parents with school-admission enquiries: age/grade eligibility, admission process, fee enquiries, timings, and campus visits. " +
+      "PLACEHOLDER: add the school's verified admission facts, fee ranges, grades offered, and contact details here.",
+  },
+  "1110238142172240": {
+    schoolName: "Mirai Experiential School",
+    systemPrompt:
+      "You are the admissions assistant for Mirai Experiential School — an experiential-learning school (NOT the NIMT college). " +
+      "You help parents with school-admission enquiries: age/grade eligibility, admission process, fee enquiries, timings, and campus visits. " +
+      "PLACEHOLDER: add the school's verified admission facts, fee ranges, grades offered, and contact details here.",
+  },
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -615,6 +640,47 @@ KNOWLEDGE BASE:
 ${renderKnowledgeBase(courseFactsBlock, applyUrl)}`;
 }
 
+// School-number reply: identity + knowledge come from SCHOOL_CHANNELS, with no
+// NIMT college course menu / KB. Formatting, language and uncertainty rules are
+// kept (copied from buildSystemPrompt) so the reply reads like the rest of the
+// system. The JSON classification block is intentionally omitted — the parser
+// tolerates its absence (defaults query_type="admission", confidence=0.5).
+function buildSchoolSystemPrompt(
+  cfg: { schoolName: string; systemPrompt: string },
+  leadName: string | null,
+  leadStage: string | null,
+): string {
+  return `You are the admissions assistant for ${cfg.schoolName}.
+
+${buildTemporalContext()}
+
+${cfg.systemPrompt}
+
+${leadName ? `The parent/student you are chatting with is: ${leadName}.` : ""}
+${leadStage ? `Lead stage: ${leadStage}.` : ""}
+
+PERSONALITY:
+- Warm, encouraging and practical. Write like a helpful admissions coordinator, not a brochure.
+- Use the person's name when you know it. One or two emojis per message is fine.
+
+FORMATTING (WhatsApp):
+- Never use markdown links like [text](url). Just paste the plain URL directly.
+- Use *bold* with single asterisks for emphasis (WhatsApp format).
+- Keep paragraphs to 2-3 lines. Max 3-4 short paragraphs per message.
+
+LANGUAGE RULES (follow strictly):
+- If the user writes in English → reply in English (default).
+- If the user writes in Hindi (Devanagari) → reply in Hindi.
+- If the user writes in Hinglish → reply in Hinglish.
+- Match the user's language from their CURRENT message.
+
+UNCERTAINTY RULES:
+- If you are NOT confident of the correct answer (a specific fee, date, or policy not in your knowledge above), do NOT guess. Say the admissions team will confirm and offer to connect them.
+- NEVER fabricate fee amounts, dates, or eligibility cutoffs.
+
+Only answer as ${cfg.schoolName}. This is a school enquiry — do NOT pitch NIMT college courses (nursing, MBA, BPT, etc.) or share the college course menu.`;
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -622,6 +688,9 @@ Deno.serve(async (req) => {
 
   try {
     const { phone, message, lead_name, lead_stage, course_interest, recent_messages, business_phone_number_id, provider, business_number } = await req.json();
+    // School number (Beacon Avantika II / Mirai): reply as that school, skip all
+    // NIMT-college course detection, KB and menu. Keyed by Meta phone_number_id.
+    const school = typeof business_phone_number_id === "string" ? SCHOOL_CHANNELS[business_phone_number_id] : undefined;
     // 'meta' (default, direct Graph API) or 'plivo' (BSP coexistence number).
     const sendProvider: "meta" | "plivo" = provider === "plivo" ? "plivo" : "meta";
     // Channel key for the per-conversation AI/human guard: the Plivo number's
@@ -814,7 +883,7 @@ Deno.serve(async (req) => {
       leadNameForPrompt = deterministicName;
     }
 
-    const selectedCourseOption = !hasCourse ? detectCourseOption(message) : null;
+    const selectedCourseOption = !school && !hasCourse ? detectCourseOption(message) : null;
     if (leadId && selectedCourseOption) {
       const courseId = await resolveCourseId(admin, selectedCourseOption);
       courseInterestForPrompt = selectedCourseOption.label;
@@ -851,12 +920,16 @@ Deno.serve(async (req) => {
     const contextPrefix = [topicContext, leadContext].filter(Boolean).join("\n");
     contextParts.push({ role: "user", parts: [{ text: contextPrefix ? `${contextPrefix}\n\n${message}` : message }] });
 
-    const [courseBriefContext, replyExamplesContext, verifiedAdmissionsContext, goldenAnswersContext] = await Promise.all([
-      loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt),
-      loadReplyExamplesContext(admin, message, existingCourseId),
-      loadVerifiedAdmissionsContext(admin, existingCourseId, courseInterestForPrompt),
-      loadGoldenAnswersContext(admin, message, existingCourseId),
-    ]);
+    // College-only knowledge/context — skipped entirely for school numbers so
+    // the school reply is never contaminated with NIMT college data.
+    const [courseBriefContext, replyExamplesContext, verifiedAdmissionsContext, goldenAnswersContext] = school
+      ? ["", "", "", ""]
+      : await Promise.all([
+          loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt),
+          loadReplyExamplesContext(admin, message, existingCourseId),
+          loadVerifiedAdmissionsContext(admin, existingCourseId, courseInterestForPrompt),
+          loadGoldenAnswersContext(admin, message, existingCourseId),
+        ]);
 
     // Call Gemini with dynamic system prompt
     // Course figures come from course_facts, not from a constant in this file.
@@ -876,17 +949,19 @@ Deno.serve(async (req) => {
     const applyPortal = resolveApplyPortal(existingLead, [], { isMiraiInstitution });
     const applyUrl = `${APPLY_PORTAL_BASE}/${applyPortal}`;
 
-    const systemPrompt = buildSystemPrompt(
-      hasName,
-      hasCourse,
-      courseBriefContext,
-      replyExamplesContext,
-      verifiedAdmissionsContext,
-      goldenAnswersContext,
-      lead_stage,
-      courseFactsBlock,
-      applyUrl,
-    );
+    const systemPrompt = school
+      ? buildSchoolSystemPrompt(school, leadNameForPrompt, lead_stage)
+      : buildSystemPrompt(
+          hasName,
+          hasCourse,
+          courseBriefContext,
+          replyExamplesContext,
+          verifiedAdmissionsContext,
+          goldenAnswersContext,
+          lead_stage,
+          courseFactsBlock,
+          applyUrl,
+        );
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`;
     const geminiBody = JSON.stringify({
       system_instruction: { parts: [{ text: systemPrompt }] },

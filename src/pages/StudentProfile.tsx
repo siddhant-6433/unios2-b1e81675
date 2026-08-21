@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2, ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
 import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
+import { isSchoolSessionYear } from "@/lib/sessionYears";
 
 interface StudentDocument {
   id: string;
@@ -398,8 +399,26 @@ const StudentProfile = () => {
   const [removalReason, setRemovalReason] = useState("");
   const [removalBusy, setRemovalBusy] = useState(false);
 
+  // Super-admin "change course / batch / session" (transfers & corrections).
+  const [placementOpen, setPlacementOpen] = useState(false);
+  const [placementSaving, setPlacementSaving] = useState(false);
+  const [placementReason, setPlacementReason] = useState("");
+  const [pCampusId, setPCampusId] = useState("");
+  const [pInstitutionId, setPInstitutionId] = useState("");
+  const [pInstType, setPInstType] = useState<"school" | "college" | "">("");
+  const [pCourseId, setPCourseId] = useState("");
+  const [pBatchId, setPBatchId] = useState("");
+  const [pSessionId, setPSessionId] = useState("");
+  const [pSection, setPSection] = useState("");
+  const [campusOpts, setCampusOpts] = useState<Array<{ id: string; name: string }>>([]);
+  const [instOpts, setInstOpts] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [courseOpts, setCourseOpts] = useState<Array<{ id: string; name: string; code?: string | null }>>([]);
+  const [batchOpts, setBatchOpts] = useState<Array<{ id: string; name: string; section?: string | null }>>([]);
+  const [sessionOpts, setSessionOpts] = useState<Array<{ id: string; name: string }>>([]);
+
   const canArchive = role === "office_assistant" || role === "school_coordinator" || role === "principal" || role === "super_admin";
   const canDelete = role === "super_admin";
+  const canChangePlacement = role === "super_admin";
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
 
@@ -434,6 +453,116 @@ const StudentProfile = () => {
     }
     toast({ title: "Student restored" });
     fetchStudent();
+  };
+
+  // ── Change placement (super-admin) ──────────────────────────────────
+  // Cascading option loaders. Campuses + sessions load when the dialog opens;
+  // institutions/courses/batches follow the selected id above them.
+  useEffect(() => {
+    if (!placementOpen) return;
+    supabase.from("campuses").select("id, name").order("name")
+      .then(({ data }) => setCampusOpts(data ?? []));
+    supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date")
+      .then(({ data }) => setSessionOpts(data ?? []));
+  }, [placementOpen]);
+
+  useEffect(() => {
+    if (!pCampusId) { setInstOpts([]); return; }
+    supabase.from("institutions").select("id, name, type").eq("campus_id", pCampusId).order("name")
+      .then(({ data }) => setInstOpts(data ?? []));
+  }, [pCampusId]);
+
+  useEffect(() => {
+    if (!pInstitutionId) { setCourseOpts([]); return; }
+    supabase.from("courses").select("id, name, code, departments!inner(institution_id)")
+      .eq("departments.institution_id", pInstitutionId).order("code")
+      .then(({ data }) => setCourseOpts((data ?? []) as Array<{ id: string; name: string; code?: string | null }>));
+  }, [pInstitutionId]);
+
+  useEffect(() => {
+    if (pInstType === "school" || !pCourseId) { setBatchOpts([]); return; }
+    supabase.from("batches").select("id, name, section").eq("course_id", pCourseId).order("name")
+      .then(({ data }) => setBatchOpts((data ?? []) as Array<{ id: string; name: string; section?: string | null }>));
+  }, [pCourseId, pInstType]);
+
+  // Sessions filtered to school academic years only when the institution is a school.
+  const placementSessionOpts = pInstType === "school"
+    ? sessionOpts.filter((s) => isSchoolSessionYear(s.name))
+    : sessionOpts;
+
+  const openPlacementDialog = async () => {
+    if (!student) return;
+    setPlacementReason("");
+    setPBatchId(student.batch_id ?? "");
+    setPSessionId(student.session_id ?? "");
+    setPSection(student.section ?? "");
+    setPCourseId(student.course_id ?? "");
+    // Reverse-resolve campus + institution (+ type) from the current course so
+    // the cascade opens on the student's existing placement.
+    if (student.course_id) {
+      const { data } = await supabase
+        .from("courses")
+        .select("departments!inner(institution_id, institutions!inner(campus_id, type))")
+        .eq("id", student.course_id)
+        .maybeSingle();
+      const dept = (data as { departments?: { institution_id?: string; institutions?: { campus_id?: string; type?: string } } } | null)?.departments;
+      const inst = dept?.institutions;
+      setPCampusId(inst?.campus_id ?? "");
+      setPInstitutionId(dept?.institution_id ?? "");
+      setPInstType(inst?.type === "school" || inst?.type === "college" ? inst.type : "");
+    } else {
+      setPCampusId(""); setPInstitutionId(""); setPInstType("");
+    }
+    setPlacementOpen(true);
+  };
+
+  const submitPlacementChange = async () => {
+    if (!student) return;
+    const reason = placementReason.trim();
+    if (!reason) {
+      toast({ title: "Reason required", description: "Enter a reason for the audit trail.", variant: "destructive" });
+      return;
+    }
+    if (!pCourseId || !pSessionId) {
+      toast({ title: "Course and session required", variant: "destructive" });
+      return;
+    }
+    setPlacementSaving(true);
+    try {
+      // RPC does the super-admin gate + validation + placement UPDATE + audit
+      // atomically, returning the changed student id (falsy → nothing applied).
+      const { data: changedId, error } = await supabase.rpc("admin_change_student_placement" as never, {
+        _student_id: student.id,
+        _course_id: pCourseId,
+        _batch_id: pInstType === "school" ? null : (pBatchId || null),
+        _session_id: pSessionId,
+        _section: pInstType === "school" ? (pSection.trim() || null) : null,
+        _reason: reason,
+      } as never);
+      if (error) throw error;
+      if (!changedId) throw new Error("Placement change did not apply.");
+
+      // Re-provision fees for the new placement (carries paid amounts onto the
+      // matching new heads; flags any that can't be matched).
+      const { data: prov, error: provErr } = await supabase.functions.invoke("provision-student-fees", {
+        body: { student_id: student.id, force_reprovision: true },
+      });
+      if (provErr) {
+        const body = (provErr as { data?: unknown }).data;
+        const detail = typeof body === "string" ? body : (body as { error?: string })?.error || provErr.message;
+        toast({ title: "Placement changed, but fee re-provision failed", description: detail, variant: "destructive" });
+      } else if ((prov as { results?: Array<{ status?: string; error?: string }> })?.results?.[0]?.status === "error") {
+        toast({ title: "Placement changed, fees need attention", description: (prov as { results: Array<{ error?: string }> }).results[0].error, variant: "destructive" });
+      } else {
+        toast({ title: "Placement changed & fees re-provisioned" });
+      }
+      setPlacementOpen(false);
+      await fetchStudent(true);
+    } catch (err) {
+      toast({ title: "Change failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    } finally {
+      setPlacementSaving(false);
+    }
   };
 
   const logStudentAudit = async (rows: Array<{
@@ -480,8 +609,12 @@ const StudentProfile = () => {
     // and hiding those in JSX would still ship them to the browser. The RPC
     // OMITS fields the caller may not see, so an un-gated field renders blank
     // rather than leaking. Row access is still RLS; the RPC is SECURITY INVOKER.
+    // photo_url is read directly here (not just via the RPC) so the header photo
+    // survives a stale/un-applied student_profile_for_viewer migration. It merges
+    // last in `{ ...shaped, ...lookups }` below, so the direct column read wins.
+    // ponytail: photo_url is a public URL, not one of the masked-PII fields the RPC guards.
     const LOOKUPS =
-      "id, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+      "id, photo_url, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
 
     let { data: found } = await supabase.from("students")
       .select(LOOKUPS).eq("admission_no", admissionNo).maybeSingle();
@@ -650,20 +783,23 @@ const StudentProfile = () => {
         setLeadDocs((ldRes.data ?? []) as LeadDocument[]);
 
         const applicationId = Array.isArray(appRes.data) ? appRes.data[0]?.application_id : null;
+        let resolvedAppPhoto: string | null = null;
         if (applicationId) {
           const { data: fnData } = await supabase.functions.invoke("list-app-docs", {
             body: { application_id: applicationId },
           }).catch(() => ({ data: null }));
           const docs = (fnData?.docs ?? []) as { name: string; url: string; path: string }[];
           setAppDocs(docs);
-          const photoDoc = findApplicationPhotoDoc(docs);
-          if (photoDoc?.url) {
-            setApplicationPhotoUrl(photoDoc.url);
-          } else if (!currentStudent.photo_url) {
-            const photoByLead = await getApplicationPhotoUrlsByLeadId([currentStudent.lead_id]);
-            setApplicationPhotoUrl(photoByLead.get(currentStudent.lead_id) || null);
-          }
+          resolvedAppPhoto = findApplicationPhotoDoc(docs)?.url || null;
         }
+        // Parity with the Students list (src/pages/Students.tsx): when the student
+        // row has no photo, pull it off the lead's latest application — regardless
+        // of whether app docs loaded or an application row even exists here.
+        if (!resolvedAppPhoto && !currentStudent.photo_url) {
+          const photoByLead = await getApplicationPhotoUrlsByLeadId([currentStudent.lead_id]);
+          resolvedAppPhoto = photoByLead.get(currentStudent.lead_id) || null;
+        }
+        if (resolvedAppPhoto) setApplicationPhotoUrl(resolvedAppPhoto);
       }
     }
     if (!silent) setLoading(false);
@@ -1087,6 +1223,11 @@ const StudentProfile = () => {
                 <Archive className="h-3.5 w-3.5" /> Archive
               </Button>
             )
+          )}
+          {canChangePlacement && (
+            <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openPlacementDialog}>
+              <ArrowRightLeft className="h-3.5 w-3.5" /> Change Course / Batch
+            </Button>
           )}
           {canDelete && (
             <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}>
@@ -1767,6 +1908,90 @@ const StudentProfile = () => {
             <Button type="button" onClick={submitProfileCorrections} disabled={editSaving}>
               {editSaving && <ButtonOrb state="working" onFilled />}
               Save Corrections
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={placementOpen} onOpenChange={setPlacementOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Change Course / Batch / Session</DialogTitle>
+            <DialogDescription>
+              Move this student to a different course, {pInstType === "school" ? "section" : "batch"} or academic session — for a transfer or a correction. The change is recorded in the audit trail.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+            Fees will be re-provisioned for the new placement. Amounts already paid are carried to the matching new fee heads; any head that can’t be matched is flagged for review. No money is refunded or moved out.
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Campus</Label>
+              <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" value={pCampusId}
+                onChange={(e) => { setPCampusId(e.target.value); setPInstitutionId(""); setPInstType(""); setPCourseId(""); setPBatchId(""); }}>
+                <option value="">Select campus</option>
+                {campusOpts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Institution</Label>
+              <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" value={pInstitutionId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setPInstitutionId(id); setPCourseId(""); setPBatchId("");
+                  const t = instOpts.find((i) => i.id === id)?.type;
+                  setPInstType(t === "school" || t === "college" ? t : "");
+                }}>
+                <option value="">Select institution</option>
+                {instOpts.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Course{pInstType === "school" ? " (class)" : ""}</Label>
+              <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" value={pCourseId}
+                onChange={(e) => { setPCourseId(e.target.value); setPBatchId(""); }}>
+                <option value="">Select course</option>
+                {courseOpts.map((c) => <option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>)}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Session</Label>
+              <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" value={pSessionId}
+                onChange={(e) => setPSessionId(e.target.value)}>
+                <option value="">Select session</option>
+                {placementSessionOpts.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            {pInstType === "school" ? (
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Section</Label>
+                <Input value={pSection} onChange={(e) => setPSection(e.target.value)} placeholder="A, B, C…" />
+              </div>
+            ) : (
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Batch</Label>
+                <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" value={pBatchId}
+                  onChange={(e) => setPBatchId(e.target.value)}>
+                  <option value="">No batch</option>
+                  {batchOpts.map((b) => <option key={b.id} value={b.id}>{b.section ? `${b.name} (${b.section})` : b.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="grid gap-1.5 sm:col-span-2">
+              <Label className="text-xs">Reason</Label>
+              <textarea value={placementReason} onChange={(e) => setPlacementReason(e.target.value)} rows={3}
+                className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                placeholder="Why is this student being moved?" disabled={placementSaving} />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPlacementOpen(false)} disabled={placementSaving}>Cancel</Button>
+            <Button type="button" onClick={submitPlacementChange} disabled={placementSaving || !pCourseId || !pSessionId || !placementReason.trim()}>
+              {placementSaving && <ButtonOrb state="working" onFilled />}
+              Change &amp; Re-provision Fees
             </Button>
           </DialogFooter>
         </DialogContent>

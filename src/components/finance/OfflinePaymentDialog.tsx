@@ -288,6 +288,52 @@ export function OfflinePaymentDialog({
       return;
     }
 
+    // ── Duplicate guard ─────────────────────────────────────────────────────
+    // The same rupee reaches us twice: the candidate pays on the gateway but
+    // closes the UPI app before the redirect (so our row stays pending), then
+    // sends a screenshot and a cashier keys it in by hand. When the reconcile
+    // sweep later settles the gateway row, both rows mint a receipt number and
+    // both credit the ledger. Catch it here, where a human can still tell the
+    // difference.
+    const ref = txnRef.trim();
+    if (leadId) {
+      if (ref) {
+        const { data: exact } = await (supabase.from("lead_payments") as any)
+          .select("id, receipt_no, amount")
+          .eq("status", "confirmed")
+          .or(`transaction_ref.eq.${ref},bank_ref_num.eq.${ref}`)
+          .limit(1)
+          .maybeSingle();
+        if (exact?.id) {
+          toast({
+            title: "This transaction is already receipted",
+            description: `Reference ${ref} is already recorded${exact.receipt_no ? ` on receipt ${exact.receipt_no}` : ""}. Recording it again would issue a second receipt for the same money.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      const { data: pendingGw } = await (supabase.from("lead_payments") as any)
+        .select("id, amount, gateway, created_at")
+        .eq("lead_id", leadId)
+        .eq("status", "pending")
+        .eq("payment_mode", "gateway")
+        .gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString())
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const sameAmount = (pendingGw || []).find((r: any) => Math.abs(Number(r.amount || 0) - amt) < 1);
+      if (sameAmount) {
+        const when = new Date(sameAmount.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+        const proceed = window.confirm(
+          `This candidate already has a PENDING ${sameAmount.gateway || "gateway"} payment of ₹${Number(sameAmount.amount).toLocaleString("en-IN")} started on ${when}.\n\n` +
+          `If that is the same payment, close this and use "Verify with EaseBuzz" on the Finance → Transaction History row instead — recording it here as well will issue two receipts for one payment.\n\n` +
+          `Record it manually anyway?`,
+        );
+        if (!proceed) return;
+      }
+    }
+
     // Pack mode-specific context into notes so the receipt + audit trail
     // captures it (we don't want to grow the schema for every mode).
     const noteBits: string[] = [];
@@ -326,6 +372,10 @@ export function OfflinePaymentDialog({
       amount:          amt,
       payment_mode:    mode,
       transaction_ref: txnRef.trim() || null,
+      // Only UPI / bank transfers carry a bank RRN; a cheque number is not one.
+      // Storing it lets the partial unique index block the gateway sweep from
+      // receipting the same money a second time.
+      bank_ref_num:    (mode === "upi" || mode === "bank_transfer") ? (txnRef.trim() || null) : null,
       payment_date:    combineIndiaDateTimeInput(date, time),
       status:          "confirmed",
       recorded_by:     profile?.id || null,
