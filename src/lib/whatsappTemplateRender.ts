@@ -1,5 +1,5 @@
 export type WhatsAppTemplateStatus = "approved" | "pending" | "rejected";
-export type WhatsAppTemplateCategory = "admissions" | "followup" | "knowledge" | "payment" | "visit" | "utility";
+export type WhatsAppTemplateCategory = "admissions" | "course_details" | "followup" | "knowledge" | "payment" | "visit" | "utility";
 
 export interface WhatsAppTemplateDefinition {
   key: string;
@@ -54,7 +54,7 @@ export interface RenderedWhatsAppTemplate {
   footer?: string;
 }
 
-const TEMPLATE_CATEGORIES = new Set<WhatsAppTemplateCategory>(["admissions", "followup", "knowledge", "payment", "visit", "utility"]);
+const TEMPLATE_CATEGORIES = new Set<WhatsAppTemplateCategory>(["admissions", "course_details", "followup", "knowledge", "payment", "visit", "utility"]);
 const TEMPLATE_STATUSES = new Set<WhatsAppTemplateStatus>(["approved", "pending", "rejected"]);
 
 const HUMAN_PARAM_LABELS: Record<string, string> = {
@@ -103,6 +103,9 @@ const humanizeParam = (key: string) =>
   HUMAN_PARAM_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
 export const inferWhatsAppTemplateCategory = (key: string): WhatsAppTemplateCategory => {
+  // Matches the settings.category value 'course_details' and the *_course_details
+  // key pattern; must precede the generic `course → admissions` rule below.
+  if (/course_details/i.test(key)) return "course_details";
   if (/visit/i.test(key)) return "visit";
   if (/fee|payment|receipt|offer|token/i.test(key)) return "payment";
   if (/followup|reminder|not_interested|deadline/i.test(key)) return "followup";
