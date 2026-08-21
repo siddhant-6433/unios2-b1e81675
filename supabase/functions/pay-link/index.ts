@@ -188,6 +188,26 @@ Deno.serve(async (req) => {
       feeDueDate = dueFee?.due_date || null;
     }
 
+    // Live fee links: the stored amount is a stale snapshot. Recompute the late
+    // fine (freezes to today) and sum the term head + its late_<term> head so the
+    // payer always owes exactly what the ledger says on the day they open the link.
+    let effectiveAmount = Number(link.amount);
+    if (link.live_fee && link.student_id && link.fee_term) {
+      try {
+        await admin.rpc("fn_recompute_late_fees", { _student_id: link.student_id });
+      } catch (e) {
+        console.error("[pay-link] fn_recompute_late_fees failed:", e);
+      }
+      const { data: heads } = await admin
+        .from("fee_ledger")
+        .select("balance")
+        .eq("student_id", link.student_id)
+        .in("status", ["due", "overdue"])
+        .in("term", [link.fee_term, `late_${link.fee_term}`]);
+      const live = (heads || []).reduce((s: number, r: any) => s + Number(r.balance || 0), 0);
+      effectiveAmount = Math.round(live * 100) / 100;
+    }
+
     if (action === "resolve") {
       // Gateways this function can actually start a checkout on. A link created
       // with gateway='choice' has no short_url, so the payer picks one here —
@@ -201,7 +221,7 @@ Deno.serve(async (req) => {
       return json({
         gateways,
         payer_name: payerName,
-        amount: Number(link.amount),
+        amount: effectiveAmount,
         purpose: link.purpose,
         purpose_label: PURPOSE_LABEL[link.purpose] || "Payment",
         note: link.note || null,
@@ -222,6 +242,18 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create-order" || action === "create-easebuzz-order") {
+      // Live link already fully paid/settled in the ledger → nothing to collect.
+      if (link.live_fee && effectiveAmount <= 0) {
+        return json({ error: "This fee is already paid in full." }, 409);
+      }
+      // Freeze the live amount onto the row: this is exactly what the gateway is
+      // about to charge, and settlePaymentLink books Number(link.amount). Without
+      // this, settlement would credit the stale send-time snapshot and orphan the
+      // fine the payer actually paid.
+      if (link.live_fee && Math.abs(effectiveAmount - Number(link.amount)) > 0.01) {
+        await admin.from("payment_links").update({ amount: effectiveAmount }).eq("id", link.id);
+        link.amount = effectiveAmount;
+      }
       const preferredGateway = String(parsed.gateway || link.gateway || "").toLowerCase();
       const useEasebuzz = action === "create-easebuzz-order"
         || preferredGateway === "easebuzz"
@@ -256,7 +288,7 @@ Deno.serve(async (req) => {
         }
         if (!phone) phone = "9999999999";
 
-        const amountStr = Number(link.amount).toFixed(2);
+        const amountStr = effectiveAmount.toFixed(2);
         const productStr = (PURPOSE_LABEL[link.purpose] || "Payment").slice(0, 100);
         // udf3=payment_link, udf1=payment_link uuid — surl/webhook settle via settlePaymentLink
         const txnid = `PL${link.id.replace(/-/g, "").slice(0, 12)}${Date.now()}`.slice(0, 40);
@@ -310,13 +342,13 @@ Deno.serve(async (req) => {
           gateway: "easebuzz",
           txnid,
           pay_url: `${baseUrl}/pay/${data.data}`,
-          amount: Number(link.amount),
+          amount: effectiveAmount,
         });
       }
 
       // ── Razorpay Standard Checkout path ────────────────────────────────
       if (!keyId || !keySecret) return json({ error: "Razorpay not configured" }, 500);
-      const amountPaise = Math.round(Number(link.amount) * 100);
+      const amountPaise = Math.round(effectiveAmount * 100);
       const { res, data } = await razorpayRequest("/orders", {
         method: "POST",
         body: JSON.stringify({
