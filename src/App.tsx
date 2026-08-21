@@ -79,6 +79,7 @@ const PublisherAnalytics   = lazy(() => import("./pages/PublisherAnalytics"));
 const ConsultantGuide      = lazy(() => import("./pages/ConsultantGuide"));
 const TemplateManager      = lazy(() => import("./pages/TemplateManager"));
 const FeeStructures        = lazy(() => import("./pages/FeeStructures"));
+const FeeNotifications     = lazy(() => import("./pages/FeeNotifications"));
 const EnquiryForm          = lazy(() => import("./pages/EnquiryForm"));
 const Exams                = lazy(() => import("./pages/Exams"));
 const Reports              = lazy(() => import("./pages/Reports"));
@@ -355,6 +356,7 @@ const App = () => (
                       <Route path="/collections" element={<Navigate to="/finance?tab=receipts" replace />} />
                       <Route path="/consultant-credit-notes" element={<RequireRole roles={["super_admin"]}><ConsultantCreditNotes /></RequireRole>} />
                       <Route path="/fee-structures" element={<RequirePermission module="courses_fees" action="view"><FeeStructures /></RequirePermission>} />
+                      <Route path="/fee-notifications" element={<RequirePermission module="finance" action="view"><FeeNotifications /></RequirePermission>} />
 
                       {/* HR — campus_admin / principal / office_admin only */}
                       <Route path="/hr" element={<RequirePermission module="hr" action="view"><HrDashboard /></RequirePermission>} />
