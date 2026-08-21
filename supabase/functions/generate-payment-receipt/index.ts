@@ -525,6 +525,25 @@ Deno.serve(async (req) => {
       if (lead?.admission_no || stu?.admission_no) rows.push(["Admission No", lead?.admission_no || stu?.admission_no]);
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
       if (courseName) rows.push(["Course", courseName]);
+      // If this student was transferred/migrated to a new course/session, note
+      // it so the receipt reflects that the placement (and fees) changed.
+      if (stu?.id) {
+        const { data: xfer } = await admin
+          .from("student_audit_log")
+          .select("created_at, metadata")
+          .eq("student_id", stu.id)
+          .eq("event_type", "placement_change")
+          .eq("field_name", "course_id")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (xfer) {
+          const from = (xfer.metadata as { old_label?: string } | null)?.old_label;
+          const to = (xfer.metadata as { new_label?: string } | null)?.new_label;
+          rows.push(["Note",
+            `Student transferred${from && to ? ` from ${from} to ${to}` : ""} on ${fmtDateShort(xfer.created_at)} — fees re-provisioned for the current course/session.`]);
+        }
+      }
     }
     // An ad-hoc charge collected at the counter names its actual head
     // (Sports, Transfer Certificate…) instead of the generic "Other Charges".
