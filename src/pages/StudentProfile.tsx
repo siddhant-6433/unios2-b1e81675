@@ -612,9 +612,12 @@ const StudentProfile = () => {
     // photo_url is read directly here (not just via the RPC) so the header photo
     // survives a stale/un-applied student_profile_for_viewer migration. It merges
     // last in `{ ...shaped, ...lookups }` below, so the direct column read wins.
-    // ponytail: photo_url is a public URL, not one of the masked-PII fields the RPC guards.
+    // lead_id is read the same way because the RPC omits it: without it the
+    // application-photo fallback below (gated on currentStudent.lead_id) never runs,
+    // so a student whose photo lives only in their application shows initials.
+    // ponytail: photo_url/lead_id are non-sensitive, not the masked-PII fields the RPC guards.
     const LOOKUPS =
-      "id, photo_url, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+      "id, lead_id, photo_url, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
 
     let { data: found } = await supabase.from("students")
       .select(LOOKUPS).eq("admission_no", admissionNo).maybeSingle();
