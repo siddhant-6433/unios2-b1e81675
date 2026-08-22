@@ -780,8 +780,8 @@ export default function LeadLists() {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, show_in_lead_picker")
-        .eq("show_in_lead_picker", true);
+        .select("template_key, display_name, description, category, visibility")
+        .in("visibility", ["marketing_only", "all"]);
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;

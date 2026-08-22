@@ -30984,7 +30984,7 @@ export type Database = {
           description: string | null
           display_name: string
           media_url: string | null
-          show_in_lead_picker: boolean
+          visibility: string
           template_key: string
           updated_at: string
         }
@@ -30996,7 +30996,7 @@ export type Database = {
           description?: string | null
           display_name: string
           media_url?: string | null
-          show_in_lead_picker?: boolean
+          visibility?: string
           template_key: string
           updated_at?: string
         }
@@ -31008,7 +31008,7 @@ export type Database = {
           description?: string | null
           display_name?: string
           media_url?: string | null
-          show_in_lead_picker?: boolean
+          visibility?: string
           template_key?: string
           updated_at?: string
         }

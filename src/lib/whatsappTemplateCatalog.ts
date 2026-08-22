@@ -206,7 +206,7 @@ interface TemplateSettingsRow {
   display_name?: string | null;
   description?: string | null;
   category?: string | null;
-  show_in_lead_picker?: boolean | null;
+  visibility?: string | null;
   allowed_user_ids?: string[] | null;
   media_url?: string | null;
 }
@@ -245,7 +245,7 @@ export async function loadWhatsAppTemplateCatalog(
   const [{ data: userData }, settingsResult, metaResult] = await Promise.all([
     supabase.auth.getUser(),
     (supabase as any).from("whatsapp_template_settings").select(
-      "template_key, display_name, description, category, show_in_lead_picker, allowed_user_ids, media_url",
+      "template_key, display_name, description, category, visibility, allowed_user_ids, media_url",
     ),
     (supabase as any)
       .from("whatsapp_templates")
@@ -263,7 +263,7 @@ export async function loadWhatsAppTemplateCatalog(
   const curatedKeys = new Set(
     settingsRows
       .filter((row) => {
-        if (row.show_in_lead_picker !== true) return false;
+        if (row.visibility !== 'all') return false;
         const userScoped = Array.isArray(row.allowed_user_ids) && row.allowed_user_ids.length > 0;
         return !userScoped || (!!userId && row.allowed_user_ids!.includes(userId));
       })

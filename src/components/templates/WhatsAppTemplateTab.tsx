@@ -210,35 +210,41 @@ function TemplateCard({
   );
 }
 
-// Show/hide toggle for whether counsellors see this template in the send picker
-// (whatsapp_template_settings.show_in_lead_picker). size="sm" for the list rows,
-// "md" for the preview header.
+// ponytail: 3-state visibility selector for whatsapp_template_settings.visibility
+const VISIBILITY_OPTIONS = [
+  { value: "hidden", label: "Hidden", color: "border-input bg-muted/40 text-muted-foreground hover:bg-muted" },
+  { value: "marketing_only", label: "Marketing", color: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20" },
+  { value: "all", label: "All", color: "border-success/30 bg-success/10 text-success hover:bg-success/20" },
+] as const;
+
 function VisibilityToggle({
-  on,
+  value,
   onChange,
   size = "sm",
 }: {
-  on: boolean;
-  onChange: (next: boolean) => void;
+  value: string;
+  onChange: (next: string) => void;
   size?: "sm" | "md";
 }) {
-  const Icon = on ? Eye : EyeOff;
+  // Cycle: hidden → marketing_only → all → hidden
+  const cycle = () => {
+    const order = ["hidden", "marketing_only", "all"] as const;
+    const idx = order.indexOf(value as any);
+    onChange(order[(idx + 1) % 3]);
+  };
+  const opt = VISIBILITY_OPTIONS.find(o => o.value === value) || VISIBILITY_OPTIONS[0];
+  const Icon = value === "all" ? Eye : value === "marketing_only" ? Eye : EyeOff;
   return (
     <button
       type="button"
-      onClick={(e) => { e.stopPropagation(); onChange(!on); }}
-      title={on ? "Shown to counsellors — click to hide" : "Hidden from counsellors — click to show"}
-      aria-pressed={on}
+      onClick={(e) => { e.stopPropagation(); cycle(); }}
+      title={value === "all" ? "Marketing + Counsellors — click to cycle" : value === "marketing_only" ? "Marketing only — click to cycle" : "Hidden — click to cycle"}
       className={`inline-flex shrink-0 items-center gap-1 rounded-full border font-medium transition-colors ${
         size === "md" ? "px-2.5 py-1 text-[11px]" : "px-2 py-0.5 text-[10px]"
-      } ${
-        on
-          ? "border-success/30 bg-success/10 text-success hover:bg-success/20"
-          : "border-input bg-muted/40 text-muted-foreground hover:bg-muted"
-      }`}
+      } ${opt.color}`}
     >
       <Icon className={size === "md" ? "h-3.5 w-3.5" : "h-3 w-3"} />
-      {on ? "Shown" : "Hidden"}
+      {opt.label}
     </button>
   );
 }
@@ -253,8 +259,8 @@ function TemplatePreviewPanel({
   template: WaTemplateRow | null;
   deleting: string | null;
   onDelete: (template: WaTemplateRow) => void;
-  visible?: boolean;
-  onToggleVisible?: (next: boolean) => void;
+  visible?: string;
+  onToggleVisible?: (next: string) => void;
 }) {
   if (!template) {
     return (
@@ -282,7 +288,7 @@ function TemplatePreviewPanel({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {onToggleVisible && (
-              <VisibilityToggle on={!!visible} onChange={onToggleVisible} size="md" />
+              <VisibilityToggle value={visible || "hidden"} onChange={onToggleVisible} size="md" />
             )}
             <Badge className={`gap-1 border-0 text-[10px] ${color}`}>
               <Icon className="h-3 w-3" />
@@ -354,8 +360,8 @@ export function WhatsAppTemplateTab({
   visibilityByKey,
   onToggleVisibility,
 }: {
-  visibilityByKey?: Record<string, boolean>;
-  onToggleVisibility?: (templateKey: string, next: boolean) => void;
+  visibilityByKey?: Record<string, string>;
+  onToggleVisibility?: (templateKey: string, next: string) => void;
 } = {}) {
   const { toast } = useToast();
   const [rows, setRows] = useState<WaTemplateRow[]>([]);
@@ -598,7 +604,7 @@ export function WhatsAppTemplateTab({
                           </Badge>
                           {onToggleVisibility && (
                             <VisibilityToggle
-                              on={!!visibilityByKey?.[template.name]}
+                              value={visibilityByKey?.[template.name] || "hidden"}
                               onChange={(next) => onToggleVisibility(template.name, next)}
                             />
                           )}
@@ -620,7 +626,7 @@ export function WhatsAppTemplateTab({
                 template={selectedApproved}
                 deleting={deleting}
                 onDelete={deleteTemplate}
-                visible={!!visibilityByKey?.[selectedApproved.name]}
+                visible={visibilityByKey?.[selectedApproved.name] || "hidden"}
                 onToggleVisible={onToggleVisibility ? (next) => onToggleVisibility(selectedApproved.name, next) : undefined}
               />
             ) : (
