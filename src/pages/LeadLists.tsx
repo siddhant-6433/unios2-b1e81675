@@ -504,6 +504,8 @@ export default function LeadLists() {
   const [assignList, setAssignList] = useState<LeadList | null>(null);
   const [counsellors, setCounsellors] = useState<CounsellorOption[]>([]);
   const [selectedCounsellorIds, setSelectedCounsellorIds] = useState<string[]>([]);
+  // ponytail: counsellors already assigned to this list — shown disabled in the assign dialog
+  const [alreadyAssignedIds, setAlreadyAssignedIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [assignmentSummary, setAssignmentSummary] = useState<string | null>(null);
   // Working instructions the counsellor sees on the dialer's list banner.
@@ -963,11 +965,22 @@ export default function LeadLists() {
   const openAssign = async (list: LeadList) => {
     setAssignList(list);
     setSelectedCounsellorIds([]);
+    setAlreadyAssignedIds([]);
     setAssignmentSummary(null);
     setAssignIncludeTerminal(list.include_terminal ?? false);
     setAssignPreview(null);
     setAssignOpen(true);
     await loadAssignableCounsellors();
+
+    // Fetch counsellors already assigned to this list so they show disabled.
+    const { data: assigned } = await supabase
+      .from("lead_list_members" as any)
+      .select("assigned_to")
+      .eq("list_id", list.id)
+      .not("assigned_to", "is", null);
+    const ids = [...new Set((assigned || []).map((r: any) => r.assigned_to).filter(Boolean))] as string[];
+    setAlreadyAssignedIds(ids);
+
     // A pure counsellor can only assign themselves — preselect so it's one click.
     if (!canAssignLists && role === "counsellor" && profile?.id) {
       setSelectedCounsellorIds([profile.id]);
@@ -1744,11 +1757,7 @@ export default function LeadLists() {
                             <Users className="h-3.5 w-3.5" /> {canAssignLists ? "Assign" : "Call this"}
                           </Button>
                         )}
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssignmentReport(list)}>
-                          <Phone className="h-3.5 w-3.5" /> Calling Report
-                        </Button>
-                        {/* Secondary actions collapse into an overflow menu so the row
-                            never clips the way "New Campaign" used to. */}
+                        {/* ponytail: all secondary actions in overflow — keeps row from clipping */}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
@@ -1756,6 +1765,9 @@ export default function LeadLists() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => openAssignmentReport(list)}>
+                              <Phone className="mr-2 h-4 w-4" /> Calling Report
+                            </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                               <Link to={`/marketing?listId=${list.id}`}>
                                 <Megaphone className="mr-2 h-4 w-4" /> New Campaign
@@ -2365,18 +2377,23 @@ export default function LeadLists() {
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>
               ) : (
                 counsellors.map((counsellor) => {
-                  const checked = selectedCounsellorIds.includes(counsellor.id);
+                  const alreadyAssigned = alreadyAssignedIds.includes(counsellor.id);
+                  const checked = alreadyAssigned || selectedCounsellorIds.includes(counsellor.id);
                   const days = daysSince(counsellor.last_call_at);
                   const dormant = days === null || days >= DORMANT_DAYS;
                   return (
-                    <label key={counsellor.id} className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 hover:bg-muted/30">
+                    <label key={counsellor.id} className={`flex items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 ${alreadyAssigned ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-muted/30"}`}>
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleCounsellor(counsellor.id)}
+                        onChange={() => !alreadyAssigned && toggleCounsellor(counsellor.id)}
+                        disabled={alreadyAssigned}
                         className="h-4 w-4"
                       />
                       <span className="text-sm font-medium text-foreground">{counsellor.name}</span>
+                      {alreadyAssigned && (
+                        <Badge variant="secondary" className="text-[10px] font-normal">Already assigned</Badge>
+                      )}
                       <span className={`ml-auto flex items-center gap-2 text-[11px] ${dormant ? "text-destructive" : "text-muted-foreground"}`}>
                         {dormant && <AlertTriangle className="h-3 w-3" />}
                         {lastCallLabel(counsellor.last_call_at)}
