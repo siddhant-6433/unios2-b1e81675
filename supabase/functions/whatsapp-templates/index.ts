@@ -104,7 +104,7 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
       display_name: displayNameForTemplate(template.name),
       description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
       category: String(template.category || "general").toLowerCase(),
-      show_in_lead_picker: false,
+      visibility: 'hidden',
     }));
 
   if (rows.length === 0) return { registered: 0 };

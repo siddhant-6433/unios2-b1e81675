@@ -68,7 +68,7 @@ describe("WhatsApp template manager access", () => {
 
   it("auto-registers newly approved Meta templates with visibility disabled", () => {
     expect(templateFunction).toContain("registerApprovedTemplateVisibilityRows");
-    expect(templateFunction).toContain('show_in_lead_picker: false');
+    expect(templateFunction).toContain("visibility: 'hidden'");
     expect(templateFunction).toContain("visibility_registered");
     expect(templateFunction).toContain("normalizeTemplateStatus(template.status) === \"APPROVED\"");
   });

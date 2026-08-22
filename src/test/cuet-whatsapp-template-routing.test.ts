@@ -28,7 +28,7 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(leadPicker).toContain('key: "cuet_2026_counselling_open"');
     expect(leadPicker).toContain('key: "cuet_counselling_booking"');
     expect(leadPicker).toContain("DEFAULT_VISIBLE_WHEN_UNCONFIGURED");
-    expect(leadPicker).toContain("show_in_lead_picker !== true");
+    expect(leadPicker).toContain("visibility !== 'all'");
     expect(leadPicker).toContain("Template Manager → Template Visibility");
     expect(leadPicker).toContain('from("whatsapp_templates")');
     expect(leadPicker).toContain("hasDynamicUrlButton");

@@ -255,7 +255,7 @@ export interface WhatsAppTemplateCatalogue {
 
 /**
  * Loads the lead-picker template catalogue: the hardcoded list gated by
- * `whatsapp_template_settings.show_in_lead_picker`, with previews overridden
+ * `whatsapp_template_settings.visibility`, with previews overridden
  * from the approved Meta templates and zero-placeholder approved templates
  * folded in. Re-runs whenever `enabled` flips true.
  */
@@ -279,7 +279,7 @@ export function useWhatsAppTemplates(enabled: boolean): WhatsAppTemplateCatalogu
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, show_in_lead_picker, allowed_team_ids, allowed_user_ids");
+        .select("template_key, display_name, description, category, visibility, allowed_team_ids, allowed_user_ids");
       if (cancelled) return;
       if (error) {
         // Fail open — show everything rather than a blank picker.
@@ -295,13 +295,13 @@ export function useWhatsAppTemplates(enabled: boolean): WhatsAppTemplateCatalogu
         display_name?: string | null;
         description?: string | null;
         category?: string | null;
-        show_in_lead_picker?: boolean | null;
+        visibility?: string | null;
         allowed_team_ids?: string[] | null;
         allowed_user_ids?: string[] | null;
       }>;
       const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
       settingsRows.forEach((r: any) => {
-        if (r.show_in_lead_picker !== true) return;
+        if (r.visibility !== 'all') return;
         const teamScoped = Array.isArray(r.allowed_team_ids) && r.allowed_team_ids.length > 0;
         const userScoped = Array.isArray(r.allowed_user_ids) && r.allowed_user_ids.length > 0;
         // Team scoping (when active) is enforced server-side via RLS-aware
