@@ -94,7 +94,9 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
     if (!stu?.lead_id) { setWaivers([]); return; }
     const { data: ol } = await supabase
       .from("offer_letters").select("id")
-      .eq("lead_id", stu.lead_id).eq("status", "approved")
+      // The admission decision lives in approval_status, NOT status (which tracks
+      // draft/issued/…). Mirrors sync_fee_ledger_concessions()'s letter lookup.
+      .eq("lead_id", stu.lead_id).eq("approval_status", "approved")
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (!ol?.id) { setWaivers([]); return; }
     const { data } = await supabase
