@@ -35,6 +35,20 @@ interface Concession {
   status: string;
 }
 
+// An approved offer-letter waiver contributing to this row's concession. These
+// live in offer_waivers (keyed by offer_letter + term), NOT the concessions
+// table, and are flat-amount only. They are synced into fee_ledger.concession by
+// sync_fee_ledger_concessions(); the offer_waivers_sync_ledger trigger re-runs
+// that on any amount/status change, so we never call sync ourselves.
+interface Waiver {
+  id: string;
+  term: string;
+  amount: number;
+  reason: string | null;
+}
+
+type Editing = { id: string; kind: "concession" | "waiver" } | null;
+
 const effectiveAmount = (type: string, value: number, total: number) =>
   type === "flat" ? value : Math.round((total * value) / 100);
 
@@ -47,7 +61,8 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState<Concession[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [waivers, setWaivers] = useState<Waiver[]>([]);
+  const [editing, setEditing] = useState<Editing>(null);
 
   const isSuperAdmin = role === "super_admin";
   // Reduce / remove is open to the cashier and counsellor; increase is not.
@@ -55,7 +70,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const total = Number(fee.total_amount || 0);
   const amount = !value ? 0 : effectiveAmount(type, Number(value), total);
 
-  const reset = () => { setType("flat"); setValue(""); setReason(""); setEditingId(null); };
+  const reset = () => { setType("flat"); setValue(""); setReason(""); setEditing(null); };
 
   const fetchExisting = async () => {
     const { data } = await supabase
@@ -67,15 +82,36 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
     setExisting(((data as Concession[]) || []).filter((c) => c.type === "flat" || c.type === "percentage"));
   };
 
+  // Offer-letter waivers feeding this row's concession. Only super_admin can edit
+  // them (RLS UPDATE/DELETE on offer_waivers is super_admin-only), so only they
+  // need the list. Trace: student → lead → latest approved offer_letter → approved
+  // waivers whose term matches this row (NB-SEC row ↔ 'security_deposit' term).
+  const fetchWaivers = async () => {
+    if (!isSuperAdmin || !fee.student_id) { setWaivers([]); return; }
+    const term = fee.fee_codes?.code === "NB-SEC" ? "security_deposit" : fee.term;
+    if (!term) { setWaivers([]); return; }
+    const { data: stu } = await supabase.from("students").select("lead_id").eq("id", fee.student_id).maybeSingle();
+    if (!stu?.lead_id) { setWaivers([]); return; }
+    const { data: ol } = await supabase
+      .from("offer_letters").select("id")
+      .eq("lead_id", stu.lead_id).eq("status", "approved")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!ol?.id) { setWaivers([]); return; }
+    const { data } = await supabase
+      .from("offer_waivers").select("id, term, amount, reason")
+      .eq("offer_letter_id", ol.id).eq("status", "approved").eq("term", term);
+    setWaivers((data as Waiver[]) || []);
+  };
+
   useEffect(() => {
-    if (open) fetchExisting();
+    if (open) { fetchExisting(); fetchWaivers(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const afterWrite = async () => {
     setSaving(false);
     reset();
-    await fetchExisting();
+    await Promise.all([fetchExisting(), fetchWaivers()]);
     onDone();
   };
 
@@ -149,15 +185,58 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
     await afterWrite();
   };
 
+  // ── edit / reduce an offer-letter waiver (super_admin only) ────────────
+  // Flat amount only. The offer_waivers_sync_ledger trigger recomputes
+  // fee_ledger.concession on the amount change, so no manual sync is needed.
+  const submitEditWaiver = async (w: Waiver) => {
+    const amt = Number(value);
+    if (!(amt > 0)) { toast({ title: "Enter a waiver amount", variant: "destructive" }); return; }
+    if (!reason.trim()) { toast({ title: "A reason is required", variant: "destructive" }); return; }
+    setSaving(true);
+    const { error } = await supabase.from("offer_waivers")
+      .update({ amount: amt, reason: reason.trim() }).eq("id", w.id);
+    if (error) {
+      setSaving(false);
+      toast({ title: "Could not update the waiver", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Waiver updated", description: `Now ₹${amt.toLocaleString("en-IN")} off ${fee.fee_codes?.code || "this head"}.` });
+    await afterWrite();
+  };
+
+  // Keep history: mark the waiver rejected (sync only counts 'approved') rather
+  // than hard-deleting. The trigger fires on the status change and re-syncs.
+  const removeWaiver = async (w: Waiver) => {
+    setSaving(true);
+    const { error } = await supabase.from("offer_waivers")
+      .update({ status: "rejected", rejection_reason: reason.trim() || "Removed from fee ledger" })
+      .eq("id", w.id);
+    if (error) {
+      setSaving(false);
+      toast({ title: "Could not remove the waiver", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Waiver removed" });
+    await afterWrite();
+  };
+
   const startEdit = (c: Concession) => {
-    setEditingId(c.id);
+    setEditing({ id: c.id, kind: "concession" });
     setType(c.type);
     setValue(String(c.value));
     setReason("");
   };
 
-  const editingConcession = existing.find((c) => c.id === editingId) || null;
-  const showAddForm = !editingId;
+  const startEditWaiver = (w: Waiver) => {
+    setEditing({ id: w.id, kind: "waiver" });
+    setType("flat");
+    setValue(String(w.amount));
+    setReason("");
+  };
+
+  const editingConcession = editing?.kind === "concession" ? existing.find((c) => c.id === editing.id) || null : null;
+  const editingWaiver = editing?.kind === "waiver" ? waivers.find((w) => w.id === editing.id) || null : null;
+  const showAddForm = !editing;
 
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
@@ -204,7 +283,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                     {canEdit && (
                       <div className="flex shrink-0 gap-0.5">
                         <button
-                          onClick={() => (editingId === c.id ? reset() : startEdit(c))}
+                          onClick={() => (editing?.id === c.id ? reset() : startEdit(c))}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
                           title="Edit / reduce" aria-label="Edit or reduce this waiver"
                         ><Pencil className="h-3 w-3" /></button>
@@ -223,23 +302,61 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
           </div>
         )}
 
-        {/* One shared form: add a new concession, or edit the one being edited. */}
-        {(showAddForm || editingConcession) && (
+        {/* Offer-letter waivers on this term. Editing recomputes the whole term's
+            share across its rows; super_admin only. */}
+        {waivers.length > 0 && (
+          <div className="space-y-1.5">
+            {waivers.map((w) => (
+              <div key={w.id} className="rounded-lg border border-input px-2.5 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-success">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">offer letter</span>
+                    {w.reason && (
+                      <p className="truncate text-[10px] text-muted-foreground" title={w.reason}>{w.reason}</p>
+                    )}
+                  </div>
+                  {isSuperAdmin && (
+                    <div className="flex shrink-0 gap-0.5">
+                      <button
+                        onClick={() => (editing?.id === w.id ? reset() : startEditWaiver(w))}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
+                        title="Edit / reduce" aria-label="Edit or reduce this offer-letter waiver"
+                      ><Pencil className="h-3 w-3" /></button>
+                      <button
+                        onClick={() => removeWaiver(w)}
+                        disabled={saving}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
+                        title="Remove" aria-label="Remove this offer-letter waiver"
+                      ><Trash2 className="h-3 w-3" /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* One shared form: add a new concession, edit a concession, or edit an
+            offer-letter waiver (flat amount only, so its type toggle is hidden). */}
+        {(showAddForm || editingConcession || editingWaiver) && (
           <div className="space-y-2.5 border-t border-border pt-2.5">
             <p className="text-[11px] font-medium text-foreground">
-              {editingConcession ? "Edit waiver" : "Add a waiver"}
+              {editingWaiver ? "Edit offer-letter waiver" : editingConcession ? "Edit waiver" : "Add a waiver"}
             </p>
             <div className="flex items-center gap-2">
-              <div className="flex shrink-0 overflow-hidden rounded-lg border border-input">
-                <button
-                  onClick={() => setType("flat")}
-                  className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${type === "flat" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
-                >₹ Flat</button>
-                <button
-                  onClick={() => setType("percentage")}
-                  className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${type === "percentage" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
-                >% Pct</button>
-              </div>
+              {!editingWaiver && (
+                <div className="flex shrink-0 overflow-hidden rounded-lg border border-input">
+                  <button
+                    onClick={() => setType("flat")}
+                    className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${type === "flat" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  >₹ Flat</button>
+                  <button
+                    onClick={() => setType("percentage")}
+                    className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${type === "percentage" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  >% Pct</button>
+                </div>
+              )}
               <input
                 type="number" min={0} max={type === "percentage" ? 100 : total}
                 value={value}
@@ -266,7 +383,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
               className="min-h-[56px] w-full resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             />
 
-            {!editingConcession && (
+            {showAddForm && (
               <p className="text-[10px] text-muted-foreground">
                 {isSuperAdmin ? "Applied immediately." : "Goes to the super admin. The ledger is unchanged until approved."}
               </p>
@@ -274,14 +391,17 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
             {editingConcession && !isSuperAdmin && (
               <p className="text-[10px] text-muted-foreground">You can only reduce this waiver.</p>
             )}
+            {editingWaiver && (
+              <p className="text-[10px] text-muted-foreground">Changes the offer-letter waiver for this term; applied immediately.</p>
+            )}
 
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={() => (editingConcession ? reset() : setOpen(false))} disabled={saving}>
-                {editingConcession ? "Cancel" : "Close"}
+              <Button size="sm" variant="outline" onClick={() => (editing ? reset() : setOpen(false))} disabled={saving}>
+                {editing ? "Cancel" : "Close"}
               </Button>
-              <Button size="sm" onClick={() => (editingConcession ? submitEdit(editingConcession) : submitAdd())} disabled={saving}>
+              <Button size="sm" onClick={() => (editingWaiver ? submitEditWaiver(editingWaiver) : editingConcession ? submitEdit(editingConcession) : submitAdd())} disabled={saving}>
                 {saving ? <ButtonOrb state="working" onFilled /> : null}
-                {editingConcession ? "Save" : isSuperAdmin ? "Apply" : "Request"}
+                {editing ? "Save" : isSuperAdmin ? "Apply" : "Request"}
               </Button>
             </div>
           </div>
