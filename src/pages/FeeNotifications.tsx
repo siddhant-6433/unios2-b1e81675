@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Send, Info, AlertTriangle, Filter, ChevronDown, ChevronRight, RefreshCw, Copy, MessageCircle } from "lucide-react";
+import { Send, Info, AlertTriangle, Filter, ChevronDown, ChevronRight, RefreshCw, Copy, MessageCircle, Phone } from "lucide-react";
 
 interface CourseOption { id: string; name: string; code: string }
 interface SessionOption { id: string; name: string }
@@ -54,9 +54,13 @@ interface CampaignRow {
   total: number; sent: number; failed: number; status: string;
 }
 interface ReportRow {
-  student_id: string; name: string; phone: string; amount_due: number;
+  student_id: string; name: string; phone: string; whatsapp_no: string | null; amount_due: number;
   delivery_status: string; delivered: boolean; read: boolean; read_at: string | null; paid: boolean;
   token: string | null;
+  father_phone: string | null; father_whatsapp: string | null;
+  mother_phone: string | null; mother_whatsapp: string | null;
+  guardian_phone: string | null;
+  lead_phone: string | null; lead_guardian_phone: string | null; sent_to_phone: string | null;
 }
 
 const payUrl = (token: string) => `${window.location.origin}/pay/${token}`;
@@ -65,6 +69,31 @@ const waLink = (phone: string, url: string) => {
   const d = (phone || "").replace(/\D/g, "");
   const withCc = d.length === 10 ? `91${d}` : d;
   return `https://wa.me/${withCc}?text=${encodeURIComponent(`Your fee payment link: ${url}`)}`;
+};
+
+// Collect all distinct valid phones for a report row with labels
+const getAvailablePhones = (r: ReportRow): Array<{ phone: string; label: string }> => {
+  const seen = new Set<string>();
+  const out: Array<{ phone: string; label: string }> = [];
+  const add = (raw: string | null | undefined, label: string) => {
+    if (!raw) return;
+    const d = raw.replace(/\D/g, "");
+    if (d.length < 10) return;
+    const key = d.slice(-10); // dedup on last 10 digits
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ phone: raw, label });
+  };
+  add(r.phone, "Primary Student Mobile");
+  add(r.whatsapp_no, "Secondary Student Mobile");
+  add(r.father_phone, "Father Mobile");
+  add(r.father_whatsapp, "Father WhatsApp");
+  add(r.mother_phone, "Mother Mobile");
+  add(r.mother_whatsapp, "Mother WhatsApp");
+  add(r.guardian_phone, "Guardian");
+  add(r.lead_phone, "Lead");
+  add(r.lead_guardian_phone, "Lead Guardian");
+  return out;
 };
 
 const DELIVERY_BADGE: Record<string, string> = {
@@ -133,6 +162,8 @@ const FeeNotifications = () => {
     setReport((data as unknown as ReportRow[]) || []);
   };
 
+  const [resending, setResending] = useState<string | null>(null); // student_id currently resending
+
   const copyLink = async (token: string) => {
     try {
       await navigator.clipboard.writeText(payUrl(token));
@@ -140,6 +171,41 @@ const FeeNotifications = () => {
     } catch {
       toast({ title: "Couldn't copy", description: payUrl(token), variant: "destructive" });
     }
+  };
+
+  const resendViaApi = async (token: string, phone: string, studentId: string) => {
+    setResending(studentId);
+    const { data, error } = await supabase.functions.invoke("fee-notify-bulk", {
+      body: { resend: true, token, phone },
+    });
+    setResending(null);
+    if (error || data?.error) {
+      toast({ title: "Resend failed", description: data?.error || (error as Error)?.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: `Sent to ${data?.sent_to || phone}` });
+    // Refresh report
+    if (openCampaignId) openReport(openCampaignId);
+  };
+
+  const resendAllFailed = async () => {
+    const failed = report.filter((r) => (r.delivery_status === "failed" || r.delivery_status === "not_sent") && r.token);
+    if (!failed.length) { toast({ title: "No failed recipients to resend" }); return; }
+    setResending("bulk");
+    let ok = 0, err = 0;
+    for (const r of failed) {
+      const phones = getAvailablePhones(r);
+      const phone = phones[0]?.phone;
+      if (!phone || !r.token) { err++; continue; }
+      const { error } = await supabase.functions.invoke("fee-notify-bulk", {
+        body: { resend: true, token: r.token, phone },
+      });
+      if (error) err++; else ok++;
+      await new Promise((resolve) => setTimeout(resolve, 150)); // pace
+    }
+    setResending(null);
+    toast({ title: `Resent: ${ok} ok, ${err} failed`, variant: err > 0 ? "destructive" : "default" });
+    if (openCampaignId) openReport(openCampaignId);
   };
 
   useEffect(() => {
@@ -439,29 +505,47 @@ const FeeNotifications = () => {
                         <p className="text-xs text-muted-foreground">No recipients found for this campaign.</p>
                       ) : (
                         <>
-                          <div className="flex flex-wrap gap-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
                             <span className="rounded-md bg-emerald-100 px-2 py-1 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">{readCount} read</span>
                             <span className="rounded-md bg-blue-100 px-2 py-1 font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{deliveredCount} delivered</span>
                             <span className="rounded-md bg-destructive/10 px-2 py-1 font-medium text-destructive">{failedCount} failed</span>
                             <span className="rounded-md bg-primary/10 px-2 py-1 font-medium text-primary">{paidCount} paid</span>
+                            {failedCount > 0 && (
+                              <Button
+                                type="button" variant="outline" size="sm"
+                                className="h-7 gap-1.5 ml-auto text-xs"
+                                disabled={resending === "bulk"}
+                                onClick={resendAllFailed}
+                              >
+                                <Send className="h-3.5 w-3.5" />
+                                {resending === "bulk" ? "Resending…" : `Resend ${failedCount} failed via API`}
+                              </Button>
+                            )}
                           </div>
                           <div className="rounded-lg border border-border overflow-hidden bg-card">
                             <Table>
                               <TableHeader>
                                 <TableRow>
                                   <TableHead>Student</TableHead>
-                                  <TableHead>Phone</TableHead>
+                                  <TableHead>Sent to</TableHead>
                                   <TableHead className="text-right">Due</TableHead>
                                   <TableHead>Delivery</TableHead>
                                   <TableHead className="text-center">Paid</TableHead>
-                                  <TableHead className="text-right">Link</TableHead>
+                                  <TableHead className="text-right">Resend</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {report.map((r) => (
+                                {report.map((r) => {
+                                  const phones = getAvailablePhones(r);
+                                  return (
                                   <TableRow key={r.student_id}>
                                     <TableCell>{r.name}</TableCell>
-                                    <TableCell>{r.phone}</TableCell>
+                                    <TableCell>
+                                      <span className="text-xs">{r.sent_to_phone || r.phone || "—"}</span>
+                                      {phones.length > 1 && (
+                                        <span className="ml-1 text-[10px] text-muted-foreground">+{phones.length - 1}</span>
+                                      )}
+                                    </TableCell>
                                     <TableCell className="text-right">₹{Number(r.amount_due).toLocaleString("en-IN")}</TableCell>
                                     <TableCell>
                                       <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${DELIVERY_BADGE[r.delivery_status] || DELIVERY_BADGE.sent}`}>
@@ -473,20 +557,55 @@ const FeeNotifications = () => {
                                       {r.token ? (
                                         <div className="flex items-center justify-end gap-1">
                                           <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => copyLink(r.token!)}>
-                                            <Copy className="h-3.5 w-3.5" /> Copy
+                                            <Copy className="h-3.5 w-3.5" />
                                           </Button>
-                                          <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-                                            <a href={waLink(r.phone, payUrl(r.token!))} target="_blank" rel="noopener noreferrer" title="Resend via WhatsApp">
-                                              <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
-                                            </a>
-                                          </Button>
+                                          {/* Phone picker dropdown — WA link + API for each number */}
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" disabled={resending === r.student_id}>
+                                                <Phone className="h-3.5 w-3.5" />
+                                                {resending === r.student_id ? "…" : "Send"}
+                                                <ChevronDown className="h-3 w-3" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-72">
+                                              <DropdownMenuLabel className="text-[10px] text-muted-foreground">Choose number & method</DropdownMenuLabel>
+                                              <DropdownMenuSeparator />
+                                              {phones.map((p) => (
+                                                <div key={p.phone} className="px-2 py-1.5 flex items-center justify-between gap-2">
+                                                  <div className="text-xs min-w-0">
+                                                    <div className="font-medium text-muted-foreground text-[10px]">{p.label}</div>
+                                                    <div>{p.phone}</div>
+                                                  </div>
+                                                  <div className="flex gap-1 shrink-0">
+                                                    <Button asChild variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]">
+                                                      <a href={waLink(p.phone, payUrl(r.token!))} target="_blank" rel="noopener noreferrer" title="Open wa.me link">
+                                                        <MessageCircle className="h-3 w-3" />
+                                                      </a>
+                                                    </Button>
+                                                    <Button
+                                                      type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]"
+                                                      onClick={() => resendViaApi(r.token!, p.phone, r.student_id)}
+                                                      title="Send via WA API"
+                                                    >
+                                                      <Send className="h-3 w-3" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                              {phones.length === 0 && (
+                                                <p className="px-2 py-2 text-xs text-muted-foreground">No valid phone numbers</p>
+                                              )}
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
                                         </div>
                                       ) : (
                                         <span className="text-xs text-muted-foreground">—</span>
                                       )}
                                     </TableCell>
                                   </TableRow>
-                                ))}
+                                  );
+                                })}
                               </TableBody>
                             </Table>
                           </div>

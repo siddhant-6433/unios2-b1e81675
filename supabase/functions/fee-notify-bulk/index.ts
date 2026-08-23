@@ -70,6 +70,49 @@ Deno.serve(async (req) => {
     }
 
     const parsed = await req.json().catch(() => ({}));
+
+    // --- Resend mode: send to a specific phone for an existing payment link ---
+    if (parsed.resend === true) {
+      const token = String(parsed.token || "");
+      const phone = String(parsed.phone || "").replace(/\D/g, "");
+      if (!token || phone.length < 10) return json({ error: "token and valid phone required" }, 400);
+
+      const { data: pl } = await admin
+        .from("payment_links")
+        .select("id, student_id, amount, fee_term, fee_campaign_id, note, expires_at")
+        .eq("token", token)
+        .single();
+      if (!pl) return json({ error: "Link not found" }, 404);
+
+      const { data: stRow } = await admin.from("students").select("name").eq("id", pl.student_id).single();
+      const validTill = pl.expires_at
+        ? new Date(pl.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+        : "—";
+
+      // Send via WA API
+      const phoneStr = phone.length === 10 ? `91${phone}` : phone;
+      const res = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({
+          template_key: "payment_link_request",
+          phone: phoneStr,
+          params: [stRow?.name || "Student", pl.note || "Fee due", Number(pl.amount).toLocaleString("en-IN"), validTill],
+          button_urls: [token],
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return json({ error: body?.error || `HTTP ${res.status}` }, 500);
+
+      // Update delivery tracking
+      const wamid = body?.message_id ?? null;
+      const update: Record<string, unknown> = { sent_to_phone: phoneStr };
+      if (wamid) update.wa_message_id = wamid;
+      await admin.from("payment_links").update(update).eq("id", pl.id);
+
+      return json({ ok: true, message_id: wamid, sent_to: phoneStr });
+    }
+
     const courseIds = (Array.isArray(parsed.course_ids) ? parsed.course_ids : [])
       .filter(isUuid).map(String);
     const sessionId = isUuid(parsed.session_id) ? String(parsed.session_id) : null;
@@ -93,7 +136,7 @@ Deno.serve(async (req) => {
     // null-status rows.
     let sq = admin
       .from("students")
-      .select("id, name, phone, lead_id, course_id, session_id, campus_id, batch_id, status");
+      .select("id, name, phone, whatsapp_no, father_phone, father_whatsapp, mother_phone, mother_whatsapp, guardian_phone, lead_id, course_id, session_id, campus_id, batch_id, status");
     if (courseIds.length) sq = sq.in("course_id", courseIds);
     if (sessionId) sq = sq.eq("session_id", sessionId);
     if (campusId) sq = sq.eq("campus_id", campusId);
@@ -101,6 +144,15 @@ Deno.serve(async (req) => {
     const { data: students, error: sErr } = await sq;
     if (sErr) return json({ error: sErr.message }, 500);
     if (!students?.length) return json({ matched: [], total: 0, skipped_no_due: 0, skipped_no_phone: 0 });
+
+    // Fetch lead phones for fallback (parent/guardian from CRM)
+    const leadIds = [...new Set(students.map((s: any) => s.lead_id).filter(Boolean))];
+    const leadPhoneMap = new Map<string, { phone: string | null; guardian_phone: string | null }>();
+    if (leadIds.length) {
+      const { data: leadRows } = await admin
+        .from("leads").select("id, phone, guardian_phone").in("id", leadIds);
+      for (const l of leadRows || []) leadPhoneMap.set(l.id, { phone: l.phone, guardian_phone: l.guardian_phone });
+    }
 
     // --- Current due per student for [term, late_term] ----------------------
     const ids = students.map((s: any) => s.id);
@@ -119,19 +171,33 @@ Deno.serve(async (req) => {
       dueByStudent.set(row.student_id, Math.round((prev + Number(row.balance || 0)) * 100) / 100);
     }
 
+    // ponytail: resolve best phone per student — cascade through all available numbers
+    const validPhone = (v: unknown) => v && String(v).replace(/\D/g, "").length >= 10 ? String(v) : null;
+    const resolvePhone = (s: any): string | null => {
+      const lead = s.lead_id ? leadPhoneMap.get(s.lead_id) : null;
+      return validPhone(s.phone)         // primary student mobile (OTP login)
+        || validPhone(s.whatsapp_no)     // secondary student mobile
+        || validPhone(s.father_phone)
+        || validPhone(s.father_whatsapp)
+        || validPhone(s.mother_phone)
+        || validPhone(s.mother_whatsapp)
+        || validPhone(s.guardian_phone)
+        || validPhone(lead?.phone)
+        || validPhone(lead?.guardian_phone);
+    };
+
     let skippedNoDue = 0;
     let skippedNoPhone = 0;
     const targets = students
-      .map((s: any) => ({ ...s, due: dueByStudent.get(s.id) || 0 }))
+      .map((s: any) => ({ ...s, due: dueByStudent.get(s.id) || 0, resolved_phone: resolvePhone(s) }))
       .filter((s: any) => {
         if (s.due <= 0) { skippedNoDue++; return false; }
-        const phone = s.phone && String(s.phone).replace(/\D/g, "").length >= 10;
-        if (!phone) { skippedNoPhone++; return false; }
+        if (!s.resolved_phone) { skippedNoPhone++; return false; }
         return true;
       });
 
     const matchedPreview = targets.map((s: any) => ({
-      student_id: s.id, name: s.name, phone: s.phone, due: s.due,
+      student_id: s.id, name: s.name, phone: s.resolved_phone, due: s.due,
     }));
 
     if (dryRun) {
@@ -241,15 +307,14 @@ Deno.serve(async (req) => {
       try {
         if (!link) throw new Error("link not minted");
         const wamid = await sendOne(
-          s.phone,
+          s.resolved_phone,
           [s.name || "Student", "Fee due", Number(s.due).toLocaleString("en-IN"), validTill],
           link.token,
         );
-        // Stamp the wamid so the delivery report can join to whatsapp_messages
-        // as the Meta webhook advances status (sent→delivered→read→failed).
-        if (wamid) {
-          await admin.from("payment_links").update({ wa_message_id: wamid }).eq("id", link.id);
-        }
+        // Stamp the wamid + which phone was used so the delivery report shows it
+        const updatePayload: Record<string, unknown> = { sent_to_phone: s.resolved_phone };
+        if (wamid) updatePayload.wa_message_id = wamid;
+        await admin.from("payment_links").update(updatePayload).eq("id", link.id);
         results.push({ student_id: s.id, ok: true });
         sent++;
       } catch (e) {
