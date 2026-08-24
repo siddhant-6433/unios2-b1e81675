@@ -27,6 +27,15 @@
  *      one recorded version can make the other file look already applied.
  *      (Bit us: branch-only db push on 2026-06-13.)
  *
+ *   F. SECURITY INVOKER function that builds a dialer/call queue from
+ *      lead_list_members JOIN leads. List assignment (lead_list_members.
+ *      assigned_to) authorizes the counsellor, but can_view_lead RLS only sees
+ *      lead OWNERSHIP — so under SECURITY INVOKER the leads JOIN silently drops
+ *      every assigned-but-unowned member and the counsellor's queue is empty
+ *      while the count (a SECURITY DEFINER RPC) still shows work remaining.
+ *      (Bit us: cloud_dialer_campaign_queue on 2026-08-24 — 612/1058 members
+ *      hidden across 26 lists.)
+ *
  * Each rule supports an inline `lint-allow: <reason>` override:
  *   - SQL:  `-- lint-allow: <reason>` on the same line or the line above
  *   - TS:   `// lint-allow: <reason>` on the same line or the line above
@@ -360,6 +369,70 @@ async function ruleE(violations) {
   }
 }
 
+// ---------- rule F: SECURITY INVOKER fn building a call-list queue -----------
+
+// Extract one function's header (CREATE … up to and including the `AS $tag$`
+// body opener) and its inner body (between the matching dollar-quote tags).
+// Returns null when the definition isn't dollar-quoted (e.g. a bare SQL fn).
+function extractFunctionBody(text, startIdx) {
+  const opener = /AS\s*(\$[A-Za-z_]*\$)/i.exec(text.slice(startIdx, startIdx + 2000));
+  if (!opener) return null;
+  const tag = opener[1];
+  const headerEnd = startIdx + opener.index + opener[0].length;
+  const closeIdx = text.indexOf(tag, headerEnd);
+  if (closeIdx === -1) return null;
+  return { header: text.slice(startIdx, headerEnd), inner: text.slice(headerEnd, closeIdx) };
+}
+
+async function ruleF(violations) {
+  const migrationsDir = join(REPO_ROOT, "supabase", "migrations");
+  // Sorted so the LAST definition of a function name wins — a later migration
+  // that flips an earlier INVOKER definition to DEFINER must clear the flag.
+  const files = (await walk(migrationsDir, (p) => p.endsWith(".sql"))).sort();
+
+  const latest = new Map();
+  for (const f of files) {
+    const { text, lines } = await readLines(f);
+    const re = /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?(\w+)\s*\(/gi;
+    let m;
+    while ((m = re.exec(text))) {
+      const body = extractFunctionBody(text, m.index);
+      if (!body) continue;
+      const region = body.header + body.inner;
+      // The call-list-queue shape: reads membership, filters work_status, and
+      // JOINs leads to return rows. A boolean predicate on a lead row (e.g.
+      // lead_matches_filter) has no work_status/membership join and won't match.
+      const buildsQueue =
+        /\blead_list_members\b/i.test(region) &&
+        /\bwork_status\b/i.test(region) &&
+        /(?:FROM|JOIN)\s+(?:public\.)?leads\b/i.test(region);
+      latest.set(m[1], {
+        file: f,
+        idx: text.slice(0, m.index).split("\n").length - 1,
+        lines,
+        isDefiner: /SECURITY\s+DEFINER/i.test(body.header),
+        buildsQueue,
+      });
+    }
+  }
+
+  for (const [name, d] of latest) {
+    if (!d.buildsQueue || d.isDefiner) continue;
+    if (isAllowed(d.lines, d.idx)) continue;
+    violations.push({
+      file: relative(REPO_ROOT, d.file),
+      line: d.idx + 1,
+      rule: "F:invoker-fn-on-call-list-queue",
+      message:
+        `Function '${name}' builds a queue from lead_list_members JOIN leads but is not SECURITY DEFINER. ` +
+        `List assignment authorizes the counsellor, but can_view_lead RLS only sees lead ownership — under ` +
+        `SECURITY INVOKER the leads JOIN silently drops every assigned-but-unowned member, so the dialer queue ` +
+        `is empty while the count still shows work remaining (bit us: cloud_dialer_campaign_queue, 2026-08-24). ` +
+        `Declare it SECURITY DEFINER and self-enforce scope (see public.my_call_lists()), or add 'lint-allow: <reason>'.`,
+    });
+  }
+}
+
 // ---------- main ------------------------------------------------------------
 
 async function loadBaseline() {
@@ -383,6 +456,7 @@ function violationKey(v) {
   await ruleC(violations);
   await ruleD(violations);
   await ruleE(violations);
+  await ruleF(violations);
 
   // Stable sort: file then line.
   violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
