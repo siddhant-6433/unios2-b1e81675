@@ -200,6 +200,7 @@ interface BuildOpts {
   receiptTitle: string;          // "PAYMENT RECEIPT" / "APPLICATION RECEIPT"
   payerHeading: string;          // "APPLICANT DETAILS" / "STUDENT DETAILS"
   rows: [string, string][];      // payer detail rows
+  allocations?: { label: string; amount: number }[]; // per-head breakup → table
   amount: number;
   paymentMode: string;
   paymentGateway?: string | null;
@@ -325,10 +326,16 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   const cardPad = 14;
   const rowGap = 16;
   const valueX = margin + cardPad + 130;
+  const keyMaxW = 126; // 130 col minus 4pt breathing room
   const valueMaxW = width - margin - cardPad - valueX;
-  // Pre-wrap each value so long notes stay inside the card instead of running off-page.
-  const wrappedRows = opts.rows.map(([k, v]) => [k, wrapText(v || "—", bold, 10, valueMaxW)] as [string, string[]]);
-  const totalLines = wrappedRows.reduce((n, [, lines]) => n + lines.length, 0);
+  // Pre-wrap both key and value so nothing overflows the card.
+  const wrappedRows = opts.rows.map(([k, v]) => [
+    wrapText(k || "", font, 10, keyMaxW),
+    wrapText(v || "—", bold, 10, valueMaxW),
+  ] as [string[], string[]]);
+  // When a key wraps, its lines + value lines stack; otherwise key & value share lines.
+  const totalLines = wrappedRows.reduce((n, [kl, vl]) =>
+    n + (kl.length > 1 ? kl.length + vl.length : Math.max(1, vl.length)), 0);
   const cardH = 22 + totalLines * rowGap + cardPad;
   page.drawRectangle({
     x: margin, y: y - cardH, width: width - margin * 2, height: cardH,
@@ -338,14 +345,79 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     x: margin + cardPad, y: y - 14, size: 9, font: bold, color: muted,
   });
   let ry = y - 30;
-  for (const [k, lines] of wrappedRows) {
-    page.drawText(k, { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
-    for (const line of lines) {
-      page.drawText(line, { x: valueX, y: ry, size: 10, font: bold, color: text });
-      ry -= rowGap;
+  for (const [kLines, vLines] of wrappedRows) {
+    if (kLines.length > 1) {
+      // Long key: draw wrapped key lines, then value below
+      for (const kl of kLines) {
+        page.drawText(kl, { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
+        ry -= rowGap;
+      }
+      for (const vl of vLines) {
+        page.drawText(vl, { x: valueX, y: ry, size: 10, font: bold, color: text });
+        ry -= rowGap;
+      }
+    } else {
+      // Short key: key & value on the same line (original layout)
+      page.drawText(kLines[0], { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
+      for (const vl of vLines) {
+        page.drawText(vl, { x: valueX, y: ry, size: 10, font: bold, color: text });
+        ry -= rowGap;
+      }
     }
   }
   y -= cardH + 14;
+
+  // ── Fee-head breakup table (S.No | Description | Amount) ──────────
+  if (opts.allocations && opts.allocations.length > 0) {
+    const tableW = width - margin * 2;
+    const colSno = 40;
+    const colAmt = 100;
+    const colDesc = tableW - colSno - colAmt;
+    const tRowH = 22;
+    const tPad = 8;
+    const headerBg = rgb(0.93, 0.94, 0.96);
+
+    // Header row
+    page.drawRectangle({ x: margin, y: y - tRowH, width: tableW, height: tRowH, color: headerBg, borderColor: border, borderWidth: 0.5 });
+    page.drawText("S.No", { x: margin + tPad, y: y - tRowH + 7, size: 9, font: bold, color: text });
+    page.drawText("Description", { x: margin + colSno + tPad, y: y - tRowH + 7, size: 9, font: bold, color: text });
+    page.drawText("Amount", { x: margin + colSno + colDesc + tPad, y: y - tRowH + 7, size: 9, font: bold, color: text });
+    // Vertical lines for header
+    page.drawRectangle({ x: margin + colSno, y: y - tRowH, width: 0.5, height: tRowH, color: border });
+    page.drawRectangle({ x: margin + colSno + colDesc, y: y - tRowH, width: 0.5, height: tRowH, color: border });
+    y -= tRowH;
+
+    // Data rows
+    for (let i = 0; i < opts.allocations.length; i++) {
+      const a = opts.allocations[i];
+      const label = winSafe(a.label || "Fee");
+      // Wrap long descriptions within the column
+      const descLines = wrapText(label, font, 10, colDesc - tPad * 2);
+      const rowH = Math.max(tRowH, descLines.length * 14 + 8);
+
+      page.drawRectangle({ x: margin, y: y - rowH, width: tableW, height: rowH, borderColor: border, borderWidth: 0.5, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: margin + colSno, y: y - rowH, width: 0.5, height: rowH, color: border });
+      page.drawRectangle({ x: margin + colSno + colDesc, y: y - rowH, width: 0.5, height: rowH, color: border });
+
+      page.drawText(String(i + 1), { x: margin + tPad + 8, y: y - rowH + (rowH - 10) / 2, size: 10, font, color: text });
+      let dy = y - 7;
+      for (const dl of descLines) {
+        page.drawText(dl, { x: margin + colSno + tPad, y: dy - 7, size: 10, font, color: text });
+        dy -= 14;
+      }
+      const amtStr = `${RUP}${fmtINR(a.amount)}`;
+      page.drawText(amtStr, { x: margin + colSno + colDesc + tPad, y: y - rowH + (rowH - 10) / 2, size: 10, font, color: text });
+      y -= rowH;
+    }
+
+    // Total row
+    page.drawRectangle({ x: margin, y: y - tRowH, width: tableW, height: tRowH, color: headerBg, borderColor: border, borderWidth: 0.5 });
+    page.drawRectangle({ x: margin + colSno + colDesc, y: y - tRowH, width: 0.5, height: tRowH, color: border });
+    page.drawText("Total", { x: margin + colSno + colDesc / 2 - 12, y: y - tRowH + 7, size: 10, font: bold, color: text });
+    const totalStr = `${RUP}${fmtINR(opts.amount)}`;
+    page.drawText(totalStr, { x: margin + colSno + colDesc + tPad, y: y - tRowH + 7, size: 10, font: bold, color: text });
+    y -= tRowH + 14;
+  }
 
   // ── Amount band (brand-coloured pill) ──────────────────────────────
   const bandH = 50;
@@ -568,16 +640,15 @@ Deno.serve(async (req) => {
     // (Sports, Transfer Certificate…) instead of the generic "Other Charges".
     const feeHeadName = (lp as { fee_codes?: { name?: string } | null }).fee_codes?.name;
 
-    // When the payment carried a per-head breakup, itemise it: the payer should
-    // be able to see exactly which head each rupee went against, not a single
-    // opaque total. Falls back to the one-line Fee Head for everything else.
+    // When the payment carried a per-head breakup, render it as a separate
+    // table below the payer card (S.No | Description | Amount | Total).
+    // Single-head payments just get a one-line row in the card.
     const allocs = (lp as { allocations?: Array<{ label?: string; amount?: number }> | null }).allocations;
-    if (Array.isArray(allocs) && allocs.length > 0) {
-      rows.push(["Fee Head", `${allocs.length} head${allocs.length === 1 ? "" : "s"} — see breakup below`]);
-      for (const a of allocs) {
-        const amt = Number(a?.amount || 0);
-        rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);
-      }
+    const allocTable = Array.isArray(allocs) && allocs.length > 0
+      ? allocs.map(a => ({ label: a?.label || "Fee", amount: Number(a?.amount || 0) }))
+      : undefined;
+    if (allocTable) {
+      rows.push(["Fee Head", `${allocTable.length} head${allocTable.length === 1 ? "" : "s"} — see table below`]);
     } else {
       rows.push(["Fee Head", feeHeadName || PAY_TYPE_LABELS[lp.type] || lp.type]);
     }
@@ -613,6 +684,7 @@ Deno.serve(async (req) => {
       receiptTitle:  isApp ? "APPLICATION RECEIPT" : isPreAdmissionToken ? "TOKEN FEE RECEIPT" : "PAYMENT RECEIPT",
       payerHeading:  isApp ? "APPLICANT DETAILS" : "PAYER DETAILS",
       rows,
+      allocations:   allocTable,
       amount:        Number(lp.amount),
       paymentMode,
       paymentGateway,

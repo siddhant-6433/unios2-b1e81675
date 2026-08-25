@@ -269,10 +269,14 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   const cardPad = 14;
   const rowGap = 16;
   const valueX = margin + cardPad + 130;
+  const keyMaxW = 126;
   const valueMaxW = width - margin - cardPad - valueX;
-  // Pre-wrap each value so long values stay inside the card instead of running off-page.
-  const wrappedRows = opts.rows.map(([k, v]) => [k, wrapText(v || "—", bold, 10, valueMaxW)] as [string, string[]]);
-  const totalLines = wrappedRows.reduce((n, [, lines]) => n + lines.length, 0);
+  const wrappedRows = opts.rows.map(([k, v]) => [
+    wrapText(k || "", font, 10, keyMaxW),
+    wrapText(v || "—", bold, 10, valueMaxW),
+  ] as [string[], string[]]);
+  const totalLines = wrappedRows.reduce((n, [kl, vl]) =>
+    n + (kl.length > 1 ? kl.length + vl.length : Math.max(1, vl.length)), 0);
   const cardH = 22 + totalLines * rowGap + cardPad;
   page.drawRectangle({
     x: margin, y: y - cardH, width: width - margin * 2, height: cardH,
@@ -282,11 +286,22 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     x: margin + cardPad, y: y - 14, size: 9, font: bold, color: muted,
   });
   let ry = y - 30;
-  for (const [k, lines] of wrappedRows) {
-    page.drawText(k, { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
-    for (const line of lines) {
-      page.drawText(line, { x: valueX, y: ry, size: 10, font: bold, color: text });
-      ry -= rowGap;
+  for (const [kLines, vLines] of wrappedRows) {
+    if (kLines.length > 1) {
+      for (const kl of kLines) {
+        page.drawText(kl, { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
+        ry -= rowGap;
+      }
+      for (const vl of vLines) {
+        page.drawText(vl, { x: valueX, y: ry, size: 10, font: bold, color: text });
+        ry -= rowGap;
+      }
+    } else {
+      page.drawText(kLines[0], { x: margin + cardPad, y: ry, size: 10, font, color: subtle });
+      for (const vl of vLines) {
+        page.drawText(vl, { x: valueX, y: ry, size: 10, font: bold, color: text });
+        ry -= rowGap;
+      }
     }
   }
   y -= cardH + 14;
