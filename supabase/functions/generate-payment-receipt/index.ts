@@ -130,7 +130,25 @@ const fmtDateShort = (d?: string | null) => {
   });
 };
 
+// pdf-lib's StandardFonts encode with WinAnsi (CP1252) and THROW on any glyph
+// they can't encode — most commonly ₹ (U+20B9), which the payment-link flow packs
+// into lead_payments.notes ("Breakup — Uniform Fee: ₹8000"). One such char wedges
+// receipt generation forever ("Generating…"). Map the usual typographic offenders
+// to ASCII and drop anything else outside Latin-1 so a stray glyph can't crash it.
+// Must run BEFORE any font.widthOfTextAtSize call — that measurement throws too.
+function winSafe(text: unknown): string {
+  return String(text ?? "")
+    .replace(/₹/g, "Rs. ")
+    .replace(/[—–]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/…/g, "...")
+    .replace(/•/g, "-")
+    .replace(/[^\x00-\xFF]/g, "?");
+}
+
 function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 6): string[] {
+  text = winSafe(text);
   if (!text) return [""];
   const words = text.split(/\s+/);
   const lines: string[] = [];
@@ -150,6 +168,7 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
 }
 
 function fitText(text: string, font: any, size: number, maxWidth: number): string {
+  text = winSafe(text);
   if (!text) return "—";
   if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
   let out = text;
@@ -235,8 +254,8 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     // Institution (from the course) + its campus address, drawn small next to
     // the logo. Institution name comes from course → dept → institution; falls
     // back to the campus name when the lead has no course.
-    const headLine = opts.institutionName || opts.campusName;
-    const headAddr = opts.letterheadAddress || opts.branding.address;
+    const headLine = winSafe(opts.institutionName || opts.campusName);
+    const headAddr = winSafe(opts.letterheadAddress || opts.branding.address);
     if (headLine) {
       page.drawText(headLine.slice(0, 60), {
         x: textLeftX, y: y - 18, size: 10, font: bold, color: subtle,
@@ -251,17 +270,17 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
     // Fallback: brand-coloured initial square.
     const fallbackSize = 40;
     page.drawRectangle({ x: margin, y: y - fallbackSize, width: fallbackSize, height: fallbackSize, color: brand });
-    const initial = (opts.branding.name || "N").trim().charAt(0).toUpperCase();
+    const initial = winSafe((opts.branding.name || "N").trim().charAt(0).toUpperCase());
     const initW = bold.widthOfTextAtSize(initial, 22);
     page.drawText(initial, {
       x: margin + (fallbackSize - initW) / 2,
       y: y - fallbackSize + (fallbackSize - 22) / 2 + 4,
       size: 22, font: bold, color: rgb(1, 1, 1),
     });
-    page.drawText(opts.branding.name, {
+    page.drawText(winSafe(opts.branding.name), {
       x: margin + fallbackSize + 12, y: y - 14, size: 13, font: bold, color: text,
     });
-    const fbLine = opts.institutionName || opts.campusName;
+    const fbLine = winSafe(opts.institutionName || opts.campusName);
     if (fbLine) {
       page.drawText(fbLine.slice(0, 60), {
         x: margin + fallbackSize + 12, y: y - 28, size: 10, font, color: subtle,

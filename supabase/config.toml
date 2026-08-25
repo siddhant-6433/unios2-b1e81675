@@ -281,6 +281,9 @@ verify_jwt = false
 [functions.payment-link-reconcile-cron]
 verify_jwt = false
 
+[functions.receipt-pdf-backfill-cron]
+verify_jwt = false
+
 [functions.tat-defaults-cron]
 verify_jwt = false
 
