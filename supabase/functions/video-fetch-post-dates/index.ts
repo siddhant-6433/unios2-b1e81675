@@ -18,6 +18,7 @@
 // The videos trigger recomputes posted_month on update.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -102,11 +103,16 @@ Deno.serve(async (req) => {
     const caller = createClient(url, svc, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } }, auth: { persistSession: false } });
     const admin = createClient(url, svc, { auth: { persistSession: false } });
 
-    const { data: u } = await caller.auth.getUser();
-    const uid = u?.user?.id;
-    if (!uid) return json({ error: "Unauthorized" }, 401);
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
-    const isSuper = (roles || []).some((r: { role: string }) => r.role === "super_admin");
+    // Accept service-role callers (pg_net triggers) as super_admin.
+    const svcCaller = await isServiceCaller(req, admin);
+    let isSuper = svcCaller;
+    if (!svcCaller) {
+      const { data: u } = await caller.auth.getUser();
+      const uid = u?.user?.id;
+      if (!uid) return json({ error: "Unauthorized" }, 401);
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
+      isSuper = (roles || []).some((r: { role: string }) => r.role === "super_admin");
+    }
 
     const body = await req.json().catch(() => ({}));
     const force = body.force === true;
