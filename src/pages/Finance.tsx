@@ -18,6 +18,7 @@ import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
+import { FeeDueDefaultReport } from "@/components/finance/FeeDueDefaultReport";
 import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
 import FeeCollections from "./FeeCollections";
 import { CashierConsole } from "@/components/finance/CashierConsole";
@@ -53,7 +54,7 @@ const Finance = () => {
   const [pendingConcessionCount, setPendingConcessionCount] = useState(0);
   const [receiptsView, setReceiptsView] = useState<"receipts" | "online">("receipts");
   const [setupView, setSetupView] = useState<"structures" | "late-fees" | "heads">("structures");
-  const [reportsView, setReportsView] = useState<"overview" | "audit">("overview");
+  const [reportsView, setReportsView] = useState<"overview" | "dues" | "audit">("overview");
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const { role, hasPermission } = useAuth();
@@ -367,17 +368,22 @@ const Finance = () => {
 
       {tab === "reports" && (
         <>
-          {isSuperAdmin && (
-            <SubTabs
-              value={reportsView}
-              onChange={(v) => setReportsView(v as "overview" | "audit")}
-              options={[
-                { value: "overview", label: "Overview" },
-                { value: "audit", label: "Audit Log" },
-              ]}
-            />
+          <SubTabs
+            value={reportsView}
+            onChange={(v) => setReportsView(v as "overview" | "dues" | "audit")}
+            options={[
+              { value: "overview", label: "Overview" },
+              { value: "dues", label: "Fee Dues" },
+              ...(isSuperAdmin ? [{ value: "audit", label: "Audit Log" }] : []),
+            ]}
+          />
+          {reportsView === "audit" && isSuperAdmin ? (
+            <PaymentAuditLog />
+          ) : reportsView === "dues" ? (
+            <FeeDueDefaultReport />
+          ) : (
+            <FinanceOverview />
           )}
-          {reportsView === "audit" && isSuperAdmin ? <PaymentAuditLog /> : <FinanceOverview />}
         </>
       )}
     </div>
