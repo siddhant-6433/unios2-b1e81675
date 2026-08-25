@@ -373,6 +373,22 @@ export async function settleLeadPaymentRow(
 }
 
 /**
+ * Best-effort direct receipt-PDF mint. The notify-event → ensureReceipt chain also
+ * generates the PDF, but it is fire-and-forget over pg_net/cold-starts and production
+ * has shown it silently dropping — leaving lead_payments.receipt_url null and the UI
+ * stuck on "Generating…" forever (easebuzz/icici also skip the DB-trigger fallback).
+ * Calling generate-payment-receipt directly here closes that gap, mirroring
+ * OfflinePaymentDialog. receipt-pdf-backfill-cron is the second safety net.
+ */
+function fireReceiptPdf(supabaseUrl: string, serviceKey: string, paymentId: string) {
+  fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+    body: JSON.stringify({ payment_id: paymentId }),
+  }).catch((e) => console.error("[gateway-settlement] receipt pdf mint failed:", e));
+}
+
+/**
  * Student fee ledger settlement — never re-applies ledger for an existing capture.
  */
 export async function settleStudentFeePayment(
@@ -521,6 +537,7 @@ export async function settleStudentFeePayment(
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
         body: JSON.stringify({ event: "payment_received", lead_id: student.lead_id, context: { payment_id: paymentId } }),
       }).catch((e) => console.error("[gateway-settlement] student-fee notify failed:", e));
+      fireReceiptPdf(supabaseUrl, serviceKey, paymentId);
     }
   }
 
@@ -606,6 +623,7 @@ export async function settlePaymentLink(
         context: { payment_id: leadPaymentId },
       }),
     }).catch((e) => console.error("[gateway-settlement] payment_link notify failed:", e));
+    fireReceiptPdf(supabaseUrl, serviceKey, leadPaymentId);
   };
 
   if (link.purpose === "pre_admission_token") {
