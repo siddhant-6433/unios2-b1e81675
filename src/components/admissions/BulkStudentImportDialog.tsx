@@ -283,12 +283,13 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   const [selectedSessionId,     setSelectedSessionId]     = useState("");
   const [selectedCurrentTerm,   setSelectedCurrentTerm]   = useState("");
   const [selectedAdmissionDate, setSelectedAdmissionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [batchLabel,            setBatchLabel]            = useState("");
   const [applyExistingFeeToAll, setApplyExistingFeeToAll] = useState(false);
 
   // Load campuses + sessions on open
   useEffect(() => {
     if (!open) return;
-    setParsed([]); setResult(null); setApplyExistingFeeToAll(false); setSelectedCurrentTerm(""); setSelectedAdmissionDate(new Date().toISOString().slice(0, 10));
+    setParsed([]); setResult(null); setApplyExistingFeeToAll(false); setSelectedCurrentTerm(""); setBatchLabel(""); setSelectedAdmissionDate(new Date().toISOString().slice(0, 10));
     Promise.all([
       supabase.from("campuses").select("id, name").order("name"),
       supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date"),
@@ -511,6 +512,24 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
     let success = 0, failed = 0;
     const errors: string[] = [];
 
+    // Resolve a batch per course from the typed label (e.g. "2025-27"). One
+    // label spans the whole file, but batches are course-scoped, so get-or-create
+    // one batch per distinct course under the chosen session. Empty label keeps
+    // the old behaviour (no batch assigned). Non-school only — school cohorts use
+    // joining_academic_year, not batches.
+    const batchByCourse: Record<string, string> = {};
+    const label = batchLabel.trim();
+    if (label && !isSchool) {
+      const courseIds = [...new Set(valid.map(r => r.course_id).filter(Boolean))];
+      for (const cid of courseIds) {
+        const { data: bid, error } = await (supabase.rpc as any)("get_or_create_batch", {
+          _course_id: cid, _session_id: selectedSessionId, _name: label,
+        });
+        if (error) { errors.push(`Batch "${label}": ${error.message}`); continue; }
+        if (bid) batchByCourse[cid as string] = bid as string;
+      }
+    }
+
     for (let i = 0; i < valid.length; i += 50) {
       const batch = valid.slice(i, i + 50).map((r, j) => ({
         name: r.name,
@@ -522,6 +541,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         course_id: r.course_id,
         campus_id: selectedCampusId,
         session_id: selectedSessionId || null,
+        batch_id: batchByCourse[r.course_id] ?? null,
         joining_academic_year: isSchool ? (r.joining_academic_year || sessionYearLabel(selectedSession?.name) || null) : null,
         semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
         admission_date: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
@@ -731,6 +751,15 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                     <option value="">Use CSV current_term column or select for all rows</option>
                     {HIGHER_ED_TERMS.map(term => <option key={term} value={term}>{term}</option>)}
                   </select>
+                </div>
+              )}
+              {!isSchool && (
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Batch</label>
+                  <input type="text" value={batchLabel} onChange={e => setBatchLabel(e.target.value)}
+                    placeholder="e.g. 2025-27 (admission–graduation year) — optional"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+                  <p className="mt-1 text-[10px] text-muted-foreground">Creates/assigns this batch per course under the selected session. Leave blank to skip.</p>
                 </div>
               )}
             </div>
