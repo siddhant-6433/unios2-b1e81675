@@ -1,18 +1,9 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { ChevronRight, Landmark } from "lucide-react";
-
-interface AbvmuClaim {
-  id: string;
-  amount: number;
-  status: string; // pending | approved | rejected | settled
-  challan_number: string | null;
-  submitted_at: string;
-  rejection_reason: string | null;
-}
+import { useAbvmuDeposit, type AbvmuClaim } from "./useAbvmuDeposit";
 
 interface Props {
   leadId: string;
@@ -30,11 +21,8 @@ const fmt = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximu
  * seat-reservation deposit configured.
  */
 export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
-  const [depositAmount, setDepositAmount] = useState(0);
-  const [approvedCredit, setApprovedCredit] = useState(0);
-  const [claims, setClaims] = useState<AbvmuClaim[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refresh, setRefresh] = useState(0);
+  const abvmu = useAbvmuDeposit(leadId, onChanged);
+  const { depositAmount, approvedCredit, firstYearDue, loading, openClaim, rejected, settledClaim, canSettle, viewChallan } = abvmu;
 
   const [open, setOpen] = useState(false);
   const [challanNo, setChallanNo] = useState("");
@@ -44,26 +32,29 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setLoading(true);
-      const [statusRes, claimsRes] = await Promise.all([
-        (supabase as any).rpc("lead_fee_status", { _lead_id: leadId }),
-        (supabase as any).rpc("get_abvmu_deposit_claims", { _lead_id: leadId }),
-      ]);
-      if (!alive) return;
-      const status = statusRes?.data || {};
-      setDepositAmount(Math.max(0, Number(status.abvmu_deposit_amount || 0)));
-      setApprovedCredit(Math.max(0, Number(status.abvmu_approved_credit || 0)));
-      setClaims((claimsRes?.data ?? []) as AbvmuClaim[]);
-      setLoading(false);
-    })();
-    return () => { alive = false; };
-  }, [leadId, refresh]);
+  // Cashier/finance settlement (record the receipt when ABVMU remits the funds).
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleDate, setSettleDate] = useState("");
+  const [settleRef, setSettleRef] = useState("");
+  const [settleNotes, setSettleNotes] = useState("");
+  const [settling, setSettling] = useState(false);
+  const [settleError, setSettleError] = useState<string | null>(null);
 
-  const openClaim = claims.find((c) => c.status === "pending" || c.status === "approved");
-  const rejected = claims.find((c) => c.status === "rejected");
+  const doSettle = async (claim: AbvmuClaim) => {
+    setSettling(true);
+    setSettleError(null);
+    try {
+      await abvmu.settle(claim, { paymentDate: settleDate, paymentRef: settleRef, notes: settleNotes });
+      setSettleOpen(false);
+      setSettleRef("");
+      setSettleDate("");
+      setSettleNotes("");
+    } catch (e: any) {
+      setSettleError(e?.message || "Could not settle ABVMU deposit claim");
+    } finally {
+      setSettling(false);
+    }
+  };
 
   const submit = async () => {
     if (!file) {
@@ -73,32 +64,12 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `abvmu-claims/${leadId}/${Date.now()}-${safeName}`;
-      const { error: upErr } = await supabase.storage
-        .from("application-documents")
-        .upload(path, file, { contentType: file.type || undefined, upsert: false });
-      if (upErr) throw upErr;
-
-      const { error: claimErr } = await (supabase as any).rpc("submit_abvmu_deposit_claim", {
-        _lead_id: leadId,
-        _proof_path: path,
-        _proof_file_name: file.name,
-        _proof_content_type: file.type || null,
-        _challan_number: challanNo || null,
-        _challan_date: challanDate || null,
-        _notes: notes || null,
-        _amount: depositAmount || null,
-      });
-      if (claimErr) throw claimErr;
-
+      await abvmu.submitClaim({ file, challanNumber: challanNo, challanDate, notes });
       setOpen(false);
       setFile(null);
       setChallanNo("");
       setChallanDate("");
       setNotes("");
-      setRefresh((n) => n + 1);
-      onChanged?.();
     } catch (e: any) {
       setError(e?.message || "Could not submit ABVMU deposit claim");
     } finally {
@@ -136,7 +107,7 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
         </button>
 
         {openClaim && (
-          <div className="border-t border-info/15 px-4 py-3 text-xs">
+          <div className="border-t border-info/15 px-4 py-3 text-xs space-y-1.5">
             {openClaim.status === "pending" && (
               <p className="text-warning-foreground font-medium">
                 Claim submitted · pending super-admin review
@@ -145,9 +116,86 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
             )}
             {openClaim.status === "approved" && (
               <p className="text-success font-medium">
-                Approved · {fmt(openClaim.amount)} provisionally reduced from year-1 due
-                (no receipt yet — remittance pending)
+                Approved · {fmt(openClaim.amount)} provisionally reduced from year-1 due →
+                {" "}first-year due now {fmt(firstYearDue)} (no receipt yet — remittance pending)
+                {openClaim.challan_number ? ` · Challan ${openClaim.challan_number}` : ""}
               </p>
+            )}
+            {openClaim.proof_path && (
+              <button
+                type="button"
+                onClick={() => viewChallan(openClaim.proof_path)}
+                className="text-info underline underline-offset-2 hover:text-info/80"
+              >
+                View challan{openClaim.proof_file_name ? ` (${openClaim.proof_file_name})` : ""}
+              </button>
+            )}
+
+            {/* Cashier/finance: record the receipt once ABVMU remits the funds. */}
+            {openClaim.status === "approved" && canSettle && (
+              <div className="pt-1.5">
+                {!settleOpen ? (
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSettleOpen(true)}>
+                    Record receipt (funds received from ABVMU)
+                  </Button>
+                ) : (
+                  <div className="space-y-2 rounded-lg border border-border bg-background/60 p-2.5">
+                    <p className="text-[11px] text-muted-foreground">
+                      Issues a receipt for {fmt(openClaim.amount)} and applies it to the fee ledger.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-medium text-muted-foreground mb-1">Remittance date</label>
+                        <input
+                          type="date"
+                          value={settleDate}
+                          onChange={(e) => setSettleDate(e.target.value)}
+                          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-medium text-muted-foreground mb-1">Bank / UTR ref</label>
+                        <input
+                          value={settleRef}
+                          onChange={(e) => setSettleRef(e.target.value)}
+                          placeholder={openClaim.challan_number || "Optional"}
+                          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <input
+                      value={settleNotes}
+                      onChange={(e) => setSettleNotes(e.target.value)}
+                      placeholder="Notes (optional)"
+                      className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                    />
+                    {settleError && <p className="text-xs text-destructive">{settleError}</p>}
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" className="h-7 text-xs gap-2" disabled={settling} onClick={() => doSettle(openClaim)}>
+                        {settling ? <><ButtonOrb state="composing" /> Recording…</> : "Confirm & issue receipt"}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={settling} onClick={() => setSettleOpen(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {settledClaim && !openClaim && (
+          <div className="border-t border-success/15 px-4 py-2.5 text-xs text-success space-y-1.5">
+            <p className="font-medium">ABVMU deposit settled · receipt issued for {fmt(settledClaim.amount)}</p>
+            {settledClaim.proof_path && (
+              <button
+                type="button"
+                onClick={() => viewChallan(settledClaim.proof_path)}
+                className="text-info underline underline-offset-2 hover:text-info/80"
+              >
+                View challan{settledClaim.proof_file_name ? ` (${settledClaim.proof_file_name})` : ""}
+              </button>
             )}
           </div>
         )}

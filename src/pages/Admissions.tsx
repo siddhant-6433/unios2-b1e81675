@@ -145,7 +145,8 @@ type ApplicationStageFilter =
   | "application_in_progress"
   | "application_fee_paid"
   | "application_submitted"
-  | "token_fee_paid";
+  | "token_fee_paid"
+  | "non_application_fee_paid";
 type ApplicationStageLeadScope = { mode: "include" | "exclude"; ids: Set<string> };
 type NewLeadAssignmentFilter = "assigned" | "unassigned";
 
@@ -179,6 +180,11 @@ const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string;
     value: "token_fee_paid",
     label: "Token fee paid",
     description: "Token fee paid or later admission stage",
+  },
+  {
+    value: "non_application_fee_paid",
+    label: "Paid fee beyond application fee",
+    description: "Any confirmed token / registration / payment-link collection (not the application fee)",
   },
 ];
 
@@ -259,7 +265,7 @@ const Admissions = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { role, profile, user } = useAuth();
-  const { selectedCampusId } = useCampus();
+  const { selectedCampusId, campuses } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments" | "referrals">(
@@ -281,6 +287,16 @@ const Admissions = () => {
   const [applicationStageLeadScope, setApplicationStageLeadScope] = useState<ApplicationStageLeadScope | null>(null);
   const [applicationStageResolving, setApplicationStageResolving] = useState(false);
   const [applicationStagePopoverOpen, setApplicationStagePopoverOpen] = useState(false);
+  // Custom Report — self-contained CSV report builder (mirrors the /applications page).
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportCourseId, setReportCourseId] = useState("all");
+  const [reportCampusId, setReportCampusId] = useState("all");
+  const [reportStages, setReportStages] = useState<string[]>([]); // empty = all stages
+  const [reportOnlyOtherFeePaid, setReportOnlyOtherFeePaid] = useState(false);
+  const [reportExcludedColumns, setReportExcludedColumns] = useState<string[]>([]);
+  const [reportRows, setReportRows] = useState<Record<string, string>[] | null>(null); // null = not yet computed
+  const [reportLoading, setReportLoading] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
@@ -614,8 +630,8 @@ const Admissions = () => {
             if (cursorId) query = query.gt("id", cursorId);
             return query;
           }),
-          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; type: string | null; status: string | null }>((cursorId, pageSize) => {
-            let query = supabase.from("lead_payments" as any).select("id, lead_id, type, status").order("id", { ascending: true }).limit(pageSize);
+          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; type: string | null; status: string | null; amount: number | null }>((cursorId, pageSize) => {
+            let query = supabase.from("lead_payments" as any).select("id, lead_id, type, status, amount").order("id", { ascending: true }).limit(pageSize);
             if (cursorId) query = query.gt("id", cursorId);
             return query;
           }),
@@ -626,6 +642,9 @@ const Admissions = () => {
         const submittedIds = new Set<string>();
         const applicationFeePaidIds = new Set<string>();
         const tokenFeePaidIds = new Set<string>();
+        // Any confirmed non-application-fee payment (token / registration / payment-link "other"),
+        // matching the /applications Custom Report "beyond application fee" flag.
+        const nonApplicationFeePaidIds = new Set<string>();
 
         for (const app of appRows) {
           if (!app.lead_id) continue;
@@ -643,11 +662,16 @@ const Admissions = () => {
           if (!payment.lead_id || payment.status !== "confirmed") continue;
           if (payment.type === "application_fee") applicationFeePaidIds.add(payment.lead_id);
           if (payment.type === "token_fee") tokenFeePaidIds.add(payment.lead_id);
+          if (payment.type !== "application_fee" && Number(payment.amount) > 0) {
+            nonApplicationFeePaidIds.add(payment.lead_id);
+          }
         }
 
         for (const lead of leadRows) {
           if (["token_paid", "pre_admitted", "admitted"].includes(lead.stage)) {
             tokenFeePaidIds.add(lead.id);
+            // Advanced stages imply a token/fee was paid even without an explicit payment row.
+            nonApplicationFeePaidIds.add(lead.id);
           }
         }
 
@@ -664,6 +688,7 @@ const Admissions = () => {
           application_fee_paid: new Set(Array.from(applicationFeePaidIds).filter((id) => !submittedIds.has(id) && !tokenFeePaidIds.has(id))),
           application_submitted: new Set(Array.from(submittedIds).filter((id) => !tokenFeePaidIds.has(id))),
           token_fee_paid: tokenFeePaidIds,
+          non_application_fee_paid: nonApplicationFeePaidIds,
         };
 
         const matchingIds = new Set<string>();
@@ -1358,6 +1383,139 @@ const Admissions = () => {
     }
   };
 
+  // ---- Custom Report (self-contained CSV report, independent of the toolbar filters) ----
+  // A lead counts as "paid beyond application fee" if it has a confirmed non-application-fee
+  // payment, OR it has advanced to a stage that implies a token/fee was paid — same rule as the
+  // "Paid fee beyond application fee" list filter.
+  const NON_APP_FEE_STAGES = ["token_paid", "pre_admitted", "admitted"];
+
+  const leadReportRow = (l: any, otherFeePaid: number): Record<string, string> => ({
+    "Lead Name": l.name || "",
+    "Mobile No": l.phone || "",
+    "Email ID": l.email || "",
+    "Application ID": l.application_id || "",
+    "Lead Stage": STAGE_LABELS[l.stage] || l.stage || "",
+    "Other Fee Paid": otherFeePaid > 0 ? String(otherFeePaid) : "",
+    Course: l.courses?.name || "",
+    Campus: l.campuses?.name || "",
+    Counsellor: l.profiles?.display_name || "",
+    Source: SOURCE_LABELS[l.source] || l.source || "",
+    Role: l.person_role || "",
+    "Lead Temperature": l.lead_temperature || "",
+    "Lead Score": l.lead_score != null ? String(l.lead_score) : "",
+    PAN: l.pre_admission_no || "",
+    AN: l.admission_no || "",
+    "Created At": formatExportDateTime(l.created_at),
+  });
+
+  // Canonical column order — derived from the row builder so it never drifts.
+  const reportAllColumns = Object.keys(leadReportRow({}, 0));
+  const reportIncludedColumns = reportAllColumns.filter((c) => !reportExcludedColumns.includes(c));
+
+  const buildReportRows = async (): Promise<Record<string, string>[]> => {
+    // 1. All leads matching course/campus/stage (RLS-scoped, keyset-paginated).
+    const leadRows: any[] = [];
+    const pageSize = 1000;
+    let cursor: { created_at: string; id: string } | null = null;
+    for (;;) {
+      let query: any = supabase
+        .from("leads")
+        .select("id, name, phone, email, stage, source, person_role, created_at, application_id, pre_admission_no, admission_no, lead_score, lead_temperature, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)");
+      if (reportCourseId !== "all") query = query.eq("course_id", reportCourseId);
+      if (reportCampusId !== "all") query = query.eq("campus_id", reportCampusId);
+      if (reportStages.length > 0) query = query.in("stage", reportStages);
+      query = applyAdmissionsLeadSort(query, "newest").limit(pageSize);
+      query = applyAdmissionsLeadCursor(query, cursor, "newest");
+      const { data, error } = await query;
+      if (error) throw error;
+      const batch = (data || []) as any[];
+      leadRows.push(...batch);
+      const last = batch[batch.length - 1];
+      if (batch.length < pageSize || !last) break;
+      cursor = { created_at: last.created_at, id: last.id };
+    }
+
+    // 2. Sum confirmed non-application-fee payments per lead.
+    const otherFeeMap: Record<string, number> = {};
+    const ids = leadRows.map((l) => l.id);
+    for (let i = 0; i < ids.length; i += 500) {
+      const idBatch = ids.slice(i, i + 500);
+      const { data: pays, error } = await supabase
+        .from("lead_payments" as any)
+        .select("lead_id, amount, type, status")
+        .in("lead_id", idBatch)
+        .eq("status", "confirmed");
+      if (error) throw error;
+      (pays || []).forEach((p: any) => {
+        if (p.type !== "application_fee" && Number(p.amount) > 0) {
+          otherFeeMap[p.lead_id] = (otherFeeMap[p.lead_id] || 0) + Number(p.amount || 0);
+        }
+      });
+    }
+
+    return leadRows
+      .filter((l) =>
+        !reportOnlyOtherFeePaid
+        || (otherFeeMap[l.id] || 0) > 0
+        || NON_APP_FEE_STAGES.includes(l.stage))
+      .map((l) => leadReportRow(l, otherFeeMap[l.id] || 0));
+  };
+
+  // Recompute the live preview whenever the dialog is open and criteria change.
+  useEffect(() => {
+    if (!showReportDialog) return;
+    let cancelled = false;
+    setReportLoading(true);
+    setReportRows(null);
+    (async () => {
+      try {
+        const rows = await buildReportRows();
+        if (!cancelled) setReportRows(rows);
+      } catch (error) {
+        if (!cancelled) {
+          setReportRows([]);
+          toast({
+            title: "Report preview failed",
+            description: error instanceof Error ? error.message : "Unable to load matching leads.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setReportLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReportDialog, reportCourseId, reportCampusId, reportStages, reportOnlyOtherFeePaid]);
+
+  const handleExportCustomReport = () => {
+    if (!reportRows || reportRows.length === 0 || reportIncludedColumns.length === 0) return;
+    setExportingReport(true);
+    try {
+      const slug = [
+        reportCourseId !== "all" ? courseOptions.find((c) => c.id === reportCourseId)?.name : null,
+        reportCampusId !== "all" ? campuses.find((c) => c.id === reportCampusId)?.name : null,
+      ].filter(Boolean).join("-") || "all";
+      const { count } = exportRowsCsv(
+        reportRows.map((row) => Object.fromEntries(reportIncludedColumns.map((c) => [c, row[c]]))),
+        `leads-report-${slug}`,
+      );
+      toast({
+        title: count > 0 ? "Report exported" : "No leads match",
+        description: count > 0 ? `${count} lead${count === 1 ? "" : "s"} exported.` : undefined,
+      });
+      if (count > 0) setShowReportDialog(false);
+    } catch (error) {
+      toast({
+        title: "Report export failed",
+        description: error instanceof Error ? error.message : "Unable to export report.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   // Only BPT/BMRIT leads can be referred, so only those need a referral lookup.
   const referrableLeadKey = useMemo(
     () => leads.filter((l) => isReferrableCourse(l.course_name)).map((l) => l.id).join(","),
@@ -1862,6 +2020,18 @@ const Admissions = () => {
             >
               {exporting ? <ButtonOrb state="working" /> : <Download className="h-4 w-4" />}
               Download CSV
+            </Button>
+          )}
+          {canExportLeads && (
+            <Button
+              variant="pill-outline"
+              size="pill"
+              onClick={() => setShowReportDialog(true)}
+              className="gap-2"
+              title="Build a consolidated CSV report for a course + campus + stages, with a 'paid beyond application fee' filter"
+            >
+              <FileText className="h-4 w-4" />
+              Custom Report
             </Button>
           )}
           <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
@@ -3305,6 +3475,116 @@ const Admissions = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Custom consolidated report — course + campus + a set of lead stages. */}
+      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Custom report</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Course</p>
+              <select
+                value={reportCourseId}
+                onChange={(e) => setReportCourseId(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                aria-label="Report course"
+              >
+                <option value="all">All courses</option>
+                {courseOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Campus</p>
+              <select
+                value={reportCampusId}
+                onChange={(e) => setReportCampusId(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                aria-label="Report campus"
+              >
+                <option value="all">All campuses</option>
+                {campuses.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Stages (none selected = all)</p>
+              <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto rounded-lg border border-border/40 p-2">
+                {STAGES.map((stage) => (
+                  <label key={stage} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={reportStages.includes(stage)}
+                      onCheckedChange={(v) => setReportStages((prev) =>
+                        v ? Array.from(new Set([...prev, stage])) : prev.filter((s) => s !== stage))}
+                    />
+                    <span className="truncate" title={STAGE_LABELS[stage] || stage}>{STAGE_LABELS[stage] || stage}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={reportOnlyOtherFeePaid}
+                onCheckedChange={(v) => setReportOnlyOtherFeePaid(!!v)}
+              />
+              Only candidates who paid a fee beyond the application fee
+            </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">Columns</p>
+                {reportExcludedColumns.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => setReportExcludedColumns([])}
+                  >
+                    Select all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto rounded-lg border border-border/40 p-2">
+                {reportAllColumns.map((col) => (
+                  <label key={col} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <Checkbox
+                      checked={!reportExcludedColumns.includes(col)}
+                      onCheckedChange={(v) => setReportExcludedColumns((prev) =>
+                        v ? prev.filter((c) => c !== col) : Array.from(new Set([...prev, col])))}
+                    />
+                    <span className="truncate" title={col}>{col}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {reportLoading ? (
+              <span className="inline-flex items-center gap-2"><ButtonOrb state="working" /> Loading matches…</span>
+            ) : (
+              <>
+                <span className="font-semibold text-foreground">{reportRows?.length ?? 0}</span>{" "}
+                lead{(reportRows?.length ?? 0) === 1 ? "" : "s"} match this selection.
+              </>
+            )}
+          </p>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setReportStages([])} disabled={reportStages.length === 0}>
+              Clear stages
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleExportCustomReport}
+              disabled={exportingReport || reportLoading || !reportRows || reportRows.length === 0 || reportIncludedColumns.length === 0}
+            >
+              {exportingReport ? <ButtonOrb state="working" /> : <Download className="h-3.5 w-3.5" />}
+              Download report ({reportRows?.length ?? 0})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
