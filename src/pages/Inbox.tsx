@@ -2708,6 +2708,8 @@ export default function Inbox() {
                       Missing: p.doc_status?.missing ?? 0,
                       Rejected: p.doc_status?.rejected ?? 0,
                       Pending: p.doc_status?.pending ?? 0,
+                      // Per-document breakdown: one column per mandatory doc, value = its state.
+                      ...Object.fromEntries((p.doc_status?.docs || []).map((d) => [d.label, d.state])),
                     })),
                     "pending-an-generation",
                   )
