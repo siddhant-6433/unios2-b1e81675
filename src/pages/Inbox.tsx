@@ -6,10 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen } from "lucide-react";
+import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { exportRowsCsv } from "@/lib/xlsxExport";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2691,6 +2692,30 @@ export default function Inbox() {
               </p>
             </div>
             {loading && <ButtonOrb state="working" />}
+            {selected === "pending_an_generation" && items.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() =>
+                  exportRowsCsv(
+                    (items as PendingAnItem[]).map((p) => ({
+                      Name: p.name,
+                      "PAN No": p.pre_admission_no || "",
+                      Course: p.course || "",
+                      "Verified docs": p.doc_status?.verified ?? 0,
+                      "Required docs": p.doc_status?.required_total ?? 0,
+                      Missing: p.doc_status?.missing ?? 0,
+                      Rejected: p.doc_status?.rejected ?? 0,
+                      Pending: p.doc_status?.pending ?? 0,
+                    })),
+                    "pending-an-generation",
+                  )
+                }
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" /> CSV
+              </Button>
+            )}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
