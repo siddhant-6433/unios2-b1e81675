@@ -20,6 +20,8 @@ import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { RowConcessionPopover } from "./RowConcessionPopover";
 import { PaidBreakdownPopover } from "./PaidBreakdownPopover";
 import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
+import { AbvmuInlineControls } from "./AbvmuInlineControls";
+import { useAbvmuDeposit } from "./useAbvmuDeposit";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 
@@ -258,6 +260,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // Paying for cashiers; + the row-actions column for finance roles).
   const colCount = 7 + (canPick ? 2 : 0) + (isFinanceRole ? 1 : 0);
   const rowBalance = (f: any) => Math.max(0, Math.round(Number(f.balance || 0)));
+
+  // Due dates carry the year; a stored 'due' head whose date has passed (and still
+  // owes a balance) reads as "overdue" rather than "due".
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const fmtDue = (d: any) =>
+    d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  const effectiveStatus = (f: any) =>
+    f.status === "due" && Number(f.balance || 0) > 0 && f.due_date && String(f.due_date).slice(0, 10) < todayStr
+      ? "overdue"
+      : f.status;
   const isPickable = (f: any) => canPick && rowBalance(f) > 0;
   const pickedTotal = Object.values(picked).reduce((s, v) => s + (Number(v) || 0), 0);
   const pickedCount = Object.keys(picked).length;
@@ -390,6 +405,60 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     }
     return groups;
   }, [fees]);
+
+  // ABVMU seat-reservation deposit (BPT/BMRIT/B.Sc-Nursing). When present, the ₹40k is
+  // conceptually part of the ₹92k Year-1 tuition but is paid to the university, not the
+  // college counter — so we present Year-1 as two lines and cap the college-collectable
+  // to the remainder. Display + collect-cap only; the fee_ledger row is untouched.
+  const abvmu = useAbvmuDeposit(student?.lead_id, onRefresh);
+  const isAbvmuTuitionRow = (f: any) =>
+    String(f.term || "").toLowerCase() === "year_1" && /^TUITION/i.test(f.fee_codes?.code || "");
+
+  const feeGroupsDisplay = useMemo(() => {
+    const dep = abvmu.depositAmount;
+    if (!dep || dep <= 0) return feeGroups;
+    return feeGroups.map((g) => {
+      const tuit = g.rows.find(isAbvmuTuitionRow);
+      if (!tuit) return g;
+      const settled = abvmu.settledAmount; // real receipt already in the ledger's paid_amount
+      const claimStatus = abvmu.settledClaim ? "settled" : abvmu.openClaim?.status || "none";
+      const synthetic = {
+        id: `abvmu-${tuit.id}`,
+        __abvmu: true,
+        __claimStatus: claimStatus,
+        fee_codes: { name: "ABVMU Deposit (Year 1)", code: "ABVMU-DEP" },
+        term: tuit.term,
+        total_amount: dep,
+        concession: 0,
+        paid_amount: settled,
+        balance: Math.max(0, dep - settled),
+        due_date: tuit.due_date,
+        status:
+          claimStatus === "settled" ? "paid"
+          : claimStatus === "approved" ? "provisional"
+          : claimStatus === "pending" ? "pending"
+          : "due",
+      };
+      const adjTuition = {
+        ...tuit,
+        fee_codes: { ...tuit.fee_codes, name: "Year 1 Tuition (to college)" },
+        total_amount: Math.max(0, Number(tuit.total_amount || 0) - dep),
+        paid_amount: Math.max(0, Number(tuit.paid_amount || 0) - settled),
+        balance: Math.max(0, Number(tuit.balance || 0) - (dep - settled)),
+      };
+      const rows: any[] = [];
+      for (const r of g.rows) {
+        if (r.id === tuit.id) { rows.push(synthetic); rows.push(adjTuition); }
+        else rows.push(r);
+      }
+      return { ...g, rows };
+    });
+  }, [feeGroups, abvmu.depositAmount, abvmu.settledAmount, abvmu.openClaim, abvmu.settledClaim]);
+
+  // Inline split is active only when there's a Year-1 tuition row to attach to; otherwise
+  // fall back to the standalone banner.
+  const abvmuInlineActive = abvmu.depositAmount > 0 &&
+    feeGroups.some((g) => g.rows.some(isAbvmuTuitionRow));
 
   if (loading) {
     return <PageLoader />;
@@ -577,7 +646,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       {/* ABVMU deposit challan — cashier can submit/track on the candidate's
           behalf (BPT/BMRIT/B.Sc Nursing carry a seat-reservation deposit).
           Self-hides when the course has no deposit or the student has no lead. */}
-      {student?.lead_id && (
+      {student?.lead_id && !abvmuInlineActive && (
         <AbvmuDepositPanel leadId={student.lead_id} onChanged={onRefresh} />
       )}
 
@@ -607,7 +676,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   No fee records found. {canProvision && "Use Manage → Auto-Assign Fees to provision."}
                 </td>
               </tr>
-            ) : feeGroups.map((g) => {
+            ) : feeGroupsDisplay.map((g) => {
               const gTotal = g.rows.reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
               const gConcession = g.rows.reduce((s: number, r: any) => s + Number(r.concession || 0), 0);
               const gPickable = g.rows.filter(isPickable);
@@ -638,7 +707,37 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   <td className="px-4 py-2.5 text-right text-[11px] tabular-nums text-success">{gConcession > 0 ? `−₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
                   <td colSpan={colCount - (canPick ? 4 : 3)} />
                 </tr>
-                {g.rows.map((f: any) => (
+                {g.rows.map((f: any) => f.__abvmu ? (
+                  <Fragment key={f.id}>
+                    <tr className="bg-info/5">
+                      {canPick && <td className="px-4 py-3" />}
+                      <td className="px-4 py-3 pl-6">
+                        <span className="block font-medium text-foreground">{f.fee_codes?.name}</span>
+                        <span className="block text-[10px] text-muted-foreground">Paid to the university (ABVMU), not the college counter</span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground/40">—</td>
+                      <td className={`px-4 py-3 text-right tabular-nums ${Number(f.paid_amount) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
+                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance).toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{fmtDue(f.due_date)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-info/15 text-info"}`}>
+                          {f.__claimStatus === "settled" ? "receipt issued"
+                            : f.__claimStatus === "approved" ? "provisional credit"
+                            : f.__claimStatus === "pending" ? "pending approval"
+                            : "not recorded"}
+                        </span>
+                      </td>
+                      {isFinanceRole && <td className="px-4 py-3" />}
+                      {canPick && <td className="px-4 py-3 text-right text-muted-foreground/40">—</td>}
+                    </tr>
+                    <tr className="border-b border-border bg-info/5">
+                      <td colSpan={colCount} className={`${canPick ? "pl-16" : "pl-10"} pr-4 pt-1 pb-3`}>
+                        <AbvmuInlineControls abvmu={abvmu} />
+                      </td>
+                    </tr>
+                  </Fragment>
+                ) : (
                   <tr key={f.id} className={`border-b border-border last:border-0 transition-colors ${picked[f.id] !== undefined ? "bg-primary/5" : "hover:bg-muted/30"}`}>
                     {canPick && (
                       <td className="px-4 py-3">
@@ -714,15 +813,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     </td>
                     <td className={`px-4 py-3 text-right font-semibold tabular-nums ${Number(f.balance || 0) > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
+                      {fmtDue(f.due_date)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>
-                        {f.status === "paid" && <Check className="h-3 w-3" />}
-                        {f.status === "due" && <Clock className="h-3 w-3" />}
-                        {f.status === "overdue" && <AlertTriangle className="h-3 w-3" />}
-                        {f.status}
-                      </span>
+                      {(() => {
+                        const st = effectiveStatus(f);
+                        return (
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[st] || "bg-muted"}`}>
+                            {st === "paid" && <Check className="h-3 w-3" />}
+                            {st === "due" && <Clock className="h-3 w-3" />}
+                            {st === "overdue" && <AlertTriangle className="h-3 w-3" />}
+                            {st}
+                          </span>
+                        );
+                      })()}
                     </td>
                     {/* No per-row Collect. Collection happens once, from the
                         bar at the foot of the table, against every ticked row —
