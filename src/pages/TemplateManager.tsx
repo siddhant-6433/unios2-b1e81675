@@ -755,6 +755,7 @@ Buttons:
                       </td>
                       <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.created_at)}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{s.last_used_at ? formatShortDate(s.last_used_at) : "—"}</td>
                       <td className="px-3 py-2">
                         {s.header_format && s.header_format !== "NONE" && s.header_format !== "TEXT" ? (
                           <div className="min-w-[220px]">

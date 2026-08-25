@@ -72,11 +72,66 @@ const displayNameForTemplate = (name: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
+/** Map header_format to a file extension for storage. */
+const HEADER_EXT: Record<string, string> = { IMAGE: "jpg", VIDEO: "mp4", DOCUMENT: "pdf" };
+
+/**
+ * Extract the example media URL from a template's components JSONB.
+ * Meta stores it at components[type=HEADER].example.header_handle[0].
+ */
+function extractHeaderMediaUrl(components: any[] | null): string | null {
+  if (!Array.isArray(components)) return null;
+  const header = components.find((c: any) => c.type === "HEADER");
+  const handle = header?.example?.header_handle;
+  return Array.isArray(handle) && handle.length > 0 ? String(handle[0]) : null;
+}
+
+/**
+ * Download media from Meta's scontent URL and re-upload to Supabase Storage.
+ * Returns the public URL on success, null on failure (non-fatal).
+ */
+async function rehostHeaderMedia(
+  adminClient: any,
+  supabaseUrl: string,
+  templateKey: string,
+  sourceUrl: string,
+  headerFormat: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(sourceUrl);
+    if (!res.ok) {
+      console.warn(`[media-rehost] Failed to download ${templateKey}: ${res.status}`);
+      return null;
+    }
+    const blob = await res.blob();
+    const ext = HEADER_EXT[headerFormat] || "bin";
+    const storagePath = `template-headers/${templateKey}.${ext}`;
+
+    // ponytail: upsert so re-syncs overwrite stale files
+    const { error: uploadErr } = await adminClient.storage
+      .from("whatsapp-media")
+      .upload(storagePath, blob, { contentType: blob.type || "application/octet-stream", upsert: true });
+    if (uploadErr) {
+      console.warn(`[media-rehost] Storage upload failed for ${templateKey}:`, uploadErr.message);
+      return null;
+    }
+
+    return `${supabaseUrl}/storage/v1/object/public/whatsapp-media/${storagePath}`;
+  } catch (err) {
+    console.warn(`[media-rehost] Unexpected error for ${templateKey}:`, err);
+    return null;
+  }
+}
+
 async function registerApprovedTemplateVisibilityRows(adminClient: any, templates: Array<{
   name: string;
   status: string;
   category?: string | null;
+  header_format?: string;
+  has_media?: boolean;
+  components?: any[] | null;
 }>) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   const approved = templates.filter((template) =>
     template.name && normalizeTemplateStatus(template.status) === "APPROVED"
   );
@@ -85,7 +140,7 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
   const keys = [...new Set(approved.map((template) => template.name))];
   const { data: existing, error: existingErr } = await adminClient
     .from("whatsapp_template_settings")
-    .select("template_key")
+    .select("template_key, media_url")
     .in("template_key", keys);
 
   if (existingErr) {
@@ -96,31 +151,54 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
     throw existingErr;
   }
 
-  const existingKeys = new Set(((existing || []) as Array<{ template_key: string }>).map((row) => row.template_key));
-  const rows = approved
-    .filter((template) => !existingKeys.has(template.name))
-    .map((template) => ({
-      template_key: template.name,
-      display_name: displayNameForTemplate(template.name),
-      description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
-      category: String(template.category || "general").toLowerCase(),
-      visibility: 'hidden',
-    }));
+  const existingByKey = new Map(
+    ((existing || []) as Array<{ template_key: string; media_url: string | null }>)
+      .map((row) => [row.template_key, row]),
+  );
+  const newTemplates = approved.filter((template) => !existingByKey.has(template.name));
+  const rows = newTemplates.map((template) => ({
+    template_key: template.name,
+    display_name: displayNameForTemplate(template.name),
+    description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
+    category: String(template.category || "general").toLowerCase(),
+    visibility: 'hidden',
+  }));
 
-  if (rows.length === 0) return { registered: 0 };
-
-  const { error: insertErr } = await adminClient
-    .from("whatsapp_template_settings")
-    .insert(rows);
-  if (insertErr) {
-    if (isMissingSettingsTable(insertErr)) {
-      console.warn("whatsapp_template_settings unavailable during template sync:", insertErr.message);
-      return { registered: 0, warning: "whatsapp_template_settings table is not deployed yet." };
+  if (rows.length > 0) {
+    const { error: insertErr } = await adminClient
+      .from("whatsapp_template_settings")
+      .insert(rows);
+    if (insertErr) {
+      if (isMissingSettingsTable(insertErr)) {
+        console.warn("whatsapp_template_settings unavailable during template sync:", insertErr.message);
+        return { registered: 0, warning: "whatsapp_template_settings table is not deployed yet." };
+      }
+      throw insertErr;
     }
-    throw insertErr;
   }
 
-  return { registered: rows.length };
+  // ── Auto-populate media_url for templates with media headers ──
+  // Covers both newly registered AND existing rows that lack a media_url.
+  let mediaPopulated = 0;
+  if (supabaseUrl) {
+    const mediaTemplates = approved.filter((t) =>
+      t.has_media && t.components && !existingByKey.get(t.name)?.media_url
+    );
+    for (const t of mediaTemplates) {
+      const sourceUrl = extractHeaderMediaUrl(t.components || null);
+      if (!sourceUrl) continue;
+      const publicUrl = await rehostHeaderMedia(adminClient, supabaseUrl, t.name, sourceUrl, t.header_format || "IMAGE");
+      if (publicUrl) {
+        await adminClient
+          .from("whatsapp_template_settings")
+          .update({ media_url: publicUrl, updated_at: new Date().toISOString() })
+          .eq("template_key", t.name);
+        mediaPopulated++;
+      }
+    }
+  }
+
+  return { registered: rows.length, media_populated: mediaPopulated };
 }
 
 Deno.serve(async (req) => {
@@ -420,6 +498,7 @@ Deno.serve(async (req) => {
         synced: rows.length,
         fetched: rows.length,
         visibility_registered: visibility.registered,
+        media_populated: visibility.media_populated || 0,
         ...(visibility.warning ? { warning: visibility.warning } : {}),
       });
     }
