@@ -264,7 +264,7 @@ function DeferredBlock({ className = "h-24" }: { className?: string }) {
 const Admissions = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { role, profile, user } = useAuth();
+  const { role, realRole, profile, user } = useAuth();
   const { selectedCampusId, campuses } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
@@ -1367,6 +1367,7 @@ const Admissions = () => {
           "Created At": formatExportDateTime(lead.created_at),
         })),
         "leads-export",
+        { unmask: realRole === "super_admin" },
       );
       toast({
         title: count > 0 ? "Leads exported" : "No leads to export",
@@ -1499,6 +1500,7 @@ const Admissions = () => {
       const { count } = exportRowsCsv(
         reportRows.map((row) => Object.fromEntries(reportIncludedColumns.map((c) => [c, row[c]]))),
         `leads-report-${slug}`,
+        { unmask: realRole === "super_admin" },
       );
       toast({
         title: count > 0 ? "Report exported" : "No leads match",

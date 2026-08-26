@@ -268,7 +268,7 @@ const Students = () => {
   const [exporting, setExporting] = useState(false);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
-  const { role } = useAuth();
+  const { role, realRole } = useAuth();
   const { toast } = useToast();
   const canSeeContact = can("students", "view_contact");
   const canCreateStudents = can("students", "create");
@@ -510,7 +510,7 @@ const Students = () => {
         "Guardian Phone": student.guardian_phone || "",
         Address: [student.address, student.city, student.state, student.pincode].filter(Boolean).join(", "),
         "Photo URL": student.photo_url || "",
-      })), "students-details");
+      })), "students-details", { unmask: realRole === "super_admin" });
     } finally {
       setExporting(false);
     }
