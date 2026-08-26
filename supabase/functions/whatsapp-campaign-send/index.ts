@@ -149,6 +149,15 @@ function templateBodyFromComponents(components: unknown): string | null {
   return typeof body?.text === "string" ? body.text : null;
 }
 
+// Meta's scontent.whatsapp.net / lookaside.fbsbx.com sample handles are viewable
+// but rejected by the send pipeline as a header link (131053 "403 Forbidden").
+// A stale one can arrive via a template's example handle OR a campaign's
+// static_params (resends copy the original's params verbatim), so every place
+// that picks a send-time header link must reject it — not just the example path.
+function isSampleHeaderHandle(url: unknown): boolean {
+  return typeof url === "string" && /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(url);
+}
+
 function templateMediaUrlFromComponents(templateKey: string, components: unknown): string | null {
   if (KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
   if (!Array.isArray(components)) return null;
@@ -162,7 +171,7 @@ function templateMediaUrlFromComponents(templateKey: string, components: unknown
   // link (131053 "Media upload error … 403 Forbidden"), so never use it as the
   // send-time link — a stable public URL must be registered in KNOWN_TEMPLATE_MEDIA.
   if (typeof handle !== "string" || !/^https?:\/\//i.test(handle)) return null;
-  if (/scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(handle)) return null;
+  if (isSampleHeaderHandle(handle)) return null;
   return handle;
 }
 
@@ -487,7 +496,7 @@ Deno.serve(async (req) => {
     const mediaHeader = templateDef.dynamicComponents?.header;
     if (mediaHeader?.kind === "media") {
       const hasStaticOverride = Object.values((campaign as any).static_params || {})
-        .some((v) => typeof v === "string" && /^https?:\/\//i.test(v));
+        .some((v) => typeof v === "string" && /^https?:\/\//i.test(v) && !isSampleHeaderHandle(v));
       if (!mediaHeader.defaultUrl && !hasStaticOverride) {
         await adminClient.from("whatsapp_campaigns").update({ status: "failed" }).eq("id", campaign_id);
         return new Response(JSON.stringify({
@@ -735,7 +744,11 @@ Deno.serve(async (req) => {
       if (templateDef.dynamicComponents?.header) {
         const header = templateDef.dynamicComponents.header;
         if (header.kind === "media") {
-          const mediaUrl = resolveParam(header.paramName) || header.defaultUrl || "";
+          // A stale scontent handle in static_params (common on resends) must not
+          // beat the rehosted public defaultUrl, or Meta 403s the whole send.
+          const override = resolveParam(header.paramName);
+          const mediaUrl = (override && !isSampleHeaderHandle(override) ? override : "")
+            || header.defaultUrl || "";
           components.push({
             type: "header",
             parameters: [{ type: header.format, [header.format]: { link: mediaUrl } }],
