@@ -138,14 +138,49 @@ export async function zohoGetPdf(token: string, path: string): Promise<Uint8Arra
   return new Uint8Array(await res.arrayBuffer());
 }
 
+export type ZohoVendorCandidate = {
+  contact_id: string;
+  contact_name: string;
+  phone: string | null;
+  email: string | null;
+  company_name: string | null;
+};
+
+// Search vendors by phone (last-10-digit) OR free-text name. Returns Zoho's matches,
+// ranked so top-level phone/mobile matches come first. Trusts Zoho's server-side
+// search_text — does NOT re-filter matches away (over-strict re-filtering on top-level
+// phone/mobile only was the bug that spawned duplicate vendors: Zoho often carries the
+// number on the contact-person, not the top-level field).
+export async function zohoSearchVendors(
+  token: string,
+  opts: { phone?: string; query?: string },
+): Promise<ZohoVendorCandidate[]> {
+  const digits = (opts.phone || "").replace(/\D/g, "").slice(-10);
+  const search_text = digits.length >= 10 ? digits : (opts.query || "").trim();
+  if (!search_text) return [];
+  const res = await zohoApi(token, "GET", "/contacts", undefined, { search_text, contact_type: "vendor" });
+  const contacts: any[] = res.data?.contacts || [];
+  const isPhoneHit = (c: any) =>
+    [c.phone, c.mobile].some((p: string) => (p || "").replace(/\D/g, "").slice(-10) === digits);
+  const ranked = digits.length >= 10
+    ? [...contacts.filter(isPhoneHit), ...contacts.filter((c) => !isPhoneHit(c))]
+    : contacts;
+  return ranked.map((c) => ({
+    contact_id: c.contact_id,
+    contact_name: c.contact_name,
+    phone: c.phone || c.mobile || null,
+    email: c.email || null,
+    company_name: c.company_name || null,
+  }));
+}
+
 // Find an existing vendor by phone; returns contact_id or null.
+// (Retained for zoho-books-sync; delegates to zohoSearchVendors.)
 export async function zohoFindVendorByPhone(token: string, phone: string): Promise<string | null> {
   const digits = (phone || "").replace(/\D/g, "").slice(-10);
   if (digits.length < 10) return null;
-  const res = await zohoApi(token, "GET", "/contacts", undefined, { search_text: digits, contact_type: "vendor" });
-  const contacts: any[] = res.data?.contacts || [];
-  const match = contacts.find((c) =>
-    [c.phone, c.mobile].some((p: string) => (p || "").replace(/\D/g, "").slice(-10) === digits),
-  );
-  return match?.contact_id || null;
+  const [top] = await zohoSearchVendors(token, { phone });
+  // Only auto-return a phone hit (ranked first); avoid grabbing an unrelated name match.
+  if (top && (top.phone || "").replace(/\D/g, "").slice(-10) === digits) return top.contact_id;
+  return null;
 }
