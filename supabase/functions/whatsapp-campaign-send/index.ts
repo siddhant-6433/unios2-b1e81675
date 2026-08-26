@@ -465,6 +465,22 @@ Deno.serve(async (req) => {
       };
     }
 
+    // Same fallback single-send uses (whatsapp-send/index.ts:647-652): the rehosted
+    // public URL in whatsapp_template_settings.media_url is the only send-safe header
+    // link for catalog templates — Meta rejects its own scontent example handle (131053).
+    {
+      const mediaHdr = templateDef.dynamicComponents?.header;
+      if (mediaHdr?.kind === "media" && !mediaHdr.defaultUrl) {
+        const { data: ts } = await adminClient
+          .from("whatsapp_template_settings")
+          .select("media_url")
+          .eq("template_key", campaign.template_key)
+          .maybeSingle();
+        const url = (ts as any)?.media_url?.trim();
+        if (url) mediaHdr.defaultUrl = url;
+      }
+    }
+
     // Preflight: a media-header template with no usable public header URL would
     // 403 on *every* recipient at Meta's media download. Fail the whole campaign
     // once with a clear message instead of silently burning the entire list.
