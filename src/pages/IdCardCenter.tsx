@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { maskMatrix } from "@/lib/maskContact";
 import { useCampus } from "@/contexts/CampusContext";
 import { ChevronDown, CreditCard, Download, FileSpreadsheet, Search, ShieldAlert, UserCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -163,12 +164,17 @@ function photoStatus(row: CardPerson): string {
 }
 
 /** Download the given rows as a CSV (opens in Excel). Filename reflects the active photo filter. */
-function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string) {
+function exportCsv(rows: CardPerson[], mode: CardMode, filterLabel: string, unmask: boolean) {
   const headers = ["Name", mode === "students" ? "Admission No." : "Employee No.", ...(mode === "students" ? ["PAN (Pre-Adm. No.)"] : []), "Group", "Detail", "Campus", "Phone", "Email", "Blood Group", "Photo Status"];
   const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const body = maskMatrix(
+    headers,
+    rows.map((r) => [r.name, r.primaryNo, ...(mode === "students" ? [r.secondaryNo] : []), r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)]),
+    unmask,
+  );
   const lines = [
     headers.map(esc).join(","),
-    ...rows.map((r) => [r.name, r.primaryNo, ...(mode === "students" ? [r.secondaryNo] : []), r.group, r.subtitle, r.campus, r.phone, r.email, r.bloodGroup, photoStatus(r)].map(esc).join(",")),
+    ...body.map((cols) => cols.map(esc).join(",")),
   ];
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -206,7 +212,7 @@ function PersonAvatar({ name, photoUrl, className }: { name: string; photoUrl: s
 }
 
 const IdCardCenter = () => {
-  const { role } = useAuth();
+  const { role, realRole } = useAuth();
   const { can } = usePermissions();
   const { selectedCampusId } = useCampus();
   const [mode, setMode] = useState<CardMode>("students");
@@ -678,7 +684,7 @@ const IdCardCenter = () => {
           <Button
             variant="outline"
             className="gap-2"
-            onClick={() => exportCsv(filteredRows, mode, photoFilter)}
+            onClick={() => exportCsv(filteredRows, mode, photoFilter, realRole === "super_admin")}
             disabled={filteredRows.length === 0}
           >
             <FileSpreadsheet className="h-4 w-4" /> Export CSV

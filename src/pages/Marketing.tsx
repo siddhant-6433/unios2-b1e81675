@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { maskMatrix } from "@/lib/maskContact";
 import { useToast } from "@/hooks/use-toast";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
@@ -1019,24 +1020,26 @@ export default function Marketing() {
 
   const downloadRecipientReport = () => {
     if (!detailCampaign) return;
+    const headers = ["Lead", "Destination", "Status", "Sent at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"];
+    const rows = recipients.map((recipient) => [
+      recipient.leadName || "",
+      recipient.destination,
+      recipient.status,
+      recipient.sentAt || "",
+      recipient.respondedAt || "",
+      recipient.calledAt || "",
+      recipient.callDisposition || "",
+      recipient.clickedLinkAt || "",
+      recipient.clickedUrl || "",
+      recipient.clickedButtonAt || "",
+      recipient.clickedButtonTitle || "",
+      recipient.providerId || "",
+      recipient.error || "",
+    ]);
     downloadCsv(
       `${detailCampaign.channel}-campaign-recipients-${detailCampaign.id}.csv`,
-      ["Lead", "Destination", "Status", "Sent at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"],
-      recipients.map((recipient) => [
-        recipient.leadName || "",
-        recipient.destination,
-        recipient.status,
-        recipient.sentAt || "",
-        recipient.respondedAt || "",
-        recipient.calledAt || "",
-        recipient.callDisposition || "",
-        recipient.clickedLinkAt || "",
-        recipient.clickedUrl || "",
-        recipient.clickedButtonAt || "",
-        recipient.clickedButtonTitle || "",
-        recipient.providerId || "",
-        recipient.error || "",
-      ]),
+      headers,
+      maskMatrix(headers, rows, realRole === "super_admin"),
     );
   };
 

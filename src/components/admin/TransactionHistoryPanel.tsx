@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { maskMatrix } from "@/lib/maskContact";
 import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
@@ -143,6 +145,7 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function TransactionHistoryPanel() {
+  const { realRole } = useAuth();
   const [tab, setTab]                     = useState<"applications" | "students">("applications");
   const [appTxns, setAppTxns]             = useState<AppTransaction[]>([]);
   const [studentPmts, setStudentPmts]     = useState<StudentPayment[]>([]);
@@ -721,7 +724,7 @@ export default function TransactionHistoryPanel() {
       t.leads?.admission_no || "",
       t.leads?.pre_admission_no || "",
     ]);
-    downloadCSV([headers, ...rows], `application-fee-transactions-${Date.now()}.csv`);
+    downloadCSV([headers, ...maskMatrix(headers, rows, realRole === "super_admin")], `application-fee-transactions-${Date.now()}.csv`);
   };
 
   const exportStudentCSV = () => {
@@ -741,7 +744,7 @@ export default function TransactionHistoryPanel() {
       p.profiles?.display_name || "",
       p.notes || "",
     ]);
-    downloadCSV([headers, ...rows], `student-fee-payments-${Date.now()}.csv`);
+    downloadCSV([headers, ...maskMatrix(headers, rows, realRole === "super_admin")], `student-fee-payments-${Date.now()}.csv`);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
