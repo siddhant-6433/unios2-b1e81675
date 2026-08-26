@@ -1313,16 +1313,42 @@ Deno.serve(async (req) => {
               .eq("wa_message_id", waMessageId);
 
             if (["sent", "delivered", "read", "failed"].includes(newStatus)) {
-              const recipientPatch: Record<string, unknown> = {
-                status: newStatus,
-              };
-              if (newStatus === "failed" && status.errors) {
-                recipientPatch.error_message = JSON.stringify(status.errors);
-              }
-              await admin
+              // Meta can deliver receipts out of order (read before delivered, a
+              // late sent after read). Advance `status` only forward and stamp
+              // per-stage timestamps so a stale receipt can't corrupt the funnel.
+              const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
+              const nowIso = new Date().toISOString();
+              const { data: cur } = await admin
                 .from("whatsapp_campaign_recipients")
-                .update(recipientPatch)
-                .eq("message_id", waMessageId);
+                .select("status, delivered_at")
+                .eq("message_id", waMessageId)
+                .maybeSingle();
+              if (cur) {
+                const patch: Record<string, unknown> = {};
+                if (newStatus === "delivered") patch.delivered_at = nowIso;
+                if (newStatus === "read") {
+                  patch.read_at = nowIso;
+                  // read implies delivered — backfill if the delivered receipt was lost/late.
+                  if (!(cur as any).delivered_at) patch.delivered_at = nowIso;
+                }
+                if (newStatus === "failed") {
+                  patch.failed_at = nowIso;
+                  if (status.errors) patch.error_message = JSON.stringify(status.errors);
+                }
+                const curRank = RANK[(cur as any).status] ?? 0;
+                if (newStatus === "failed") {
+                  // A message that already reached the user isn't retroactively "failed".
+                  if (curRank < RANK.delivered) patch.status = "failed";
+                } else if ((RANK[newStatus] ?? 0) > curRank) {
+                  patch.status = newStatus;
+                }
+                if (Object.keys(patch).length > 0) {
+                  await admin
+                    .from("whatsapp_campaign_recipients")
+                    .update(patch)
+                    .eq("message_id", waMessageId);
+                }
+              }
             }
           }
         }

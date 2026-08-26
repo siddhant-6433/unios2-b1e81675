@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
 import { expectedReplyTypeForTemplate } from "../_shared/whatsapp-outbound-context.ts";
 import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
+import { isTransientFailure, isThrottleCode, retryBackoffMs, MAX_SEND_RETRIES } from "../_shared/campaign-retry.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -320,7 +321,25 @@ async function fetchApprovedMetaCampaignTemplate(adminClient: any, templateKey: 
   return template;
 }
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// ── Send concurrency ───────────────────────────────────────────────────────
+// The loop used to be strictly sequential with a fixed 200ms sleep (~2-3 msg/s).
+// Meta's Cloud API tolerates far more, so we run a small bounded pool instead.
+// Failure classification + backoff live in _shared/campaign-retry.ts (tested).
+const SEND_CONCURRENCY = 8;
+
+// Bounded-concurrency pool: at most `limit` workers pull from a shared cursor.
+// JS is single-threaded so shared counters mutated between awaits are safe.
+async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
 
 async function syncCampaignCounts(admin: any, campaignId: string) {
   const [
@@ -386,7 +405,9 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const batchSize = Math.max(1, Math.min(Number(batch_size) || 20, 50));
+    // Bounded-concurrency pool makes larger batches finish inside the pg_net
+    // budget, so the cap is 200 (was 50). Cron passes 120.
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 20, 200));
 
     // Validate auth. Browser/manual sends use a user JWT; cron/dispatcher sends
     // use CRON_SECRET or the service-role key and are attributed below.
@@ -529,7 +550,7 @@ Deno.serve(async (req) => {
     // eligible_at defaults to now() for legacy campaigns.
     const nowIso = new Date().toISOString();
     const recipientSelect =
-      "id, campaign_id, lead_id, phone, status, eligible_at, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
     let recipients: any[] | null = null;
     {
       const paced = await adminClient
@@ -667,7 +688,55 @@ Deno.serve(async (req) => {
     // join: student_name, course_name, campus_name.
     const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
 
-    for (const recipient of recipients) {
+    // Pre-batch pause/terminate check. This used to run once per recipient (a DB
+    // read per message); batches now finish in seconds under concurrency, so one
+    // check here plus the post-batch check below is prompt enough.
+    {
+      const { data: liveCampaign } = await adminClient
+        .from("whatsapp_campaigns").select("status").eq("id", campaign_id).single();
+      if (liveCampaign?.status === "paused" || liveCampaign?.status === "terminated") {
+        const counts = await syncCampaignCounts(adminClient, campaign_id);
+        await adminClient.from("whatsapp_campaigns")
+          .update({ sent_count: counts.totalSent, failed_count: counts.totalFailed })
+          .eq("id", campaign_id);
+        return new Response(JSON.stringify({
+          success: true,
+          done: liveCampaign.status === "terminated",
+          paused: liveCampaign.status === "paused",
+          terminated: liveCampaign.status === "terminated",
+          message: liveCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
+          ...counts,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+    // Transient failures (throttle 131049, 5xx, network) are requeued with
+    // backoff instead of being burned into a terminal `failed` bucket; permanent
+    // ones (invalid recipient, template error) fail immediately.
+    const handleSendFailure = async (recipient: any, errorMsg: string, code: number | null, httpStatus: number) => {
+      const priorRetries = Number(recipient.retry_count) || 0;
+      const nextRetry = priorRetries + 1;
+      if (isTransientFailure(code, httpStatus, errorMsg) && nextRetry <= MAX_SEND_RETRIES) {
+        const backoff = retryBackoffMs(priorRetries, isThrottleCode(code));
+        await adminClient.from("whatsapp_campaign_recipients").update({
+          status: "pending",
+          eligible_at: new Date(Date.now() + backoff).toISOString(),
+          retry_count: nextRetry,
+          last_error_code: code != null ? String(code) : null,
+          error_message: `Retry ${nextRetry}/${MAX_SEND_RETRIES} after transient error: ${errorMsg}`,
+        }).eq("id", recipient.id);
+        return; // requeued: neither sent nor failed this round
+      }
+      await adminClient.from("whatsapp_campaign_recipients").update({
+        status: "failed",
+        failed_at: new Date().toISOString(),
+        last_error_code: code != null ? String(code) : null,
+        error_message: errorMsg,
+      }).eq("id", recipient.id);
+      failedCount++;
+    };
+
+    const processRecipient = async (recipient: any) => {
       const lead = (recipient as any).leads || {};
       const latestApplication = latestApplicationByLeadId.get((recipient as any).lead_id);
       const leadName = resolveLeadDisplayName(lead, latestApplication);
@@ -687,7 +756,7 @@ Deno.serve(async (req) => {
           })
           .eq("id", recipient.id);
         failedCount++;
-        continue;
+        return;
       }
 
       // Academic-partner private leads (shared_with_nimt = false) are never part
@@ -701,7 +770,7 @@ Deno.serve(async (req) => {
           })
           .eq("id", recipient.id);
         failedCount++;
-        continue;
+        return;
       }
 
       if (!waPhone) {
@@ -713,7 +782,7 @@ Deno.serve(async (req) => {
           })
           .eq("id", recipient.id);
         failedCount++;
-        continue;
+        return;
       }
 
       // Build template params in the exact order Meta expects. Per-lead
@@ -773,31 +842,6 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const { data: liveCampaign } = await adminClient
-          .from("whatsapp_campaigns")
-          .select("status")
-          .eq("id", campaign_id)
-          .single();
-        if (liveCampaign?.status === "paused" || liveCampaign?.status === "terminated") {
-          const finalCampaign = liveCampaign;
-          const counts = await syncCampaignCounts(adminClient, campaign_id);
-          await adminClient
-            .from("whatsapp_campaigns")
-            .update({
-              sent_count: counts.totalSent,
-              failed_count: counts.totalFailed,
-            })
-            .eq("id", campaign_id);
-          return new Response(JSON.stringify({
-            success: true,
-            done: finalCampaign.status === "terminated",
-            paused: finalCampaign.status === "paused",
-            terminated: finalCampaign.status === "terminated",
-            message: finalCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
-            ...counts,
-          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-
         const sendResult = await (sendWhatsAppTemplate as any)(adminClient, {
           route: "bulk",
           requireBulk: true,
@@ -865,34 +909,16 @@ Deno.serve(async (req) => {
         } else {
           const errorMsg = sendResult.error || "Unknown WhatsApp channel error";
           console.error(`Failed to send to ${waPhone}:`, errorMsg);
-
-          await adminClient
-            .from("whatsapp_campaign_recipients")
-            .update({
-              status: "failed",
-              error_message: errorMsg,
-            })
-            .eq("id", recipient.id);
-
-          failedCount++;
+          await handleSendFailure(recipient, errorMsg, sendResult.errorCode ?? null, sendResult.status);
         }
       } catch (sendErr: any) {
+        // Network / timeout / abort — no Meta code; treat as transient.
         console.error(`Exception sending to ${waPhone}:`, sendErr.message);
-
-        await adminClient
-          .from("whatsapp_campaign_recipients")
-          .update({
-            status: "failed",
-            error_message: sendErr.message || "Network error",
-          })
-          .eq("id", recipient.id);
-
-        failedCount++;
+        await handleSendFailure(recipient, sendErr.message || "Network error", null, 0);
       }
+    };
 
-      // 200ms delay between sends to avoid rate limiting
-      await delay(200);
-    }
+    await runPool(recipients, SEND_CONCURRENCY, processRecipient);
 
     // Update campaign totals
     // Fetch current counts in case there were already some sent/failed from a previous run
