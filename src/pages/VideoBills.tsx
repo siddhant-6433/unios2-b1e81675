@@ -101,7 +101,7 @@ export default function VideoBills() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [vendorPrompt, setVendorPrompt] = useState<
-    { editorName: string; billId: string; pdfBase64?: string; candidates: VendorCandidate[] } | null
+    { editorName: string; billId: string; pdfBase64?: string; relink?: boolean; candidates: VendorCandidate[] } | null
   >(null);
   const [exporting, setExporting] = useState(false);
   const [fetchingDates, setFetchingDates] = useState(false);
@@ -210,7 +210,7 @@ export default function VideoBills() {
     const res = data as { error?: string; needs_vendor_choice?: boolean; candidates?: VendorCandidate[] } | null;
     // Editor not yet linked to a Zoho vendor — let staff pick a match (or create new).
     if (res?.needs_vendor_choice) {
-      setVendorPrompt({ editorName: editor?.name || "editor", billId: bill.id, pdfBase64: pdf_base64, candidates: res.candidates || [] });
+      setVendorPrompt({ editorName: editor?.name || "editor", billId: bill.id, pdfBase64: pdf_base64, relink: opts?.relink, candidates: res.candidates || [] });
       return;
     }
     const errMsg = error?.message || res?.error;
@@ -481,6 +481,7 @@ export default function VideoBills() {
           editorName={vendorPrompt.editorName}
           billId={vendorPrompt.billId}
           pdfBase64={vendorPrompt.pdfBase64}
+          relink={vendorPrompt.relink}
           candidates={vendorPrompt.candidates}
           onDone={fetchAll}
           onClose={() => setVendorPrompt(null)}
