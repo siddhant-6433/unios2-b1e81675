@@ -17,6 +17,7 @@ import {
 } from "@/lib/videoBrands";
 import { BankDetailsFields } from "@/components/bank/BankDetailsFields";
 import { VideoHistory } from "@/components/video/VideoHistory";
+import { ZohoVendorLinkField } from "@/components/video/ZohoVendorLinkField";
 import { isValidIfsc } from "@/lib/bankDetails";
 
 type VideoRow = {
@@ -47,6 +48,7 @@ type EditorRow = {
   bank_ifsc?: string | null; bank_name?: string | null; bank_upi?: string | null;
   bank_verified_name?: string | null; bank_verified_at?: string | null;
   bank_verification_ref?: string | null; bank_verification_status?: string | null;
+  zoho_vendor_id?: string | null;
 };
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
@@ -294,6 +296,7 @@ export default function VideoApprovals() {
       bank_verified_at: editorForm.bank_verified_at ?? null,
       bank_verification_ref: editorForm.bank_verification_ref ?? null,
       bank_verification_status: editorForm.bank_verification_status ?? "unverified",
+      zoho_vendor_id: editorForm.zoho_vendor_id ?? null,
     };
     let error;
     if (editorForm.id) {
@@ -647,6 +650,11 @@ export default function VideoApprovals() {
                   } : p)}
                 />
               </div>
+              <ZohoVendorLinkField
+                phone={editorForm.phone}
+                value={editorForm.zoho_vendor_id}
+                onChange={(id) => setEditorForm(p => p ? { ...p, zoho_vendor_id: id } : p)}
+              />
               <label className="flex items-center gap-2 text-xs font-medium">
                 <input type="checkbox" checked={editorForm.active}
                   onChange={e => setEditorForm(p => p ? { ...p, active: e.target.checked } : p)} />
