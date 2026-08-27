@@ -13,7 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
@@ -1179,6 +1179,9 @@ export default function Marketing() {
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/template-manager"><Megaphone className="mr-2 h-4 w-4" /> Templates</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/marketing/opt-outs"><UserX className="mr-2 h-4 w-4" /> Opt-outs</Link>
           </Button>
           <Button onClick={load} variant="outline" size="sm" disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh

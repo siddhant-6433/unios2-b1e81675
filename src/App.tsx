@@ -33,6 +33,7 @@ const LeadAllocation       = lazy(() => import("./pages/LeadAllocation"));
 const LeadBuckets          = lazy(() => import("./pages/LeadBuckets"));
 const LeadLists            = lazy(() => import("./pages/LeadLists"));
 const Marketing            = lazy(() => import("./pages/Marketing"));
+const OptOuts              = lazy(() => import("./pages/OptOuts"));
 const LeadAssignmentHistoryPage = lazy(() => import("./pages/LeadAssignmentHistoryPage"));
 const CallLog              = lazy(() => import("./pages/CallLog"));
 const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
@@ -313,6 +314,7 @@ const App = () => (
                       <Route path="/lead-assignments" element={<RequirePermission module="leads" action="view"><LeadAssignmentHistoryPage /></RequirePermission>} />
                       <Route path="/lists" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><LeadLists /></RequirePermission></BlockRole>} />
                       <Route path="/marketing" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
+                      <Route path="/marketing/opt-outs" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><OptOuts /></RequirePermission></BlockRole>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       {/* Counsellors work one queue: /fresh-leads and /missed-calls are
                           the Cloud Dialer's "New Lead" and "Missed Callback" buckets.
