@@ -615,17 +615,23 @@ Deno.serve(async (req) => {
     let dynamicTemplateBody: string | null = null;
     let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
-      const { data: dynamicTemplate, error: dynamicErr } = await admin
+      // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
+      // would error on >1 row and read as "Unknown template". Take one, English first.
+      const { data: dynamicRows, error: dynamicErr } = await admin
         .from("whatsapp_templates")
         .select("name, status, placeholder_count, has_media, header_format, components")
         .eq("name", template_key)
         .eq("status", "APPROVED")
-        .maybeSingle();
+        .order("language", { ascending: true })
+        .limit(1);
+      const dynamicTemplate = (dynamicRows as any[] | null)?.[0] || null;
       if (dynamicErr) console.error("Dynamic WhatsApp template lookup failed:", dynamicErr.message);
+      // Any APPROVED template can be sent dynamically: body params come from the
+      // caller's params[] (arity validated against Meta's placeholder_count
+      // below), and a media header falls back to whatsapp_template_settings
+      // media_url / the passed header_image_url. Only dynamic-URL-button
+      // templates are still rejected — they need per-send button params.
       const canSendDynamic = dynamicTemplate
-        && (dynamicTemplate as any).placeholder_count === 0
-        && (dynamicTemplate as any).has_media !== true
-        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
         && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
       if (!canSendDynamic) {
         return new Response(
@@ -634,7 +640,11 @@ Deno.serve(async (req) => {
         );
       }
       dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
-      templateDef = { name: (dynamicTemplate as any).name, params: [] };
+      const dynCount = Number((dynamicTemplate as any).placeholder_count || 0);
+      templateDef = {
+        name: (dynamicTemplate as any).name,
+        params: Array.from({ length: dynCount }, (_v, i) => `param_${i + 1}`),
+      };
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
@@ -670,12 +680,14 @@ Deno.serve(async (req) => {
     // a warning, not a rejection. Runs after the repair shims above so padded
     // params are counted as sent.
     const suppliedParamCount = Array.isArray(params) ? params.length : 0;
-    const { data: metaTemplate } = await admin
+    const { data: metaRows } = await admin
       .from("whatsapp_templates")
       .select("placeholder_count, has_media, header_format")
       .eq("name", templateDef.name)
       .eq("status", "APPROVED")
-      .maybeSingle();
+      .order("language", { ascending: true })
+      .limit(1);
+    const metaTemplate = (metaRows as any[] | null)?.[0] || null;
 
     if (metaTemplate && typeof (metaTemplate as any).placeholder_count === "number") {
       const expected = (metaTemplate as any).placeholder_count as number;
