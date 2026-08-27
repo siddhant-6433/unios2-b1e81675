@@ -260,6 +260,9 @@ verify_jwt = false
 [functions.campaign-dispatcher]
 verify_jwt = false
 
+[functions.whatsapp-channel-profiles-sync]
+verify_jwt = false
+
 [functions.post-visit-nudge-cron]
 verify_jwt = false
 

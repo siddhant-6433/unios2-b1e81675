@@ -9,10 +9,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, CheckCircle2, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, XCircle } from "lucide-react";
+import {
+  type WaSenderOption,
+  DEFAULT_WA_SENDER,
+  defaultWaSenderOption,
+  loadWaSenders,
+} from "@/lib/waSenders";
+import { WhatsAppBusinessIdentity } from "@/components/whatsapp/WhatsAppBusinessIdentity";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
@@ -266,6 +274,8 @@ export default function Marketing() {
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
+  const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [emailMode, setEmailMode] = useState<"template" | "custom">("template");
   const [emailSlug, setEmailSlug] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -283,6 +293,10 @@ export default function Marketing() {
   const canDeleteLists = role === "super_admin";
   const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
   const scheduledTimeValue = scheduledTimePart(campaignScheduledAt);
+  const waSelectedSender = useMemo(
+    () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
+    [waSenderOptions, waSenderValue]
+  );
 
   const setScheduledDate = (date: string) => {
     if (!date) {
@@ -459,6 +473,15 @@ export default function Marketing() {
   }, [dateBounds, role]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    loadWaSenders(supabase as any)
+      .then(({ options }) => {
+        setWaSenderOptions(options);
+        setWaSenderValue((c) => options.some((o) => o.value === c) ? c : options[0]?.value || DEFAULT_WA_SENDER);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
@@ -645,6 +668,8 @@ export default function Marketing() {
             list_id: selectedList.id,
             total_recipients: valid.length,
             static_params: staticParamsToSend,
+            business_phone_number_id: waSelectedSender?.phoneNumberId || null,
+            business_phone_number: waSelectedSender?.businessNumber || null,
             created_by: profile?.id || null,
             next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
@@ -1287,6 +1312,31 @@ export default function Marketing() {
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Send from number</label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20"
+                      >
+                        <WhatsAppBusinessIdentity sender={waSelectedSender ?? defaultWaSenderOption()} compact />
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
+                      {waSenderOptions.map((sender) => (
+                        <DropdownMenuItem
+                          key={sender.value}
+                          onSelect={() => setWaSenderValue(sender.value)}
+                          className="cursor-pointer p-0 focus:bg-muted"
+                        >
+                          <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                 <div>
                   <SelectField
                     label="WhatsApp template"
