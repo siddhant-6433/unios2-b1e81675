@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { maskMatrix } from "@/lib/maskContact";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCallListOverview, type CallListOverviewRow } from "@/components/dashboard/CallListProgressPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
@@ -851,11 +852,12 @@ export default function LeadLists() {
       const dt = (v: string | null) => (v ? new Date(v).toLocaleString("en-IN") : "");
       const header = ["Lead", "Phone", "Course", "Campus", "Counsellor", "Assigned At", "Stage", "Latest Disposition", "Latest Call At", "Notes"];
       const cell = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-      const body = rows.map((r) => [
+      const rawBody = rows.map((r) => [
         r.lead_name || "", r.lead_phone || "", r.course_name || "", r.campus_name || "",
         r.assigned_to_name || "", dt(r.assigned_at), (r.lead_stage || "").replace(/_/g, " "),
         (r.latest_call_disposition || "").replace(/_/g, " "), dt(r.latest_call_at), r.latest_call_response || "",
       ]);
+      const body = maskMatrix(header, rawBody, realRole === "super_admin");
       const csv = [header, ...body].map((cols) => cols.map(cell).join(",")).join("\r\n");
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);

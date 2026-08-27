@@ -12,6 +12,7 @@ import {
   VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, type VideoBrand, type VideoContentType,
 } from "@/lib/videoBrands";
 import { videoBillSlipBase64 } from "@/components/video/videoBillSlip";
+import { VendorMatchDialog, type VendorCandidate } from "@/components/video/VendorMatchDialog";
 import { exportRowsXlsx, formatExportDateTime, type ExportRow } from "@/lib/xlsxExport";
 
 type EditorRow = {
@@ -99,6 +100,9 @@ export default function VideoBills() {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [vendorPrompt, setVendorPrompt] = useState<
+    { editorName: string; billId: string; pdfBase64?: string; candidates: VendorCandidate[] } | null
+  >(null);
   const [exporting, setExporting] = useState(false);
   const [fetchingDates, setFetchingDates] = useState(false);
 
@@ -171,10 +175,11 @@ export default function VideoBills() {
     if (error) { toast({ title: "Update failed", description: error.message, variant: "destructive" }); setMarking(null); return; }
     // Best-effort: record the payment in Zoho if the bill was synced.
     if (status === "paid" && bill.zoho_bill_id) {
-      const { error: zErr } = await supabase.functions.invoke("zoho-video-bill-sync", {
+      const { data: zData, error: zErr } = await supabase.functions.invoke("zoho-video-bill-sync", {
         body: { bill_id: bill.id, action: "record_payment" },
       });
-      if (zErr) toast({ title: "Marked paid, but Zoho payment sync failed", variant: "destructive" });
+      const zMsg = zErr?.message || (zData as { error?: string } | null)?.error;
+      if (zMsg) toast({ title: "Marked paid, but Zoho payment sync failed", description: zMsg, variant: "destructive" });
     }
     toast({ title: `Bill marked ${status}` }); fetchAll();
     setMarking(null);
@@ -189,7 +194,7 @@ export default function VideoBills() {
     setDeleting(null);
   };
 
-  const handleZohoSync = async (bill: BillRow) => {
+  const handleZohoSync = async (bill: BillRow, opts?: { relink?: boolean }) => {
     setSyncing(bill.id);
     const editor = editors.find(e => e.id === bill.editor_id);
     const pdf_base64 = editor
@@ -199,13 +204,34 @@ export default function VideoBills() {
         })
       : undefined;
     const { data, error } = await supabase.functions.invoke("zoho-video-bill-sync", {
-      body: { bill_id: bill.id, action: "create_bill", pdf_base64 },
+      body: { bill_id: bill.id, action: "create_bill", pdf_base64, relink: opts?.relink },
     });
     setSyncing(null);
-    const errMsg = error?.message || (data as { error?: string } | null)?.error;
+    const res = data as { error?: string; needs_vendor_choice?: boolean; candidates?: VendorCandidate[] } | null;
+    // Editor not yet linked to a Zoho vendor — let staff pick a match (or create new).
+    if (res?.needs_vendor_choice) {
+      setVendorPrompt({ editorName: editor?.name || "editor", billId: bill.id, pdfBase64: pdf_base64, candidates: res.candidates || [] });
+      return;
+    }
+    const errMsg = error?.message || res?.error;
     if (errMsg) { toast({ title: "Zoho sync failed", description: errMsg, variant: "destructive" }); return; }
     toast({ title: "Sent to Zoho Books" });
     fetchAll();
+  };
+
+  // Re-push a bill after fixing a bad Zoho mapping: clear the stored Zoho refs and
+  // re-open the vendor picker so the correct existing vendor can be chosen. Delete the
+  // duplicate bill (and vendor) in Zoho first — a leftover bill with the same reference
+  // number would be reused instead of recreated.
+  const handleResync = async (bill: BillRow) => {
+    if (!window.confirm("Re-sync to Zoho? Delete the duplicate bill in Zoho Books first — you'll then pick the correct vendor and a fresh bill is created.")) return;
+    setSyncing(bill.id);
+    const { error } = await supabase.from("video_bills" as any).update({
+      zoho_bill_id: null, zoho_bill_number: null, zoho_payment_id: null,
+      zoho_synced_at: null, zoho_sync_error: null,
+    }).eq("id", bill.id);
+    if (error) { toast({ title: "Re-sync failed", description: error.message, variant: "destructive" }); setSyncing(null); return; }
+    await handleZohoSync({ ...bill, zoho_bill_id: null }, { relink: true });
   };
 
   // Pull real posting dates from Instagram/YouTube for this month's billable
@@ -417,6 +443,12 @@ export default function VideoBills() {
                                     {syncing === bill.id ? <ButtonOrb state="composing" /> : <Building2 className="h-3 w-3" />} Send to Zoho
                                   </Button>
                                 )}
+                                {bill?.zoho_bill_id && (
+                                  <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === bill.id}
+                                    onClick={() => handleResync(bill)} title="Fix a wrong vendor mapping: delete the duplicate in Zoho, then re-push and pick the correct vendor">
+                                    {syncing === bill.id ? <ButtonOrb state="composing" /> : <RefreshCw className="h-3 w-3" />} Re-sync
+                                  </Button>
+                                )}
                                 {bill?.status === "approved" && (
                                   <Button size="sm" className="gap-1 h-7 text-xs bg-success hover:bg-success/90" disabled={marking === bill.id}
                                     onClick={() => handleMark(bill, "paid")}>
@@ -443,6 +475,17 @@ export default function VideoBills() {
           )}
         </CardContent>
       </Card>
+
+      {vendorPrompt && (
+        <VendorMatchDialog
+          editorName={vendorPrompt.editorName}
+          billId={vendorPrompt.billId}
+          pdfBase64={vendorPrompt.pdfBase64}
+          candidates={vendorPrompt.candidates}
+          onDone={fetchAll}
+          onClose={() => setVendorPrompt(null)}
+        />
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@
 //                    (called after the bill is marked paid inside UniOs).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoFindVendorByPhone, zohoResolveExpenseAccount } from "../_shared/zoho.ts";
+import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoSearchVendors, zohoResolveExpenseAccount, type ZohoVendorCandidate } from "../_shared/zoho.ts";
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -62,6 +62,14 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const billId: string = body.bill_id;
     const action: string = body.action || "create_bill";
+
+    // Vendor search (used by the sync-time picker and the editor-form link field).
+    if (action === "find_vendors") {
+      const token = await zohoAccessToken();
+      const candidates = await zohoSearchVendors(token, { phone: body.phone, query: body.query });
+      return json({ candidates });
+    }
+
     if (!billId) return json({ error: "bill_id required" }, 400);
 
     // Load bill + editor.
@@ -73,10 +81,22 @@ Deno.serve(async (req) => {
     const token = await zohoAccessToken();
 
     // ---- Ensure vendor --------------------------------------------------------
-    const ensureVendor = async (): Promise<string> => {
-      let vendorId: string | null = editor.zoho_vendor_id
-        || (editor.phone ? await zohoFindVendorByPhone(token, editor.phone) : null);
-      if (!vendorId) {
+    // Returns a resolved vendorId, OR asks the caller to pick when the editor is not
+    // yet linked (never auto-creates a vendor silently — that spawned duplicates).
+    type EnsureVendorResult = { vendorId: string } | { needsChoice: true; candidates: ZohoVendorCandidate[] };
+    const linkVendor = async (vendorId: string) => {
+      if (vendorId !== editor.zoho_vendor_id) {
+        await admin.from("video_editors").update({ zoho_vendor_id: vendorId }).eq("id", editor.id);
+      }
+    };
+    const ensureVendor = async (): Promise<EnsureVendorResult> => {
+      // 1. Explicit user choice from the picker — persist and use.
+      if (body.vendor_id) {
+        await linkVendor(body.vendor_id);
+        return { vendorId: body.vendor_id };
+      }
+      // 2. User chose "Create a new vendor" in the picker.
+      if (body.force_create_vendor) {
         const res = await zohoApi(token, "POST", "/contacts", {
           contact_name: editor.name,
           contact_type: "vendor",
@@ -84,17 +104,23 @@ Deno.serve(async (req) => {
           email: editor.email || undefined,
         });
         if (!res.ok) throw new Error(`vendor create failed: ${JSON.stringify(res.data)}`);
-        vendorId = res.data.contact.contact_id;
+        const vendorId = res.data.contact.contact_id;
+        await linkVendor(vendorId);
+        return { vendorId };
       }
-      if (vendorId !== editor.zoho_vendor_id) {
-        await admin.from("video_editors").update({ zoho_vendor_id: vendorId }).eq("id", editor.id);
-      }
-      return vendorId!;
+      // 3. Already linked — use it, no prompt. (relink forces a re-pick even when set,
+      //    for fixing a bad vendor mapping.)
+      if (editor.zoho_vendor_id && !body.relink) return { vendorId: editor.zoho_vendor_id };
+      // 4. Not linked — always ask (even for a single match). Never auto-create.
+      const candidates = editor.phone ? await zohoSearchVendors(token, { phone: editor.phone }) : [];
+      return { needsChoice: true, candidates };
     };
 
     if (action === "create_bill") {
       try {
-        const vendorId = await ensureVendor();
+        const vendor = await ensureVendor();
+        if ("needsChoice" in vendor) return json({ needs_vendor_choice: true, candidates: vendor.candidates });
+        const vendorId = vendor.vendorId;
         let zohoBillId = bill.zoho_bill_id;
         let zohoBillNumber = bill.zoho_bill_number;
 
@@ -157,7 +183,9 @@ Deno.serve(async (req) => {
     if (action === "record_payment") {
       if (!bill.zoho_bill_id) return json({ error: "No Zoho bill for this video bill — create the bill first." }, 400);
       try {
-        const vendorId = await ensureVendor();
+        const vendor = await ensureVendor();
+        if ("needsChoice" in vendor) return json({ needs_vendor_choice: true, candidates: vendor.candidates });
+        const vendorId = vendor.vendorId;
         const res = await zohoApi(token, "POST", "/vendorpayments", {
           vendor_id: vendorId,
           payment_mode: "banktransfer",

@@ -24,7 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchActionBadgeCounts, fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
-import { canSeePolicyItem, isAcademicPartnerPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
+import { canSeePolicyItem, isAcademicPartnerPortalRole, isAdmissionPartnerPortalRole, isPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -71,6 +71,13 @@ const academicPartnerMenu: MenuItem[] = [
   { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Finance", url: "/academic-partner-portal?tab=fees", icon: IndianRupee, roles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Collections", url: "/academic-partner-portal?tab=fees", icon: Receipt, roles: ["academic_partner", "academic_partner_offer_letter"] },
+];
+
+const admissionPartnerMenu: MenuItem[] = [
+  { title: "Overview", url: "/admission-partner-portal", icon: LayoutDashboard, roles: ["admission_partner"] },
+  { title: "Leads", url: "/admission-partner-portal?tab=leads", icon: GraduationCap, roles: ["admission_partner"] },
+  { title: "Applications", url: "/admission-partner-portal?tab=applications", icon: FileText, roles: ["admission_partner"] },
+  { title: "Students", url: "/admission-partner-portal?tab=students", icon: Users, roles: ["admission_partner"] },
 ];
 
 const admissionSubMenu: MenuItem[] = [
@@ -239,7 +246,7 @@ export function AppSidebar() {
   const hasPersonalDocs = role === "super_admin";
 
   const fetchAdmissionBadges = useCallback(async () => {
-    if (isAcademicPartnerPortalRole(role)) return;
+    if (isPortalRole(role)) return;
     if (role === "counsellor" && !profile?.id) return;
 
     const { data, error } = await fetchActionBadgeCounts({
@@ -282,7 +289,7 @@ export function AppSidebar() {
   }, [role]);
 
   useEffect(() => {
-    if (isAcademicPartnerPortalRole(role)) {
+    if (isPortalRole(role)) {
       setWaUnread(0);
       setNewLeadCount(0);
       setTatDefaults(0);
@@ -324,8 +331,13 @@ export function AppSidebar() {
   }, [fetchAdmissionBadges, fetchPendingApprovals]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
-  const isPartnerPortalRole = isAcademicPartnerPortalRole(role);
-  const visibleMainSource = isPartnerPortalRole ? academicPartnerMenu : mainMenu;
+  const isAdmissionPortalRole = isAdmissionPartnerPortalRole(role);
+  const isPartnerPortalRole = isAcademicPartnerPortalRole(role) || isAdmissionPortalRole;
+  const visibleMainSource = isAdmissionPortalRole
+    ? admissionPartnerMenu
+    : isAcademicPartnerPortalRole(role)
+      ? academicPartnerMenu
+      : mainMenu;
   const visibleMain = visibleMainSource.filter(canSee).map(item => {
     if (item.url === "/" && pendingApprovals > 0) return { ...item, badge: pendingApprovals };
     if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
