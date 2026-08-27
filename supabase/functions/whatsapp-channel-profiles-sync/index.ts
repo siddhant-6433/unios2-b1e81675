@@ -103,9 +103,10 @@ Deno.serve(async (req) => {
   const reqBody = await req.json().catch(() => ({}));
   if (reqBody?.action === "list_phone_numbers") {
     const token = (Deno.env.get(reqBody.token_env || "WHATSAPP_API_TOKEN") || "").trim();
-    if (!token || !reqBody.waba_id) return json({ error: "waba_id and a valid token_env required" }, 400);
+    const wabaId = reqBody.waba_id || (reqBody.waba_env ? Deno.env.get(reqBody.waba_env) : null);
+    if (!token || !wabaId) return json({ error: "waba_id/waba_env and a valid token_env required" }, 400);
     const res = await fetchWithTimeout(
-      `https://graph.facebook.com/v21.0/${reqBody.waba_id}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
       { headers: { Authorization: `Bearer ${token}` } },
       15000,
     );
