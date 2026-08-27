@@ -70,6 +70,8 @@ interface CampaignRow {
   called: number;
   clickedLink: number;
   clickedButton: number;
+  delivered: number;
+  read: number;
   status: string;
   createdAt: string;
   completedAt: string | null;
@@ -106,6 +108,9 @@ interface RecipientRow {
   clickedUrl: string | null;
   clickedButtonAt: string | null;
   clickedButtonTitle: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  failedAt: string | null;
 }
 
 const statusTone = (status: string) => {
@@ -416,6 +421,17 @@ export default function Marketing() {
       emailQuery,
     ]);
 
+    const waIds = ((waRes.data as any[]) || []).map((row) => row.id);
+    const funnelRes = waIds.length
+      ? await supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: waIds })
+      : null;
+    const funnelById = new Map<string, { delivered: number; read: number; failed: number }>(
+      ((funnelRes?.data as any[]) || []).map((r) => [
+        r.campaign_id,
+        { delivered: Number(r.delivered || 0), read: Number(r.read || 0), failed: Number(r.failed || 0) },
+      ]),
+    );
+
     const waRows: CampaignRow[] = ((waRes.data as any[]) || []).map((row) => {
       const total = Number(row.total_recipients || 0);
       const sent = Number(row.sent_count || 0);
@@ -434,6 +450,8 @@ export default function Marketing() {
         called: Number(row.called_count || 0),
         clickedLink: Number(row.link_click_count || 0),
         clickedButton: Number(row.button_click_count || 0),
+        delivered: funnelById.get(row.id)?.delivered ?? 0,
+        read: funnelById.get(row.id)?.read ?? 0,
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -460,6 +478,8 @@ export default function Marketing() {
         called: Number(row.called_count || 0),
         clickedLink: Number(row.link_click_count || 0),
         clickedButton: Number(row.button_click_count || 0),
+        delivered: 0,
+        read: 0,
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -581,11 +601,13 @@ export default function Marketing() {
         acc.called += item.called;
         acc.clickedLink += item.clickedLink;
         acc.clickedButton += item.clickedButton;
+        acc.delivered += item.delivered;
+        acc.read += item.read;
         if (item.channel === "whatsapp") acc.whatsapp += item.sent;
         if (item.channel === "email") acc.email += item.sent;
         return acc;
       },
-      { total: 0, sent: 0, failed: 0, pending: 0, responded: 0, called: 0, clickedLink: 0, clickedButton: 0, whatsapp: 0, email: 0 },
+      { total: 0, sent: 0, failed: 0, pending: 0, responded: 0, called: 0, clickedLink: 0, clickedButton: 0, delivered: 0, read: 0, whatsapp: 0, email: 0 },
     );
   }, [campaigns]);
 
@@ -796,9 +818,10 @@ export default function Marketing() {
     const table = campaign.channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients";
     const destinationColumn = campaign.channel === "whatsapp" ? "phone" : "to_email";
     const providerColumn = campaign.channel === "whatsapp" ? "message_id" : "provider_id";
+    const funnelColumns = campaign.channel === "whatsapp" ? ",delivered_at,read_at,failed_at" : "";
     const { data } = await supabase
       .from(table as any)
-      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title,leads(name)`)
+      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title${funnelColumns},leads(name)`)
       .eq("campaign_id", campaign.id)
       .order("created_at", { ascending: false })
       .limit(500);
@@ -818,6 +841,9 @@ export default function Marketing() {
       clickedUrl: row.clicked_url || null,
       clickedButtonAt: row.clicked_button_at || null,
       clickedButtonTitle: row.clicked_button_title || null,
+      deliveredAt: row.delivered_at ?? null,
+      readAt: row.read_at ?? null,
+      failedAt: row.failed_at ?? null,
     })));
     setRecipientsLoading(false);
   };
@@ -1046,12 +1072,14 @@ export default function Marketing() {
     if (!detailCampaign) return;
     downloadCsv(
       `${detailCampaign.channel}-campaign-recipients-${detailCampaign.id}.csv`,
-      ["Lead", "Destination", "Status", "Sent at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"],
+      ["Lead", "Destination", "Status", "Sent at", "Delivered at", "Read at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"],
       recipients.map((recipient) => [
         recipient.leadName || "",
         recipient.destination,
         recipient.status,
         recipient.sentAt || "",
+        recipient.deliveredAt || "",
+        recipient.readAt || "",
         recipient.respondedAt || "",
         recipient.calledAt || "",
         recipient.callDisposition || "",
@@ -1567,6 +1595,8 @@ export default function Marketing() {
         <div className="grid gap-3 md:grid-cols-4">
           <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
           <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
+          <Metric title="Delivered" value={`${totals.delivered.toLocaleString("en-IN")} (${pct(totals.delivered, totals.sent)})`} icon={CheckCircle2} tone="blue" />
+          <Metric title="Read" value={`${totals.read.toLocaleString("en-IN")} (${pct(totals.read, totals.sent)})`} icon={MessageSquare} tone="emerald" />
           <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
           <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
         </div>
@@ -1628,6 +1658,8 @@ export default function Marketing() {
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-right">Recipients</th>
                     <th className="px-4 py-3 text-right">Sent</th>
+                    <th className="px-4 py-3 text-right">Delivered</th>
+                    <th className="px-4 py-3 text-right">Read</th>
                     <th className="px-4 py-3 text-right">Failed</th>
                     <th className="px-4 py-3 text-right">Responded</th>
                     <th className="px-4 py-3 text-right">Called</th>
@@ -1660,6 +1692,22 @@ export default function Marketing() {
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-success">{campaign.sent.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium text-success">
+                          {campaign.channel === "whatsapp" ? campaign.delivered.toLocaleString("en-IN") : "—"}
+                        </div>
+                        {campaign.channel === "whatsapp" && (
+                          <div className="text-[11px] text-muted-foreground">{pct(campaign.delivered, campaign.sent)}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium text-success">
+                          {campaign.channel === "whatsapp" ? campaign.read.toLocaleString("en-IN") : "—"}
+                        </div>
+                        {campaign.channel === "whatsapp" && (
+                          <div className="text-[11px] text-muted-foreground">{pct(campaign.read, campaign.sent)}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-destructive">{campaign.failed.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
@@ -1790,6 +1838,8 @@ export default function Marketing() {
                     <th className="px-3 py-2 text-left">Destination</th>
                     <th className="px-3 py-2 text-left">Status</th>
                     <th className="px-3 py-2 text-left">Sent</th>
+                    <th className="px-3 py-2 text-left">Delivered</th>
+                    <th className="px-3 py-2 text-left">Read</th>
                     <th className="px-3 py-2 text-left">Responded</th>
                     <th className="px-3 py-2 text-left">Called</th>
                     <th className="px-3 py-2 text-left">Clicks</th>
@@ -1806,6 +1856,8 @@ export default function Marketing() {
                         <Badge variant="outline" className="capitalize">{row.status}</Badge>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.sentAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.deliveredAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.readAt)}</td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.respondedAt)}</td>
                       <td className="px-3 py-2 text-muted-foreground">
                         <div>{fmtDate(row.calledAt)}</div>
