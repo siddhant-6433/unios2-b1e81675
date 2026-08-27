@@ -281,6 +281,8 @@ export default function Marketing() {
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
   const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
+  const [waTestPhone, setWaTestPhone] = useState("");
+  const [waTestSending, setWaTestSending] = useState(false);
   const [emailMode, setEmailMode] = useState<"template" | "custom">("template");
   const [emailSlug, setEmailSlug] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -349,6 +351,55 @@ export default function Marketing() {
     ),
     [selectedWaTemplate?.key, waTemplateComponentsByKey],
   );
+  const handleSendTest = useCallback(async () => {
+    if (!waTemplate || !waTestPhone.trim()) return;
+    setWaTestSending(true);
+    try {
+      const params: string[] = [];
+      for (const p of selectedWaTemplate?.params || []) {
+        if (isWaMediaTemplateParam(p.name)) continue;
+        const value = effectiveWaParamValue(waStaticParams, p.name);
+        const mappedToken = decodeWaParamFieldMapping(value);
+        if (mappedToken) {
+          params.push(sampleValueForWaMappedField(mappedToken));
+        } else if (value.trim()) {
+          params.push(value.trim());
+        } else {
+          params.push(sampleValueForParam(p.name));
+        }
+      }
+
+      const hasMediaHeader = (selectedWaTemplate?.params || []).some((p) => isWaMediaTemplateParam(p.name));
+      const headerImageUrl = hasMediaHeader
+        ? (effectiveWaParamValue(waStaticParams, "template_header_media_url").trim() || selectedWaTemplateDefaultMediaUrl || undefined)
+        : undefined;
+
+      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: waTemplate,
+          phone: waTestPhone.trim(),
+          params,
+          provider: "meta",
+          business_phone_number_id: waSelectedSender?.phoneNumberId || null,
+          business_number: waSelectedSender?.businessNumber || null,
+          ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+        },
+      });
+      if (error || data?.error || data?.ok === false) {
+        throw new Error(error?.message || data?.error || "Send failed.");
+      }
+      toast({ title: "Test sent", description: `Sent to ${waTestPhone}` });
+    } catch (err) {
+      toast({
+        title: "Test failed",
+        description: err instanceof Error ? err.message : "Could not send test message.",
+        variant: "destructive",
+      });
+    } finally {
+      setWaTestSending(false);
+    }
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, toast]);
+
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
     if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
@@ -1364,6 +1415,26 @@ export default function Marketing() {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs font-medium text-muted-foreground">Send test message</label>
+                    <Input
+                      value={waTestPhone}
+                      onChange={(e) => setWaTestPhone(e.target.value)}
+                      placeholder="Phone number to test"
+                      className="mt-1"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending}
+                    onClick={handleSendTest}
+                  >
+                    {waTestSending ? "Sending…" : "Send test"}
+                  </Button>
                 </div>
                 <div>
                   <SelectField
