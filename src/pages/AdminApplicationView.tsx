@@ -1562,7 +1562,7 @@ export default function AdminApplicationView() {
         docs={docs}
         reviews={reviews}
         onSetStatus={setDocStatus}
-        readOnly={decided || !canApproveApplication}
+        readOnly={!canApproveApplication}
         readOnlyReason={!canApproveApplication
           ? "You can view this document, but only principals and super admins can approve or reject it."
           : undefined}
