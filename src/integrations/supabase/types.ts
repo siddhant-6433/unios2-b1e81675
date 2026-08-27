@@ -10,7 +10,32 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.17"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -973,6 +998,45 @@ export type Database = {
             referencedColumns: ["candidate_lead_id"]
           },
         ]
+      }
+      admission_partners: {
+        Row: {
+          created_at: string
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          organization: string | null
+          phone: string | null
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
       }
       admission_sessions: {
         Row: {
@@ -8763,6 +8827,33 @@ export type Database = {
           },
         ]
       }
+      email_ai_settings: {
+        Row: {
+          auto_send: boolean
+          confidence_threshold: number
+          created_at: string
+          enabled: boolean
+          mailbox: string
+          updated_at: string
+        }
+        Insert: {
+          auto_send?: boolean
+          confidence_threshold?: number
+          created_at?: string
+          enabled?: boolean
+          mailbox: string
+          updated_at?: string
+        }
+        Update: {
+          auto_send?: boolean
+          confidence_threshold?: number
+          created_at?: string
+          enabled?: boolean
+          mailbox?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       email_campaign_recipients: {
         Row: {
           call_disposition: string | null
@@ -9045,11 +9136,19 @@ export type Database = {
       }
       email_messages: {
         Row: {
+          ai_confidence: number | null
+          ai_generated: boolean
           body_html: string
+          body_text: string | null
           created_at: string | null
+          direction: string
           from_email: string | null
+          gmail_message_id: string | null
+          gmail_thread_id: string | null
           id: string
+          in_reply_to: string | null
           lead_id: string | null
+          mailbox: string | null
           provider_id: string | null
           sent_at: string | null
           sent_by: string | null
@@ -9059,11 +9158,19 @@ export type Database = {
           to_email: string
         }
         Insert: {
+          ai_confidence?: number | null
+          ai_generated?: boolean
           body_html: string
+          body_text?: string | null
           created_at?: string | null
+          direction?: string
           from_email?: string | null
+          gmail_message_id?: string | null
+          gmail_thread_id?: string | null
           id?: string
+          in_reply_to?: string | null
           lead_id?: string | null
+          mailbox?: string | null
           provider_id?: string | null
           sent_at?: string | null
           sent_by?: string | null
@@ -9073,11 +9180,19 @@ export type Database = {
           to_email: string
         }
         Update: {
+          ai_confidence?: number | null
+          ai_generated?: boolean
           body_html?: string
+          body_text?: string | null
           created_at?: string | null
+          direction?: string
           from_email?: string | null
+          gmail_message_id?: string | null
+          gmail_thread_id?: string | null
           id?: string
+          in_reply_to?: string | null
           lead_id?: string | null
+          mailbox?: string | null
           provider_id?: string | null
           sent_at?: string | null
           sent_by?: string | null
@@ -10819,6 +10934,48 @@ export type Database = {
         }
         Relationships: []
       }
+      fee_notification_campaigns: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          failed: number
+          fee_term: string
+          filter: Json
+          id: string
+          purpose_label: string | null
+          sent: number
+          status: string
+          total: number
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at?: string | null
+          failed?: number
+          fee_term: string
+          filter?: Json
+          id?: string
+          purpose_label?: string | null
+          sent?: number
+          status?: string
+          total?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string | null
+          failed?: number
+          fee_term?: string
+          filter?: Json
+          id?: string
+          purpose_label?: string | null
+          sent?: number
+          status?: string
+          total?: number
+        }
+        Relationships: []
+      }
       fee_proposals: {
         Row: {
           admission_payable_total: number
@@ -12216,6 +12373,44 @@ export type Database = {
           },
         ]
       }
+      hr_document_audit: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_name: string | null
+          created_at: string
+          details: Json
+          id: string
+          letter_id: string
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          letter_id: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          letter_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_document_audit_letter_id_fkey"
+            columns: ["letter_id"]
+            isOneToOne: false
+            referencedRelation: "hr_letters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hr_letter_templates: {
         Row: {
           body: string
@@ -12262,42 +12457,66 @@ export type Database = {
       }
       hr_letters: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           body: string
           created_at: string
-          employee_profile_id: string
+          employee_profile_id: string | null
           id: string
+          issued_at: string | null
           issued_by: string | null
           issued_on: string
+          job_applicant_id: string | null
           letter_code: string
           letter_name: string
           reference_no: string | null
+          rejection_reason: string | null
+          status: string
           subject: string | null
+          submitted_at: string | null
+          submitted_by: string | null
           template_id: string | null
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           body: string
           created_at?: string
-          employee_profile_id: string
+          employee_profile_id?: string | null
           id?: string
+          issued_at?: string | null
           issued_by?: string | null
           issued_on?: string
+          job_applicant_id?: string | null
           letter_code: string
           letter_name: string
           reference_no?: string | null
+          rejection_reason?: string | null
+          status?: string
           subject?: string | null
+          submitted_at?: string | null
+          submitted_by?: string | null
           template_id?: string | null
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           body?: string
           created_at?: string
-          employee_profile_id?: string
+          employee_profile_id?: string | null
           id?: string
+          issued_at?: string | null
           issued_by?: string | null
           issued_on?: string
+          job_applicant_id?: string | null
           letter_code?: string
           letter_name?: string
           reference_no?: string | null
+          rejection_reason?: string | null
+          status?: string
           subject?: string | null
+          submitted_at?: string | null
+          submitted_by?: string | null
           template_id?: string | null
         }
         Relationships: [
@@ -12306,6 +12525,20 @@ export type Database = {
             columns: ["employee_profile_id"]
             isOneToOne: false
             referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_letters_job_applicant_id_fkey"
+            columns: ["job_applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_letters_job_applicant_id_fkey"
+            columns: ["job_applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
             referencedColumns: ["id"]
           },
           {
@@ -15589,6 +15822,63 @@ export type Database = {
           },
         ]
       }
+      interviews: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          interviewer_id: string | null
+          job_applicant_id: string
+          location: string | null
+          meeting_link: string | null
+          mode: string
+          notes: string | null
+          scheduled_at: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          interviewer_id?: string | null
+          job_applicant_id: string
+          location?: string | null
+          meeting_link?: string | null
+          mode?: string
+          notes?: string | null
+          scheduled_at: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          interviewer_id?: string | null
+          job_applicant_id?: string
+          location?: string | null
+          meeting_link?: string | null
+          mode?: string
+          notes?: string | null
+          scheduled_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interviews_job_applicant_id_fkey"
+            columns: ["job_applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_job_applicant_id_fkey"
+            columns: ["job_applicant_id"]
+            isOneToOne: false
+            referencedRelation: "job_applicants_inbox"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jd_category_mappings: {
         Row: {
           category: string
@@ -18167,6 +18457,7 @@ export type Database = {
           amount: number
           application_id: string | null
           applied_to_ledger: boolean
+          bank_ref_num: string | null
           concession_amount: number
           concession_breakdown: Json | null
           created_at: string | null
@@ -18192,6 +18483,7 @@ export type Database = {
           amount: number
           application_id?: string | null
           applied_to_ledger?: boolean
+          bank_ref_num?: string | null
           concession_amount?: number
           concession_breakdown?: Json | null
           created_at?: string | null
@@ -18217,6 +18509,7 @@ export type Database = {
           amount?: number
           application_id?: string | null
           applied_to_ledger?: boolean
+          bank_ref_num?: string | null
           concession_amount?: number
           concession_breakdown?: Json | null
           created_at?: string | null
@@ -18681,6 +18974,7 @@ export type Database = {
         Row: {
           academic_partner_id: string | null
           admission_no: string | null
+          admission_partner_id: string | null
           admitted_at: string | null
           ai_call_duration_seconds: number | null
           ai_call_uuid: string | null
@@ -18782,6 +19076,7 @@ export type Database = {
         Insert: {
           academic_partner_id?: string | null
           admission_no?: string | null
+          admission_partner_id?: string | null
           admitted_at?: string | null
           ai_call_duration_seconds?: number | null
           ai_call_uuid?: string | null
@@ -18883,6 +19178,7 @@ export type Database = {
         Update: {
           academic_partner_id?: string | null
           admission_no?: string | null
+          admission_partner_id?: string | null
           admitted_at?: string | null
           ai_call_duration_seconds?: number | null
           ai_call_uuid?: string | null
@@ -18994,6 +19290,13 @@ export type Database = {
             columns: ["academic_partner_id"]
             isOneToOne: false
             referencedRelation: "academic_partners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_admission_partner_id_fkey"
+            columns: ["admission_partner_id"]
+            isOneToOne: false
+            referencedRelation: "admission_partners"
             referencedColumns: ["id"]
           },
           {
@@ -22555,17 +22858,22 @@ export type Database = {
           created_at: string
           created_by: string
           expires_at: string | null
+          fee_campaign_id: string | null
+          fee_term: string | null
           gateway: string | null
           gateway_link_id: string | null
           id: string
           lead_id: string | null
           lead_payment_id: string | null
+          live_fee: boolean
           note: string | null
           purpose: string
+          sent_to_phone: string | null
           short_url: string | null
           status: string
           student_id: string | null
           token: string
+          wa_message_id: string | null
         }
         Insert: {
           allocations?: Json | null
@@ -22574,17 +22882,22 @@ export type Database = {
           created_at?: string
           created_by: string
           expires_at?: string | null
+          fee_campaign_id?: string | null
+          fee_term?: string | null
           gateway?: string | null
           gateway_link_id?: string | null
           id?: string
           lead_id?: string | null
           lead_payment_id?: string | null
+          live_fee?: boolean
           note?: string | null
           purpose: string
+          sent_to_phone?: string | null
           short_url?: string | null
           status?: string
           student_id?: string | null
           token?: string
+          wa_message_id?: string | null
         }
         Update: {
           allocations?: Json | null
@@ -22593,17 +22906,22 @@ export type Database = {
           created_at?: string
           created_by?: string
           expires_at?: string | null
+          fee_campaign_id?: string | null
+          fee_term?: string | null
           gateway?: string | null
           gateway_link_id?: string | null
           id?: string
           lead_id?: string | null
           lead_payment_id?: string | null
+          live_fee?: boolean
           note?: string | null
           purpose?: string
+          sent_to_phone?: string | null
           short_url?: string | null
           status?: string
           student_id?: string | null
           token?: string
+          wa_message_id?: string | null
         }
         Relationships: [
           {
@@ -22632,6 +22950,13 @@ export type Database = {
             columns: ["consultant_id"]
             isOneToOne: false
             referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_links_fee_campaign_id_fkey"
+            columns: ["fee_campaign_id"]
+            isOneToOne: false
+            referencedRelation: "fee_notification_campaigns"
             referencedColumns: ["id"]
           },
           {
@@ -26830,6 +27155,7 @@ export type Database = {
           food_habits: string | null
           form_filling_date: string | null
           gender: string | null
+          guardian_email: string | null
           guardian_name: string | null
           guardian_phone: string | null
           guardian_user_id: string | null
@@ -26955,6 +27281,7 @@ export type Database = {
           food_habits?: string | null
           form_filling_date?: string | null
           gender?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           guardian_user_id?: string | null
@@ -27080,6 +27407,7 @@ export type Database = {
           food_habits?: string | null
           form_filling_date?: string | null
           gender?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           guardian_user_id?: string | null
@@ -28376,6 +28704,47 @@ export type Database = {
         }
         Relationships: []
       }
+      video_events: {
+        Row: {
+          actor: string | null
+          author_name: string | null
+          created_at: string
+          event: string
+          id: string
+          note: string | null
+          screenshots: string[] | null
+          video_id: string
+        }
+        Insert: {
+          actor?: string | null
+          author_name?: string | null
+          created_at?: string
+          event: string
+          id?: string
+          note?: string | null
+          screenshots?: string[] | null
+          video_id: string
+        }
+        Update: {
+          actor?: string | null
+          author_name?: string | null
+          created_at?: string
+          event?: string
+          id?: string
+          note?: string | null
+          screenshots?: string[] | null
+          video_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_events_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "videos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       videos: {
         Row: {
           approved_at: string | null
@@ -28396,6 +28765,8 @@ export type Database = {
           rejection_reason: string | null
           rejection_screenshots: string[] | null
           status: Database["public"]["Enums"]["video_status"]
+          thumbnail_instagram_url: string | null
+          thumbnail_youtube_url: string | null
           title: string
           updated_at: string
           video_bill_id: string | null
@@ -28421,6 +28792,8 @@ export type Database = {
           rejection_reason?: string | null
           rejection_screenshots?: string[] | null
           status?: Database["public"]["Enums"]["video_status"]
+          thumbnail_instagram_url?: string | null
+          thumbnail_youtube_url?: string | null
           title: string
           updated_at?: string
           video_bill_id?: string | null
@@ -28446,6 +28819,8 @@ export type Database = {
           rejection_reason?: string | null
           rejection_screenshots?: string[] | null
           status?: Database["public"]["Enums"]["video_status"]
+          thumbnail_instagram_url?: string | null
+          thumbnail_youtube_url?: string | null
           title?: string
           updated_at?: string
           video_bill_id?: string | null
@@ -29502,14 +29877,19 @@ export type Database = {
           clicked_link_at: string | null
           clicked_url: string | null
           created_at: string | null
+          delivered_at: string | null
           eligible_at: string
           error_message: string | null
+          failed_at: string | null
           id: string
+          last_error_code: string | null
           lead_id: string
           message_id: string | null
           phone: string
+          read_at: string | null
           responded_at: string | null
           response_message_id: string | null
+          retry_count: number
           sent_at: string | null
           status: string | null
         }
@@ -29525,14 +29905,19 @@ export type Database = {
           clicked_link_at?: string | null
           clicked_url?: string | null
           created_at?: string | null
+          delivered_at?: string | null
           eligible_at?: string
           error_message?: string | null
+          failed_at?: string | null
           id?: string
+          last_error_code?: string | null
           lead_id: string
           message_id?: string | null
           phone: string
+          read_at?: string | null
           responded_at?: string | null
           response_message_id?: string | null
+          retry_count?: number
           sent_at?: string | null
           status?: string | null
         }
@@ -29548,14 +29933,19 @@ export type Database = {
           clicked_link_at?: string | null
           clicked_url?: string | null
           created_at?: string | null
+          delivered_at?: string | null
           eligible_at?: string
           error_message?: string | null
+          failed_at?: string | null
           id?: string
+          last_error_code?: string | null
           lead_id?: string
           message_id?: string | null
           phone?: string
+          read_at?: string | null
           responded_at?: string | null
           response_message_id?: string | null
+          retry_count?: number
           sent_at?: string | null
           status?: string | null
         }
@@ -29808,11 +30198,14 @@ export type Database = {
           is_active: boolean
           label: string
           meta_phone_number_id: string | null
+          profile_picture_url: string | null
+          profile_synced_at: string | null
           provider: string
           quality_risk_level: string
           route: string
           secret_token_name: string | null
           updated_at: string
+          verified_name: string | null
         }
         Insert: {
           allow_ai?: boolean
@@ -29824,11 +30217,14 @@ export type Database = {
           is_active?: boolean
           label: string
           meta_phone_number_id?: string | null
+          profile_picture_url?: string | null
+          profile_synced_at?: string | null
           provider: string
           quality_risk_level?: string
           route: string
           secret_token_name?: string | null
           updated_at?: string
+          verified_name?: string | null
         }
         Update: {
           allow_ai?: boolean
@@ -29840,11 +30236,14 @@ export type Database = {
           is_active?: boolean
           label?: string
           meta_phone_number_id?: string | null
+          profile_picture_url?: string | null
+          profile_synced_at?: string | null
           provider?: string
           quality_risk_level?: string
           route?: string
           secret_token_name?: string | null
           updated_at?: string
+          verified_name?: string | null
         }
         Relationships: []
       }
@@ -30562,6 +30961,7 @@ export type Database = {
       }
       whatsapp_otps: {
         Row: {
+          attempts: number
           created_at: string
           expires_at: string
           id: string
@@ -30575,6 +30975,7 @@ export type Database = {
           wa_status_updated_at: string | null
         }
         Insert: {
+          attempts?: number
           created_at?: string
           expires_at: string
           id?: string
@@ -30588,6 +30989,7 @@ export type Database = {
           wa_status_updated_at?: string | null
         }
         Update: {
+          attempts?: number
           created_at?: string
           expires_at?: string
           id?: string
@@ -30984,9 +31386,9 @@ export type Database = {
           description: string | null
           display_name: string
           media_url: string | null
-          visibility: string
           template_key: string
           updated_at: string
+          visibility: string
         }
         Insert: {
           allowed_team_ids?: string[] | null
@@ -30996,9 +31398,9 @@ export type Database = {
           description?: string | null
           display_name: string
           media_url?: string | null
-          visibility?: string
           template_key: string
           updated_at?: string
+          visibility?: string
         }
         Update: {
           allowed_team_ids?: string[] | null
@@ -31008,9 +31410,9 @@ export type Database = {
           description?: string | null
           display_name?: string
           media_url?: string | null
-          visibility?: string
           template_key?: string
           updated_at?: string
+          visibility?: string
         }
         Relationships: []
       }
@@ -34983,6 +35385,25 @@ export type Database = {
         Args: { p_campus_id: string; p_course_id: string; p_lead_id: string }
         Returns: number
       }
+      add_video_comment: {
+        Args: { p_note: string; p_screenshots?: string[]; p_video_id: string }
+        Returns: {
+          actor: string | null
+          author_name: string | null
+          created_at: string
+          event: string
+          id: string
+          note: string | null
+          screenshots: string[] | null
+          video_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "video_events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       admin_assign_student_service_request: {
         Args: { _handler_user_id: string; _request_id: string }
         Returns: string
@@ -35037,6 +35458,19 @@ export type Database = {
         Args: { _lead_id: string; _reason: string }
         Returns: string
       }
+      admission_partner_insert_lead: {
+        Args: {
+          _campus_id?: string
+          _course_id?: string
+          _email?: string
+          _guardian_name?: string
+          _guardian_phone?: string
+          _name: string
+          _notes?: string
+          _phone: string
+        }
+        Returns: string
+      }
       admissions_followup_bucket_counts: {
         Args: { p_campus_id?: string; p_counsellor_id?: string }
         Returns: Json
@@ -35068,6 +35502,13 @@ export type Database = {
         Returns: string
       }
       application_doc_key: { Args: { _file_path: string }; Returns: string }
+      application_photo_urls_by_lead: {
+        Args: { _lead_ids: string[] }
+        Returns: {
+          lead_id: string
+          url: string
+        }[]
+      }
       apply_consultant_credit_note_receipt: {
         Args: {
           _amount: number
@@ -35110,6 +35551,10 @@ export type Database = {
       approve_attendance_regularisation: {
         Args: { _approve: boolean; _ids: string[]; _note?: string }
         Returns: number
+      }
+      approve_hr_document: {
+        Args: { _letter_id: string; _notes?: string }
+        Returns: string
       }
       approve_pgdm_certificate: {
         Args: { _approval_notes?: string; _request_id: string }
@@ -35308,6 +35753,15 @@ export type Database = {
         }
         Returns: Json
       }
+      campaign_funnel_counts: {
+        Args: { p_campaign_ids: string[] }
+        Returns: {
+          campaign_id: string
+          delivered: number
+          failed: number
+          read: number
+        }[]
+      }
       can_academic_partner_view_fee_student: {
         Args: { _student_id: string; _user_id: string }
         Returns: boolean
@@ -35318,6 +35772,10 @@ export type Database = {
       }
       can_access_consultant_onboarding: {
         Args: { _user_id: string }
+        Returns: boolean
+      }
+      can_admission_partner_view_lead: {
+        Args: { _lead_id: string; _user_id: string }
         Returns: boolean
       }
       can_assign_lead_external_owner: {
@@ -35637,6 +36095,7 @@ export type Database = {
           amount: number
           application_id: string | null
           applied_to_ledger: boolean
+          bank_ref_num: string | null
           concession_amount: number
           concession_breakdown: Json | null
           created_at: string | null
@@ -35750,6 +36209,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fee_due_report: { Args: { _campus_ids?: string[] }; Returns: Json }
       fee_reconciliation_report: { Args: never; Returns: Json }
       finance_summary: { Args: { _campus_ids?: string[] }; Returns: Json }
       find_auth_user_by_email_or_phone: {
@@ -35795,6 +36255,18 @@ export type Database = {
           name: string
           phone: string
           stage: string
+        }[]
+      }
+      find_video_by_url: {
+        Args: { p_url: string }
+        Returns: {
+          brand: string
+          created_at: string
+          editor_name: string
+          id: string
+          matched_field: string
+          status: string
+          title: string
         }[]
       }
       fn_ai_call_queue_status: { Args: never; Returns: Json }
@@ -35852,6 +36324,8 @@ export type Database = {
         Args: { p_course_id: string; p_student_name?: string }
         Returns: Json
       }
+      fn_dev_cron_detail: { Args: never; Returns: Json }
+      fn_dev_health_summary: { Args: never; Returns: Json }
       fn_ga_relay_post: {
         Args: {
           _event_name: string
@@ -35949,6 +36423,10 @@ export type Database = {
       generate_family_application_id: { Args: never; Returns: string }
       generate_hr_letter: {
         Args: { _employee_profile_id: string; _template_code: string }
+        Returns: string
+      }
+      generate_hr_offer_letter: {
+        Args: { _details?: Json; _job_applicant_id: string }
         Returns: string
       }
       generate_video_bill: {
@@ -36231,6 +36709,30 @@ export type Database = {
           source: string
         }[]
       }
+      get_fee_notification_report: {
+        Args: { p_campaign_id: string }
+        Returns: {
+          amount_due: number
+          delivered: boolean
+          delivery_status: string
+          father_phone: string
+          father_whatsapp: string
+          guardian_phone: string
+          lead_guardian_phone: string
+          lead_phone: string
+          mother_phone: string
+          mother_whatsapp: string
+          name: string
+          paid: boolean
+          phone: string
+          read: boolean
+          read_at: string
+          sent_to_phone: string
+          student_id: string
+          token: string
+          whatsapp_no: string
+        }[]
+      }
       get_lead_assignment_history: {
         Args: {
           _assigned_by_profile_ids?: string[]
@@ -36322,6 +36824,10 @@ export type Database = {
           receipt_no: string
           source: string
         }[]
+      }
+      get_or_create_batch: {
+        Args: { _course_id: string; _name: string; _session_id: string }
+        Returns: string
       }
       get_overdue_followup_enforcement_enabled: {
         Args: never
@@ -36522,6 +37028,7 @@ export type Database = {
       }
       is_staff_incentive_admin: { Args: { _user_id: string }; Returns: boolean }
       is_staff_user: { Args: never; Returns: boolean }
+      issue_hr_document: { Args: { _letter_id: string }; Returns: string }
       issue_student_login_link: { Args: { _student_id: string }; Returns: Json }
       lead_abvmu_approved_credit: {
         Args: { _lead_id: string }
@@ -36888,6 +37395,10 @@ export type Database = {
         Args: { _category: string; _message_text: string; _phone?: string }
         Returns: undefined
       }
+      log_hr_document_action: {
+        Args: { _action: string; _details?: Json; _letter_id: string }
+        Returns: undefined
+      }
       log_pgdm_certificate_action: {
         Args: { _action: string; _details?: Json; _request_id: string }
         Returns: undefined
@@ -37039,6 +37550,10 @@ export type Database = {
       }
       notify_student_service_assignment: {
         Args: { _event?: string; _request_id: string }
+        Returns: undefined
+      }
+      notify_super_admins_hr_document: {
+        Args: { _body: string; _letter_id: string; _title: string }
         Returns: undefined
       }
       online_class_stream_info: {
@@ -37272,6 +37787,10 @@ export type Database = {
           p_token: string
         }
         Returns: undefined
+      }
+      reject_hr_document: {
+        Args: { _letter_id: string; _reason: string }
+        Returns: string
       }
       reject_refund: {
         Args: { _note: string; _refund_id: string }
@@ -37686,6 +38205,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      student_class_teacher_for_viewer: { Args: never; Returns: Json }
       student_course_is_school: {
         Args: { _course_id: string }
         Returns: boolean
@@ -37731,6 +38251,7 @@ export type Database = {
           handler_official_phone: string
         }[]
       }
+      student_timetable_for_viewer: { Args: never; Returns: Json }
       submit_abvmu_deposit_claim: {
         Args: {
           _amount?: number
@@ -38138,6 +38659,7 @@ export type Database = {
         | "school_coordinator"
         | "non_teaching"
         | "hr_executive"
+        | "admission_partner"
       consultant_payout_model:
         | "commission_pct_first_year"
         | "commission_fixed"
@@ -38165,6 +38687,8 @@ export type Database = {
         | "school_outreach"
         | "dialer"
         | "academic_partner"
+        | "email"
+        | "admission_partner"
       lead_stage:
         | "new_lead"
         | "application_in_progress"
@@ -38348,6 +38872,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: [
@@ -38375,6 +38902,7 @@ export const Constants = {
         "school_coordinator",
         "non_teaching",
         "hr_executive",
+        "admission_partner",
       ],
       consultant_payout_model: [
         "commission_pct_first_year",
@@ -38404,6 +38932,8 @@ export const Constants = {
         "school_outreach",
         "dialer",
         "academic_partner",
+        "email",
+        "admission_partner",
       ],
       lead_stage: [
         "new_lead",

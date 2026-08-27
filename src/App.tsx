@@ -74,6 +74,7 @@ const SystemHealth         = lazy(() => import("./pages/SystemHealth"));
 const AutomationRules      = lazy(() => import("./pages/AutomationRules"));
 const ConsultantPortal     = lazy(() => import("./pages/ConsultantPortal"));
 const AcademicPartnerPortal = lazy(() => import("./pages/AcademicPartnerPortal"));
+const AdmissionPartnerPortal = lazy(() => import("./pages/AdmissionPartnerPortal"));
 const PublisherPortal      = lazy(() => import("./pages/PublisherPortal"));
 const PublisherLogin       = lazy(() => import("./pages/PublisherLogin"));
 const PublisherAnalytics   = lazy(() => import("./pages/PublisherAnalytics"));
@@ -392,6 +393,7 @@ const App = () => (
                       <Route path="/academic-partners" element={<RequirePermission module="academic_partners" action="view"><AcademicPartners /></RequirePermission>} />
                       <Route path="/consultant-portal" element={<RequirePermission module="consultant_portal" action="view"><ConsultantPortal /></RequirePermission>} />
                       <Route path="/academic-partner-portal" element={<RequirePermission module="academic_partner_portal" action="view"><AcademicPartnerPortal /></RequirePermission>} />
+                      <Route path="/admission-partner-portal" element={<RequirePermission module="admission_partner_portal" action="view"><AdmissionPartnerPortal /></RequirePermission>} />
                       <Route path="/consultant-guide" element={<RequirePermission module="consultant_portal" action="view"><ConsultantGuide /></RequirePermission>} />
                       <Route path="/publisher-portal" element={<RequirePermission module="publisher_portal" action="view"><PublisherPortal /></RequirePermission>} />
                       <Route path="/publisher-analytics" element={<RequirePermission module="publisher_portal" action="view"><PublisherAnalytics /></RequirePermission>} />
