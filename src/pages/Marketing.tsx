@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -373,10 +374,10 @@ export default function Marketing() {
       toast({ title: "Can't send", description: `This sender doesn't have "${waTemplate}" approved.`, variant: "destructive" });
       return;
     }
-    const digits = waTestPhone.replace(/[^0-9]/g, "");
-    const phone = digits.length === 10 ? `91${digits}` : digits;
-    if (phone.length < 12) {
-      toast({ title: "Invalid number", description: "Enter a valid number with country code (e.g. 9198…).", variant: "destructive" });
+    // waTestPhone comes from PhoneInput as a full +CC number, so just strip to digits.
+    const phone = waTestPhone.replace(/[^0-9]/g, "");
+    if (phone.length < 10) {
+      toast({ title: "Invalid number", description: "Enter a valid phone number with its country code.", variant: "destructive" });
       return;
     }
     setWaTestSending(true);
@@ -1567,10 +1568,11 @@ export default function Marketing() {
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
                     <label className="text-xs font-medium text-muted-foreground">Send test message</label>
-                    <Input
+                    <PhoneInput
                       value={waTestPhone}
-                      onChange={(e) => setWaTestPhone(e.target.value)}
-                      placeholder="Phone number to test"
+                      onChange={setWaTestPhone}
+                      placeholder="Phone to test"
+                      aria-label="Test phone number"
                       className="mt-1"
                     />
                   </div>
