@@ -328,6 +328,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       // to fetch the newly uploaded bytes rather than returning a 304.
       setPdfBust(Date.now());
       toast({ title: "PDF ready" });
+    } catch (e: any) {
+      // A transport-level failure (e.g. "TypeError: Failed to fetch") throws
+      // instead of returning { error }. Degrade gracefully — the offer is
+      // already persisted and the PDF can be regenerated — never propagate,
+      // so an awaiting caller (handleCreate) still completes its success path.
+      toast({ title: "Couldn't generate PDF", description: e?.message || "Network error — try Regenerate.", variant: "destructive" });
     } finally {
       setRegeneratingId(null);
     }
@@ -784,6 +790,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
     if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
 
+    // Wrap the remaining network work so setSaving(false) always runs — any
+    // awaited call below (inserts, PDF gen) can throw "Failed to fetch" and
+    // must not strand the button in its spinning/saving state.
+    try {
+
     // School mode to persist on the offer (drives the PDF fee). NULL for non-school
     // structures or plain day scholars = base fee.
     const persistSchoolMode = hasSchoolOptions
@@ -950,7 +961,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       fetchOffers();
       onSuccess();
     }
-    setSaving(false);
+    } catch (e: any) {
+      // Transport-level failure on one of the awaited calls above. The offer may
+      // already be persisted; surface the error rather than a silent stuck state.
+      toast({ title: "Error", description: e?.message || "Network error while issuing the offer.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
