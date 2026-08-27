@@ -23,6 +23,7 @@ export type WaSenderOption = {
   qualityRiskLevel: string | null;
   verifiedName: string | null;
   profilePictureUrl: string | null;
+  availableTemplates: string[] | null;
 };
 
 export const DEFAULT_WA_SENDER = "__default_bulk_sender__";
@@ -45,6 +46,7 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
   qualityRiskLevel: null,
   verifiedName: null,
   profilePictureUrl: null,
+  availableTemplates: null,
 });
 
 export const knownBulkSenderOptions = (): WaSenderOption[] => [
@@ -61,6 +63,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     qualityRiskLevel: "normal",
     verifiedName: null,
     profilePictureUrl: null,
+    availableTemplates: null,
   },
   {
     value: "meta:1075269918995469",
@@ -75,6 +78,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     qualityRiskLevel: "watch",
     verifiedName: null,
     profilePictureUrl: null,
+    availableTemplates: null,
   },
   {
     value: "plivo:919555192192",
@@ -89,6 +93,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     qualityRiskLevel: "normal",
     verifiedName: null,
     profilePictureUrl: null,
+    availableTemplates: null,
   },
 ];
 
@@ -125,6 +130,16 @@ export const senderHealthClass = (failedPct: number | null | undefined) => {
   return "bg-success/10 text-success";
 };
 
+/**
+ * Whether a sender's WABA is known to support a given template. A sender
+ * with unresolved templates (null) is treated as unverified and allowed
+ * through — only an explicit non-inclusion blocks the send.
+ */
+export const senderCanSendTemplate = (
+  sender: Pick<WaSenderOption, "availableTemplates"> | null,
+  templateKey: string,
+): boolean => !sender || sender.availableTemplates == null || sender.availableTemplates.includes(templateKey);
+
 export const resolveBusinessNumber = (
   phoneNumberId: string | null | undefined,
   businessNumber: string | null | undefined,
@@ -145,7 +160,7 @@ export async function loadWaSenders(
   const [channelsRes, healthRes] = await Promise.all([
     supabase
       .from("whatsapp_channels" as any)
-      .select("id,label,provider,route,business_number,meta_phone_number_id,allow_bulk,quality_risk_level,verified_name,profile_picture_url")
+      .select("id,label,provider,route,business_number,meta_phone_number_id,allow_bulk,quality_risk_level,verified_name,profile_picture_url,available_templates")
       .eq("is_active", true)
       .eq("allow_bulk", true)
       .order("label", { ascending: true }),
@@ -184,6 +199,7 @@ export async function loadWaSenders(
         qualityRiskLevel: channel.quality_risk_level || null,
         verifiedName: channel.verified_name || null,
         profilePictureUrl: channel.profile_picture_url || null,
+        availableTemplates: channel.available_templates ?? null,
       });
     }
   }
@@ -211,6 +227,7 @@ export async function loadWaSenders(
       qualityRiskLevel: existingByNumber?.qualityRiskLevel || existing?.qualityRiskLevel || null,
       verifiedName: existingByNumber?.verifiedName || existing?.verifiedName || null,
       profilePictureUrl: existingByNumber?.profilePictureUrl || existing?.profilePictureUrl || null,
+      availableTemplates: existingByNumber?.availableTemplates ?? existing?.availableTemplates ?? null,
     });
     if (targetValue !== value) options.delete(value);
   }
