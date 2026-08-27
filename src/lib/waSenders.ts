@@ -102,10 +102,15 @@ export const digitsOnly = (value: string | null | undefined) => (value || "").re
 export const mergeKnownBulkSenders = (options: Map<string, WaSenderOption>) => {
   for (const sender of knownBulkSenderOptions()) {
     const byValue = options.get(sender.value);
-    const byNumber = [...options.values()].find((option) =>
-      option.provider === sender.provider &&
-      digitsOnly(option.businessNumber) === digitsOnly(sender.businessNumber)
-    );
+    // Dedup by phone digits regardless of provider: a synced Meta channel for a
+    // number (with real identity + availableTemplates) must win over a stale
+    // hardcoded entry (e.g. the dead plivo:9555192192), otherwise the picker
+    // shows the number twice and the null-availableTemplates duplicate bypasses
+    // the per-template guard.
+    const byNumber = digitsOnly(sender.businessNumber)
+      ? [...options.values()].find((option) =>
+          digitsOnly(option.businessNumber) === digitsOnly(sender.businessNumber))
+      : null;
     if (byValue || byNumber) continue;
     options.set(sender.value, sender);
   }
