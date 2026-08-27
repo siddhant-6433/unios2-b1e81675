@@ -575,7 +575,10 @@ export default function Marketing() {
       setEmailTemplates(nextTemplates);
       setSelectedListId((current) => {
         if (requestedListId && nextLists.some((list) => list.id === requestedListId)) return requestedListId;
-        return current || nextLists[0]?.id || "";
+        // Do NOT auto-select the first list — an auto-selected list + default
+        // channel/template left "Queue Campaign" enabled on load, so a stray
+        // click blasted the whole first list. Require an explicit choice.
+        return current;
       });
       setEmailSlug((current) => current || nextTemplates[0]?.slug || "");
     })();
@@ -667,6 +670,20 @@ export default function Marketing() {
       setLaunchError("Pick a lead list first.");
       return;
     }
+    // Confirm before firing — queuing a campaign blasts real messages to a whole
+    // list and can't be recalled. Show the blast radius so it can't be triggered
+    // by an accidental click.
+    const channelLabel = campaignChannel === "whatsapp" ? "WhatsApp" : "Email";
+    const templateLabel = campaignChannel === "whatsapp" ? waTemplate : emailSlug;
+    const whenLabel = campaignScheduleMode === "scheduled" && campaignScheduledAt
+      ? `scheduled for ${campaignScheduledAt}`
+      : "now";
+    const ok = window.confirm(
+      `Queue ${channelLabel} campaign to "${selectedList.name}" (~${selectedList.member_count} leads) ` +
+      `using template "${templateLabel}", sending ${whenLabel}?\n\n` +
+      `Eligible leads (after DNC / quiet-day / scope filters) will receive this message. This cannot be undone.`,
+    );
+    if (!ok) return;
     setLaunching(true);
     setLaunchError(null);
 
