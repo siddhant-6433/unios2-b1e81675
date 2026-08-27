@@ -27,6 +27,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "consultant", label: "Consultant" },
   { value: "academic_partner", label: "Academic Partner" },
   { value: "academic_partner_offer_letter", label: "Academic Partner + Offers" },
+  { value: "admission_partner", label: "Admission Partner" },
   { value: "video_editor", label: "Video Editor (Consultant)" },
   { value: "publisher", label: "Publisher (Lead Aggregator)" },
   { value: "student", label: "Student" },
@@ -111,7 +112,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
 
     // Staff sign in by WhatsApp phone OTP, so a mobile number is required for a
     // staff login. External roles (students/families/partners) don't OTP in.
-    const EXTERNAL_ROLES = ["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"];
+    const EXTERNAL_ROLES = ["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "admission_partner", "publisher"];
     if (!EXTERNAL_ROLES.includes(role) && !phone.trim()) {
       toast({ title: "Mobile number required", description: "Staff log in via WhatsApp OTP — enter a mobile number for this login.", variant: "destructive" });
       return;
@@ -168,6 +169,20 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
         const { data: existing } = await supabase.from("academic_partners").select("id").eq("user_id", data.user_id).maybeSingle();
         if (!existing) {
           await supabase.from("academic_partners").insert({
+            name: displayName.trim() || email.trim(),
+            email: email.trim(),
+            phone: phone.trim() || null,
+            user_id: data.user_id,
+            status: "active",
+          });
+        }
+      }
+
+      // Auto-create admission partner profile when inviting with that role.
+      if (role === "admission_partner" && data?.user_id) {
+        const { data: existing } = await supabase.from("admission_partners").select("id").eq("user_id", data.user_id).maybeSingle();
+        if (!existing) {
+          await supabase.from("admission_partners").insert({
             name: displayName.trim() || email.trim(),
             email: email.trim(),
             phone: phone.trim() || null,
