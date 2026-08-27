@@ -1333,7 +1333,13 @@ Deno.serve(async (req) => {
                 }
                 if (newStatus === "failed") {
                   patch.failed_at = nowIso;
-                  if (status.errors) patch.error_message = JSON.stringify(status.errors);
+                  if (status.errors) {
+                    patch.error_message = JSON.stringify(status.errors);
+                    // Record the Meta code so reports can tell a throttle (131049)
+                    // from a hard failure (131026 invalid number, etc.).
+                    const code = status.errors?.[0]?.code;
+                    if (code != null) patch.last_error_code = String(code);
+                  }
                 }
                 const curRank = RANK[(cur as any).status] ?? 0;
                 if (newStatus === "failed") {
