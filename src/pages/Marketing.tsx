@@ -10,11 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
@@ -285,6 +286,11 @@ export default function Marketing() {
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waTestPhone, setWaTestPhone] = useState("");
   const [waTestSending, setWaTestSending] = useState(false);
+  const [waTestSent, setWaTestSent] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [senderPickerOpen, setSenderPickerOpen] = useState(false);
+  const [listPickerOpen, setListPickerOpen] = useState(false);
   const [emailMode, setEmailMode] = useState<"template" | "custom">("template");
   const [emailSlug, setEmailSlug] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -342,6 +348,10 @@ export default function Marketing() {
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
     [availableWaBulkTemplates, waTemplate],
   );
+  const templateOptions = useMemo(
+    () => availableWaBulkTemplates.filter((template) => senderCanSendTemplate(waSelectedSender, template.key)),
+    [availableWaBulkTemplates, waSelectedSender],
+  );
   const waTemplateQuality = useMemo(
     () => evaluateTemplateQualityForBulk(waTemplateQualityByKey[selectedWaTemplate?.key || waTemplate]),
     [waTemplateQualityByKey, selectedWaTemplate?.key, waTemplate],
@@ -361,6 +371,12 @@ export default function Marketing() {
     if (!waTemplate || !waTestPhone.trim()) return;
     if (!senderCanSendTemplate(waSelectedSender, waTemplate)) {
       toast({ title: "Can't send", description: `This sender doesn't have "${waTemplate}" approved.`, variant: "destructive" });
+      return;
+    }
+    const digits = waTestPhone.replace(/[^0-9]/g, "");
+    const phone = digits.length === 10 ? `91${digits}` : digits;
+    if (phone.length < 12) {
+      toast({ title: "Invalid number", description: "Enter a valid number with country code (e.g. 9198…).", variant: "destructive" });
       return;
     }
     setWaTestSending(true);
@@ -387,7 +403,7 @@ export default function Marketing() {
       const { data, error } = await supabase.functions.invoke("whatsapp-send", {
         body: {
           template_key: waTemplate,
-          phone: waTestPhone.trim(),
+          phone,
           params,
           provider: "meta",
           business_phone_number_id: waSelectedSender?.phoneNumberId || null,
@@ -410,7 +426,8 @@ export default function Marketing() {
         }
         throw new Error(detail);
       }
-      toast({ title: "Test sent", description: `Sent to ${waTestPhone}` });
+      toast({ title: "Test sent", description: `Sent to ${phone}` });
+      setWaTestSent(true);
     } catch (err) {
       toast({
         title: "Test failed",
@@ -421,6 +438,10 @@ export default function Marketing() {
       setWaTestSending(false);
     }
   }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, toast]);
+
+  useEffect(() => {
+    setWaTestSent(false);
+  }, [waTemplate, waSenderValue, waStaticParams, waTestPhone]);
 
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
@@ -1233,30 +1254,70 @@ export default function Marketing() {
         </div>
       </div>
 
+      {!builderOpen ? (
+        <Button onClick={() => setBuilderOpen(true)} size="lg" className="gap-2">
+          <Megaphone className="h-4 w-4" /> New Campaign
+        </Button>
+      ) : (
       <Card>
         <CardContent className="space-y-4 p-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <ListPlus className="h-4 w-4 text-primary" />
-              <p className="font-semibold">Lists / Initiate New Campaign</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <ListPlus className="h-4 w-4 text-primary" />
+                <p className="font-semibold">Lists / Initiate New Campaign</p>
+              </div>
+              <p className="text-xs text-muted-foreground">Pick a saved lead list, choose the channel, and queue the campaign.</p>
             </div>
-            <p className="text-xs text-muted-foreground">Pick a saved lead list, choose the channel, and queue the campaign.</p>
+            <Button variant="ghost" size="sm" onClick={() => setBuilderOpen(false)}>
+              Cancel
+            </Button>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_1fr]">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Lead list</label>
               <div className="mt-1 flex gap-2">
-                <SelectField
-                  value={selectedListId}
-                  onValueChange={setSelectedListId}
-                  placeholder={lists.length === 0 ? "No lists available" : "Select lead list"}
-                  options={lists.map((list) => ({ value: list.id, label: `${list.name} (${list.member_count})` }))}
-                  disabled={lists.length === 0}
-                  triggerClassName="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                  className="min-w-0 flex-1"
-                  ariaLabel="Select lead list"
-                />
+                <Popover open={listPickerOpen} onOpenChange={setListPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={lists.length === 0}
+                      className="h-10 min-w-0 flex-1 justify-between rounded-md border border-input bg-background px-3 text-sm font-normal"
+                    >
+                      <span className="truncate">
+                        {lists.length === 0
+                          ? "No lists available"
+                          : selectedList
+                            ? `${selectedList.name} (${selectedList.member_count})`
+                            : "Select lead list"}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search lists…" />
+                      <CommandList className="max-h-[300px] overflow-y-auto">
+                        <CommandEmpty>No lists found.</CommandEmpty>
+                        {lists.map((list) => (
+                          <CommandItem
+                            key={list.id}
+                            value={list.name}
+                            onSelect={() => {
+                              setSelectedListId(list.id);
+                              setListPickerOpen(false);
+                            }}
+                          >
+                            <Check className={`mr-2 h-4 w-4 ${list.id === selectedListId ? "opacity-100" : "opacity-0"}`} />
+                            <span className="truncate">{list.name} ({list.member_count})</span>
+                          </CommandItem>
+                        ))}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 {canDeleteLists && selectedList && (
                   <Button
                     type="button"
@@ -1293,48 +1354,6 @@ export default function Marketing() {
                 className="mt-1"
               />
             </div>
-          </div>
-
-          <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
-            <SelectField
-              label="Send time"
-              value={campaignScheduleMode}
-              onValueChange={(value) => {
-                const nextMode = value as "now" | "scheduled";
-                setCampaignScheduleMode(nextMode);
-                if (nextMode === "scheduled" && !campaignScheduledAt) {
-                  setCampaignScheduledAt(defaultFutureDateTime());
-                }
-              }}
-              options={[
-                { value: "now", label: "Send now" },
-                { value: "scheduled", label: "Schedule for later" },
-              ]}
-              allowEmpty={false}
-              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            />
-            {campaignScheduleMode === "scheduled" && (
-              <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
-                <DatePickerField
-                  label="Scheduled date"
-                  value={scheduledDateValue}
-                  onValueChange={setScheduledDate}
-                  placeholder="Pick date"
-                  minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                  triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  ariaLabel="Scheduled campaign date"
-                />
-                <FieldShell label="Time">
-                  <Input
-                    type="time"
-                    value={scheduledTimeValue || defaultFutureTime()}
-                    onChange={(event) => setScheduledTime(event.target.value)}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    aria-label="Scheduled campaign time"
-                  />
-                </FieldShell>
-              </div>
-            )}
           </div>
 
           {campaignChannel === "whatsapp" && (
@@ -1439,9 +1458,65 @@ export default function Marketing() {
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
                 <div>
+                  <label className="text-xs font-medium text-muted-foreground">WhatsApp template</label>
+                  <Popover open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="mt-1 h-10 w-full justify-between rounded-md border border-input bg-background px-3 text-sm font-normal"
+                      >
+                        <span className="truncate">
+                          {selectedWaTemplate?.label || (templateOptions.length === 0 ? "No templates available" : "Select template")}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search templates…" />
+                        <CommandList className="max-h-[300px] overflow-y-auto">
+                          <CommandEmpty>No templates found.</CommandEmpty>
+                          {templateOptions.map((template) => (
+                            <CommandItem
+                              key={template.key}
+                              value={template.label}
+                              onSelect={() => {
+                                setWaTemplate(template.key);
+                                setWaStaticParams({});
+                                setTemplatePickerOpen(false);
+                              }}
+                            >
+                              <Check className={`mr-2 h-4 w-4 ${template.key === waTemplate ? "opacity-100" : "opacity-0"}`} />
+                              <span className="truncate">{template.label}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {templateOptions.length === 0 && (
+                    <p className="mt-1.5 text-xs font-medium text-destructive">
+                      This number has no approved templates — pick another number.
+                    </p>
+                  )}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${waTemplateQuality.badgeClass}`}>
+                      Meta: {waTemplateQuality.label}
+                    </span>
+                    {!waTemplateQuality.allowBulk && (
+                      <span className="text-[11px] text-destructive font-medium">Bulk send blocked</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{waTemplateQuality.detail}</p>
+                  {selectedWaTemplate?.description && (
+                    <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
+                  )}
+                </div>
+                <div>
                   <label className="text-xs font-medium text-muted-foreground">Send from number</label>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+                  <Popover open={senderPickerOpen} onOpenChange={setSenderPickerOpen}>
+                    <PopoverTrigger asChild>
                       <button
                         type="button"
                         className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -1449,30 +1524,40 @@ export default function Marketing() {
                         <WhatsAppBusinessIdentity sender={waSelectedSender ?? defaultWaSenderOption()} compact />
                         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
-                      {waSenderOptions.map((sender) => {
-                        const canSend = senderCanSendTemplate(sender, waTemplate);
-                        return (
-                          <DropdownMenuItem
-                            key={sender.value}
-                            onSelect={() => setWaSenderValue(sender.value)}
-                            disabled={!canSend}
-                            className="cursor-pointer p-0 focus:bg-muted"
-                          >
-                            <div className="flex w-full flex-col">
-                              <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
-                              {!canSend && (
-                                <span className="px-3 pb-1.5 text-[11px] font-medium text-destructive">
-                                  Can't send "{waTemplate}"
-                                </span>
-                              )}
-                            </div>
-                          </DropdownMenuItem>
-                        );
-                      })}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search numbers…" />
+                        <CommandList className="max-h-[300px] overflow-y-auto">
+                          <CommandEmpty>No numbers found.</CommandEmpty>
+                          {waSenderOptions.map((sender) => {
+                            const canSend = senderCanSendTemplate(sender, waTemplate);
+                            return (
+                              <CommandItem
+                                key={sender.value}
+                                value={`${sender.businessNumber} ${sender.verifiedName ?? ""} ${sender.label}`}
+                                disabled={!canSend}
+                                onSelect={() => {
+                                  setWaSenderValue(sender.value);
+                                  setSenderPickerOpen(false);
+                                }}
+                                className="p-0"
+                              >
+                                <div className="flex w-full flex-col">
+                                  <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                                  {!canSend && (
+                                    <span className="px-3 pb-1.5 text-[11px] font-medium text-destructive">
+                                      Can't send "{waTemplate}"
+                                    </span>
+                                  )}
+                                </div>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   {!selectedSenderCanSend && (
                     <p className="mt-1.5 text-xs font-medium text-destructive">
                       This number can't send "{waTemplate}" — its WhatsApp account doesn't have that template approved. Pick another sender or template.
@@ -1499,31 +1584,9 @@ export default function Marketing() {
                     {waTestSending ? "Sending…" : "Send test"}
                   </Button>
                 </div>
-                <div>
-                  <SelectField
-                    label="WhatsApp template"
-                    value={waTemplate}
-                    onValueChange={(value) => {
-                      setWaTemplate(value);
-                      setWaStaticParams({});
-                    }}
-                    options={availableWaBulkTemplates.map((template) => ({ value: template.key, label: template.label }))}
-                    allowEmpty={false}
-                    triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  />
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${waTemplateQuality.badgeClass}`}>
-                      Meta: {waTemplateQuality.label}
-                    </span>
-                    {!waTemplateQuality.allowBulk && (
-                      <span className="text-[11px] text-destructive font-medium">Bulk send blocked</span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{waTemplateQuality.detail}</p>
-                  {selectedWaTemplate?.description && (
-                    <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
-                  )}
-                </div>
+                {waTestSent && (
+                  <p className="text-xs font-medium text-emerald-600">Test sent — queueing is now enabled.</p>
+                )}
                 <div className="space-y-2">
                   {waStaticFields.length === 0 ? (
                     <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -1705,21 +1768,70 @@ export default function Marketing() {
             <p className="text-xs text-muted-foreground">
               DNC leads and members without the selected channel destination are skipped at queue time.
             </p>
-            <Button
-              onClick={launchCampaign}
-              disabled={
-                launching
-                || !selectedList
-                || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
-                || (campaignChannel === "whatsapp" && !selectedSenderCanSend)
-              }
-            >
-              {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
-              Queue Campaign
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                onClick={launchCampaign}
+                disabled={
+                  launching
+                  || !selectedList
+                  || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
+                  || (campaignChannel === "whatsapp" && !selectedSenderCanSend)
+                  || (campaignChannel === "whatsapp" && !waTestSent)
+                }
+              >
+                {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
+                Queue Campaign
+              </Button>
+              {campaignChannel === "whatsapp" && !waTestSent && (
+                <p className="text-xs text-muted-foreground">Send a successful test message to enable queueing.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
+            <SelectField
+              label="Send time"
+              value={campaignScheduleMode}
+              onValueChange={(value) => {
+                const nextMode = value as "now" | "scheduled";
+                setCampaignScheduleMode(nextMode);
+                if (nextMode === "scheduled" && !campaignScheduledAt) {
+                  setCampaignScheduledAt(defaultFutureDateTime());
+                }
+              }}
+              options={[
+                { value: "now", label: "Send now" },
+                { value: "scheduled", label: "Schedule for later" },
+              ]}
+              allowEmpty={false}
+              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            />
+            {campaignScheduleMode === "scheduled" && (
+              <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
+                <DatePickerField
+                  label="Scheduled date"
+                  value={scheduledDateValue}
+                  onValueChange={setScheduledDate}
+                  placeholder="Pick date"
+                  minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                  triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  ariaLabel="Scheduled campaign date"
+                />
+                <FieldShell label="Time">
+                  <Input
+                    type="time"
+                    value={scheduledTimeValue || defaultFutureTime()}
+                    onChange={(event) => setScheduledTime(event.target.value)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    aria-label="Scheduled campaign time"
+                  />
+                </FieldShell>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
+      )}
 
       <div className="space-y-3">
         <div>
