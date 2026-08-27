@@ -10,12 +10,13 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube, RotateCcw } from "lucide-react";
+import { Plus, Video, ExternalLink, CheckCircle, Instagram, Linkedin, Youtube, RotateCcw, X } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPES, CONTENT_TYPE_LABEL,
   STATUS_BADGE, type VideoBrand, type VideoContentType, type VideoStatus,
 } from "@/lib/videoBrands";
 import { VideoHistory } from "@/components/video/VideoHistory";
+import { uploadVideoImages, checkAspectRatio } from "@/lib/videoUpload";
 
 type VideoRow = {
   id: string;
@@ -34,6 +35,8 @@ type VideoRow = {
   linkedin_posted_on: string | null;
   youtube_url: string | null;
   youtube_posted_on: string | null;
+  thumbnail_youtube_url: string | null;
+  thumbnail_instagram_url: string | null;
   is_billable: boolean;
   posted_month: string | null;
   video_bill_id: string | null;
@@ -102,6 +105,39 @@ function SocialLinkIcons({ v }: { v: VideoRow }) {
   );
 }
 
+// One mandatory thumbnail slot. Shows the newly-picked file, else the existing
+// URL (on resubmit), and a file picker. `box` sizes the preview to the ratio.
+function ThumbnailPicker({ label, hint, box, existingUrl, file, onPick }: {
+  label: string; hint: string; box: string;
+  existingUrl: string; file: File | null; onPick: (f: File | null) => void;
+}) {
+  const preview = file ? URL.createObjectURL(file) : existingUrl || "";
+  return (
+    <div>
+      <label className="text-xs font-medium mb-1 block">{label} *</label>
+      <div className="flex items-start gap-3">
+        {preview ? (
+          <div className="relative shrink-0">
+            <img src={preview} alt={label} className={`${box} rounded-lg object-cover border border-border`} />
+            {file && (
+              <button type="button" onClick={() => onPick(null)}
+                className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-white flex items-center justify-center">
+                <X className="h-2.5 w-2.5" />
+              </button>
+            )}
+          </div>
+        ) : null}
+        <div className="min-w-0">
+          <input type="file" accept="image/*"
+            onChange={e => { onPick(e.target.files?.[0] || null); e.target.value = ""; }}
+            className="text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs" />
+          <p className="text-[10px] text-muted-foreground mt-1">{hint}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VideoEditorPortal() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -119,7 +155,11 @@ export default function VideoEditorPortal() {
     title: "",
     content_type: "video" as VideoContentType,
     drive_url: "",
+    thumbnail_youtube_url: "",   // existing 16:9 URL (resubmit)
+    thumbnail_instagram_url: "", // existing 9:16 URL (resubmit)
   });
+  // Newly picked thumbnail files, uploaded on submit. Null = keep existing URL.
+  const [thumbFiles, setThumbFiles] = useState<{ youtube: File | null; instagram: File | null }>({ youtube: null, instagram: null });
 
   const [selected, setSelected] = useState<VideoRow | null>(null);
   const [socialForm, setSocialForm] = useState({
@@ -231,6 +271,20 @@ export default function VideoEditorPortal() {
     if (!form.title.trim() || !form.drive_url.trim()) {
       toast({ title: "Title and video link are required", variant: "destructive" }); return;
     }
+    // Both thumbnails are mandatory: a newly-picked file, or an existing URL (resubmit).
+    if (!thumbFiles.youtube && !form.thumbnail_youtube_url) {
+      toast({ title: "YouTube thumbnail required", description: "Attach a 16:9 thumbnail for YouTube.", variant: "destructive" }); return;
+    }
+    if (!thumbFiles.instagram && !form.thumbnail_instagram_url) {
+      toast({ title: "Instagram thumbnail required", description: "Attach a 9:16 thumbnail for Instagram.", variant: "destructive" }); return;
+    }
+    // Validate the shape of any newly-picked thumbnail before we persist anything.
+    if (thumbFiles.youtube && !(await checkAspectRatio(thumbFiles.youtube, 16, 9))) {
+      toast({ title: "Wrong YouTube thumbnail ratio", description: "The YouTube thumbnail must be 16:9 (landscape).", variant: "destructive" }); return;
+    }
+    if (thumbFiles.instagram && !(await checkAspectRatio(thumbFiles.instagram, 9, 16))) {
+      toast({ title: "Wrong Instagram thumbnail ratio", description: "The Instagram thumbnail must be 9:16 (portrait).", variant: "destructive" }); return;
+    }
     // ponytail: client-side dedup against loaded videos; DB unique constraint is the real guard
     const normalised = form.drive_url.trim().replace(/\/+$/, "").toLowerCase();
     if (videos.some(v => v.id !== form.id && v.drive_url.replace(/\/+$/, "").toLowerCase() === normalised)) {
@@ -301,6 +355,20 @@ export default function VideoEditorPortal() {
       });
       setSubmitting(false); return;
     }
+    // Upload any newly-picked thumbnails now that the row exists, then persist
+    // their URLs. Blocking (not fire-and-forget) — thumbnails are mandatory.
+    if (videoId && (thumbFiles.youtube || thumbFiles.instagram)) {
+      try {
+        const patch: any = {};
+        if (thumbFiles.youtube) patch.thumbnail_youtube_url = (await uploadVideoImages("video-thumbnails", videoId, [thumbFiles.youtube]))[0];
+        if (thumbFiles.instagram) patch.thumbnail_instagram_url = (await uploadVideoImages("video-thumbnails", videoId, [thumbFiles.instagram]))[0];
+        const { error: tErr } = await supabase.from("videos" as any).update(patch).eq("id", videoId);
+        if (tErr) throw tErr;
+      } catch (e: any) {
+        toast({ title: "Thumbnail upload failed", description: e.message, variant: "destructive" });
+        setSubmitting(false); return;
+      }
+    }
     // Notify super admins on WhatsApp that a video is awaiting approval.
     // Fire-and-forget — never block the editor's submit on a notification.
     if (videoId) {
@@ -309,7 +377,8 @@ export default function VideoEditorPortal() {
       }).catch(() => { /* notification failure is non-fatal */ });
     }
     toast({ title: form.id ? "Video resubmitted for approval" : "Video submitted for approval" });
-    setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
+    setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "", thumbnail_youtube_url: "", thumbnail_instagram_url: "" });
+    setThumbFiles({ youtube: null, instagram: null });
     setShowSubmit(false);
     setSubmitting(false);
     if (editor) fetchVideos(editor.id);
@@ -401,7 +470,8 @@ export default function VideoEditorPortal() {
           </p>
         </div>
         <Button className="gap-1.5" onClick={() => {
-          setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
+          setForm({ id: "", brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "", thumbnail_youtube_url: "", thumbnail_instagram_url: "" });
+          setThumbFiles({ youtube: null, instagram: null });
           setShowSubmit(true);
         }}>
           <Plus className="h-4 w-4" /> Submit New Video
@@ -516,7 +586,8 @@ export default function VideoEditorPortal() {
                             </Button>
                           ) : v.status === "rejected" ? (
                             <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => {
-                              setForm({ id: v.id, brand: v.brand, title: v.title, content_type: v.content_type, drive_url: v.drive_url });
+                              setForm({ id: v.id, brand: v.brand, title: v.title, content_type: v.content_type, drive_url: v.drive_url, thumbnail_youtube_url: v.thumbnail_youtube_url || "", thumbnail_instagram_url: v.thumbnail_instagram_url || "" });
+                              setThumbFiles({ youtube: null, instagram: null });
                               setShowSubmit(true);
                             }}>
                               <RotateCcw className="h-3 w-3" /> Resubmit
@@ -561,7 +632,7 @@ export default function VideoEditorPortal() {
                 </div>
               );
             })()}
-            {form.id && <VideoHistory videoId={form.id} />}
+            {form.id && <VideoHistory videoId={form.id} canComment />}
             <div>
               <label className="text-xs font-medium mb-1 block">Brand *</label>
               <select value={form.brand} onChange={e => setForm(p => ({ ...p, brand: e.target.value as VideoBrand }))} className={inputCls}>
@@ -587,6 +658,22 @@ export default function VideoEditorPortal() {
                 Drive: share as <span className="font-semibold">Anyone with the link → Viewer</span>. YouTube: set it to <span className="font-semibold">Unlisted</span> (or Public) so the approver can open it.
               </p>
             </div>
+            <ThumbnailPicker
+              label="YouTube thumbnail (16:9)"
+              hint="Landscape image, 16:9 ratio (e.g. 1280×720)."
+              box="h-16 w-28"
+              existingUrl={form.thumbnail_youtube_url}
+              file={thumbFiles.youtube}
+              onPick={f => setThumbFiles(p => ({ ...p, youtube: f }))}
+            />
+            <ThumbnailPicker
+              label="Instagram thumbnail (9:16)"
+              hint="Portrait image, 9:16 ratio (e.g. 1080×1920)."
+              box="h-28 w-[3.95rem]"
+              existingUrl={form.thumbnail_instagram_url}
+              file={thumbFiles.instagram}
+              onPick={f => setThumbFiles(p => ({ ...p, instagram: f }))}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSubmit(false)}>Cancel</Button>

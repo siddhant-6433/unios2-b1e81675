@@ -19,6 +19,7 @@ import { BankDetailsFields } from "@/components/bank/BankDetailsFields";
 import { VideoHistory } from "@/components/video/VideoHistory";
 import { ZohoVendorLinkField } from "@/components/video/ZohoVendorLinkField";
 import { isValidIfsc } from "@/lib/bankDetails";
+import { uploadVideoImages } from "@/lib/videoUpload";
 
 type VideoRow = {
   id: string;
@@ -37,6 +38,8 @@ type VideoRow = {
   linkedin_posted_on: string | null;
   youtube_url: string | null;
   youtube_posted_on: string | null;
+  thumbnail_youtube_url: string | null;
+  thumbnail_instagram_url: string | null;
   approved_at: string | null;
   created_at: string;
 };
@@ -56,22 +59,6 @@ const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.
 // Label a source link by host so the UI doesn't say "Drive" for a YouTube URL.
 function sourceLabel(url: string): string {
   return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
-}
-
-// Upload correction screenshots to the public application-documents bucket and
-// return their public URLs. Throws on the first failed upload.
-async function uploadScreenshots(videoId: string, files: File[]): Promise<string[]> {
-  const urls: string[] = [];
-  for (const f of files) {
-    const ext = f.name.split(".").pop() || "jpg";
-    const path = `video-rejections/${videoId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error } = await supabase.storage
-      .from("application-documents")
-      .upload(path, f, { contentType: f.type, upsert: false });
-    if (error) throw error;
-    urls.push(supabase.storage.from("application-documents").getPublicUrl(path).data.publicUrl);
-  }
-  return urls;
 }
 
 function fmtPostedAt(iso: string | null): string {
@@ -221,7 +208,7 @@ export default function VideoApprovals() {
     setActing(true);
     let urls: string[] = [];
     try {
-      urls = await uploadScreenshots(selected.id, screenshots);
+      urls = await uploadVideoImages("video-rejections", selected.id, screenshots);
     } catch (e: any) {
       toast({ title: "Screenshot upload failed", description: e.message, variant: "destructive" });
       setActing(false); return;
@@ -523,9 +510,26 @@ export default function VideoApprovals() {
                 <ExternalLink className="h-4 w-4" /> Open {sourceLabel(selected.drive_url)} Link
               </a>
 
+              {(selected.thumbnail_youtube_url || selected.thumbnail_instagram_url) && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-1.5">Thumbnails</p>
+                  <div className="flex gap-3">
+                    {[
+                      { url: selected.thumbnail_youtube_url, label: "YouTube 16:9", box: "h-20 w-36" },
+                      { url: selected.thumbnail_instagram_url, label: "Instagram 9:16", box: "h-32 w-[4.5rem]" },
+                    ].map(t => t.url ? (
+                      <a key={t.label} href={t.url} target="_blank" rel="noreferrer" className="text-center">
+                        <img src={t.url} alt={t.label} className={`${t.box} rounded-lg object-cover border border-border`} />
+                        <span className="mt-1 block text-[9px] text-muted-foreground">{t.label}</span>
+                      </a>
+                    ) : null)}
+                  </div>
+                </div>
+              )}
+
               <PostedLinks v={selected} />
 
-              <VideoHistory videoId={selected.id} />
+              <VideoHistory videoId={selected.id} canComment />
 
               {selected.status === "rejected" && (selected.rejection_reason || selected.rejection_screenshots?.length) && (
                 <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
