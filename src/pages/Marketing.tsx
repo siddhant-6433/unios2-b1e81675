@@ -387,7 +387,19 @@ export default function Marketing() {
         },
       });
       if (error || data?.error || data?.ok === false) {
-        throw new Error(error?.message || data?.error || "Send failed.");
+        // supabase functions.invoke throws a FunctionsHttpError whose generic
+        // message is "non-2xx status code" — the real reason (e.g. Meta's
+        // "template does not exist in this WABA" or "number not found") is in
+        // the response body. Surface it so the failure is actionable.
+        let detail = (error as any)?.message || data?.error || data?.meta_error || "Send failed.";
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try {
+            const body = await ctx.json();
+            detail = body?.error || body?.meta_error || detail;
+          } catch { /* keep generic detail */ }
+        }
+        throw new Error(detail);
       }
       toast({ title: "Test sent", description: `Sent to ${waTestPhone}` });
     } catch (err) {
