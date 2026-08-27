@@ -97,6 +97,22 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
+  // Diagnostic/onboarding: list a WABA's phone numbers (id + display number) so a
+  // stale meta_phone_number_id can be corrected or a new number (Seralis) wired.
+  // { "action": "list_phone_numbers", "waba_id": "...", "token_env"?: "WHATSAPP_API_TOKEN" }
+  const reqBody = await req.json().catch(() => ({}));
+  if (reqBody?.action === "list_phone_numbers") {
+    const token = (Deno.env.get(reqBody.token_env || "WHATSAPP_API_TOKEN") || "").trim();
+    if (!token || !reqBody.waba_id) return json({ error: "waba_id and a valid token_env required" }, 400);
+    const res = await fetchWithTimeout(
+      `https://graph.facebook.com/v21.0/${reqBody.waba_id}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      15000,
+    );
+    const body = await res.json().catch(() => ({}));
+    return json({ ok: res.ok, status: res.status, phone_numbers: body?.data || body?.error || body }, res.ok ? 200 : 200);
+  }
+
   const { data: channels, error } = await admin
     .from("whatsapp_channels")
     .select("id, label, route, secret_token_name, meta_phone_number_id, provider, is_active")
