@@ -20,6 +20,7 @@ import {
   DEFAULT_WA_SENDER,
   defaultWaSenderOption,
   loadWaSenders,
+  senderCanSendTemplate,
 } from "@/lib/waSenders";
 import { WhatsAppBusinessIdentity } from "@/components/whatsapp/WhatsAppBusinessIdentity";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
@@ -305,6 +306,10 @@ export default function Marketing() {
     () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
     [waSenderOptions, waSenderValue]
   );
+  const selectedSenderCanSend = useMemo(
+    () => senderCanSendTemplate(waSelectedSender, waTemplate),
+    [waSelectedSender, waTemplate]
+  );
 
   const setScheduledDate = (date: string) => {
     if (!date) {
@@ -354,6 +359,10 @@ export default function Marketing() {
   );
   const handleSendTest = useCallback(async () => {
     if (!waTemplate || !waTestPhone.trim()) return;
+    if (!senderCanSendTemplate(waSelectedSender, waTemplate)) {
+      toast({ title: "Can't send", description: `This sender doesn't have "${waTemplate}" approved.`, variant: "destructive" });
+      return;
+    }
     setWaTestSending(true);
     try {
       const params: string[] = [];
@@ -718,6 +727,9 @@ export default function Marketing() {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
         if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
+        if (!senderCanSendTemplate(waSelectedSender, waTemplate)) {
+          throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
+        }
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
@@ -1439,17 +1451,33 @@ export default function Marketing() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
-                      {waSenderOptions.map((sender) => (
-                        <DropdownMenuItem
-                          key={sender.value}
-                          onSelect={() => setWaSenderValue(sender.value)}
-                          className="cursor-pointer p-0 focus:bg-muted"
-                        >
-                          <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
-                        </DropdownMenuItem>
-                      ))}
+                      {waSenderOptions.map((sender) => {
+                        const canSend = senderCanSendTemplate(sender, waTemplate);
+                        return (
+                          <DropdownMenuItem
+                            key={sender.value}
+                            onSelect={() => setWaSenderValue(sender.value)}
+                            disabled={!canSend}
+                            className="cursor-pointer p-0 focus:bg-muted"
+                          >
+                            <div className="flex w-full flex-col">
+                              <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                              {!canSend && (
+                                <span className="px-3 pb-1.5 text-[11px] font-medium text-destructive">
+                                  Can't send "{waTemplate}"
+                                </span>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                        );
+                      })}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {!selectedSenderCanSend && (
+                    <p className="mt-1.5 text-xs font-medium text-destructive">
+                      This number can't send "{waTemplate}" — its WhatsApp account doesn't have that template approved. Pick another sender or template.
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
@@ -1465,7 +1493,7 @@ export default function Marketing() {
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending}
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || !selectedSenderCanSend}
                     onClick={handleSendTest}
                   >
                     {waTestSending ? "Sending…" : "Send test"}
@@ -1683,6 +1711,7 @@ export default function Marketing() {
                 launching
                 || !selectedList
                 || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
+                || (campaignChannel === "whatsapp" && !selectedSenderCanSend)
               }
             >
               {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}

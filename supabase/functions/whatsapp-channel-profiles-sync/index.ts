@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
 
   const { data: channels, error } = await admin
     .from("whatsapp_channels")
-    .select("id, label, route, secret_token_name, meta_phone_number_id, provider, is_active")
+    .select("id, label, route, secret_token_name, meta_phone_number_id, provider, is_active, waba_id")
     .eq("is_active", true)
     .eq("provider", "meta")
     .not("meta_phone_number_id", "is", null);
@@ -156,12 +156,40 @@ Deno.serve(async (req) => {
       const sourcePic = profRes.ok ? (profBody?.data?.[0]?.profile_picture_url || null) : null;
       if (sourcePic) avatarUrl = await rehostAvatar(admin, supabaseUrl, pnid, sourcePic);
 
+      // Approved templates in this number's WABA (for the picker guard). Only
+      // if we can resolve the WABA: the channel's own waba_id, or the main WABA
+      // env for the bulk/admissions marketing route. Others stay null = unverified.
+      let templateNames: string[] | null = null;
+      const wabaId = ch.waba_id
+        || (["bulk", "admissions"].includes(ch.route) ? (Deno.env.get("WHATSAPP_WABA_ID") || null) : null);
+      if (wabaId) {
+        try {
+          const tplRes = await fetchWithTimeout(
+            `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status&limit=1000`,
+            { headers: authHdr }, 15000,
+          );
+          const tplBody = await tplRes.json().catch(() => ({}));
+          if (tplRes.ok && Array.isArray(tplBody?.data)) {
+            templateNames = [...new Set(
+              tplBody.data
+                .filter((t: any) => String(t?.status).toUpperCase() === "APPROVED")
+                .map((t: any) => String(t.name)),
+            )];
+          }
+        } catch { /* leave null — unverified */ }
+      }
+
       const patch: Record<string, unknown> = { profile_synced_at: new Date().toISOString() };
       if (verifiedName) patch.verified_name = verifiedName;
       if (avatarUrl) patch.profile_picture_url = avatarUrl;
+      if (templateNames) {
+        patch.available_templates = templateNames;
+        patch.templates_synced_at = new Date().toISOString();
+        if (wabaId && !ch.waba_id) patch.waba_id = wabaId;
+      }
       await admin.from("whatsapp_channels").update(patch).eq("id", ch.id);
 
-      results.push({ id: ch.id, phone_number_id: pnid, ok: true, verified_name: verifiedName, avatar: !!avatarUrl });
+      results.push({ id: ch.id, phone_number_id: pnid, ok: true, verified_name: verifiedName, avatar: !!avatarUrl, templates: templateNames?.length ?? null });
     } catch (err: any) {
       results.push({ id: ch.id, phone_number_id: pnid, ok: false, reason: err?.message || "fetch error" });
     }
