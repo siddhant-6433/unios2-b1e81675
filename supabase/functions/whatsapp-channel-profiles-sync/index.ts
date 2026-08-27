@@ -176,16 +176,42 @@ Deno.serve(async (req) => {
       if (wabaId) {
         try {
           const tplRes = await fetchWithTimeout(
-            `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status&limit=1000`,
-            { headers: authHdr }, 15000,
+            `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=1000`,
+            { headers: authHdr }, 20000,
           );
           const tplBody = await tplRes.json().catch(() => ({}));
           if (tplRes.ok && Array.isArray(tplBody?.data)) {
-            templateNames = [...new Set(
-              tplBody.data
-                .filter((t: any) => String(t?.status).toUpperCase() === "APPROVED")
-                .map((t: any) => String(t.name)),
-            )];
+            const approved = tplBody.data.filter((t: any) => String(t?.status).toUpperCase() === "APPROVED");
+            templateNames = [...new Set(approved.map((t: any) => String(t.name)))];
+            // Mirror every WABA's templates into whatsapp_templates (+ a hidden
+            // visibility row) so they appear in the picker/Template Visibility,
+            // not just the main WABA's. Unique on (name, language).
+            for (const t of approved) {
+              const components = Array.isArray(t.components) ? t.components : [];
+              const body = components.find((c: any) => String(c?.type).toUpperCase() === "BODY");
+              const header = components.find((c: any) => String(c?.type).toUpperCase() === "HEADER");
+              const placeholders = [...String(body?.text || "").matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
+              const placeholderCount = placeholders.length ? Math.max(...placeholders) : 0;
+              const headerFormat = header?.format ? String(header.format).toUpperCase() : null;
+              await admin.from("whatsapp_templates").upsert({
+                name: t.name,
+                language: t.language || "en",
+                status: "APPROVED",
+                category: t.category || null,
+                components,
+                header_format: headerFormat,
+                has_media: !!headerFormat && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
+                placeholder_count: placeholderCount,
+                waba_id: wabaId,
+                status_updated_at: new Date().toISOString(),
+              }, { onConflict: "name,language" });
+              await admin.from("whatsapp_template_settings").upsert({
+                template_key: t.name,
+                display_name: String(t.name).replace(/_/g, " "),
+                category: String(t.category || "general").toLowerCase(),
+                visibility: "hidden",
+              }, { onConflict: "template_key", ignoreDuplicates: true });
+            }
           }
         } catch { /* leave null — unverified */ }
       }
