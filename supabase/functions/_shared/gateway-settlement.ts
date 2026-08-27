@@ -588,24 +588,22 @@ export async function settlePaymentLink(
     return { ok: false, message: claim.error, payment_id: payId };
   }
 
-  // Guard: only the first caller flips active→paid.
-  const { data: claimed, error: claimErr } = await admin
-    .from("payment_links")
-    .update({ status: "paid" })
-    .eq("id", link.id)
-    .eq("status", "active")
-    .select("id")
-    .maybeSingle();
-  if (claimErr) return { ok: false, message: claimErr.message, payment_id: payId };
-  if (!claimed) {
-    return {
-      ok: true,
-      already: true,
-      entity_type: "payment_link",
-      entity_id: link.id,
-      payment_id: payId,
-    };
-  }
+  // Idempotency comes from the unique (transaction_ref, type) index on confirmed
+  // lead_payments below — NOT from flipping the link's status up front. The link
+  // is marked paid only AFTER the payment is booked (finalizeLink), so a failure
+  // between the claim and the booking never strands the link as paid-but-unbooked.
+  // That used to be un-retryable: a stranded 'paid' link + the gateway_settlements
+  // claim both blocked every re-drive, silently swallowing real payments (most
+  // often for imported students, whose lead_id is null — see the student branch).
+  const releaseClaim = async () => {
+    if (claim.claimed) {
+      await admin
+        .from("gateway_settlements")
+        .delete()
+        .eq("gateway", gateway)
+        .eq("gateway_payment_id", payId);
+    }
+  };
 
   const paidAmount = Number(link.amount);
   // When the link carries a per-head breakup, record it on the payment and let
@@ -613,21 +611,50 @@ export async function settlePaymentLink(
   // allocation to the matching fee_ledger heads — instead of the oldest-due sweep.
   const hasAllocations = Array.isArray(link.allocations) && link.allocations.length > 0;
 
-  const notifyPaymentReceived = (leadId: string, leadPaymentId: string) => {
-    fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-      body: JSON.stringify({
-        event: "payment_received",
-        lead_id: leadId,
-        context: { payment_id: leadPaymentId },
-      }),
-    }).catch((e) => console.error("[gateway-settlement] payment_link notify failed:", e));
+  const notifyPaymentReceived = (leadId: string | null, leadPaymentId: string) => {
+    // notify-event is lead-anchored (WhatsApp/email relay); skip it for lead-less
+    // (imported) students, but always mint the receipt PDF — it is student-aware
+    // and resolves branding off the student's own course→institution chain.
+    if (leadId) {
+      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({
+          event: "payment_received",
+          lead_id: leadId,
+          context: { payment_id: leadPaymentId },
+        }),
+      }).catch((e) => console.error("[gateway-settlement] payment_link notify failed:", e));
+    }
     fireReceiptPdf(supabaseUrl, serviceKey, leadPaymentId);
   };
 
+  // Final step of every branch: back-link the payment and flip the link paid.
+  const finalizeLink = async (leadPaymentId: string) => {
+    await admin
+      .from("payment_links")
+      .update({ status: "paid", lead_payment_id: leadPaymentId })
+      .eq("id", link.id);
+  };
+
+  // A confirmed payment with this transaction_ref already exists (concurrent
+  // settle, or a re-drive of a previously-stranded link): heal the link and stop.
+  const healFromExisting = async (): Promise<SettlementResult> => {
+    const { data: existing } = await admin
+      .from("lead_payments")
+      .select("id")
+      .eq("transaction_ref", payId)
+      .eq("status", "confirmed")
+      .maybeSingle();
+    if (existing?.id) await finalizeLink(existing.id);
+    return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+  };
+
   if (link.purpose === "pre_admission_token") {
-    if (!link.lead_id) return { ok: false, message: "pre_admission_token link has no lead_id" };
+    if (!link.lead_id) {
+      await releaseClaim();
+      return { ok: false, message: "pre_admission_token link has no lead_id" };
+    }
     const { data: lp, error } = await admin
       .from("lead_payments")
       .insert({
@@ -644,12 +671,13 @@ export async function settlePaymentLink(
       .maybeSingle();
     if (error) {
       if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
-        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+        return await healFromExisting();
       }
+      await releaseClaim();
       return { ok: false, message: error.message };
     }
     if (lp?.id) {
-      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      await finalizeLink(lp.id);
       notifyPaymentReceived(link.lead_id, lp.id);
     }
     return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
@@ -658,13 +686,18 @@ export async function settlePaymentLink(
   if (link.student_id) {
     const { data: student } = await admin
       .from("students").select("lead_id").eq("id", link.student_id).maybeSingle();
+    // Imported students have no lead — leadId stays null. lead_payments.lead_id is
+    // nullable and the oldest-due sweep below keys on student_id, so the payment
+    // books fine without a lead; the receipt PDF resolves branding off the
+    // student's own course→institution chain. (Previously this returned early and
+    // stranded the already-claimed link as paid-but-unbooked.)
     const leadId = student?.lead_id || link.lead_id || null;
-    if (!leadId) return { ok: false, message: "No lead linked to student for settlement" };
 
     const { data: lp, error } = await admin
       .from("lead_payments")
       .insert({
         lead_id: leadId,
+        student_id: link.student_id,
         type: "other",
         amount: paidAmount,
         payment_mode: "gateway",
@@ -681,14 +714,15 @@ export async function settlePaymentLink(
       .maybeSingle();
     if (error) {
       if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
-        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+        return await healFromExisting();
       }
+      await releaseClaim();
       return { ok: false, message: error.message };
     }
     if (lp?.id) {
-      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
       if (hasAllocations) {
         // Breakup routing is handled by provision_student_fees (confirm trigger).
+        await finalizeLink(lp.id);
         notifyPaymentReceived(leadId, lp.id);
         return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
       }
@@ -725,6 +759,7 @@ export async function settlePaymentLink(
           })),
         );
       }
+      await finalizeLink(lp.id);
       notifyPaymentReceived(leadId, lp.id);
     }
     return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
@@ -750,16 +785,18 @@ export async function settlePaymentLink(
       .maybeSingle();
     if (error) {
       if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
-        return { ok: true, already: true, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
+        return await healFromExisting();
       }
+      await releaseClaim();
       return { ok: false, message: error.message };
     }
     if (lp?.id) {
-      await admin.from("payment_links").update({ lead_payment_id: lp.id }).eq("id", link.id);
+      await finalizeLink(lp.id);
       notifyPaymentReceived(link.lead_id, lp.id);
     }
     return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
   }
 
+  await releaseClaim();
   return { ok: false, message: "Link has no settlement target" };
 }
