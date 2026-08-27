@@ -44,7 +44,11 @@ SELECT cron.schedule(
                ) || '/functions/v1/campaign-dispatcher',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
-      'x-cron-secret', coalesce((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1), '')
+      -- Hardcoded to match the CRON_SECRET *env* var the dispatcher checks,
+      -- same as every other working cron here. The vault.decrypted_secrets
+      -- 'CRON_SECRET' value has drifted stale (see the sb_secret_ key migration
+      -- notes) — sourcing it from vault silently 401s the whole pipeline.
+      'x-cron-secret', '825230a9abd38418482572ca5ec24dbd06221ffa'
     ),
     body    := jsonb_build_object('limit', 4, 'batch_size', 120),
     timeout_milliseconds := 55000
