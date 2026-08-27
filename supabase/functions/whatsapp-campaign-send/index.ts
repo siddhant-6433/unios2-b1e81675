@@ -682,6 +682,30 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Server-side visibility gate. Recipient rows can be inserted with arbitrary
+    // lead_ids (whatsapp_campaign_recipients is USING(true)) and we read them with
+    // the service role (bypassing RLS), so a counsellor could otherwise blast leads
+    // outside their scope. Filter the batch to leads the campaign CREATOR was
+    // allowed to see (can_view_lead). Defense-in-depth over the frontend scoping;
+    // fails OPEN on RPC error to avoid breaking legitimate sends. Sees-all roles
+    // (admins) return the whole batch unchanged.
+    const viewableLeadIds = new Set<string>(leadIds);
+    if (leadIds.length > 0) {
+      const { data: viewable, error: viewErr } = await adminClient.rpc(
+        "filter_viewable_campaign_leads",
+        { p_created_by: (campaign as any).created_by || null, p_lead_ids: leadIds },
+      );
+      if (viewErr) {
+        console.error("filter_viewable_campaign_leads failed (allowing batch):", viewErr.message);
+      } else {
+        viewableLeadIds.clear();
+        for (const row of (viewable || []) as any[]) {
+          const id = typeof row === "string" ? row : (row?.filter_viewable_campaign_leads ?? Object.values(row || {})[0]);
+          if (typeof id === "string") viewableLeadIds.add(id);
+        }
+      }
+    }
+
     // Static params filled once at campaign-creation time (see Lists UI).
     // Used to plug params that aren't per-lead — visit_date, fee amount,
     // due_date, application_id, etc. Auto-filled per-lead from the leads
@@ -744,6 +768,19 @@ Deno.serve(async (req) => {
       const courseName = lead.courses?.name || "";
       const campusName = lead.campuses?.name || "";
       const waPhone = (recipient.phone || lead.phone || "").replace(/[^0-9]/g, "");
+
+      // Authorization: never send to a lead the campaign creator couldn't see.
+      if (recipient.lead_id && !viewableLeadIds.has(recipient.lead_id)) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({
+            status: "skipped",
+            error_message: "Skipped: lead outside the campaign creator's visibility scope",
+          })
+          .eq("id", recipient.id);
+        failedCount++;
+        return;
+      }
 
       // DNC is a hard stop: never send further communications (stage may have
       // changed after the campaign was queued).
