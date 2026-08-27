@@ -43,6 +43,10 @@ export interface WhatsAppSendResult {
   status: number;
   raw: unknown;
   error: string | null;
+  // Meta's numeric error code (e.g. 131049 throttle, 131026 invalid recipient),
+  // surfaced so callers can classify transient vs permanent failures without
+  // string-matching the message. null on success or non-Meta providers.
+  errorCode?: number | null;
 }
 
 interface SupabaseLike {
@@ -76,6 +80,30 @@ export function digits(value: string | null | undefined): string {
 export function isLikelyBusinessPhoneNumber(value: string | null | undefined): boolean {
   const normalized = digits(value);
   return normalized.length === 10 || (normalized.length === 12 && normalized.startsWith("91"));
+}
+
+// Pull Meta's numeric error code out of a Graph error body:
+// { error: { code: 131049, error_data: { details }, ... } }.
+export function metaErrorCode(raw: unknown): number | null {
+  const err = (raw as { error?: unknown })?.error ?? raw;
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === "number" ? code : null;
+}
+
+// fetch with an AbortController deadline. A hung Graph connection would
+// otherwise block a whole send batch until the platform kills the invocation.
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs = 20000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function errorMessage(value: unknown, fallback: string): string {
@@ -402,7 +430,7 @@ export async function sendWhatsAppTemplate(
     };
   }
 
-  const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const response = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -427,5 +455,6 @@ export async function sendWhatsAppTemplate(
     status: response.status,
     raw,
     error: response.ok ? null : errorMessage((raw as { error?: unknown })?.error || raw, "Failed to send template via Meta"),
+    errorCode: response.ok ? null : metaErrorCode(raw),
   };
 }

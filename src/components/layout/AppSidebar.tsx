@@ -115,7 +115,7 @@ const admissionSubMenu: MenuItem[] = [
 ];
 
 const marketingSubMenu: MenuItem[] = [
-  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["counsellor", "academic_partner", "academic_partner_offer_letter"] },
   { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },

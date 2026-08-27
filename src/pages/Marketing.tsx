@@ -10,10 +10,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, CheckCircle2, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
+import {
+  type WaSenderOption,
+  DEFAULT_WA_SENDER,
+  defaultWaSenderOption,
+  loadWaSenders,
+} from "@/lib/waSenders";
+import { WhatsAppBusinessIdentity } from "@/components/whatsapp/WhatsAppBusinessIdentity";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
@@ -63,6 +71,8 @@ interface CampaignRow {
   called: number;
   clickedLink: number;
   clickedButton: number;
+  delivered: number;
+  read: number;
   status: string;
   createdAt: string;
   completedAt: string | null;
@@ -99,6 +109,9 @@ interface RecipientRow {
   clickedUrl: string | null;
   clickedButtonAt: string | null;
   clickedButtonTitle: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  failedAt: string | null;
 }
 
 const statusTone = (status: string) => {
@@ -267,6 +280,10 @@ export default function Marketing() {
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
+  const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
+  const [waTestPhone, setWaTestPhone] = useState("");
+  const [waTestSending, setWaTestSending] = useState(false);
   const [emailMode, setEmailMode] = useState<"template" | "custom">("template");
   const [emailSlug, setEmailSlug] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -284,6 +301,10 @@ export default function Marketing() {
   const canDeleteLists = role === "super_admin";
   const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
   const scheduledTimeValue = scheduledTimePart(campaignScheduledAt);
+  const waSelectedSender = useMemo(
+    () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
+    [waSenderOptions, waSenderValue]
+  );
 
   const setScheduledDate = (date: string) => {
     if (!date) {
@@ -331,6 +352,55 @@ export default function Marketing() {
     ),
     [selectedWaTemplate?.key, waTemplateComponentsByKey],
   );
+  const handleSendTest = useCallback(async () => {
+    if (!waTemplate || !waTestPhone.trim()) return;
+    setWaTestSending(true);
+    try {
+      const params: string[] = [];
+      for (const p of selectedWaTemplate?.params || []) {
+        if (isWaMediaTemplateParam(p.name)) continue;
+        const value = effectiveWaParamValue(waStaticParams, p.name);
+        const mappedToken = decodeWaParamFieldMapping(value);
+        if (mappedToken) {
+          params.push(sampleValueForWaMappedField(mappedToken));
+        } else if (value.trim()) {
+          params.push(value.trim());
+        } else {
+          params.push(sampleValueForParam(p.name));
+        }
+      }
+
+      const hasMediaHeader = (selectedWaTemplate?.params || []).some((p) => isWaMediaTemplateParam(p.name));
+      const headerImageUrl = hasMediaHeader
+        ? (effectiveWaParamValue(waStaticParams, "template_header_media_url").trim() || selectedWaTemplateDefaultMediaUrl || undefined)
+        : undefined;
+
+      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: waTemplate,
+          phone: waTestPhone.trim(),
+          params,
+          provider: "meta",
+          business_phone_number_id: waSelectedSender?.phoneNumberId || null,
+          business_number: waSelectedSender?.businessNumber || null,
+          ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+        },
+      });
+      if (error || data?.error || data?.ok === false) {
+        throw new Error(error?.message || data?.error || "Send failed.");
+      }
+      toast({ title: "Test sent", description: `Sent to ${waTestPhone}` });
+    } catch (err) {
+      toast({
+        title: "Test failed",
+        description: err instanceof Error ? err.message : "Could not send test message.",
+        variant: "destructive",
+      });
+    } finally {
+      setWaTestSending(false);
+    }
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, toast]);
+
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
     if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
@@ -403,6 +473,17 @@ export default function Marketing() {
       emailQuery,
     ]);
 
+    const waIds = ((waRes.data as any[]) || []).map((row) => row.id);
+    const funnelRes = waIds.length
+      ? await supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: waIds })
+      : null;
+    const funnelById = new Map<string, { delivered: number; read: number; failed: number }>(
+      ((funnelRes?.data as any[]) || []).map((r) => [
+        r.campaign_id,
+        { delivered: Number(r.delivered || 0), read: Number(r.read || 0), failed: Number(r.failed || 0) },
+      ]),
+    );
+
     const waRows: CampaignRow[] = ((waRes.data as any[]) || []).map((row) => {
       const total = Number(row.total_recipients || 0);
       const sent = Number(row.sent_count || 0);
@@ -421,6 +502,8 @@ export default function Marketing() {
         called: Number(row.called_count || 0),
         clickedLink: Number(row.link_click_count || 0),
         clickedButton: Number(row.button_click_count || 0),
+        delivered: funnelById.get(row.id)?.delivered ?? 0,
+        read: funnelById.get(row.id)?.read ?? 0,
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -447,6 +530,8 @@ export default function Marketing() {
         called: Number(row.called_count || 0),
         clickedLink: Number(row.link_click_count || 0),
         clickedButton: Number(row.button_click_count || 0),
+        delivered: 0,
+        read: 0,
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -460,6 +545,15 @@ export default function Marketing() {
   }, [dateBounds, role]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    loadWaSenders(supabase as any)
+      .then(({ options }) => {
+        setWaSenderOptions(options);
+        setWaSenderValue((c) => options.some((o) => o.value === c) ? c : options[0]?.value || DEFAULT_WA_SENDER);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
@@ -482,7 +576,10 @@ export default function Marketing() {
       setEmailTemplates(nextTemplates);
       setSelectedListId((current) => {
         if (requestedListId && nextLists.some((list) => list.id === requestedListId)) return requestedListId;
-        return current || nextLists[0]?.id || "";
+        // Do NOT auto-select the first list — an auto-selected list + default
+        // channel/template left "Queue Campaign" enabled on load, so a stray
+        // click blasted the whole first list. Require an explicit choice.
+        return current;
       });
       setEmailSlug((current) => current || nextTemplates[0]?.slug || "");
     })();
@@ -559,11 +656,13 @@ export default function Marketing() {
         acc.called += item.called;
         acc.clickedLink += item.clickedLink;
         acc.clickedButton += item.clickedButton;
+        acc.delivered += item.delivered;
+        acc.read += item.read;
         if (item.channel === "whatsapp") acc.whatsapp += item.sent;
         if (item.channel === "email") acc.email += item.sent;
         return acc;
       },
-      { total: 0, sent: 0, failed: 0, pending: 0, responded: 0, called: 0, clickedLink: 0, clickedButton: 0, whatsapp: 0, email: 0 },
+      { total: 0, sent: 0, failed: 0, pending: 0, responded: 0, called: 0, clickedLink: 0, clickedButton: 0, delivered: 0, read: 0, whatsapp: 0, email: 0 },
     );
   }, [campaigns]);
 
@@ -572,6 +671,20 @@ export default function Marketing() {
       setLaunchError("Pick a lead list first.");
       return;
     }
+    // Confirm before firing — queuing a campaign blasts real messages to a whole
+    // list and can't be recalled. Show the blast radius so it can't be triggered
+    // by an accidental click.
+    const channelLabel = campaignChannel === "whatsapp" ? "WhatsApp" : "Email";
+    const templateLabel = campaignChannel === "whatsapp" ? waTemplate : emailSlug;
+    const whenLabel = campaignScheduleMode === "scheduled" && campaignScheduledAt
+      ? `scheduled for ${campaignScheduledAt}`
+      : "now";
+    const ok = window.confirm(
+      `Queue ${channelLabel} campaign to "${selectedList.name}" (~${selectedList.member_count} leads) ` +
+      `using template "${templateLabel}", sending ${whenLabel}?\n\n` +
+      `Eligible leads (after DNC / quiet-day / scope filters) will receive this message. This cannot be undone.`,
+    );
+    if (!ok) return;
     setLaunching(true);
     setLaunchError(null);
 
@@ -646,6 +759,8 @@ export default function Marketing() {
             list_id: selectedList.id,
             total_recipients: valid.length,
             static_params: staticParamsToSend,
+            business_phone_number_id: waSelectedSender?.phoneNumberId || null,
+            business_phone_number: waSelectedSender?.businessNumber || null,
             created_by: profile?.id || null,
             next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
@@ -772,9 +887,10 @@ export default function Marketing() {
     const table = campaign.channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients";
     const destinationColumn = campaign.channel === "whatsapp" ? "phone" : "to_email";
     const providerColumn = campaign.channel === "whatsapp" ? "message_id" : "provider_id";
+    const funnelColumns = campaign.channel === "whatsapp" ? ",delivered_at,read_at,failed_at" : "";
     const { data } = await supabase
       .from(table as any)
-      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title,leads(name)`)
+      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title${funnelColumns},leads(name)`)
       .eq("campaign_id", campaign.id)
       .order("created_at", { ascending: false })
       .limit(500);
@@ -794,6 +910,9 @@ export default function Marketing() {
       clickedUrl: row.clicked_url || null,
       clickedButtonAt: row.clicked_button_at || null,
       clickedButtonTitle: row.clicked_button_title || null,
+      deliveredAt: row.delivered_at ?? null,
+      readAt: row.read_at ?? null,
+      failedAt: row.failed_at ?? null,
     })));
     setRecipientsLoading(false);
   };
@@ -1020,12 +1139,14 @@ export default function Marketing() {
 
   const downloadRecipientReport = () => {
     if (!detailCampaign) return;
-    const headers = ["Lead", "Destination", "Status", "Sent at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"];
+    const headers = ["Lead", "Destination", "Status", "Sent at", "Delivered at", "Read at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"];
     const rows = recipients.map((recipient) => [
       recipient.leadName || "",
       recipient.destination,
       recipient.status,
       recipient.sentAt || "",
+      recipient.deliveredAt || "",
+      recipient.readAt || "",
       recipient.respondedAt || "",
       recipient.calledAt || "",
       recipient.callDisposition || "",
@@ -1078,6 +1199,9 @@ export default function Marketing() {
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/template-manager"><Megaphone className="mr-2 h-4 w-4" /> Templates</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/marketing/opt-outs"><UserX className="mr-2 h-4 w-4" /> Opt-outs</Link>
           </Button>
           <Button onClick={load} variant="outline" size="sm" disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -1290,6 +1414,51 @@ export default function Marketing() {
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Send from number</label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20"
+                      >
+                        <WhatsAppBusinessIdentity sender={waSelectedSender ?? defaultWaSenderOption()} compact />
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
+                      {waSenderOptions.map((sender) => (
+                        <DropdownMenuItem
+                          key={sender.value}
+                          onSelect={() => setWaSenderValue(sender.value)}
+                          className="cursor-pointer p-0 focus:bg-muted"
+                        >
+                          <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs font-medium text-muted-foreground">Send test message</label>
+                    <Input
+                      value={waTestPhone}
+                      onChange={(e) => setWaTestPhone(e.target.value)}
+                      placeholder="Phone number to test"
+                      className="mt-1"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending}
+                    onClick={handleSendTest}
+                  >
+                    {waTestSending ? "Sending…" : "Send test"}
+                  </Button>
+                </div>
                 <div>
                   <SelectField
                     label="WhatsApp template"
@@ -1520,6 +1689,8 @@ export default function Marketing() {
         <div className="grid gap-3 md:grid-cols-4">
           <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
           <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
+          <Metric title="Delivered" value={`${totals.delivered.toLocaleString("en-IN")} (${pct(totals.delivered, totals.sent)})`} icon={CheckCircle2} tone="blue" />
+          <Metric title="Read" value={`${totals.read.toLocaleString("en-IN")} (${pct(totals.read, totals.sent)})`} icon={MessageSquare} tone="emerald" />
           <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
           <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
         </div>
@@ -1581,6 +1752,8 @@ export default function Marketing() {
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-right">Recipients</th>
                     <th className="px-4 py-3 text-right">Sent</th>
+                    <th className="px-4 py-3 text-right">Delivered</th>
+                    <th className="px-4 py-3 text-right">Read</th>
                     <th className="px-4 py-3 text-right">Failed</th>
                     <th className="px-4 py-3 text-right">Responded</th>
                     <th className="px-4 py-3 text-right">Called</th>
@@ -1613,6 +1786,22 @@ export default function Marketing() {
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-success">{campaign.sent.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium text-success">
+                          {campaign.channel === "whatsapp" ? campaign.delivered.toLocaleString("en-IN") : "—"}
+                        </div>
+                        {campaign.channel === "whatsapp" && (
+                          <div className="text-[11px] text-muted-foreground">{pct(campaign.delivered, campaign.sent)}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium text-success">
+                          {campaign.channel === "whatsapp" ? campaign.read.toLocaleString("en-IN") : "—"}
+                        </div>
+                        {campaign.channel === "whatsapp" && (
+                          <div className="text-[11px] text-muted-foreground">{pct(campaign.read, campaign.sent)}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-destructive">{campaign.failed.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
@@ -1743,6 +1932,8 @@ export default function Marketing() {
                     <th className="px-3 py-2 text-left">Destination</th>
                     <th className="px-3 py-2 text-left">Status</th>
                     <th className="px-3 py-2 text-left">Sent</th>
+                    <th className="px-3 py-2 text-left">Delivered</th>
+                    <th className="px-3 py-2 text-left">Read</th>
                     <th className="px-3 py-2 text-left">Responded</th>
                     <th className="px-3 py-2 text-left">Called</th>
                     <th className="px-3 py-2 text-left">Clicks</th>
@@ -1759,6 +1950,8 @@ export default function Marketing() {
                         <Badge variant="outline" className="capitalize">{row.status}</Badge>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.sentAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.deliveredAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.readAt)}</td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.respondedAt)}</td>
                       <td className="px-3 py-2 text-muted-foreground">
                         <div>{fmtDate(row.calledAt)}</div>
