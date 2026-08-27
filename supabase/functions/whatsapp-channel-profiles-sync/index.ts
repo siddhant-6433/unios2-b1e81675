@@ -101,6 +101,17 @@ Deno.serve(async (req) => {
   // stale meta_phone_number_id can be corrected or a new number (Seralis) wired.
   // { "action": "list_phone_numbers", "waba_id": "...", "token_env"?: "WHATSAPP_API_TOKEN" }
   const reqBody = await req.json().catch(() => ({}));
+  if (reqBody?.action === "list_business_numbers") {
+    const token = (Deno.env.get(reqBody.token_env || "WHATSAPP_API_TOKEN") || "").trim();
+    if (!token || !reqBody.business_id) return json({ error: "business_id + valid token_env required" }, 400);
+    const res = await fetchWithTimeout(
+      `https://graph.facebook.com/v21.0/${reqBody.business_id}/owned_whatsapp_business_accounts?fields=id,name,phone_numbers%7Bid,display_phone_number,verified_name%7D`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      15000,
+    );
+    const body = await res.json().catch(() => ({}));
+    return json({ ok: res.ok, status: res.status, wabas: body?.data || body?.error || body });
+  }
   if (reqBody?.action === "list_phone_numbers") {
     const token = (Deno.env.get(reqBody.token_env || "WHATSAPP_API_TOKEN") || "").trim();
     const wabaId = reqBody.waba_id || (reqBody.waba_env ? Deno.env.get(reqBody.waba_env) : null);
