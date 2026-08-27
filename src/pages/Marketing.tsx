@@ -283,6 +283,12 @@ export default function Marketing() {
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  // Real Meta template arity + which keys actually exist as APPROVED Meta templates.
+  // The hardcoded WA_BULK_TEMPLATES params/keys drift from Meta (e.g. lead_welcome
+  // has 3 body placeholders in Meta but 2 in config; kb_placements isn't a Meta
+  // template at all), which broke test-sends. These come from whatsapp_templates.
+  const [placeholderCountByKey, setPlaceholderCountByKey] = useState<Record<string, number>>({});
+  const [approvedTemplateKeys, setApprovedTemplateKeys] = useState<Set<string>>(new Set());
   const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waTestPhone, setWaTestPhone] = useState("");
@@ -340,10 +346,15 @@ export default function Marketing() {
   );
   const availableWaBulkTemplates = useMemo(
     () => [
-      ...WA_BULK_TEMPLATES.map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
+      // Drop hardcoded templates that aren't APPROVED Meta templates (e.g.
+      // kb_placements) — they 404 as "Unknown template" at send. Only filter once
+      // the approved set has loaded, so nothing flashes empty on first render.
+      ...WA_BULK_TEMPLATES
+        .filter((template) => approvedTemplateKeys.size === 0 || approvedTemplateKeys.has(template.key))
+        .map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
       ...dynamicWaBulkTemplates,
     ],
-    [dynamicWaBulkTemplates, waMetaTemplateOverrides],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys],
   );
   const selectedWaTemplate = useMemo(
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
@@ -382,6 +393,10 @@ export default function Marketing() {
     }
     setWaTestSending(true);
     try {
+      // Body params, resolved like the preview. Then reconcile the count against
+      // Meta's real placeholder_count — the hardcoded config drifts (e.g.
+      // lead_welcome is 2 params in config but 3 in Meta), and whatsapp-send hard-
+      // rejects arity mismatches.
       const params: string[] = [];
       for (const p of selectedWaTemplate?.params || []) {
         if (isWaMediaTemplateParam(p.name)) continue;
@@ -394,6 +409,11 @@ export default function Marketing() {
         } else {
           params.push(sampleValueForParam(p.name));
         }
+      }
+      const realCount = placeholderCountByKey[waTemplate];
+      if (typeof realCount === "number") {
+        while (params.length < realCount) params.push(`sample ${params.length + 1}`);
+        params.length = realCount; // truncate if config had extras
       }
 
       const hasMediaHeader = (selectedWaTemplate?.params || []).some((p) => isWaMediaTemplateParam(p.name));
@@ -438,7 +458,7 @@ export default function Marketing() {
     } finally {
       setWaTestSending(false);
     }
-  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, toast]);
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, toast]);
 
   useEffect(() => {
     setWaTestSent(false);
@@ -656,8 +676,14 @@ export default function Marketing() {
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
       const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
       const qualityByKey: Record<string, string | null> = {};
-      (approvedRows || []).forEach((row: { name?: string; quality_score?: string | null }) => {
-        if (row.name) qualityByKey[row.name] = row.quality_score ?? null;
+      const countByKey: Record<string, number> = {};
+      const approvedKeys = new Set<string>();
+      (approvedRows || []).forEach((row: { name?: string; quality_score?: string | null; placeholder_count?: number | null }) => {
+        if (row.name) {
+          qualityByKey[row.name] = row.quality_score ?? null;
+          countByKey[row.name] = Number(row.placeholder_count || 0);
+          approvedKeys.add(row.name);
+        }
       });
       approvedTemplateRows.forEach((row) => {
         if (row.name && row.components) componentsByKey[row.name] = row.components;
@@ -684,6 +710,8 @@ export default function Marketing() {
       setWaMetaTemplateOverrides(overrides);
       setWaTemplateComponentsByKey(componentsByKey);
       setWaTemplateQualityByKey(qualityByKey);
+      setPlaceholderCountByKey(countByKey);
+      setApprovedTemplateKeys(approvedKeys);
       setDynamicWaBulkTemplates(dynamic);
     })();
   }, [role]);
