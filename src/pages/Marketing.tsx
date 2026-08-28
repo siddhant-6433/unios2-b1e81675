@@ -15,11 +15,12 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-fields";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
+  WHATSAPP_BUSINESS_NAME,
   defaultWaSenderOption,
   loadWaSenders,
   senderCanSendTemplate,
@@ -294,6 +295,8 @@ export default function Marketing() {
   // template at all), which broke test-sends. These come from whatsapp_templates.
   const [placeholderCountByKey, setPlaceholderCountByKey] = useState<Record<string, number>>({});
   const [approvedTemplateKeys, setApprovedTemplateKeys] = useState<Set<string>>(new Set());
+  // Which WABA each template belongs to (whatsapp_templates.waba_id, null = main NIMT WABA).
+  const [templateWabaByKey, setTemplateWabaByKey] = useState<Record<string, string | null>>({});
   const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waTestPhone, setWaTestPhone] = useState("");
@@ -324,9 +327,25 @@ export default function Marketing() {
     () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
     [waSenderOptions, waSenderValue]
   );
+  const selectedTemplateWaba = useMemo(
+    () => templateWabaByKey[waTemplate] ?? null,
+    [templateWabaByKey, waTemplate],
+  );
   const selectedSenderCanSend = useMemo(
-    () => senderCanSendTemplate(waSelectedSender, waTemplate),
-    [waSelectedSender, waTemplate]
+    () => senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba),
+    [waSelectedSender, waTemplate, selectedTemplateWaba]
+  );
+  // Org label per waba, sourced from synced senders' verified_name (e.g. "Seralis Lab").
+  const orgByWaba = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const s of waSenderOptions) {
+      if (s.wabaId && s.verifiedName) m[s.wabaId] = s.verifiedName;
+    }
+    return m;
+  }, [waSenderOptions]);
+  const wabaOrgLabel = useCallback(
+    (wabaId: string | null) => (wabaId ? (orgByWaba[wabaId] || "Other WABA") : WHATSAPP_BUSINESS_NAME),
+    [orgByWaba],
   );
 
   const setScheduledDate = (date: string) => {
@@ -363,19 +382,21 @@ export default function Marketing() {
           ...(waMetaTemplateOverrides[template.key] || {}),
           // DB param_specs (Meta-aligned) win over the hardcoded params list.
           ...(paramSpecsByKey[template.key] ? { params: paramSpecsByKey[template.key] } : {}),
+          wabaId: templateWabaByKey[template.key] ?? null,
         })),
-      ...dynamicWaBulkTemplates.map((template) => (
-        paramSpecsByKey[template.key] ? { ...template, params: paramSpecsByKey[template.key] } : template
-      )),
-    ],
-    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys, paramSpecsByKey],
+      ...dynamicWaBulkTemplates.map((template) => ({
+        ...(paramSpecsByKey[template.key] ? { ...template, params: paramSpecsByKey[template.key] } : template),
+        wabaId: templateWabaByKey[template.key] ?? null,
+      })),
+    ] as (WaBulkTemplate & { wabaId?: string | null })[],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys, paramSpecsByKey, templateWabaByKey],
   );
   const selectedWaTemplate = useMemo(
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
     [availableWaBulkTemplates, waTemplate],
   );
   const templateOptions = useMemo(
-    () => availableWaBulkTemplates.filter((template) => senderCanSendTemplate(waSelectedSender, template.key)),
+    () => availableWaBulkTemplates.filter((template) => senderCanSendTemplate(waSelectedSender, template.key, template.wabaId)),
     [availableWaBulkTemplates, waSelectedSender],
   );
   const waTemplateQuality = useMemo(
@@ -395,7 +416,7 @@ export default function Marketing() {
   );
   const handleSendTest = useCallback(async () => {
     if (!waTemplate || !waTestPhone.trim()) return;
-    if (!senderCanSendTemplate(waSelectedSender, waTemplate)) {
+    if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
       toast({ title: "Can't send", description: `This sender doesn't have "${waTemplate}" approved.`, variant: "destructive" });
       return;
     }
@@ -472,7 +493,7 @@ export default function Marketing() {
     } finally {
       setWaTestSending(false);
     }
-  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, toast]);
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, toast]);
 
   useEffect(() => {
     setWaTestSent(false);
@@ -688,8 +709,13 @@ export default function Marketing() {
       }
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
-        .select("name, components, placeholder_count, has_media, header_format, quality_score")
+        .select("name, components, placeholder_count, has_media, header_format, quality_score, waba_id")
         .eq("status", "APPROVED");
+      const wabaByKey: Record<string, string | null> = {};
+      for (const row of (approvedRows || []) as Array<{ name?: string; waba_id?: string | null }>) {
+        if (row.name) wabaByKey[row.name] = row.waba_id ?? null;
+      }
+      setTemplateWabaByKey(wabaByKey);
       const dynamicTemplateKeys = settingsRows
         .map((setting) => setting.template_key)
         .filter((templateKey) => templateKey && !knownKeys.has(templateKey));
@@ -803,7 +829,7 @@ export default function Marketing() {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
         if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
-        if (!senderCanSendTemplate(waSelectedSender, waTemplate)) {
+        if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
         }
 
@@ -1532,20 +1558,38 @@ export default function Marketing() {
                         <CommandInput placeholder="Search templates…" />
                         <CommandList className="max-h-[300px] overflow-y-auto">
                           <CommandEmpty>No templates found.</CommandEmpty>
-                          {templateOptions.map((template) => (
-                            <CommandItem
-                              key={template.key}
-                              value={template.label}
-                              onSelect={() => {
-                                setWaTemplate(template.key);
-                                setWaStaticParams({});
-                                setTemplatePickerOpen(false);
-                              }}
-                            >
-                              <Check className={`mr-2 h-4 w-4 ${template.key === waTemplate ? "opacity-100" : "opacity-0"}`} />
-                              <span className="truncate">{template.label}</span>
-                            </CommandItem>
-                          ))}
+                          {(() => {
+                            const groups = new Map<string, typeof templateOptions>();
+                            for (const template of templateOptions) {
+                              const org = wabaOrgLabel(template.wabaId ?? null);
+                              const list = groups.get(org) || [];
+                              list.push(template);
+                              groups.set(org, list);
+                            }
+                            const orgs = [...groups.keys()].sort((a, b) => {
+                              if (a === WHATSAPP_BUSINESS_NAME) return -1;
+                              if (b === WHATSAPP_BUSINESS_NAME) return 1;
+                              return a.localeCompare(b);
+                            });
+                            return orgs.map((org) => (
+                              <CommandGroup key={org} heading={org}>
+                                {groups.get(org)!.map((template) => (
+                                  <CommandItem
+                                    key={template.key}
+                                    value={`${org} ${template.label}`}
+                                    onSelect={() => {
+                                      setWaTemplate(template.key);
+                                      setWaStaticParams({});
+                                      setTemplatePickerOpen(false);
+                                    }}
+                                  >
+                                    <Check className={`mr-2 h-4 w-4 ${template.key === waTemplate ? "opacity-100" : "opacity-0"}`} />
+                                    <span className="truncate">{template.label}</span>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            ));
+                          })()}
                         </CommandList>
                       </Command>
                     </PopoverContent>
@@ -1586,7 +1630,7 @@ export default function Marketing() {
                         <CommandList className="max-h-[300px] overflow-y-auto">
                           <CommandEmpty>No numbers found.</CommandEmpty>
                           {waSenderOptions.map((sender) => {
-                            const canSend = senderCanSendTemplate(sender, waTemplate);
+                            const canSend = senderCanSendTemplate(sender, waTemplate, selectedTemplateWaba);
                             return (
                               <CommandItem
                                 key={sender.value}

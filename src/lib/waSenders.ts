@@ -15,6 +15,7 @@ export type WaSenderOption = {
   label: string;
   provider: "meta" | "plivo";
   phoneNumberId: string | null;
+  wabaId: string | null;
   businessNumber: string | null;
   total: number | null;
   failed: number | null;
@@ -38,6 +39,7 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
   label: "Bulk default sender",
   provider: "meta",
   phoneNumberId: null,
+  wabaId: null,
   businessNumber: null,
   total: null,
   failed: null,
@@ -55,6 +57,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     label: "Admissions Meta sender 9667641872",
     provider: "meta",
     phoneNumberId: null,
+    wabaId: null,
     businessNumber: "919667641872",
     total: null,
     failed: null,
@@ -70,6 +73,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     label: "Bulk campaign Meta sender 7428499849",
     provider: "meta",
     phoneNumberId: "1075269918995469",
+    wabaId: null,
     businessNumber: "917428499849",
     total: null,
     failed: null,
@@ -85,6 +89,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     label: "Admissions Plivo sender 9555192192",
     provider: "plivo",
     phoneNumberId: null,
+    wabaId: null,
     businessNumber: "919555192192",
     total: null,
     failed: null,
@@ -136,14 +141,29 @@ export const senderHealthClass = (failedPct: number | null | undefined) => {
 };
 
 /**
- * Whether a sender's WABA is known to support a given template. A sender
- * with unresolved templates (null) is treated as unverified and allowed
- * through — only an explicit non-inclusion blocks the send.
+ * Whether a template is known to live only on specific WABAs — true when at
+ * least one loaded sender explicitly lists it in available_templates. For such
+ * a template, a sender that doesn't list it (including unsynced null senders)
+ * genuinely cannot send it, so the permissive null fallback must not apply.
+ */
+export const normWaba = (w: string | null | undefined) => w || "MAIN";
+
+/**
+ * Whether a sender can send a given template. Preferred path: compare WABA
+ * ids (NULL normalised to "MAIN") — a sender can only send templates that
+ * live in its own WABA. Falls back to the legacy availableTemplates-list
+ * check when the template's waba_id isn't known yet.
  */
 export const senderCanSendTemplate = (
-  sender: Pick<WaSenderOption, "availableTemplates"> | null,
+  sender: Pick<WaSenderOption, "wabaId" | "availableTemplates"> | null,
   templateKey: string,
-): boolean => !sender || sender.availableTemplates == null || sender.availableTemplates.includes(templateKey);
+  templateWabaId?: string | null,
+): boolean => {
+  if (!sender) return true;
+  if (templateWabaId !== undefined) return normWaba(sender.wabaId) === normWaba(templateWabaId);
+  // legacy fallback (no template waba known): allow if unverified or the name is in the list
+  return sender.availableTemplates == null || sender.availableTemplates.includes(templateKey);
+};
 
 export const resolveBusinessNumber = (
   phoneNumberId: string | null | undefined,
@@ -165,7 +185,7 @@ export async function loadWaSenders(
   const [channelsRes, healthRes] = await Promise.all([
     supabase
       .from("whatsapp_channels" as any)
-      .select("id,label,provider,route,business_number,meta_phone_number_id,allow_bulk,quality_risk_level,verified_name,profile_picture_url,available_templates")
+      .select("id,label,provider,route,business_number,meta_phone_number_id,waba_id,allow_bulk,quality_risk_level,verified_name,profile_picture_url,available_templates")
       .eq("is_active", true)
       .eq("allow_bulk", true)
       .order("label", { ascending: true }),
@@ -196,6 +216,7 @@ export async function loadWaSenders(
         label: formatSenderNumber(resolvedBusinessNumber) || channel.label || phoneNumberId || "WhatsApp sender",
         provider: channel.provider === "plivo" ? "plivo" : "meta",
         phoneNumberId,
+        wabaId: channel.waba_id ?? null,
         businessNumber: resolvedBusinessNumber,
         total: health?.total ?? null,
         failed: health?.failed ?? null,
@@ -224,6 +245,7 @@ export async function loadWaSenders(
       label: formatSenderNumber(businessNumber) || existingByNumber?.label || existing?.label || `Meta sender ${health.phone_number_id}`,
       provider: "meta",
       phoneNumberId: existingByNumber?.phoneNumberId || health.phone_number_id,
+      wabaId: null,
       businessNumber,
       total: health.total,
       failed: health.failed,

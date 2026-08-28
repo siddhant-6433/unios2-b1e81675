@@ -232,11 +232,13 @@ Deno.serve(async (req) => {
                 waba_id: wabaId,
                 status_updated_at: new Date().toISOString(),
               }, { onConflict: "name,language" });
+              // Marketing-category templates surface in the picker by default;
+              // utility/auth stay hidden (curate in Template Visibility).
               await admin.from("whatsapp_template_settings").upsert({
                 template_key: t.name,
                 display_name: String(t.name).replace(/_/g, " "),
                 category: String(t.category || "general").toLowerCase(),
-                visibility: "hidden",
+                visibility: String(t.category || "").toUpperCase() === "MARKETING" ? "marketing_only" : "hidden",
               }, { onConflict: "template_key", ignoreDuplicates: true });
 
               // Media-header templates: re-host the example image/video/doc so
