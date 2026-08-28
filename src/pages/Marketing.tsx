@@ -282,6 +282,10 @@ export default function Marketing() {
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
+  // DB-authored param specs (whatsapp_template_settings.param_specs) override the
+  // hardcoded WA_BULK_TEMPLATES params for a template — the single source aligned
+  // to Meta's placeholder_count, shared with the server.
+  const [paramSpecsByKey, setParamSpecsByKey] = useState<Record<string, WaBulkTemplate["params"]>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
   // Real Meta template arity + which keys actually exist as APPROVED Meta templates.
   // The hardcoded WA_BULK_TEMPLATES params/keys drift from Meta (e.g. lead_welcome
@@ -350,11 +354,20 @@ export default function Marketing() {
       // kb_placements) — they 404 as "Unknown template" at send. Only filter once
       // the approved set has loaded, so nothing flashes empty on first render.
       ...WA_BULK_TEMPLATES
-        .filter((template) => approvedTemplateKeys.size === 0 || approvedTemplateKeys.has(template.key))
-        .map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
-      ...dynamicWaBulkTemplates,
+        .filter((template) => approvedTemplateKeys.size === 0
+          || approvedTemplateKeys.has(template.key)
+          || !!paramSpecsByKey[template.key]) // key may differ from the Meta name (course_details -> inquiry_course_update); a spec vouches for it
+        .map((template) => ({
+          ...template,
+          ...(waMetaTemplateOverrides[template.key] || {}),
+          // DB param_specs (Meta-aligned) win over the hardcoded params list.
+          ...(paramSpecsByKey[template.key] ? { params: paramSpecsByKey[template.key] } : {}),
+        })),
+      ...dynamicWaBulkTemplates.map((template) => (
+        paramSpecsByKey[template.key] ? { ...template, params: paramSpecsByKey[template.key] } : template
+      )),
     ],
-    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys, paramSpecsByKey],
   );
   const selectedWaTemplate = useMemo(
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
@@ -654,13 +667,24 @@ export default function Marketing() {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, visibility")
+        .select("template_key, display_name, description, category, visibility, param_specs")
         .in("visibility", ["marketing_only", "all"]);
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;
         description?: string | null;
       }>);
+      const specsByKey: Record<string, WaBulkTemplate["params"]> = {};
+      for (const s of (settings || []) as any[]) {
+        if (Array.isArray(s.param_specs)) {
+          specsByKey[s.template_key] = s.param_specs.map((p: any) => ({
+            name: String(p.name),
+            source: p.source === "auto" ? "auto" as const : "static" as const,
+            placeholder: p.placeholder || undefined,
+            help: p.help || undefined,
+          }));
+        }
+      }
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format, quality_score")
@@ -707,6 +731,7 @@ export default function Marketing() {
           };
         });
 
+      setParamSpecsByKey(specsByKey);
       setWaMetaTemplateOverrides(overrides);
       setWaTemplateComponentsByKey(componentsByKey);
       setWaTemplateQualityByKey(qualityByKey);
