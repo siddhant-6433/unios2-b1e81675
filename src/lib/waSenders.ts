@@ -245,7 +245,10 @@ export async function loadWaSenders(
       label: formatSenderNumber(businessNumber) || existingByNumber?.label || existing?.label || `Meta sender ${health.phone_number_id}`,
       provider: "meta",
       phoneNumberId: existingByNumber?.phoneNumberId || health.phone_number_id,
-      wabaId: null,
+      // Preserve the channel's real WABA — nulling it here (health rows carry no
+      // waba) breaks the per-template sender guard: a synced Seralis number with
+      // sends would look like the MAIN WABA and be blocked from its own template.
+      wabaId: existingByNumber?.wabaId ?? existing?.wabaId ?? null,
       businessNumber,
       total: health.total,
       failed: health.failed,
