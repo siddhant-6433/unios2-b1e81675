@@ -256,6 +256,7 @@ export default function Marketing() {
   const [searchParams] = useSearchParams();
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+  const [visibleCampaigns, setVisibleCampaigns] = useState(10);
   const [lists, setLists] = useState<LeadList[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1972,7 +1973,7 @@ export default function Marketing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {campaigns.map((campaign) => (
+                  {campaigns.slice(0, visibleCampaigns).map((campaign) => (
                     <tr key={`${campaign.channel}-${campaign.id}`} className="border-b border-border last:border-b-0">
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground">{campaign.name}</p>
@@ -2106,6 +2107,13 @@ export default function Marketing() {
                   ))}
                 </tbody>
               </table>
+              {campaigns.length > visibleCampaigns && (
+                <div className="flex justify-center py-3">
+                  <Button variant="outline" size="sm" onClick={() => setVisibleCampaigns((n) => n + 10)}>
+                    Show more ({campaigns.length - visibleCampaigns} more)
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
