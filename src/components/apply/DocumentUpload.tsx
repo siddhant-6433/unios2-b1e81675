@@ -352,6 +352,13 @@ export function DocumentUpload({
       setReviewStatus(prev => ({ ...prev, [docKey]: "pending" }));
       setReviewNotes(prev => ({ ...prev, [docKey]: null }));
       toast({ title: `${docKey.replace(/_/g, ' ')} uploaded` });
+      if (docKey === "class_10_marksheet" && res?.name_match_score != null && res.name_match_score < 70) {
+        toast({
+          title: "Name mismatch on marksheet",
+          description: "The name on your marksheet doesn't appear to match the name you entered. Please verify your Full Name is exactly as it appears on your Class 10 Marksheet.",
+          variant: "destructive",
+        });
+      }
     }
     setUploading(null);
   };

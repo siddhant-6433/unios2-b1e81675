@@ -394,6 +394,7 @@ export default function Applications() {
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted" | "on_hold">("all");
+  const [eligibilityFilter, setEligibilityFilter] = useState(false);
   const [courseFilter, setCourseFilter] = useState("all");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
   const [partnerFilter, setPartnerFilter] = useState("all");
@@ -1005,6 +1006,7 @@ export default function Applications() {
     if (partnerFilter !== "all" && a.lead_external_owner_id !== partnerFilter) return false;
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
+    if (eligibilityFilter && !a.flags?.some((f: string) => f.startsWith("elig:"))) return false;
     // The "token_paid" tile filters on the lead_payments-derived flag so it
     // includes everyone who paid token fee, not just those currently AT the
     // token_paid stage. Other stage tiles still match on the lead's stage.
@@ -1067,7 +1069,7 @@ export default function Applications() {
 
     // Default: most recently active applications first.
     return applicationActivityTime(b) - applicationActivityTime(a);
-  }), [apps, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, partnerFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
+  }), [apps, eligibilityFilter, fromDate, matchesCourseFilter, matchesCounsellorFilter, sharedWithNimtFilter, partnerFilter, paymentFilter, search, sortMode, stageFilter, stageHoldSplit, statusFilter, toDate]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / APPLICATION_TABLE_PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, pageCount);
@@ -1145,7 +1147,7 @@ export default function Applications() {
   useEffect(() => {
     setCurrentPage(1);
     setExpandedId(null);
-  }, [courseFilter, counsellorFilter, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+  }, [courseFilter, counsellorFilter, eligibilityFilter, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
 
   const selectApplicationCohort = (rows: AppRow[], label: string) => {
     if (!canManageApplicationLists) return;
@@ -2055,6 +2057,16 @@ export default function Applications() {
             ariaLabel="Filter applications by external owner (partner or consultant)"
           />
         )}
+        <Button
+          variant={eligibilityFilter ? "default" : "outline"}
+          size="sm"
+          className="h-9 gap-1.5 text-xs"
+          onClick={() => setEligibilityFilter((v) => !v)}
+          aria-pressed={eligibilityFilter}
+          title="Show only applications with eligibility mismatches"
+        >
+          Ineligible
+        </Button>
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}
@@ -2077,8 +2089,8 @@ export default function Applications() {
             Save filter ({filteredListApps.length})
           </Button>
         )}
-        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || partnerFilter !== "all" || paymentFilter !== "all" || statusFilter !== "all" || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPartnerFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
+        {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || partnerFilter !== "all" || paymentFilter !== "all" || statusFilter !== "all" || eligibilityFilter || sharedWithNimtFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPartnerFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setEligibilityFilter(false); setSharedWithNimtFilter("all"); setStageFilter(null); setStageHoldSplit("all"); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
@@ -2491,9 +2503,15 @@ export default function Applications() {
 
                               {app.flags?.length ? (
                                 <div className="mt-3 flex flex-wrap gap-1">
-                                  {app.flags.filter(f => !(f === "payment_pending" && app.payment_status === "paid")).map((f, i) => (
-                                    <Badge key={i} className="text-[9px] border-0 bg-gray-100 text-gray-600">{f}</Badge>
-                                  ))}
+                                  {app.flags.filter(f => !(f === "payment_pending" && app.payment_status === "paid")).map((f, i) => {
+                                    const isElig = f.startsWith("elig:");
+                                    const isNameMismatch = f === "name_mismatch";
+                                    const cls = isElig ? "bg-red-100 text-red-700"
+                                      : isNameMismatch ? "bg-amber-100 text-amber-700"
+                                      : "bg-gray-100 text-gray-600";
+                                    const label = isElig ? f.replace("elig:", "⚠ ").replace(/_/g, " ") : f.replace(/_/g, " ");
+                                    return <Badge key={i} className={`text-[9px] border-0 ${cls}`}>{label}</Badge>;
+                                  })}
                                 </div>
                               ) : null}
                             </div>
