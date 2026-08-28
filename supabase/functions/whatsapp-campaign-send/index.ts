@@ -495,6 +495,28 @@ Deno.serve(async (req) => {
       };
     }
 
+    // Param specs (whatsapp_template_settings.param_specs) are the single source
+    // of a template's ordered body params, aligned to Meta placeholder_count.
+    // When present they override the hardcoded/dynamic param name list, and
+    // 'auto' params are filled per-lead via resolveMappedCampaignField(map).
+    // resolveParam (below) reads paramAutoMap; static params still come from
+    // static_params[name]. Un-spec'd templates keep the old behavior.
+    const paramAutoMap: Record<string, string> = {};
+    {
+      const { data: specRow } = await adminClient
+        .from("whatsapp_template_settings")
+        .select("param_specs")
+        .eq("template_key", campaign.template_key)
+        .maybeSingle();
+      const specs = (specRow as any)?.param_specs;
+      if (Array.isArray(specs)) {
+        templateDef.params = specs.map((s: any) => String(s?.name || ""));
+        for (const s of specs) {
+          if (s?.source === "auto" && s?.map) paramAutoMap[String(s.name)] = String(s.map);
+        }
+      }
+    }
+
     // Same fallback single-send uses (whatsapp-send/index.ts:647-652): the rehosted
     // public URL in whatsapp_template_settings.media_url is the only send-safe header
     // link for catalog templates — Meta rejects its own scontent example handle (131053).
@@ -832,6 +854,11 @@ Deno.serve(async (req) => {
         }
         if (name === "course_name")  return courseName || staticParams[name] || "";
         if (name === "campus_name")  return campusName || staticParams[name] || "";
+        // An 'auto' param spec fills this position per-lead (e.g. lead_source),
+        // unless the campaign explicitly overrode it in static_params.
+        if (paramAutoMap[name] && !staticParams[name]) {
+          return resolveMappedCampaignField(paramAutoMap[name], lead, latestApplication, waPhone);
+        }
         const configuredValue = staticParams[name] || "";
         if (configuredValue.startsWith(WA_PARAM_MAPPING_PREFIX)) {
           const token = configuredValue.slice(WA_PARAM_MAPPING_PREFIX.length);
