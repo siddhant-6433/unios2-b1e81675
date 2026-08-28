@@ -47,7 +47,8 @@ const roleLabels = ROLE_LABELS as Record<string, string>;
 
 // Roles that hold a login but are not on the payroll. Consultants and academic
 // partners are external parties with their own portals; publishers are library
-// vendors. They must not appear in an employee headcount.
+// vendors; video editors are external content vendors. They must not appear in
+// an employee headcount.
 const NON_EMPLOYEE_ROLES = [
   "student",
   "parent",
@@ -55,6 +56,7 @@ const NON_EMPLOYEE_ROLES = [
   "academic_partner",
   "academic_partner_offer_letter",
   "publisher",
+  "video_editor",
 ] as const;
 
 // PostgREST caps every response at 1000 rows; raising the client limit does
