@@ -298,7 +298,9 @@ export default function Marketing() {
   const [approvedTemplateKeys, setApprovedTemplateKeys] = useState<Set<string>>(new Set());
   // Which WABA each template belongs to (whatsapp_templates.waba_id, null = main NIMT WABA).
   const [templateWabaByKey, setTemplateWabaByKey] = useState<Record<string, string | null>>({});
-  const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
+  // No sender is selected by default — the user picks a template first, then the
+  // number list narrows to the ones whose WABA can send it.
+  const [waSenderValue, setWaSenderValue] = useState("");
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waTestPhone, setWaTestPhone] = useState("");
   const [waTestSending, setWaTestSending] = useState(false);
@@ -325,15 +327,17 @@ export default function Marketing() {
   const scheduledDateValue = scheduledDatePart(campaignScheduledAt);
   const scheduledTimeValue = scheduledTimePart(campaignScheduledAt);
   const waSelectedSender = useMemo(
-    () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
+    () => waSenderOptions.find((s) => s.value === waSenderValue) || null,
     [waSenderOptions, waSenderValue]
   );
   const selectedTemplateWaba = useMemo(
     () => templateWabaByKey[waTemplate] ?? null,
     [templateWabaByKey, waTemplate],
   );
+  // A sender must be explicitly chosen (no default) AND its WABA must match the
+  // template — this gates the test-send and Queue Campaign buttons.
   const selectedSenderCanSend = useMemo(
-    () => senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba),
+    () => !!waSelectedSender && senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba),
     [waSelectedSender, waTemplate, selectedTemplateWaba]
   );
   // Org label per waba, sourced from synced senders' verified_name (e.g. "Seralis Lab").
@@ -402,15 +406,6 @@ export default function Marketing() {
   // still narrows to numbers that can send the chosen template, and picking a
   // template auto-switches to a compatible sender (see onSelect below).
   const templateOptions = availableWaBulkTemplates;
-  // First sender that can send a given template (its own WABA), preferring a
-  // bulk-safe concrete number over the default.
-  const senderForTemplate = useCallback(
-    (wabaId: string | null) =>
-      waSenderOptions.find((s) => s.value !== DEFAULT_WA_SENDER && senderCanSendTemplate(s, "", wabaId))
-      || waSenderOptions.find((s) => senderCanSendTemplate(s, "", wabaId))
-      || null,
-    [waSenderOptions],
-  );
   const waTemplateQuality = useMemo(
     () => evaluateTemplateQualityForBulk(waTemplateQualityByKey[selectedWaTemplate?.key || waTemplate]),
     [waTemplateQualityByKey, selectedWaTemplate?.key, waTemplate],
@@ -671,7 +666,9 @@ export default function Marketing() {
     loadWaSenders(supabase as any)
       .then(({ options }) => {
         setWaSenderOptions(options);
-        setWaSenderValue((c) => options.some((o) => o.value === c) ? c : options[0]?.value || DEFAULT_WA_SENDER);
+        // Keep an explicit choice if still valid; otherwise leave unselected
+        // (don't auto-pick a number — the user picks after choosing a template).
+        setWaSenderValue((c) => (c && options.some((o) => o.value === c)) ? c : "");
       })
       .catch(() => {});
   }, []);
@@ -1604,10 +1601,14 @@ export default function Marketing() {
                                       setWaTemplate(template.key);
                                       setWaStaticParams({});
                                       // Template-first: if the current sender can't send this
-                                      // template's WABA, switch to one that can.
+                                      // template's WABA, narrow the number. Auto-pick only when
+                                      // exactly one number matches (e.g. a Seralis template);
+                                      // otherwise clear so the user chooses from the filtered list.
                                       if (!senderCanSendTemplate(waSelectedSender, template.key, template.wabaId ?? null)) {
-                                        const next = senderForTemplate(template.wabaId ?? null);
-                                        if (next) setWaSenderValue(next.value);
+                                        const compatible = waSenderOptions.filter(
+                                          (s) => s.value !== DEFAULT_WA_SENDER && senderCanSendTemplate(s, "", template.wabaId ?? null),
+                                        );
+                                        setWaSenderValue(compatible.length === 1 ? compatible[0].value : "");
                                       }
                                       setTemplatePickerOpen(false);
                                     }}
@@ -1649,7 +1650,13 @@ export default function Marketing() {
                         type="button"
                         className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20"
                       >
-                        <WhatsAppBusinessIdentity sender={waSelectedSender ?? defaultWaSenderOption()} compact />
+                        {waSelectedSender ? (
+                          <WhatsAppBusinessIdentity sender={waSelectedSender} compact />
+                        ) : (
+                          <span className="flex-1 text-muted-foreground">
+                            {waTemplate ? "Select a number that can send this template" : "Select a template first"}
+                          </span>
+                        )}
                         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
                     </PopoverTrigger>
