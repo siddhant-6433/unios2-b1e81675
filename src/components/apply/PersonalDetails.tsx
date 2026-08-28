@@ -114,6 +114,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
         <TextField
           label="Full Name"
           required
+          description="Enter your name exactly as it appears on your Class 10 Marksheet."
           value={data.full_name || ""}
           onValueChange={(value) => onChange({ full_name: value })}
           error={showErrors && missing.full_name ? "Full name is required." : undefined}

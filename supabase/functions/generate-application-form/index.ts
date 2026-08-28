@@ -959,6 +959,16 @@ Deno.serve(async (req) => {
     }
     const mismatches = computeMismatches(appForPdf, eligibilityRules, sessionName);
 
+    // ── Persist eligibility flags into applications.flags ──────────────
+    // ponytail: reuses existing flags array, no new column needed
+    const eligFlags = mismatches.map(m => `elig:${m.section}`);
+    const currentFlags: string[] = Array.isArray(appForPdf.flags) ? appForPdf.flags : [];
+    const nonEligFlags = currentFlags.filter((f: string) => !f.startsWith("elig:"));
+    const newFlags = [...nonEligFlags, ...eligFlags];
+    if (JSON.stringify(newFlags.sort()) !== JSON.stringify(currentFlags.sort())) {
+      await admin.from("applications").update({ flags: newFlags }).eq("application_id", appForPdf.application_id);
+    }
+
     // List uploaded files for this application. New applicant uploads live in
     // R2 with metadata in application_documents; older/internal files may still
     // live in Supabase Storage, so keep a fallback for those.

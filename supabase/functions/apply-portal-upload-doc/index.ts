@@ -9,6 +9,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { deleteFromR2, uploadToR2 } from "../_shared/r2.ts";
+import { nameMatchScore } from "../_shared/razorpayx.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -195,7 +196,7 @@ Deno.serve(async (req) => {
     // their phone via OTP.
     const { data: app, error: appErr } = await admin
       .from("applications")
-      .select("application_id, phone")
+      .select("application_id, phone, full_name, flags")
       .eq("application_id", applicationId)
       .maybeSingle();
     if (appErr) {
@@ -319,6 +320,54 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── OCR name extraction for Class 10 marksheet ──────────────
+    // ponytail: best-effort Gemini Vision; upload never fails on OCR error
+    let responseExtra: Record<string, unknown> = {};
+    if (docKey === "class_10_marksheet") {
+      try {
+        const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
+        if (geminiKey) {
+          const b64 = bytesToBase64(buf);
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { inline_data: { mime_type: contentType, data: b64 } },
+                    { text: "Extract the student's full name from this Class 10 marksheet. Return ONLY the full name as it appears on the document, nothing else." },
+                  ],
+                }],
+              }),
+            },
+          );
+          const geminiData = await geminiRes.json();
+          const extractedName = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (extractedName && extractedName.length > 1 && extractedName.length < 200) {
+            await admin.from("application_documents")
+              .update({ extracted_name: extractedName })
+              .eq("application_id", applicationId)
+              .eq("doc_key", "class_10_marksheet");
+
+            const score = nameMatchScore(app.full_name || "", extractedName);
+            const flags: string[] = Array.isArray(app.flags) ? app.flags : [];
+            const withoutMismatch = flags.filter((f: string) => f !== "name_mismatch");
+            const newFlags = score < 70 ? [...withoutMismatch, "name_mismatch"] : withoutMismatch;
+            if (JSON.stringify(newFlags) !== JSON.stringify(flags)) {
+              await admin.from("applications")
+                .update({ flags: newFlags })
+                .eq("application_id", applicationId);
+            }
+            responseExtra = { extracted_name: extractedName, name_match_score: score };
+          }
+        }
+      } catch (e) {
+        console.error("[apply-portal-upload-doc] OCR name extraction failed:", (e as Error).message);
+      }
+    }
+
     const staleObjectPaths = storageProvider === "supabase"
       ? oldPaths.filter((oldPath: string) => oldPath !== legacyPath)
       : oldPaths;
@@ -359,7 +408,7 @@ Deno.serve(async (req) => {
       console.error("[apply-portal-upload-doc] doc-status sync failed:", (e as Error).message);
     }
 
-    return new Response(JSON.stringify({ ok: true, path: uploadedPath, url: uploadedUrl, storage_provider: storageProvider }), {
+    return new Response(JSON.stringify({ ok: true, path: uploadedPath, url: uploadedUrl, storage_provider: storageProvider, ...responseExtra }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
