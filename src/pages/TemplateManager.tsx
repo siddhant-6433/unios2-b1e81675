@@ -13,6 +13,7 @@ import {
 import { Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle, GraduationCap, Save, Filter } from "lucide-react";
 import { cahetDeadlineDescription } from "@/lib/deadlineRollover";
 import { WhatsAppTemplateTab } from "@/components/templates/WhatsAppTemplateTab";
+import { WHATSAPP_BUSINESS_NAME } from "@/lib/waSenders";
 
 // ── WhatsApp Template (from Meta API) ──
 interface MetaTemplate {
@@ -205,6 +206,9 @@ Buttons:
     /** Sendable header media URL; required when header_format is IMAGE/VIDEO/DOCUMENT. */
     media_url?: string | null;
     header_format?: string | null;
+    /** WABA the template lives under + its human org label (e.g. "Seralis Lab"). */
+    waba_id?: string | null;
+    org_label?: string | null;
   };
   type WaVisibilitySort = "date_added_desc" | "date_added_asc" | "date_used_desc" | "date_used_asc" | "name_asc" | "name_desc";
   const [waSettings, setWaSettings] = useState<WaSetting[]>([]);
@@ -212,6 +216,8 @@ Buttons:
   const [waToggling, setWaToggling] = useState<string | null>(null);
   const [waSearch, setWaSearch] = useState("");
   const [waSort, setWaSort] = useState<WaVisibilitySort>("date_added_desc");
+  const [waOrgFilter, setWaOrgFilter] = useState("all");
+  const [waStatusFilter, setWaStatusFilter] = useState("");
 
   const fetchWaSettings = async () => {
     setWaSettingsLoading(true);
@@ -224,7 +230,7 @@ Buttons:
       const settingsByKey = new Map(settingsRows.map((setting) => [setting.template_key, setting]));
       const { data: approvedTemplates } = await (supabase as any)
         .from("whatsapp_templates")
-        .select("name, category, created_at, status_updated_at, header_format")
+        .select("name, category, created_at, status_updated_at, header_format, waba_id")
         .eq("status", "APPROVED")
         .order("created_at", { ascending: false });
       // header_format decides whether a row needs a media URL at all.
@@ -233,6 +239,20 @@ Buttons:
           .filter((t) => t.name)
           .map((t) => [t.name, String(t.header_format || "NONE").toUpperCase()]),
       );
+      const wabaByName = new Map<string, string | null>(
+        ((approvedTemplates || []) as Array<{ name: string; waba_id?: string | null }>)
+          .filter((t) => t.name)
+          .map((t) => [t.name, t.waba_id ?? null]),
+      );
+      // Org label per WABA from the connected channels' verified WhatsApp name.
+      const { data: channelRows } = await (supabase as any)
+        .from("whatsapp_channels")
+        .select("waba_id, verified_name")
+        .not("waba_id", "is", null);
+      const orgByWaba = new Map<string, string>();
+      ((channelRows || []) as Array<{ waba_id?: string | null; verified_name?: string | null }>)
+        .forEach((c) => { if (c.waba_id && c.verified_name && !orgByWaba.has(c.waba_id)) orgByWaba.set(c.waba_id, c.verified_name); });
+      const orgLabel = (waba: string | null) => waba ? (orgByWaba.get(waba) || "Other WABA") : WHATSAPP_BUSINESS_NAME;
       const { data: usedRows } = await (supabase as any)
         .from("whatsapp_messages")
         .select("template_key, created_at")
@@ -262,12 +282,17 @@ Buttons:
           updated_at: template.status_updated_at || template.created_at || null,
         } satisfies WaSetting));
       const mergedSettings = [...settingsRows, ...missingApprovedSettings];
-      setWaSettings(mergedSettings.map((setting) => ({
-        ...setting,
-        ...(setting.template_key === "bpt_bmrit_cahet_deadline" ? { description: cahetDeadlineDescription() } : {}),
-        last_used_at: lastUsedByTemplate.get(setting.template_key) || null,
-        header_format: headerFormatByName.get(setting.template_key) || "NONE",
-      })));
+      setWaSettings(mergedSettings.map((setting) => {
+        const waba = wabaByName.get(setting.template_key) ?? null;
+        return {
+          ...setting,
+          ...(setting.template_key === "bpt_bmrit_cahet_deadline" ? { description: cahetDeadlineDescription() } : {}),
+          last_used_at: lastUsedByTemplate.get(setting.template_key) || null,
+          header_format: headerFormatByName.get(setting.template_key) || "NONE",
+          waba_id: waba,
+          org_label: orgLabel(waba),
+        };
+      }));
     }
     setWaSettingsLoading(false);
   };
@@ -331,17 +356,31 @@ Buttons:
 
   useEffect(() => { fetchWaSettings(); }, []);
 
+  // Distinct organisations present, for the org filter dropdown.
+  const waOrgOptions = useMemo(() => {
+    const orgs = new Set<string>();
+    waSettings.forEach((s) => orgs.add(s.org_label || WHATSAPP_BUSINESS_NAME));
+    return [...orgs].sort((a, b) => {
+      if (a === WHATSAPP_BUSINESS_NAME) return -1;
+      if (b === WHATSAPP_BUSINESS_NAME) return 1;
+      return a.localeCompare(b);
+    });
+  }, [waSettings]);
+
   const visibleWaSettings = useMemo(() => {
     const query = waSearch.trim().toLowerCase();
-    const filtered = query
-      ? waSettings.filter((setting) =>
-          [
-            setting.template_key,
-            setting.display_name,
-            setting.description || "",
-            setting.category || "",
-          ].some((value) => value.toLowerCase().includes(query)))
-      : waSettings;
+    const filtered = waSettings.filter((setting) => {
+      if (waOrgFilter !== "all" && (setting.org_label || WHATSAPP_BUSINESS_NAME) !== waOrgFilter) return false;
+      if (waStatusFilter && setting.visibility !== waStatusFilter) return false;
+      if (!query) return true;
+      return [
+        setting.template_key,
+        setting.display_name,
+        setting.description || "",
+        setting.category || "",
+        setting.org_label || "",
+      ].some((value) => value.toLowerCase().includes(query));
+    });
 
     const dateValue = (value?: string | null) => value ? new Date(value).getTime() : 0;
     return [...filtered].sort((a, b) => {
@@ -352,7 +391,7 @@ Buttons:
       if (waSort === "name_desc") return b.display_name.localeCompare(a.display_name);
       return dateValue(b.created_at) - dateValue(a.created_at);
     });
-  }, [waSearch, waSettings, waSort]);
+  }, [waSearch, waSettings, waSort, waOrgFilter, waStatusFilter]);
 
   const fetchTemplates = async () => {
     const { data, error } = await supabase
@@ -710,6 +749,26 @@ Buttons:
                   className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
                 />
                 <select
+                  value={waOrgFilter}
+                  onChange={(e) => setWaOrgFilter(e.target.value)}
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="all">All organisations</option>
+                  {waOrgOptions.map((org) => (
+                    <option key={org} value={org}>{org}</option>
+                  ))}
+                </select>
+                <select
+                  value={waStatusFilter}
+                  onChange={(e) => setWaStatusFilter(e.target.value)}
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="">All visibility</option>
+                  <option value="hidden">Hidden</option>
+                  <option value="marketing_only">Marketing only</option>
+                  <option value="all">Marketing + Counsellors</option>
+                </select>
+                <select
                   value={waSort}
                   onChange={(e) => setWaSort(e.target.value as WaVisibilitySort)}
                   className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -732,33 +791,44 @@ Buttons:
             <PageLoader />
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full table-fixed text-xs">
+                <colgroup>
+                  <col className="w-[22%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[26%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium">Template key</th>
-                    <th className="text-left px-3 py-2 font-medium">Display name</th>
+                    <th className="text-left px-3 py-2 font-medium">Template</th>
                     <th className="text-left px-3 py-2 font-medium">Category</th>
                     <th className="text-left px-3 py-2 font-medium">Description</th>
-                    <th className="text-left px-3 py-2 font-medium">Date added</th>
-                    <th className="text-left px-3 py-2 font-medium">Date used</th>
+                    <th className="text-left px-3 py-2 font-medium">Added</th>
+                    <th className="text-left px-3 py-2 font-medium">Used</th>
                     <th className="text-left px-3 py-2 font-medium">Header file</th>
                     <th className="text-center px-3 py-2 font-medium">Show in picker</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleWaSettings.map((s) => (
-                    <tr key={s.template_key} className="border-t border-border">
-                      <td className="px-3 py-2 font-mono text-foreground">{s.template_key}</td>
-                      <td className="px-3 py-2 text-foreground">{s.display_name}</td>
+                    <tr key={s.template_key} className="border-t border-border align-top">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-foreground truncate" title={s.display_name}>{s.display_name}</div>
+                        <div className="font-mono text-[10px] text-muted-foreground truncate" title={s.template_key}>{s.template_key}</div>
+                        <Badge variant="outline" className="mt-1 text-[9px]">{s.org_label || WHATSAPP_BUSINESS_NAME}</Badge>
+                      </td>
                       <td className="px-3 py-2">
                         <Badge variant="outline" className="text-[10px]">{s.category || "general"}</Badge>
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground"><span className="line-clamp-2" title={s.description || ""}>{s.description || "—"}</span></td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.created_at)}</td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{s.last_used_at ? formatShortDate(s.last_used_at) : "—"}</td>
                       <td className="px-3 py-2">
                         {s.header_format && s.header_format !== "NONE" && s.header_format !== "TEXT" ? (
-                          <div className="min-w-[220px]">
+                          <div className="w-full">
                             <input
                               type="url"
                               defaultValue={s.media_url || ""}
@@ -798,7 +868,7 @@ Buttons:
                     </tr>
                   ))}
                   {visibleWaSettings.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
+                    <tr><td colSpan={7} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
                   )}
                 </tbody>
               </table>

@@ -396,9 +396,20 @@ export default function Marketing() {
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
     [availableWaBulkTemplates, waTemplate],
   );
-  const templateOptions = useMemo(
-    () => availableWaBulkTemplates.filter((template) => senderCanSendTemplate(waSelectedSender, template.key, template.wabaId)),
-    [availableWaBulkTemplates, waSelectedSender],
+  // Template-first flow: show ALL templates grouped by org. Filtering by the
+  // (pre-selected default) sender would hide every non-MAIN WABA's templates
+  // (Seralis etc.) until a matching number was picked first. The sender picker
+  // still narrows to numbers that can send the chosen template, and picking a
+  // template auto-switches to a compatible sender (see onSelect below).
+  const templateOptions = availableWaBulkTemplates;
+  // First sender that can send a given template (its own WABA), preferring a
+  // bulk-safe concrete number over the default.
+  const senderForTemplate = useCallback(
+    (wabaId: string | null) =>
+      waSenderOptions.find((s) => s.value !== DEFAULT_WA_SENDER && senderCanSendTemplate(s, "", wabaId))
+      || waSenderOptions.find((s) => senderCanSendTemplate(s, "", wabaId))
+      || null,
+    [waSenderOptions],
   );
   const waTemplateQuality = useMemo(
     () => evaluateTemplateQualityForBulk(waTemplateQualityByKey[selectedWaTemplate?.key || waTemplate]),
@@ -1592,6 +1603,12 @@ export default function Marketing() {
                                     onSelect={() => {
                                       setWaTemplate(template.key);
                                       setWaStaticParams({});
+                                      // Template-first: if the current sender can't send this
+                                      // template's WABA, switch to one that can.
+                                      if (!senderCanSendTemplate(waSelectedSender, template.key, template.wabaId ?? null)) {
+                                        const next = senderForTemplate(template.wabaId ?? null);
+                                        if (next) setWaSenderValue(next.value);
+                                      }
                                       setTemplatePickerOpen(false);
                                     }}
                                   >
@@ -1608,7 +1625,7 @@ export default function Marketing() {
                   </Popover>
                   {templateOptions.length === 0 && (
                     <p className="mt-1.5 text-xs font-medium text-destructive">
-                      This number has no approved templates — pick another number.
+                      No approved templates found. Sync templates and try again.
                     </p>
                   )}
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
