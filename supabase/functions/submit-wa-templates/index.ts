@@ -143,6 +143,28 @@ const TEMPLATES = [
     ],
   },
   {
+    // Placement & Internship Report — user-requested document delivery.
+    // Fired by placement-report-send when a website visitor asks for the
+    // Clinical Training, Internship & Placement Report (2025-26). The report
+    // PDF rides in the DOCUMENT header (header_document_url at send time), so
+    // the submission sample only needs the placeholder handle.
+    name: "placement_report_download",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+      },
+      {
+        type: "BODY",
+        text: "Hi {{1}}, thank you for your interest in NIMT Institute of Medical & Paramedical Sciences. As requested, our Clinical Training, Internship & Placement Report (2025-26) is attached. It covers internship stipends, clinical departments, hiring hospitals and placement support. Our admissions team will reach out to help you with the next steps.",
+        example: { body_text: [["Rahul Sharma"]] },
+      },
+    ],
+  },
+  {
     name: "offer_letter_issued",
     category: "UTILITY",
     language: "en",
