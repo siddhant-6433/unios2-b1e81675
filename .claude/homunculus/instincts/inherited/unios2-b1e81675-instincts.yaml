@@ -1,0 +1,319 @@
+# Instincts generated from https://github.com/siddhant-6433/unios2-b1e81675
+# Generated: 2026-06-01T10:26:43.984Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: unios2-b1e81675-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat
+
+## Evidence
+
+- 3 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat(whatsapp): add provider column + whatsapp_ai_mode guard table, feat(whatsapp): Plivo coexistence webhook + provider-aware AI reply
+
+---
+id: unios2-b1e81675-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Commit Length
+
+## Action
+
+Write moderate-length commit messages (~62 characters)
+
+## Evidence
+
+- Average commit message length: 62 chars
+- Based on 3 commits
+
+---
+id: unios2-b1e81675-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: unios2-b1e81675-import-alias
+trigger: "when importing modules"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Import Alias
+
+## Action
+
+Use path aliases (@/, ~/) instead of relative imports
+
+## Evidence
+
+- Import analysis shows alias pattern
+- Example: import { x } from '@/lib/x'
+
+---
+id: unios2-b1e81675-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Export Style
+
+## Action
+
+Prefer mixed exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: mixed
+
+---
+id: unios2-b1e81675-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: unios2-b1e81675-instinct-file-naming
+trigger: "When creating a new file in the codebase"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct File Naming
+
+## Action
+
+Name the file using camelCase convention
+
+## Evidence
+
+- Pattern in namingConventions.files: camelCase
+
+---
+id: unios2-b1e81675-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Function Naming
+
+## Action
+
+Use camelCase for the function name
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: unios2-b1e81675-instinct-class-naming
+trigger: "When declaring a new class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Class Naming
+
+## Action
+
+Use PascalCase for the class name
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: unios2-b1e81675-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for the constant name
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: unios2-b1e81675-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Import Style
+
+## Action
+
+Use alias import style
+
+## Evidence
+
+- Pattern in importStyle: alias
+
+---
+id: unios2-b1e81675-instinct-export-style
+trigger: "When exporting modules or functions"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Export Style
+
+## Action
+
+Use a mixed export style (named and default exports as appropriate)
+
+## Evidence
+
+- Pattern in exportStyle: mixed
+
+---
+id: unios2-b1e81675-instinct-error-handling
+trigger: "When handling errors in code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Error Handling
+
+## Action
+
+Use try-catch blocks for error handling
+
+## Evidence
+
+- Pattern in errorHandling.style: try-catch
+
+---
+id: unios2-b1e81675-instinct-git-commit-format
+trigger: "When writing a git commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Git Commit Format
+
+## Action
+
+Use the conventional commit format with a 'feat' prefix for new features
+
+## Evidence
+
+- Pattern in commits.type: conventional
+- Pattern in commits.prefixes: feat
+- Seen in commit examples: 'feat(whatsapp): add provider column + whatsapp_ai_mode guard table'
+
+---
+id: unios2-b1e81675-instinct-git-commit-length
+trigger: "When writing a git commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 62 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength: 62
+
+---
+id: unios2-b1e81675-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: siddhant-6433/unios2-b1e81675
+---
+
+# Unios2 B1e81675 Instinct Test Location
+
+## Action
+
+Place test files in a separate location from source files
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation: separate
+

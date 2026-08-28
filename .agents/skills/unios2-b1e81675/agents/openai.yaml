@@ -1,0 +1,6 @@
+interface:
+  display_name: "Unios2 B1e81675"
+  short_description: "Repo-specific patterns and workflows for unios2-b1e81675"
+  default_prompt: "Use the unios2-b1e81675 repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
