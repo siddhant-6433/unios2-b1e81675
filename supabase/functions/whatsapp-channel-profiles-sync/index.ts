@@ -55,7 +55,34 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/jpg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
+  "video/mp4": "mp4",
+  "application/pdf": "pdf",
 };
+
+/** Re-host a template's example header media (Meta scontent handle) into the
+ * public bucket so it's a valid send-time header link (Meta rejects the scontent
+ * handle as a message header — 131053). Returns the public URL or null. */
+async function rehostTemplateHeader(
+  admin: any,
+  supabaseUrl: string,
+  name: string,
+  sourceUrl: string,
+  headerFormat: string,
+): Promise<string | null> {
+  try {
+    const res = await fetchWithTimeout(sourceUrl, {}, 20000);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const ext = EXT_BY_MIME[blob.type]
+      || (headerFormat === "VIDEO" ? "mp4" : headerFormat === "DOCUMENT" ? "pdf" : "jpg");
+    const path = `template-headers/${name}.${ext}`;
+    const { error } = await admin.storage
+      .from("whatsapp-media")
+      .upload(path, blob, { contentType: blob.type || "application/octet-stream", upsert: true });
+    if (error) return null;
+    return `${supabaseUrl}/storage/v1/object/public/whatsapp-media/${path}`;
+  } catch { return null; }
+}
 
 /** Download Meta's profile picture and re-host it in the public bucket. */
 async function rehostAvatar(
@@ -211,6 +238,21 @@ Deno.serve(async (req) => {
                 category: String(t.category || "general").toLowerCase(),
                 visibility: "hidden",
               }, { onConflict: "template_key", ignoreDuplicates: true });
+
+              // Media-header templates: re-host the example image/video/doc so
+              // they're sendable (the campaign path falls back to media_url).
+              // Only when media_url isn't already set — one rehost per template.
+              const exampleHandle = header?.example?.header_handle?.[0];
+              if (headerFormat && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) && exampleHandle) {
+                const { data: curSetting } = await admin
+                  .from("whatsapp_template_settings").select("media_url").eq("template_key", t.name).maybeSingle();
+                if (!(curSetting as any)?.media_url) {
+                  const hostedUrl = await rehostTemplateHeader(admin, supabaseUrl, t.name, exampleHandle, headerFormat);
+                  if (hostedUrl) {
+                    await admin.from("whatsapp_template_settings").update({ media_url: hostedUrl }).eq("template_key", t.name);
+                  }
+                }
+              }
             }
           }
         } catch { /* leave null — unverified */ }
