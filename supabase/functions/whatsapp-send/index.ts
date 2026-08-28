@@ -287,17 +287,21 @@ function templateBodyFromComponents(components: unknown): string | null {
   return typeof body?.text === "string" ? body.text : null;
 }
 
-function templateHasDynamicUrlButton(components: unknown): boolean {
-  if (!Array.isArray(components)) return false;
+// Real component indexes of the dynamic URL buttons (those with a {{n}} suffix),
+// so a caller's button_urls[i] applies to the i-th DYNAMIC button — not the i-th
+// button overall (a quick-reply button before it would shift the index).
+function dynamicUrlButtonIndexes(components: unknown): number[] {
+  if (!Array.isArray(components)) return [];
   const buttons = components.find((component) => {
     const data = component as Record<string, unknown>;
     return data.type === "BUTTONS";
   }) as Record<string, unknown> | undefined;
-  if (!Array.isArray(buttons?.buttons)) return false;
-  return buttons.buttons.some((button) => {
-    const data = button as Record<string, unknown>;
-    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
+  if (!Array.isArray(buttons?.buttons)) return [];
+  const out: number[] = [];
+  (buttons!.buttons as Record<string, unknown>[]).forEach((button, index) => {
+    if (button.type === "URL" && typeof button.url === "string" && (button.url as string).includes("{{")) out.push(index);
   });
+  return out;
 }
 
 type WhatsAppRoute = "default" | "call" | "visit";
@@ -613,6 +617,9 @@ Deno.serve(async (req) => {
     }
 
     let dynamicTemplateBody: string | null = null;
+    // Real indexes of dynamic URL buttons for a catalog template (empty for the
+    // hardcoded TEMPLATES path, which keeps its by-array-position mapping).
+    let urlButtonIndexes: number[] = [];
     let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
@@ -628,16 +635,28 @@ Deno.serve(async (req) => {
       if (dynamicErr) console.error("Dynamic WhatsApp template lookup failed:", dynamicErr.message);
       // Any APPROVED template can be sent dynamically: body params come from the
       // caller's params[] (arity validated against Meta's placeholder_count
-      // below), and a media header falls back to whatsapp_template_settings
-      // media_url / the passed header_image_url. Only dynamic-URL-button
-      // templates are still rejected — they need per-send button params.
-      const canSendDynamic = dynamicTemplate
-        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
-      if (!canSendDynamic) {
+      // below), a media header falls back to whatsapp_template_settings
+      // media_url / the passed header_image_url, and dynamic-URL-button suffixes
+      // come from the caller's button_urls[] (validated just below).
+      if (!dynamicTemplate) {
         return new Response(
           JSON.stringify({ error: `Unknown template: ${template_key}` }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+      urlButtonIndexes = dynamicUrlButtonIndexes((dynamicTemplate as any).components);
+      if (urlButtonIndexes.length > 0) {
+        const suppliedButtons = Array.isArray(button_urls)
+          ? button_urls.filter((u) => typeof u === "string" && u.trim().length > 0)
+          : [];
+        if (suppliedButtons.length < urlButtonIndexes.length) {
+          return new Response(
+            JSON.stringify({
+              error: `Template "${template_key}" has ${urlButtonIndexes.length} dynamic URL button(s); received ${suppliedButtons.length} button value(s)`,
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
       dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
       const dynCount = Number((dynamicTemplate as any).placeholder_count || 0);
@@ -768,9 +787,14 @@ Deno.serve(async (req) => {
       components.push({ type: "body", parameters: bodyParams });
     }
 
-    // URL button parameters (dynamic suffix for each button)
+    // URL button parameters (dynamic suffix for each button). For catalog
+    // templates urlButtonIndexes maps button_urls[i] to the i-th DYNAMIC button's
+    // real component index; the hardcoded TEMPLATES path leaves it empty and
+    // keeps its historical by-array-position mapping.
     if (button_urls && Array.isArray(button_urls)) {
-      button_urls.forEach((url: string, index: number) => {
+      button_urls.forEach((url: string, i: number) => {
+        const index = urlButtonIndexes.length > 0 ? urlButtonIndexes[i] : i;
+        if (index == null) return;
         components.push({
           type: "button",
           sub_type: "url",

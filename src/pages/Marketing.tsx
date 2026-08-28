@@ -54,6 +54,7 @@ import {
   encodeWaParamFieldMapping,
   isWaMappableTemplateParam,
   isWaMediaTemplateParam,
+  parseWaButtonUrlParam,
   sampleValueForWaMappedField,
   waBodyPreviewParams,
   waParamFieldLabel,
@@ -432,19 +433,29 @@ export default function Marketing() {
       // Meta's real placeholder_count — the hardcoded config drifts (e.g.
       // lead_welcome is 2 params in config but 3 in Meta), and whatsapp-send hard-
       // rejects arity mismatches.
+      const resolveTestValue = (name: string) => {
+        const value = effectiveWaParamValue(waStaticParams, name);
+        const mappedToken = decodeWaParamFieldMapping(value);
+        if (mappedToken) return sampleValueForWaMappedField(mappedToken);
+        if (value.trim()) return value.trim();
+        return sampleValueForParam(name);
+      };
+      // Dynamic-URL-button suffixes go out as button_urls (by button index), NOT
+      // mixed into body params — whatsapp-send applies them per URL button.
+      const buttonParams: { button: number; position: number; value: string }[] = [];
       const params: string[] = [];
       for (const p of selectedWaTemplate?.params || []) {
         if (isWaMediaTemplateParam(p.name)) continue;
-        const value = effectiveWaParamValue(waStaticParams, p.name);
-        const mappedToken = decodeWaParamFieldMapping(value);
-        if (mappedToken) {
-          params.push(sampleValueForWaMappedField(mappedToken));
-        } else if (value.trim()) {
-          params.push(value.trim());
-        } else {
-          params.push(sampleValueForParam(p.name));
+        const btn = parseWaButtonUrlParam(p.name);
+        if (btn) {
+          buttonParams.push({ ...btn, value: resolveTestValue(p.name) });
+          continue;
         }
+        params.push(resolveTestValue(p.name));
       }
+      const button_urls = buttonParams
+        .sort((a, b) => a.button - b.button || a.position - b.position)
+        .map((b) => b.value);
       const realCount = placeholderCountByKey[waTemplate];
       if (typeof realCount === "number") {
         while (params.length < realCount) params.push(`sample ${params.length + 1}`);
@@ -465,6 +476,7 @@ export default function Marketing() {
           business_phone_number_id: waSelectedSender?.phoneNumberId || null,
           business_number: waSelectedSender?.businessNumber || null,
           ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+          ...(button_urls.length ? { button_urls } : {}),
         },
       });
       if (error || data?.error || data?.ok === false) {

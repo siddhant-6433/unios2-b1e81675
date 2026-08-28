@@ -31,6 +31,14 @@ export const waParamFieldLabel = (token: WaParamFieldToken) => WA_PARAM_FIELD_LA
 
 export const isWaBodyTemplateParam = (name: string) => /^template_value_\d+$/.test(name);
 
+export const isWaButtonUrlTemplateParam = (name: string) => /^template_button_\d+_url_value_\d+$/.test(name);
+
+// Dynamic-URL-button param names encode which button and which {{n}} they fill.
+export const parseWaButtonUrlParam = (name: string) => {
+  const m = name.match(/^template_button_(\d+)_url_value_(\d+)$/);
+  return m ? { button: Number(m[1]), position: Number(m[2]) } : null;
+};
+
 export const isWaMappableTemplateParam = (name: string) =>
   isWaBodyTemplateParam(name) ||
   /^template_header_value_\d+$/.test(name) ||
