@@ -31,3 +31,6 @@ dist-ssr
 .claude/
 supabase/.temp/
 .gstack/
+
+# Local import ETL output
+scripts/.out/

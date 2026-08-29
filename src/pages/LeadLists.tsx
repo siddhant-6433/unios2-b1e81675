@@ -91,6 +91,8 @@ interface LeadList {
   filter_definition?: DynamicListFilterDefinition | null;
   last_refreshed_at?: string | null;
   include_terminal?: boolean;
+  /** Free-form tags (e.g. city + type) — searchable on the dashboard. */
+  tags?: string[] | null;
 }
 
 type CampaignChannel = "whatsapp" | "email";
@@ -375,6 +377,7 @@ export default function LeadLists() {
   const [listFilter, setListFilter] = useState<"all" | "calling" | "mine">("all");
   const [counsellorFilter, setCounsellorFilter] = useState<string>("");
   const [sortKey, setSortKey] = useState<"created" | "due" | "assigned" | "members" | "name">("created");
+  const [search, setSearch] = useState("");
 
   // Counsellors that appear on any active calling list — drives the filter.
   const counsellorOptions = useMemo(() => {
@@ -388,6 +391,10 @@ export default function LeadLists() {
     if (listFilter === "calling") rows = rows.filter((r) => r.list.purpose === "calling" && r.list.is_active);
     if (listFilter === "mine") rows = rows.filter((r) => r.list.created_by && r.list.created_by === profile?.id);
     if (counsellorFilter) rows = rows.filter((r) => r.ov?.by_counsellor.some((c) => c.counsellor_id === counsellorFilter));
+    const q = search.trim().toLowerCase();
+    if (q) rows = rows.filter((r) =>
+      r.list.name.toLowerCase().includes(q) ||
+      (r.list.tags ?? []).some((t) => t.toLowerCase().includes(q)));
     const time = (v: string | null | undefined) => (v ? new Date(v).getTime() : null);
     rows.sort((a, b) => {
       switch (sortKey) {
@@ -409,7 +416,7 @@ export default function LeadLists() {
       }
     });
     return rows;
-  }, [lists, callProgressByList, listFilter, counsellorFilter, sortKey, profile?.id]);
+  }, [lists, callProgressByList, listFilter, counsellorFilter, sortKey, search, profile?.id]);
 
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
@@ -1359,6 +1366,13 @@ export default function LeadLists() {
               <p className="text-xs text-muted-foreground">Use Marketing Hub to initiate campaigns; use this page to maintain and assign lists.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name or tag (e.g. Gurgaon)…"
+                className="rounded-md border border-input bg-background px-2 py-1 text-xs w-56"
+              />
               <div className="inline-flex rounded-lg border border-border p-0.5">
                 {([
                   ["all", "All"],
@@ -1467,6 +1481,19 @@ export default function LeadLists() {
                       </TooltipProvider>
                       {list.description && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-md">{list.description}</p>
+                      )}
+                      {(list.tags ?? []).length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(list.tags ?? []).map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setSearch(t)}
+                              className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3">
