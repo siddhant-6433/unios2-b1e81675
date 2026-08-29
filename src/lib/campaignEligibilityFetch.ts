@@ -1,6 +1,33 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
+ * All rows of lead_list_members for a list, paginated past PostgREST's max-rows cap
+ * (default 1000). Without this a >1000-member list silently enrolls only 1000
+ * recipients. `select` is the join projection (differs for whatsapp vs email).
+ */
+export async function fetchListMembers(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: SupabaseClient<any> | { from: (t: string) => any },
+  listId: string,
+  select: string,
+): Promise<any[]> {
+  const PAGE = 1000;
+  const all: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await (client as any)
+      .from("lead_list_members")
+      .select(select)
+      .eq("list_id", listId)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data as any[]) || [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return all;
+}
+
+/**
  * Last outbound template/campaign contact per lead (for quiet-period filter).
  * Uses whatsapp_messages so 1:1 templates and bulk campaigns both count.
  */

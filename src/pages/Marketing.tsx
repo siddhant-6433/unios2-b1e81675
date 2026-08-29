@@ -33,7 +33,7 @@ import {
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
-import { fetchLastWhatsAppMarketingAtByLeadIds } from "@/lib/campaignEligibilityFetch";
+import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -853,11 +853,11 @@ export default function Marketing() {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
         }
 
-        const { data: members, error: memErr } = await supabase
-          .from("lead_list_members" as any)
-          .select("lead_id, leads(id, phone, stage, shared_with_nimt)")
-          .eq("list_id", selectedList.id);
-        if (memErr) throw memErr;
+        const members = await fetchListMembers(
+          supabase as any,
+          selectedList.id,
+          "lead_id, leads(id, phone, stage, shared_with_nimt)",
+        );
 
         const rawLeads = ((members as any[]) || [])
           .map((member) => member.leads)
@@ -935,11 +935,11 @@ export default function Marketing() {
           throw new Error("Subject and body are required for custom email.");
         }
 
-        const { data: members, error: memErr } = await supabase
-          .from("lead_list_members" as any)
-          .select("lead_id, leads(id, email, stage, shared_with_nimt)")
-          .eq("list_id", selectedList.id);
-        if (memErr) throw memErr;
+        const members = await fetchListMembers(
+          supabase as any,
+          selectedList.id,
+          "lead_id, leads(id, email, stage, shared_with_nimt)",
+        );
 
         const rawEmailLeads = ((members as any[]) || [])
           .map((member) => member.leads)
