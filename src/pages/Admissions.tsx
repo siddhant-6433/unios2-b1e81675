@@ -3495,7 +3495,7 @@ const Admissions = () => {
               >
                 <option value="all">All courses</option>
                 {courseOptions.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{c.name}{c.campus_name ? ` — ${c.campus_name}` : ""}</option>
                 ))}
               </select>
             </div>
