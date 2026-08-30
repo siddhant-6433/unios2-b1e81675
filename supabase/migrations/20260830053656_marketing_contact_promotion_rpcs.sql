@@ -315,7 +315,7 @@ GRANT EXECUTE ON FUNCTION public.import_marketing_contacts_bulk(uuid, jsonb, tex
 GRANT EXECUTE ON FUNCTION public.lead_list_members_page(uuid, int, int, text)                          TO authenticated, service_role;
 
 -- import_leads_bulk wrote marketing data straight into `leads` — the exact
--- coupling this change removes. Guarded with IF EXISTS because the migration
--- that created it (20260829145145) landed on a sibling branch; prod has it,
--- a fresh database may not.
+-- coupling this change removes. It is created by 20260829145145, which sorts
+-- earlier, so on a fresh database the create-then-drop sequence is correct.
+-- IF EXISTS keeps this safe on databases that never had it.
 DROP FUNCTION IF EXISTS public.import_leads_bulk(uuid, jsonb, public.lead_source);

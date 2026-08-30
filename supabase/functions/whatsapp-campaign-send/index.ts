@@ -14,6 +14,8 @@ const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
 const BOARDING_PARENT_INTERACTION_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/boarding_school_parent_interaction_header.png";
+const NIMT_BEACON_SCHOOL_2027_28_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/nimt_beacon_school_2027_28.png";
 
 type DynamicHeaderComponent =
   | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
@@ -84,6 +86,7 @@ const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
   cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
   cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
   parent_interaction_boarding_july18: BOARDING_PARENT_INTERACTION_IMAGE_URL,
+  nimt_beacon_school_2027_28: NIMT_BEACON_SCHOOL_2027_28_IMAGE_URL,
 };
 
 function cleanPersonName(value: unknown): string {
