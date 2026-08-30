@@ -22,6 +22,19 @@ const TRANSPARENT_GIF = Uint8Array.from(
 );
 
 // --- Valid event types ---
+// Events that count as real engagement and therefore promote a bulk-imported
+// marketing contact into a worked lead. Passive signals (email_open) are
+// excluded on purpose — see the promotion call site.
+const PROMOTING_EVENT_TYPES = new Set([
+  "chat_open",
+  "chat_message",
+  "navya_click",
+  "whatsapp_click",
+  "whatsapp_reply",
+  "form_start",
+  "apply_click",
+]);
+
 const VALID_EVENT_TYPES = new Set([
   "page_view",
   "chat_open",
@@ -163,6 +176,30 @@ Deno.serve(async (req) => {
       if (normalized) {
         const rows = await dbSelect("leads", `phone=eq.${encodeURIComponent(normalized)}&select=id&limit=1`);
         if (rows.length > 0) leadId = rows[0].id;
+
+        // No lead, but the number may be a bulk-imported marketing contact.
+        // A real site interaction is engagement, so promote it into a lead.
+        //
+        // PROMOTING_EVENT_TYPES is deliberately narrow: email_open must never
+        // promote, or a single campaign blast would promote the entire list —
+        // which is exactly the flood this whole split exists to prevent.
+        if (!leadId && PROMOTING_EVENT_TYPES.has(event_type)) {
+          const res = await fetch(`${supabaseUrl}/rest/v1/rpc/resolve_or_create_lead_by_phone`, {
+            method: "POST",
+            headers: restHeaders,
+            body: JSON.stringify({
+              _phone: normalized,
+              _source: "website",
+              _reason: `website_${event_type}`,
+            }),
+          });
+          if (res.ok) {
+            const resolved = await res.json();
+            if (typeof resolved === "string") leadId = resolved;
+          } else {
+            console.error("resolve_or_create_lead_by_phone failed:", await res.text());
+          }
+        }
       }
 
       const { error: insertError } = await dbInsert("lead_engagement_events", {

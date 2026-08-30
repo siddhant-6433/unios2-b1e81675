@@ -129,6 +129,11 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ success: number; failed: number; duplicates: number; listId?: string | null; listName?: string; failedRows?: { name: string; phone: string; error: string }[] } | null>(null);
   const [triggerAiCalls, setTriggerAiCalls] = useState(false);
+  // Where the rows land. Defaults to "marketing" — the overwhelming majority of
+  // bulk uploads are purchased/scraped audiences that no counsellor works, and
+  // putting those in `leads` is what bloated it to 94% dead rows. "leads" stays
+  // available for genuine admissions CSVs (walk-in registers, event sign-ups).
+  const [importTarget, setImportTarget] = useState<"marketing" | "leads">("marketing");
 
   // Optional manual source override — applied to every imported lead,
   // overriding whatever was in the CSV (or filling it in when missing).
@@ -317,6 +322,66 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
     // lookup matches the trigger's canonical form. This avoids fighting the
     // partial unique index `idx_leads_phone_unique` (WHERE is_mirror=false)
     // — ON CONFLICT can't match a partial index without supplying its WHERE,
+    // Marketing import: rows go to marketing_contacts via one bulk RPC. No
+    // per-row insert_lead, no dedupe preflight (the RPC upserts on normalized
+    // phone), no AI calls. A contact whose number is already a lead is linked
+    // to that lead rather than duplicated.
+    if (importTarget === "marketing") {
+      let listId: string | null = null;
+      let savedListName: string | undefined;
+
+      if (listMode === "new") {
+        const name = listName.trim() || defaultListName;
+        const { data: list, error: listErr } = await supabase
+          .from("lead_lists" as any)
+          .insert({ name, source: "import", description: `Imported ${validLeads.length} contacts from ${fileName || "CSV"}` })
+          .select("id, name")
+          .single();
+        if (listErr || !list) {
+          toast({ title: "List not created", description: listErr?.message || "Could not save list.", variant: "destructive" });
+          setImporting(false);
+          return;
+        }
+        listId = (list as any).id;
+        savedListName = (list as any).name;
+      } else if (listMode === "existing" && existingListId) {
+        listId = existingListId;
+        savedListName = existingLists.find(l => l.id === existingListId)?.name;
+      }
+
+      if (!listId) {
+        toast({ title: "Pick a list", description: "Marketing contacts are imported into a list.", variant: "destructive" });
+        setImporting(false);
+        return;
+      }
+
+      for (let i = 0; i < validLeads.length; i += 500) {
+        const chunk = validLeads.slice(i, i + 500).map(l => ({
+          name: l.name,
+          phone: l.phone,
+          email: l.email || null,
+          city: (l as any).city || null,
+        }));
+        const { data, error } = await supabase.rpc("import_marketing_contacts_bulk" as any, {
+          _list_id: listId,
+          _rows: chunk,
+          _source: "import",
+        });
+        if (error) {
+          failed += chunk.length;
+          failedRows.push({ name: `batch ${i / 500 + 1}`, phone: `${chunk.length} rows`, error: error.message });
+        } else {
+          success += Number((data as any)?.inserted_or_updated ?? chunk.length);
+        }
+      }
+
+      setResult({ success, failed, duplicates: 0, listId, listName: savedListName, failedRows });
+      setImporting(false);
+      setStep("result");
+      if (success > 0) onSuccess();
+      return;
+    }
+
     // and PostgREST doesn't expose that.
     const canonical: string[] = [];
     for (const l of validLeads) {
@@ -798,8 +863,35 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
               )}
             </div>
 
+            {/* Import target — marketing contacts vs admissions leads */}
+            <div className="p-3 rounded-xl border border-primary/20 bg-primary/5 space-y-2">
+              <p className="text-xs font-semibold text-foreground">Import as</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setImportTarget("marketing"); setTriggerAiCalls(false); }}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-left text-[11px] transition ${importTarget === "marketing" ? "border-primary bg-white font-semibold" : "border-primary/20 bg-transparent"}`}
+                >
+                  Marketing contacts
+                  <span className="block font-normal text-muted-foreground mt-0.5">
+                    Bulk audience. Stays out of the CRM until someone replies, calls or visits.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportTarget("leads")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-left text-[11px] transition ${importTarget === "leads" ? "border-primary bg-white font-semibold" : "border-primary/20 bg-transparent"}`}
+                >
+                  Admissions leads
+                  <span className="block font-normal text-muted-foreground mt-0.5">
+                    Real enquiries counsellors will work now. Appears in the CRM immediately.
+                  </span>
+                </button>
+              </div>
+            </div>
+
             {/* AI Call option */}
-            <label className="flex items-start gap-3 p-3 rounded-xl border border-info/20 bg-info/5 cursor-pointer select-none">
+            <label className={`flex items-start gap-3 p-3 rounded-xl border border-info/20 bg-info/5 cursor-pointer select-none ${importTarget === "marketing" ? "hidden" : ""}`}>
               <input
                 type="checkbox"
                 checked={triggerAiCalls}
@@ -823,7 +915,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
                 className="gap-1.5"
               >
                 {importing ? <ButtonOrb state="solving" onFilled /> : <Upload className="h-4 w-4" />}
-                Import {validCount} lead{validCount === 1 ? "" : "s"}{triggerAiCalls ? " + AI Call" : ""}
+                Import {validCount} {importTarget === "marketing" ? `contact${validCount === 1 ? "" : "s"}` : `lead${validCount === 1 ? "" : "s"}`}{triggerAiCalls ? " + AI Call" : ""}
               </Button>
             </div>
           </div>

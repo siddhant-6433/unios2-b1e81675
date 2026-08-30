@@ -614,35 +614,26 @@ Deno.serve(async (req) => {
           let lead = leadRows?.[0] || null;
 
           if (!lead) {
+            // No lead on this number. resolve_or_create_lead_by_phone is the one
+            // find-or-create primitive: it promotes a bulk-imported
+            // marketing_contacts row into a real lead when the person replies,
+            // and only mints a brand-new lead when nobody is on file. It also
+            // runs the intake round-robin, so ownership is handled server-side.
             const phoneForLead = phone.length === 10 ? `+91${phone}` : `+${phone}`;
-            const { data: newLead, error: leadInsertErr } = await admin
-              .from("leads")
-              .insert({
-                phone: phoneForLead,
-                source: "whatsapp",
-                stage: "new_lead",
-                name: phoneForLead,
-              })
-              .select("id, counsellor_id, name, stage, person_role")
-              .single();
-            if (leadInsertErr) {
-              console.error("Webhook auto-create lead failed:", leadInsertErr.message);
+            const { data: resolvedId, error: resolveErr } = await admin.rpc(
+              "resolve_or_create_lead_by_phone",
+              { _phone: phoneForLead, _source: "whatsapp", _reason: "whatsapp_reply" },
+            );
+            if (resolveErr) {
+              console.error("Webhook resolve/create lead failed:", resolveErr.message);
             }
-            lead = newLead || null;
-
-            // Distribute brand-new WhatsApp leads across the same admin-maintained
-            // intake round-robin pool that inbound voice calls use (prefers
-            // online counsellors). No-op when no pool is configured.
-            if (lead?.id && !lead.counsellor_id) {
-              try {
-                const { data: assignedId } = await admin.rpc("fn_intake_round_robin_assign", { _lead_id: lead.id });
-                if (assignedId) {
-                  lead.counsellor_id = assignedId as string;
-                  console.log(`WhatsApp intake round-robin assigned lead ${lead.id} → ${assignedId}`);
-                }
-              } catch (e) {
-                console.error("WhatsApp intake round-robin assign failed:", (e as Error).message);
-              }
+            if (resolvedId) {
+              const { data: resolvedRows } = await admin
+                .from("leads")
+                .select("id, counsellor_id, name, stage, person_role")
+                .eq("id", resolvedId as string)
+                .limit(1);
+              lead = resolvedRows?.[0] || null;
             }
           }
 

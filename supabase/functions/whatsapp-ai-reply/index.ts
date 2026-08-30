@@ -859,21 +859,23 @@ Deno.serve(async (req) => {
     // updates the lead when they reply with it.
     if (!leadId) {
       const phoneForLead = normalizedPhone.length === 10 ? `+91${normalizedPhone}` : `+${normalizedPhone}`;
-      const { data: newLead, error: leadInsertErr } = await admin
-        .from("leads")
-        .insert({
-          phone: phoneForLead,
-          source: "whatsapp",
-          stage: "new_lead",
-          name: lead_name || phoneForLead,
-        })
-        .select("id")
-        .single();
+      // Shared find-or-create primitive — see resolve_or_create_lead_by_phone.
+      // A reply from a bulk-imported marketing contact promotes that contact
+      // instead of creating a second record for the same person.
+      const { data: resolvedId, error: leadInsertErr } = await admin.rpc(
+        "resolve_or_create_lead_by_phone",
+        {
+          _phone: phoneForLead,
+          _source: "whatsapp",
+          _reason: "whatsapp_reply",
+          _name: lead_name || null,
+        },
+      );
       if (leadInsertErr) {
         console.error("Auto-create lead failed:", leadInsertErr.message);
       }
-      leadId = newLead?.id || null;
-      console.log("Auto-created lead from WhatsApp:", leadId);
+      leadId = (resolvedId as string) || null;
+      console.log("Resolved lead from WhatsApp:", leadId);
     }
 
     const deterministicName = !hasName ? extractNameCandidate(message) : null;

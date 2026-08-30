@@ -56,19 +56,27 @@ export default function OptOuts() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [resubscribingId, setResubscribingId] = useState<string | null>(null);
+  const [contactOptOuts, setContactOptOuts] = useState(0);
 
   const loadCounts = useCallback(async () => {
     const now = Date.now();
     const cutoff7 = new Date(now - 7 * 86400000).toISOString();
     const cutoff30 = new Date(now - 30 * 86400000).toISOString();
-    const [totalRes, last7Res, last30Res] = await Promise.all([
+    const [totalRes, last7Res, last30Res, contactRes] = await Promise.all([
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "dnc"),
       supabase.from("lead_activities").select("id", { count: "exact", head: true }).eq("new_stage", "dnc").gte("created_at", cutoff7),
       supabase.from("lead_activities").select("id", { count: "exact", head: true }).eq("new_stage", "dnc").gte("created_at", cutoff30),
+      // Suppressed marketing contacts. These never enter the CRM, so they have
+      // no lead row and no stage — campaign send skips them on
+      // marketing_contacts.opted_out. Surfaced as a count only: a contact that
+      // actually replies STOP gets promoted to a lead first and then lands in
+      // the DNC table below through the normal path.
+      supabase.from("marketing_contacts" as any).select("id", { count: "exact", head: true }).eq("opted_out", true),
     ]);
     setTotalCount(totalRes.count || 0);
     setLast7(last7Res.count || 0);
     setLast30(last30Res.count || 0);
+    setContactOptOuts(contactRes.count || 0);
   }, []);
 
   const loadRows = useCallback(async () => {
@@ -153,10 +161,11 @@ export default function OptOuts() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric title="Total opted-out" value={totalCount.toLocaleString("en-IN")} icon={Users} />
         <Metric title="Last 7 days" value={last7.toLocaleString("en-IN")} icon={CalendarClock} />
         <Metric title="Last 30 days" value={last30.toLocaleString("en-IN")} icon={CalendarClock} />
+        <Metric title="Marketing contacts suppressed" value={contactOptOuts.toLocaleString("en-IN")} icon={Users} />
       </div>
 
       <Card>

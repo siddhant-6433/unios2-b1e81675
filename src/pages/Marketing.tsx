@@ -855,12 +855,24 @@ export default function Marketing() {
 
         const { data: members, error: memErr } = await supabase
           .from("lead_list_members" as any)
-          .select("lead_id, leads(id, phone, stage, shared_with_nimt)")
+          .select("lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)")
           .eq("list_id", selectedList.id);
         if (memErr) throw memErr;
 
+        // Members are polymorphic (lead or bulk-imported marketing contact).
+        // Contacts are normalised into the lead shape so filterCampaignRecipients
+        // and the pacing plan need no changes; `isContact` is carried through so
+        // the recipient row can be written against the right column.
+        // A contact whose number is already a lead (promoted_lead_id set) is
+        // dropped here — the lead-backed member covers that person, and sending
+        // to both would message them twice.
         const rawLeads = ((members as any[]) || [])
-          .map((member) => member.leads)
+          .map((member) => {
+            if (member.leads?.id) return member.leads;
+            const c = member.marketing_contacts;
+            if (!c?.id || c.opted_out || c.promoted_lead_id) return null;
+            return { id: c.id, phone: c.phone, stage: null, shared_with_nimt: false, isContact: true };
+          })
           .filter((lead) => lead && lead.id);
 
         const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
@@ -921,7 +933,10 @@ export default function Marketing() {
 
         const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
-          lead_id: lead.id,
+          // Exactly one of these is set — whatsapp_campaign_recipients_one_target
+          // enforces it at the DB level.
+          lead_id: (lead as any).isContact ? null : lead.id,
+          contact_id: (lead as any).isContact ? lead.id : null,
           phone: lead.phone,
           eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
         }));

@@ -244,28 +244,49 @@ async function createLead(lead: LeadInfo): Promise<string | null> {
       }
     }
 
-    // No existing lead — create new one
+    // No existing lead. The number may still be a bulk-imported marketing
+    // contact — starting a chat is engagement, so promote that contact into a
+    // lead instead of creating a duplicate person. resolve_or_create_lead_by_phone
+    // promotes when a contact exists and mints a fresh lead otherwise, so this
+    // one call covers both cases.
+    const resolveRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/resolve_or_create_lead_by_phone`, {
+      method: "POST",
+      headers: supabaseHeaders,
+      body: JSON.stringify({
+        _phone: normPhone,
+        _source: newSource,
+        _reason: "website_chat",
+        _name: lead.name,
+      }),
+    });
+    if (!resolveRes.ok) {
+      console.error("Lead creation failed:", await resolveRes.text());
+      return null;
+    }
+    const leadId = await resolveRes.json().catch(() => null);
+    if (!leadId || typeof leadId !== "string") return null;
+
+    // The RPC only sets name/phone/source/stage, so apply the chat's richer
+    // attribution (UTM/GA/landing page) and course selection on top. A promoted
+    // contact carries an imported directory name; the name typed into the chat
+    // is the better one.
     const body: Record<string, unknown> = {
       name: lead.name,
-      phone: normPhone,
       source: newSource,
-      stage: "new_lead",
       skip_ai_call: true,
       ...attribution,
     };
     if (courseId) body.course_id = courseId;
 
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
-      method: "POST",
-      headers: { ...supabaseHeaders, Prefer: "return=representation" },
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
+      method: "PATCH",
+      headers: { ...supabaseHeaders, Prefer: "return=minimal" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      console.error("Lead creation failed:", await res.text());
-      return null;
+    if (!patchRes.ok) {
+      console.error("Lead attribution update failed:", await patchRes.text());
     }
-    const data = await res.json();
-    return data[0]?.id || null;
+    return leadId;
   } catch (e) {
     console.error("Lead creation error:", e);
     return null;
