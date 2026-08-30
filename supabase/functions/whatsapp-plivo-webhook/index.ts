@@ -233,18 +233,24 @@ Deno.serve(async (req) => {
     let lead = existingLeads?.[0] || null;
 
     if (!lead) {
-      const { data: newLead, error: leadErr } = await admin
-        .from("leads")
-        .insert({
-          phone: leadPhone,
-          source: "whatsapp",
-          stage: "new_lead",
-          name: leadPhone,
-        })
-        .select("id, counsellor_id, name, stage, person_role")
-        .single();
-      if (leadErr) console.error("plivo lead insert failed:", leadErr);
-      lead = newLead || null;
+      // Same primitive the Meta webhook uses: promotes a bulk-imported
+      // marketing_contacts row on reply, mints a lead only for an unknown
+      // number, and runs the intake round-robin. That last part is new here —
+      // this path never assigned an owner, so every Plivo-created lead used to
+      // land unowned and stay that way.
+      const { data: resolvedId, error: leadErr } = await admin.rpc(
+        "resolve_or_create_lead_by_phone",
+        { _phone: leadPhone, _source: "whatsapp", _reason: "whatsapp_reply" },
+      );
+      if (leadErr) console.error("plivo resolve/create lead failed:", leadErr);
+      if (resolvedId) {
+        const { data: resolvedRows } = await admin
+          .from("leads")
+          .select("id, counsellor_id, name, stage, person_role")
+          .eq("id", resolvedId as string)
+          .limit(1);
+        lead = resolvedRows?.[0] || null;
+      }
     }
 
     // ── Log the inbound message ──────────────────────────────────────────────

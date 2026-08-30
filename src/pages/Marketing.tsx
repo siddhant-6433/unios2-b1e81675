@@ -853,14 +853,29 @@ export default function Marketing() {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
         }
 
+        // Paginated past PostgREST's 1000-row cap (see fetchListMembers), with
+        // the contact join added: a marketing list is exactly the case where
+        // both matter — it is >1000 members AND contact-backed.
         const members = await fetchListMembers(
           supabase as any,
           selectedList.id,
-          "lead_id, leads(id, phone, stage, shared_with_nimt)",
+          "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
         );
 
+        // Members are polymorphic (lead or bulk-imported marketing contact).
+        // Contacts are normalised into the lead shape so filterCampaignRecipients
+        // and the pacing plan need no changes; `isContact` is carried through so
+        // the recipient row can be written against the right column.
+        // A contact whose number is already a lead (promoted_lead_id set) is
+        // dropped here — the lead-backed member covers that person, and sending
+        // to both would message them twice.
         const rawLeads = ((members as any[]) || [])
-          .map((member) => member.leads)
+          .map((member) => {
+            if (member.leads?.id) return member.leads;
+            const c = member.marketing_contacts;
+            if (!c?.id || c.opted_out || c.promoted_lead_id) return null;
+            return { id: c.id, phone: c.phone, stage: null, shared_with_nimt: false, isContact: true };
+          })
           .filter((lead) => lead && lead.id);
 
         const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
@@ -921,7 +936,10 @@ export default function Marketing() {
 
         const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
-          lead_id: lead.id,
+          // Exactly one of these is set — whatsapp_campaign_recipients_one_target
+          // enforces it at the DB level.
+          lead_id: (lead as any).isContact ? null : lead.id,
+          contact_id: (lead as any).isContact ? lead.id : null,
           phone: lead.phone,
           eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
         }));
@@ -938,11 +956,20 @@ export default function Marketing() {
         const members = await fetchListMembers(
           supabase as any,
           selectedList.id,
-          "lead_id, leads(id, email, stage, shared_with_nimt)",
+          "lead_id, contact_id, leads(id, email, stage, shared_with_nimt), marketing_contacts(id, email, opted_out, promoted_lead_id)",
         );
 
+        // Same polymorphic normalisation as the WhatsApp path above. Most
+        // imported contacts have no email and drop out at the eligibility
+        // filter, but without this an email campaign over a marketing list
+        // would silently resolve every member to null and reach nobody.
         const rawEmailLeads = ((members as any[]) || [])
-          .map((member) => member.leads)
+          .map((member) => {
+            if (member.leads?.id) return member.leads;
+            const c = member.marketing_contacts;
+            if (!c?.id || c.opted_out || c.promoted_lead_id) return null;
+            return { id: c.id, email: c.email, stage: null, shared_with_nimt: false, isContact: true };
+          })
           .filter((lead) => lead && lead.id);
         const emailEligibility = filterCampaignRecipients(rawEmailLeads, {
           channel: "email",
@@ -974,7 +1001,9 @@ export default function Marketing() {
 
         const rows = valid.map((lead) => ({
           campaign_id: (campaign as any).id,
-          lead_id: lead.id,
+          // Exactly one target — email_campaign_recipients_one_target enforces it.
+          lead_id: (lead as any).isContact ? null : lead.id,
+          contact_id: (lead as any).isContact ? lead.id : null,
           to_email: lead.email,
         }));
         for (let i = 0; i < rows.length; i += 500) {

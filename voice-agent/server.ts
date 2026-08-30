@@ -2469,29 +2469,36 @@ Deno.serve({ port: PORT }, async (req) => {
           const recent = (await recentRes.json().catch(() => []))?.[0];
           if (recent?.created_at) lastOutboundCallAt = recent.created_at;
         } else {
-          // Unknown caller — create a fresh lead row so the conversation has
+          // Unknown caller — resolve or create a lead so the conversation has
           // somewhere to attach followups, dispositions, and notes. Without
           // this, an inbound call from a number not in CRM produced a
-          // silent ghost call that disappeared. Source = "whatsapp" is the
-          // default catch-all for inbound voice (matches existing channel).
+          // silent ghost call that disappeared.
+          //
+          // resolve_or_create_lead_by_phone is the shared primitive: if this
+          // number is a bulk-imported marketing contact, calling in IS
+          // engagement, so the contact is promoted into a real lead rather
+          // than a second record being created for the same person.
           const phoneE164 = `+91${phone}`;
-          const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+          const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/resolve_or_create_lead_by_phone`, {
             method: "POST",
-            headers: { ...dbHeaders, Prefer: "return=representation" },
+            headers: dbHeaders,
             body: JSON.stringify({
-              name: `Inbound caller ${phone.slice(-4)}`, // Navya updates via update_lead_info
-              phone: phoneE164,
-              source: "inbound_call",
-              stage: "new_lead",
-              notes: `Auto-created on inbound AI call ${callId}`,
+              _phone: phoneE164,
+              _source: "inbound_call",
+              _reason: `inbound_call ${callId}`,
+              _name: `Inbound caller ${phone.slice(-4)}`, // Navya updates via update_lead_info
             }),
           });
-          if (insertRes.ok) {
-            const created = await insertRes.json().catch(() => []);
-            if (created?.[0]?.id) {
-              leadId = created[0].id;
-              leadName = created[0].name || "";
-              console.log(`[${callId}] Auto-created lead ${leadId} for inbound caller ${phoneE164}`);
+          if (rpcRes.ok) {
+            const resolvedId = await rpcRes.json().catch(() => null);
+            if (resolvedId && typeof resolvedId === "string") {
+              leadId = resolvedId;
+              const nameRes = await fetch(
+                `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=name`,
+                { headers: dbHeaders },
+              );
+              leadName = (await nameRes.json().catch(() => []))?.[0]?.name || "";
+              console.log(`[${callId}] Resolved lead ${leadId} for inbound caller ${phoneE164}`);
               // Seed an activity entry so the call shows up in the lead's timeline.
               fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
                 method: "POST",
@@ -2499,13 +2506,13 @@ Deno.serve({ port: PORT }, async (req) => {
                 body: JSON.stringify({
                   lead_id: leadId,
                   type: "system",
-                  description: `🤖 Auto-created from inbound AI call (${phoneE164}). Navya is qualifying.`,
+                  description: `🤖 Inbound AI call from ${phoneE164}. Navya is qualifying.`,
                 }),
               }).catch(() => {});
             }
           } else {
-            const errBody = await insertRes.text().catch(() => "");
-            console.error(`[${callId}] Inbound auto-lead-create failed (${insertRes.status}): ${errBody.slice(0, 200)}`);
+            const errBody = await rpcRes.text().catch(() => "");
+            console.error(`[${callId}] Inbound lead resolve failed (${rpcRes.status}): ${errBody.slice(0, 200)}`);
           }
         }
       }

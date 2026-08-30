@@ -7,7 +7,10 @@
  *   --dry-run (default): writes scripts/.out/import-manifest.csv + per-list JSON
  *                        for you to review city tags before committing.
  *   --commit           : creates a lead_lists row per file and upserts contacts
- *                        via the import_leads_bulk RPC (skip_ai_call=true, no AI).
+ *                        via the import_marketing_contacts_bulk RPC. Imports land
+ *                        in marketing_contacts, NOT in leads — a contact only
+ *                        becomes a lead once it engages (see
+ *                        resolve_or_create_lead_by_phone).
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  (only needed for --commit)
  * Optional: scripts/import-city-overrides.csv  ("listName,city" — your review edits)
@@ -306,7 +309,7 @@ async function main() {
   // batch still lands. Returns rows successfully sent. Idempotent (ON CONFLICT).
   async function sendChunk(listId, chunk, listName, offset) {
     if (!chunk.length) return 0;
-    const { error } = await supabase.rpc('import_leads_bulk', { _list_id: listId, _rows: chunk, _source: 'other' });
+    const { error } = await supabase.rpc('import_marketing_contacts_bulk', { _list_id: listId, _rows: chunk, _source: 'import' });
     if (!error) return chunk.length;
     if (chunk.length <= 50) { console.error(`\n  batch failed (${listName} @${offset}, n=${chunk.length}): ${error.message}`); return 0; }
     const mid = Math.floor(chunk.length / 2);

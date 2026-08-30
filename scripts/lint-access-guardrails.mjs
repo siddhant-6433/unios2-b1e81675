@@ -145,6 +145,11 @@ async function ruleA(violations) {
 
 // ---------- rule B: SECURITY INVOKER view on RLS-scoped tables --------------
 
+// marketing_contacts is deliberately NOT in this list. It holds bulk-imported
+// marketing data with no counsellor ownership and no admissions content, so it
+// is guarded by a flat role check rather than per-row can_view_lead scoping —
+// that per-row function is the cost the leads/marketing_contacts split exists
+// to remove. Anything that moves admissions data into it belongs in `leads`.
 const RLS_SCOPED_TABLES = ["leads", "applications", "students"];
 
 // Match a CREATE VIEW or ALTER VIEW that sets security_invoker=true.

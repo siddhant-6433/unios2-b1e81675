@@ -331,7 +331,11 @@ export default function LeadLists() {
   // Members preview
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewList, setPreviewList] = useState<LeadList | null>(null);
-  const [previewMembers, setPreviewMembers] = useState<Array<{ id: string; name: string; phone: string; email: string | null; stage: string }>>([]);
+  // A list member is now polymorphic: either a real lead or a bulk-imported
+  // marketing contact that hasn't engaged yet. lead_list_members_page returns
+  // both shapes in one paged result.
+  const [previewMembers, setPreviewMembers] = useState<Array<{ member_id: string; kind: "lead" | "contact"; target_id: string; name: string | null; phone: string | null; email: string | null; stage: string | null; promoted: boolean | null }>>([]);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   // List assignment + calling report
@@ -637,21 +641,39 @@ export default function LeadLists() {
     setEmailOpen(true);
   };
 
+  // Manual promotion: staff can pull a marketing contact into the CRM without
+  // waiting for it to reply. Same RPC the engagement channels call, so the
+  // result is identical (lead created under the contact's id, intake
+  // round-robin applied, activity logged) and it stays idempotent.
+  const promoteContact = async (contactId: string) => {
+    setPromotingId(contactId);
+    const { data, error } = await supabase.rpc("promote_marketing_contact" as any, {
+      _contact_id: contactId,
+      _source: "other",
+      _reason: "manual_promote",
+    });
+    setPromotingId(null);
+    if (error || !data) {
+      toast({ title: "Promote failed", description: error?.message || "No lead returned.", variant: "destructive" });
+      return;
+    }
+    setPreviewMembers(prev => prev.map(m =>
+      m.target_id === contactId ? { ...m, kind: "lead" as const, promoted: true, stage: "new_lead" } : m
+    ));
+    toast({ title: "Promoted to lead", description: "This contact is now in the CRM and assigned." });
+  };
+
   const openPreview = async (list: LeadList) => {
     setPreviewList(list);
     setPreviewOpen(true);
     setPreviewLoading(true);
-    const { data, error } = await supabase
-      .from("lead_list_members" as any)
-      .select("lead_id, leads(id, name, phone, email, stage, shared_with_nimt)")
-      .eq("list_id", list.id)
-      .limit(100);
+    const { data, error } = await supabase.rpc("lead_list_members_page" as any, {
+      _list_id: list.id,
+      _limit: 100,
+      _offset: 0,
+    });
     if (error) console.error("Preview fetch failed:", error);
-    setPreviewMembers(
-      ((data as any) || [])
-        .map((m: any) => m.leads)
-        .filter(Boolean)
-    );
+    setPreviewMembers(((data as any) || []) as typeof previewMembers);
     setPreviewLoading(false);
   };
 
@@ -2058,18 +2080,36 @@ export default function LeadLists() {
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">Phone</th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">Email</th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">Stage</th>
+                    <th className="px-3 py-2 text-right font-medium text-muted-foreground"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {previewMembers.map((m) => (
-                    <tr key={m.id} className="border-b border-border/50">
-                      <td className="px-3 py-2 text-foreground">{m.name}</td>
-                      <td className="px-3 py-2 text-muted-foreground font-mono text-xs">{m.phone}</td>
+                    <tr key={m.member_id} className="border-b border-border/50">
+                      <td className="px-3 py-2 text-foreground">{m.name || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground font-mono text-xs">{m.phone || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground text-xs">{m.email || "—"}</td>
                       <td className="px-3 py-2">
-                        <Badge variant={m.stage === "dnc" ? "destructive" : "outline"} className="text-[10px]">
-                          {m.stage}
-                        </Badge>
+                        {m.kind === "lead" ? (
+                          <Badge variant={m.stage === "dnc" ? "destructive" : "outline"} className="text-[10px]">
+                            {m.stage}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">Marketing contact</Badge>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {m.kind === "contact" && !m.promoted && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px]"
+                            disabled={promotingId === m.target_id}
+                            onClick={() => promoteContact(m.target_id)}
+                          >
+                            {promotingId === m.target_id ? "Promoting…" : "Promote to lead"}
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))}

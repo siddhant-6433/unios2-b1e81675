@@ -575,7 +575,7 @@ Deno.serve(async (req) => {
     // eligible_at defaults to now() for legacy campaigns.
     const nowIso = new Date().toISOString();
     const recipientSelect =
-      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, contact_id, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
     let recipients: any[] | null = null;
     {
       const paced = await adminClient
@@ -591,7 +591,7 @@ Deno.serve(async (req) => {
         // Pre-migration fallback
         const legacy = await adminClient
           .from("whatsapp_campaign_recipients")
-          .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
+          .select("id, campaign_id, lead_id, phone, status, contact_id, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
           .eq("campaign_id", campaign_id)
           .eq("status", "pending")
           .limit(batchSize);
@@ -613,6 +613,25 @@ Deno.serve(async (req) => {
         );
       } else {
         recipients = paced.data || [];
+      }
+    }
+
+    // Recipients are polymorphic: a row targets either a lead or a bulk-imported
+    // marketing contact. Shaping the contact into the same object the lead branch
+    // produces keeps every downstream path (param rendering, display-name
+    // resolution, phone fallback) identical instead of forking the send loop.
+    // `stage` stays null so the DNC check below can't false-positive; contact
+    // opt-out is enforced separately via marketing_contacts.opted_out.
+    for (const r of (recipients || []) as any[]) {
+      if (!r.leads && r.marketing_contacts) {
+        r.leads = {
+          name: r.marketing_contacts.name,
+          phone: r.marketing_contacts.phone,
+          email: r.marketing_contacts.email,
+          source: "import",
+          stage: null,
+          shared_with_nimt: false,
+        };
       }
     }
 
@@ -809,6 +828,14 @@ Deno.serve(async (req) => {
 
       // DNC is a hard stop: never send further communications (stage may have
       // changed after the campaign was queued).
+      if (recipient.marketing_contacts?.opted_out) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({ status: "skipped", error_message: "Skipped: marketing contact opted out" })
+          .eq("id", recipient.id);
+        return;
+      }
+
       if (String(lead.stage || "").toLowerCase() === "dnc") {
         await adminClient
           .from("whatsapp_campaign_recipients")
