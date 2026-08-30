@@ -107,14 +107,15 @@ function SocialLinkIcons({ v }: { v: VideoRow }) {
 
 // One mandatory thumbnail slot. Shows the newly-picked file, else the existing
 // URL (on resubmit), and a file picker. `box` sizes the preview to the ratio.
-function ThumbnailPicker({ label, hint, box, existingUrl, file, onPick }: {
+function ThumbnailPicker({ label, hint, box, existingUrl, file, onPick, required = false }: {
   label: string; hint: string; box: string;
   existingUrl: string; file: File | null; onPick: (f: File | null) => void;
+  required?: boolean;
 }) {
   const preview = file ? URL.createObjectURL(file) : existingUrl || "";
   return (
     <div>
-      <label className="text-xs font-medium mb-1 block">{label} *</label>
+      <label className="text-xs font-medium mb-1 block">{label}{required ? " *" : ""}</label>
       <div className="flex items-start gap-3">
         {preview ? (
           <div className="relative shrink-0">
@@ -271,12 +272,12 @@ export default function VideoEditorPortal() {
     if (!form.title.trim() || !form.drive_url.trim()) {
       toast({ title: "Title and video link are required", variant: "destructive" }); return;
     }
-    // Both thumbnails are mandatory: a newly-picked file, or an existing URL (resubmit).
-    if (!thumbFiles.youtube && !form.thumbnail_youtube_url) {
-      toast({ title: "YouTube thumbnail required", description: "Attach a 16:9 thumbnail for YouTube.", variant: "destructive" }); return;
-    }
-    if (!thumbFiles.instagram && !form.thumbnail_instagram_url) {
-      toast({ title: "Instagram thumbnail required", description: "Attach a 9:16 thumbnail for Instagram.", variant: "destructive" }); return;
+    // At least one thumbnail is mandatory: a newly-picked file, or an existing URL
+    // (resubmit). Reels are 9:16-only, so we don't force a 16:9 YouTube thumbnail too.
+    const hasYoutube   = !!thumbFiles.youtube   || !!form.thumbnail_youtube_url;
+    const hasInstagram = !!thumbFiles.instagram || !!form.thumbnail_instagram_url;
+    if (!hasYoutube && !hasInstagram) {
+      toast({ title: "Add a thumbnail", description: "Attach at least one thumbnail — 16:9 for YouTube or 9:16 for Instagram.", variant: "destructive" }); return;
     }
     // Validate the shape of any newly-picked thumbnail before we persist anything.
     if (thumbFiles.youtube && !(await checkAspectRatio(thumbFiles.youtube, 16, 9))) {
@@ -658,6 +659,9 @@ export default function VideoEditorPortal() {
                 Drive: share as <span className="font-semibold">Anyone with the link → Viewer</span>. YouTube: set it to <span className="font-semibold">Unlisted</span> (or Public) so the approver can open it.
               </p>
             </div>
+            <p className="text-xs font-medium">
+              Thumbnails <span className="text-muted-foreground font-normal">— add at least one (both if the video goes to YouTube and Instagram).</span>
+            </p>
             <ThumbnailPicker
               label="YouTube thumbnail (16:9)"
               hint="Landscape image, 16:9 ratio (e.g. 1280×720)."
