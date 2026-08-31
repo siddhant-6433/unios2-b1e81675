@@ -150,7 +150,9 @@ describe("assigned call lists", () => {
   it("gives counsellors one work surface", () => {
     // /fresh-leads and /missed-calls are dialer buckets for counsellors.
     expect(app).toContain('<RedirectRole roles={["counsellor"]} to="/cloud-dialer">');
-    expect(appLayout).toContain('role !== "counsellor" && <GlobalActionBar />');
+    // The action bar is back for counsellors as cross-page navigation — hidden
+    // only on the /cloud-dialer console, where those numbers are bucket chips.
+    expect(appLayout).toContain('!(role === "counsellor" && isConsole) && <GlobalActionBar />');
     expect(admissions).toContain('role === "counsellor" ? ["pipeline", "list"]');
   });
 

@@ -444,107 +444,35 @@ const CounsellorDashboard = () => {
     setActivityDatePreset(preset);
     const { from, to } = getDateRange(preset);
 
-    // Get counsellor profiles
-    const { data: roleData } = await supabase
-      .from("user_roles" as any).select("user_id, role").in("role", ["counsellor", "admission_head"]);
-    const counsellorUserIds = (roleData || []).map((r: any) => r.user_id);
-    const { data: profiles } = await supabase
-      .from("profiles").select("id, user_id, display_name").in("user_id", counsellorUserIds);
+    // get_counsellor_activity_log aggregates on the server — no .limit(500)
+    // truncation of lead_activities / call_logs, no raw-row scan to the client
+    // (20260831084853 migration). Same per-counsellor shape as before.
+    const { data, error } = await (supabase as any).rpc("get_counsellor_activity_log", {
+      _from_date: from || null,
+      _to_date:   to   || null,
+    });
 
-    if (!profiles?.length) { setActivityLoading(false); return; }
-    const profileMap = new Map((profiles as any[]).map(p => [p.user_id, p]));
-    const profileIdMap = new Map((profiles as any[]).map(p => [p.id, p]));
-
-    // Fetch activities in date range
-    let actQ = supabase
-      .from("lead_activities" as any)
-      .select("id, lead_id, type, description, user_id, created_at")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (from) actQ = actQ.gte("created_at", `${from}T00:00:00`);
-    if (to) actQ = actQ.lte("created_at", `${to}T23:59:59`);
-    const { data: activities } = await actQ;
-
-    // Fetch call logs in date range
-    let clQ = supabase
-      .from("call_logs" as any)
-      .select("id, lead_id, disposition, duration_seconds, user_id, called_at")
-      .order("called_at", { ascending: false })
-      .limit(500);
-    if (from) clQ = clQ.gte("called_at", `${from}T00:00:00`);
-    if (to) clQ = clQ.lte("called_at", `${to}T23:59:59`);
-    const { data: callLogs } = await clQ;
-
-    // Fetch leads per counsellor to compute not-called
-    const profileIds = (profiles as any[]).map(p => p.id);
-    const { data: counsellorLeads } = await supabase
-      .from("leads")
-      .select("id, counsellor_id")
-      .in("counsellor_id", profileIds)
-      .not("stage", "in", "(admitted,rejected,not_interested)");
-
-    // Build set of lead IDs that have call logs
-    const calledLeadIds = new Set<string>();
-    for (const cl of (callLogs || []) as any[]) calledLeadIds.add(cl.lead_id);
-
-    // Aggregate per counsellor
-    const agg = new Map<string, {
-      name: string; userId: string; profileId: string;
-      calls: number; whatsapps: number; notes: number; stageChanges: number; aiCalls: number;
-      dispositions: Record<string, number>; totalCallDuration: number;
-      totalLeads: number; notCalled: number;
-    }>();
-
-    for (const p of profiles as any[]) {
-      agg.set(p.user_id, {
-        name: p.display_name || "Unknown", userId: p.user_id, profileId: p.id,
-        calls: 0, whatsapps: 0, notes: 0, stageChanges: 0, aiCalls: 0,
-        dispositions: {}, totalCallDuration: 0,
-        totalLeads: 0, notCalled: 0,
-      });
-    }
-
-    // Count leads and not-called per counsellor
-    const profileIdToUserId = new Map((profiles as any[]).map(p => [p.id, p.user_id]));
-    for (const l of (counsellorLeads || []) as any[]) {
-      const userId = profileIdToUserId.get(l.counsellor_id);
-      if (!userId) continue;
-      const entry = agg.get(userId);
-      if (!entry) continue;
-      entry.totalLeads++;
-      if (!calledLeadIds.has(l.id)) entry.notCalled++;
-    }
-
-    for (const a of (activities || []) as any[]) {
-      const entry = agg.get(a.user_id);
-      if (!entry) continue;
-      if (a.type === "call") entry.calls++;
-      else if (a.type === "whatsapp") entry.whatsapps++;
-      else if (a.type === "note") entry.notes++;
-      else if (a.type === "stage_change") entry.stageChanges++;
-      else if (a.type === "ai_call") entry.aiCalls++;
-    }
-
-    for (const cl of (callLogs || []) as any[]) {
-      const entry = agg.get(cl.user_id);
-      if (!entry) continue;
-      entry.calls++;
-      entry.totalCallDuration += cl.duration_seconds || 0;
-      if (cl.disposition) {
-        entry.dispositions[cl.disposition] = (entry.dispositions[cl.disposition] || 0) + 1;
-      }
-    }
-
-    // Also count by counsellor_id (profiles.id) for activities that use profile-based user tracking
-    for (const a of (activities || []) as any[]) {
-      if (a.user_id) continue; // already counted above
-      // Some activities might have a lead's counsellor_id as the implicit actor
+    if (error) {
+      console.error("fetchActivity RPC error:", error);
+      setActivityLoading(false);
+      return;
     }
 
     setActivityData(
-      Array.from(agg.values())
-        .filter(a => a.calls + a.whatsapps + a.notes + a.stageChanges + a.aiCalls > 0)
-        .sort((a, b) => (b.calls + b.whatsapps + b.notes) - (a.calls + a.whatsapps + a.notes))
+      ((data || []) as any[]).map((r: any) => ({
+        name:              r.counsellor_name || "Unknown",
+        userId:            r.user_id,
+        profileId:         r.counsellor_id,
+        calls:             Number(r.calls),
+        whatsapps:         Number(r.whatsapps),
+        notes:             Number(r.notes),
+        stageChanges:      Number(r.stage_changes),
+        aiCalls:           Number(r.ai_calls),
+        dispositions:      (r.dispositions ?? {}) as Record<string, number>,
+        totalCallDuration: Number(r.total_call_duration),
+        totalLeads:        Number(r.total_leads),
+        notCalled:         Number(r.not_called),
+      }))
     );
     setActivityLoading(false);
   }, []);
