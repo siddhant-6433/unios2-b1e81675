@@ -367,6 +367,20 @@ Buttons:
     });
   }, [waSettings]);
 
+  // Newly approved templates are registered `hidden` on purpose, and the campaign
+  // picker only reads marketing_only/all — so without a nudge a freshly approved
+  // template silently never reaches Marketing. Surface the recent ones.
+  const NEW_HIDDEN_WINDOW_DAYS = 14;
+  const newlyHiddenKeys = useMemo(() => {
+    const cutoff = Date.now() - NEW_HIDDEN_WINDOW_DAYS * 86_400_000;
+    return new Set(
+      waSettings
+        .filter((s) => s.visibility === "hidden"
+          && s.created_at && new Date(s.created_at).getTime() >= cutoff)
+        .map((s) => s.template_key),
+    );
+  }, [waSettings]);
+
   const visibleWaSettings = useMemo(() => {
     const query = waSearch.trim().toLowerCase();
     const filtered = waSettings.filter((setting) => {
@@ -787,6 +801,32 @@ Buttons:
             </div>
           </div>
 
+          {/* Newly approved templates land here hidden, and the campaign picker
+              only reads marketing_only/all — so they are invisible to Marketing
+              until someone decides. Without this nudge that wait is silent. */}
+          {newlyHiddenKeys.size > 0 && waStatusFilter !== "hidden" && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-warning-foreground" />
+              <p className="flex-1 text-xs text-warning-foreground">
+                <span className="font-semibold">
+                  {newlyHiddenKeys.size} newly approved template{newlyHiddenKeys.size === 1 ? "" : "s"}
+                </span>{" "}
+                {newlyHiddenKeys.size === 1 ? "is" : "are"} still hidden, so {newlyHiddenKeys.size === 1 ? "it" : "they"}
+                {" "}won't appear when building a campaign. Set {newlyHiddenKeys.size === 1 ? "it" : "them"} to
+                {" "}<span className="font-medium">Marketing only</span> or
+                {" "}<span className="font-medium">Marketing + Counsellors</span> to use {newlyHiddenKeys.size === 1 ? "it" : "them"}.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0"
+                onClick={() => { setWaStatusFilter("hidden"); setWaSort("date_added_desc"); }}
+              >
+                Review {newlyHiddenKeys.size === 1 ? "it" : "them"}
+              </Button>
+            </div>
+          )}
+
           {waSettingsLoading ? (
             <PageLoader />
           ) : (
@@ -818,7 +858,17 @@ Buttons:
                       <td className="px-3 py-2">
                         <div className="font-medium text-foreground truncate" title={s.display_name}>{s.display_name}</div>
                         <div className="font-mono text-[10px] text-muted-foreground truncate" title={s.template_key}>{s.template_key}</div>
-                        <Badge variant="outline" className="mt-1 text-[9px]">{s.org_label || WHATSAPP_BUSINESS_NAME}</Badge>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <Badge variant="outline" className="text-[9px]">{s.org_label || WHATSAPP_BUSINESS_NAME}</Badge>
+                          {newlyHiddenKeys.has(s.template_key) && (
+                            <Badge
+                              className="bg-warning/15 text-[9px] text-warning-foreground hover:bg-warning/15"
+                              title="Approved recently but still hidden — campaigns cannot use it yet"
+                            >
+                              Needs visibility
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2">
                         <Badge variant="outline" className="text-[10px]">{s.category || "general"}</Badge>

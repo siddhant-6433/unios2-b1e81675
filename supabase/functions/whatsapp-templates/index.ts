@@ -201,6 +201,171 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
   return { registered: rows.length, media_populated: mediaPopulated };
 }
 
+const templatesUrl = (wabaId: string) =>
+  `https://graph.facebook.com/v21.0/${wabaId}/message_templates`;
+
+/** Meta paging cursors are absolute URLs; only ever follow one back to Graph. */
+function isGraphUrl(value: string): boolean {
+  try { return new URL(value).host === "graph.facebook.com"; } catch { return false; }
+}
+
+/** Strip any access token that leaked into an error string before it escapes. */
+const redactToken = (message: string) =>
+  String(message ?? "")
+    .replace(/access_token=[^&\s)]+/gi, "access_token=REDACTED")
+    .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, "Bearer REDACTED");
+
+type WabaTarget = {
+  wabaId: string;
+  token: string;
+  /** The WHATSAPP_WABA_ID account. Its rows keep waba_id NULL — see syncWabaRows. */
+  isDefault: boolean;
+  label: string;
+};
+
+/**
+ * Every WABA we can read templates from: the env default plus every distinct
+ * waba_id on an active whatsapp_channels row, each with its OWN token.
+ *
+ * Before this, list/sync only ever queried WHATSAPP_WABA_ID, so a template
+ * approved under any other WABA could never appear no matter how many times
+ * "Sync from Meta" was pressed — e.g. WABA 963503789849531 (the 9555192192
+ * coexistence sender) had zero templates mirrored despite being bulk-enabled.
+ */
+async function resolveWabaTargets(
+  adminClient: any,
+  defaultWabaId: string,
+  defaultToken: string,
+): Promise<WabaTarget[]> {
+  const targets = new Map<string, WabaTarget>();
+  targets.set(defaultWabaId, {
+    wabaId: defaultWabaId, token: defaultToken, isDefault: true, label: "Default WABA",
+  });
+
+  const { data: channels, error } = await adminClient
+    .from("whatsapp_channels")
+    .select("label, waba_id, secret_token_name, is_active")
+    .not("waba_id", "is", null)
+    .eq("is_active", true);
+  if (error) {
+    console.warn("Could not read whatsapp_channels for WABA fan-out:", error.message);
+    return [...targets.values()];
+  }
+
+  for (const ch of (channels || []) as Array<{
+    label?: string | null; waba_id?: string | null; secret_token_name?: string | null;
+  }>) {
+    const waba = ch.waba_id ? String(ch.waba_id) : "";
+    if (!waba || targets.has(waba)) continue;
+    // Each channel names its own secret; fall back to the shared token so a
+    // channel with no dedicated secret still syncs if the main token covers it.
+    const token = (ch.secret_token_name ? Deno.env.get(ch.secret_token_name) : null) || defaultToken;
+    if (!token) continue;
+    targets.set(waba, { wabaId: waba, token, isDefault: false, label: ch.label || waba });
+  }
+  return [...targets.values()];
+}
+
+/**
+ * All templates for one WABA, following Meta's paging cursor.
+ *
+ * The old code passed limit=200 and read only the first page, so any WABA with
+ * more than 200 templates silently lost the tail — and Meta orders by creation,
+ * so the lost tail is exactly the newly approved ones.
+ */
+async function fetchTemplatesForWaba(
+  target: WabaTarget,
+  fields: string,
+): Promise<{ templates: any[]; error?: string }> {
+  const collected: any[] = [];
+  // Token rides in the Authorization header, never the query string: fetch's
+  // failure message embeds the full URL, and the outer catch both console.errors
+  // it into permanent edge logs and returns it to the browser — which would leak
+  // a live WABA token on any network blip.
+  let url = `${templatesUrl(target.wabaId)}?fields=${fields}&limit=200`;
+  const auth = { Authorization: `Bearer ${target.token}` };
+  // ponytail: 25-page ceiling (5000 templates) so a broken cursor can't spin forever.
+  for (let page = 0; page < 25 && url; page++) {
+    const res = await fetch(url, { headers: auth });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        templates: collected,
+        error: data?.error?.message || `Meta API error ${res.status}`,
+      };
+    }
+    collected.push(...(data.data || []));
+    // Meta's cursor is an absolute URL. Pin the host before following it —
+    // an unvalidated redirect target would receive the Authorization header.
+    const next = data?.paging?.next;
+    url = next && isGraphUrl(next) ? next : "";
+  }
+  return { templates: collected };
+}
+
+/** Meta template → whatsapp_templates row. */
+function toTemplateRow(t: any, wabaId: string | null) {
+  const header = (t.components || []).find((c: any) => c.type === "HEADER");
+  const headerFormat = (header?.format || "NONE").toUpperCase();
+  const bodyComp = (t.components || []).find((c: any) => c.type === "BODY");
+  const placeholderCount = (String(bodyComp?.text || "").match(/\{\{(\d+)\}\}/g) || []).length;
+  return {
+    meta_template_id: String(t.id),
+    name: t.name,
+    language: t.language || "en",
+    category: t.category || null,
+    status: normalizeTemplateStatus(t.status),
+    header_format: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) ? headerFormat : "NONE",
+    has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
+    placeholder_count: placeholderCount,
+    components: t.components || null,
+    quality_score: typeof t.quality_score === "object" ? t.quality_score?.score || null : t.quality_score || null,
+    waba_id: wabaId,
+    status_updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Fan out across every WABA and return de-duplicated rows.
+ *
+ * whatsapp_templates is unique on (name, language), so the same template name
+ * living in two WABAs can only be mirrored once. The default WABA wins, since
+ * that is the account every legacy sender resolves against.
+ *
+ * ponytail: if two WABAs ever genuinely need the same template name at once,
+ * the unique constraint has to become (waba_id, name, language) and every
+ * name-only lookup has to carry a WABA — a much larger change than this.
+ */
+async function collectRowsAcrossWabas(targets: WabaTarget[], fields: string) {
+  const byKey = new Map<string, any>();
+  const perWaba: Array<{ waba_id: string; label: string; fetched: number; error?: string }> = [];
+  const skipped: string[] = [];
+
+  for (const target of targets) {
+    const { templates, error } = await fetchTemplatesForWaba(target, fields);
+    perWaba.push({ waba_id: target.wabaId, label: target.label, fetched: templates.length, ...(error ? { error } : {}) });
+    if (error) console.warn(`[template-sync] ${target.label} (${target.wabaId}): ${error}`);
+
+    for (const t of templates) {
+      if (!t?.name) continue;
+      const key = `${t.name}:${t.language || "en"}`;
+      // Default-WABA templates keep waba_id NULL. The sender-matching helper
+      // normalises NULL to "MAIN", and the main senders have no waba_id set —
+      // stamping a real id here would make them fail senderCanSendTemplate.
+      const row = toTemplateRow(t, target.isDefault ? null : target.wabaId);
+      const existing = byKey.get(key);
+      if (!existing) { byKey.set(key, row); continue; }
+      if (existing.waba_id !== null && row.waba_id === null) {
+        byKey.set(key, row);              // default wins
+        skipped.push(`${key}@${existing.waba_id}`);
+      } else {
+        skipped.push(`${key}@${target.wabaId}`);
+      }
+    }
+  }
+  return { rows: [...byKey.values()], perWaba, skipped };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -209,15 +374,20 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
-    const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+    const envWabaId = Deno.env.get("WHATSAPP_WABA_ID");
+    const envToken = Deno.env.get("WHATSAPP_API_TOKEN");
 
-    if (!wabaId || !waToken) {
+    if (!envWabaId || !envToken) {
       return new Response(
         JSON.stringify({ error: "WhatsApp Business Account not configured" }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Mutable per-request: create/delete may retarget these at a specific WABA.
+    const defaultWabaId: string = envWabaId;
+    let wabaId: string = envWabaId;
+    let waToken: string = envToken;
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
@@ -267,34 +437,51 @@ Deno.serve(async (req) => {
 
     const user = { id: userId };
 
-    const metaUrl = `https://graph.facebook.com/v21.0/${wabaId}/message_templates`;
-
     console.log("Action:", action, "User:", user.id ?? "cron", "Role:", role);
 
-    // ── LIST: List all templates ──
+    // ── LIST: List all templates, across every WABA we can read ──
     if (action === "list") {
-      const res = await fetch(`${metaUrl}?limit=100&access_token=${waToken}`);
-      const data = await res.json();
+      const targets = await resolveWabaTargets(adminClient, wabaId, waToken);
+      const { rows, perWaba, skipped } = await collectRowsAcrossWabas(
+        targets, "id,name,status,category,language,components",
+      );
 
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: data?.error?.message || "Meta API error" }), {
-          status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      // Every target failed — surface it instead of pretending there are no templates.
+      if (rows.length === 0 && perWaba.every((w) => w.error)) {
+        return json({ error: perWaba[0]?.error || "Meta API error", per_waba: perWaba }, 502);
       }
 
-      const templates = (data.data || []).map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        status: normalizeTemplateStatus(t.status),
-        category: t.category,
-        language: t.language,
-        components: t.components,
+      const templates = rows.map((r: any) => ({
+        id: r.meta_template_id,
+        name: r.name,
+        status: r.status,
+        category: r.category,
+        language: r.language,
+        components: r.components,
+        waba_id: r.waba_id,
       }));
 
       const visibility = await registerApprovedTemplateVisibilityRows(adminClient, templates);
 
-      return new Response(JSON.stringify({ templates, visibility_registered: visibility.registered, visibility_warning: visibility.warning }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return json({
+        templates,
+        per_waba: perWaba,
+        ...(skipped.length ? { duplicate_names_skipped: skipped } : {}),
+        visibility_registered: visibility.registered,
+        visibility_warning: visibility.warning,
+      });
+    }
+
+    // ── WABAS: the accounts we hold a usable token for ──
+    // Drives the sync/submit pickers. Never returns tokens — labels and ids only.
+    if (action === "wabas") {
+      const targets = await resolveWabaTargets(adminClient, wabaId, waToken);
+      return json({
+        wabas: targets.map((t) => ({
+          waba_id: t.wabaId,
+          label: t.isDefault ? "NIMT (default)" : t.label,
+          is_default: t.isDefault,
+        })),
       });
     }
 
@@ -303,8 +490,28 @@ Deno.serve(async (req) => {
       const {
         name, category, language, body_text,
         header_format, header_text, header_example, header_handle,
-        body_examples, footer_text, buttons,
+        body_examples, footer_text, buttons, waba_id,
       } = body;
+
+      // ponytail: resolve per-WABA token when a specific WABA is requested
+      if (waba_id && waba_id !== wabaId) {
+        const { data: ch } = await adminClient
+          .from("whatsapp_channels")
+          .select("secret_token_name")
+          .eq("waba_id", waba_id)
+          .eq("is_active", true)
+          .limit(1)
+          .single();
+        const resolved = ch?.secret_token_name ? Deno.env.get(ch.secret_token_name) : null;
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: `No API token configured for WABA ${waba_id}` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        wabaId = waba_id;
+        waToken = resolved;
+      }
 
       if (!name || !body_text) {
         return new Response(JSON.stringify({ error: "name and body_text are required" }), {
@@ -397,9 +604,12 @@ Deno.serve(async (req) => {
         components,
       };
 
-      const res = await fetch(`${metaUrl}?access_token=${waToken}`, {
+      // Built here, not above: the waba_id override lands earlier in this block,
+      // so a URL captured before it would submit to the default WABA and quietly
+      // ignore whichever account the submitter picked.
+      const res = await fetch(templatesUrl(wabaId), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${waToken}` },
         body: JSON.stringify(payload),
       });
 
@@ -430,6 +640,10 @@ Deno.serve(async (req) => {
           placeholder_count: varCount,
           components,
           reject_reason: null,
+          // NULL for the default account, matching what sync writes — the
+          // sender-matching helper normalises NULL to "MAIN" and the main
+          // senders carry no waba_id of their own.
+          waba_id: wabaId === defaultWabaId ? null : wabaId,
           created_by: userId,
           submitted_at: new Date().toISOString(),
           status_updated_at: new Date().toISOString(),
@@ -441,37 +655,29 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── SYNC: Reconcile local rows with Meta's current template state ──
+    // ── SYNC: Reconcile local rows with Meta, across every readable WABA ──
+    // Syncs ALL accounts by default. Pass waba_id to sync just one — useful when
+    // a single account has a token problem and you want a fast, isolated retry.
     if (action === "sync") {
-      const res = await fetch(
-        `${metaUrl}?fields=id,name,status,category,language,components,quality_score&limit=200&access_token=${waToken}`
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: data?.error?.message || "Meta API error" }), {
-          status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      const onlyWaba = body.waba_id ? String(body.waba_id) : null;
+      const allTargets = await resolveWabaTargets(adminClient, wabaId, waToken);
+      const targets = onlyWaba
+        ? allTargets.filter((t) => t.wabaId === onlyWaba)
+        : allTargets;
+
+      if (onlyWaba && targets.length === 0) {
+        return json({ error: `WABA ${onlyWaba} is not a known active WhatsApp account` }, 400);
       }
 
-      const rows = (data.data || []).map((t: any) => {
-        const header = (t.components || []).find((c: any) => c.type === "HEADER");
-        const headerFormat = (header?.format || "NONE").toUpperCase();
-        const bodyComp = (t.components || []).find((c: any) => c.type === "BODY");
-        const placeholderCount = (String(bodyComp?.text || "").match(/\{\{(\d+)\}\}/g) || []).length;
-        return {
-          meta_template_id: String(t.id),
-          name: t.name,
-          language: t.language || "en",
-          category: t.category || null,
-          status: normalizeTemplateStatus(t.status),
-          header_format: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) ? headerFormat : "NONE",
-          has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
-          placeholder_count: placeholderCount,
-          components: t.components || null,
-          quality_score: typeof t.quality_score === "object" ? t.quality_score?.score || null : t.quality_score || null,
-          status_updated_at: new Date().toISOString(),
-        };
-      });
+      const { rows, perWaba, skipped } = await collectRowsAcrossWabas(
+        targets, "id,name,status,category,language,components,quality_score",
+      );
+
+      // Only bail when EVERY account failed. One dead token (e.g. a channel whose
+      // secret was never set) must not block the accounts that do work.
+      if (rows.length === 0 && perWaba.every((w) => w.error)) {
+        return json({ error: perWaba[0]?.error || "Meta API error", per_waba: perWaba }, 502);
+      }
 
       if (rows.length > 0) {
         const { error: syncErr } = await adminClient
@@ -497,6 +703,10 @@ Deno.serve(async (req) => {
         success: true,
         synced: rows.length,
         fetched: rows.length,
+        per_waba: perWaba,
+        ...(skipped.length ? { duplicate_names_skipped: skipped } : {}),
+        // Newly approved templates are registered hidden on purpose; this is how
+        // many now need a visibility decision before campaigns can use them.
         visibility_registered: visibility.registered,
         media_populated: visibility.media_populated || 0,
         ...(visibility.warning ? { warning: visibility.warning } : {}),
@@ -514,6 +724,23 @@ Deno.serve(async (req) => {
 
       const templateId = String(meta_template_id || id || "").trim();
       const safeLanguage = language ? String(language).trim() : "";
+
+      // Delete has to hit the account the template actually lives in, with that
+      // account's token — otherwise a non-default-WABA template gets a 404 from
+      // the default account and the row is never removed.
+      const { data: ownerRow } = await adminClient
+        .from("whatsapp_templates")
+        .select("waba_id")
+        .eq("name", String(name))
+        .limit(1)
+        .maybeSingle();
+      const ownerWaba = ownerRow?.waba_id ? String(ownerRow.waba_id) : null;
+      if (ownerWaba && ownerWaba !== defaultWabaId) {
+        const target = (await resolveWabaTargets(adminClient, wabaId, waToken))
+          .find((t) => t.wabaId === ownerWaba);
+        if (target) { wabaId = target.wabaId; waToken = target.token; }
+      }
+
       const attempts: Record<string, string>[] = [];
       if (templateId) {
         attempts.push({
@@ -535,8 +762,11 @@ Deno.serve(async (req) => {
       let result: any = null;
       let status = 502;
       for (const params of uniqueAttempts) {
-        const search = new URLSearchParams({ ...params, access_token: waToken });
-        const res = await fetch(`${metaUrl}?${search.toString()}`, { method: "DELETE" });
+        const search = new URLSearchParams(params);
+        const res = await fetch(`${templatesUrl(wabaId)}?${search.toString()}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${waToken}` },
+        });
         result = await res.json().catch(() => ({}));
         status = res.status;
         if (res.ok) {
@@ -578,8 +808,11 @@ Deno.serve(async (req) => {
       status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
-    console.error("WhatsApp templates error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    // Redact before BOTH sinks: console.error writes to permanent edge logs and
+    // the body goes straight to the browser.
+    const safe = redactToken(err?.message);
+    console.error("WhatsApp templates error:", safe);
+    return new Response(JSON.stringify({ error: safe }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

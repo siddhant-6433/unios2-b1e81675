@@ -32,8 +32,23 @@ async function freshAccessToken(): Promise<string | null> {
 
   const expiresInMs = (session.expires_at ?? 0) * 1000 - Date.now();
   if (expiresInMs < 60_000) {
-    const { data } = await supabase.auth.refreshSession();
-    return data.session?.access_token ?? session.access_token ?? null;
+    const { data, error } = await supabase.auth.refreshSession();
+    const refreshed = data.session?.access_token ?? null;
+    if (refreshed) return refreshed;
+
+    // Refresh failed. Only give up if the token we hold is ACTUALLY expired.
+    // Inside the 60s pre-expiry window it is usually still valid, and a
+    // transient failure (offline blip, GoTrue 429 across the several tabs
+    // counsellors keep open) must not throw away a working token — every
+    // direct `supabase.functions.invoke` caller would then fall back to
+    // sending the publishable key and hard-401.
+    if (expiresInMs > 0) return session.access_token ?? null;
+
+    // Genuinely expired: return null so invokeEdge raises a real
+    // "session expired, sign in again" instead of the edge function rejecting
+    // a stale token as a confusing 401.
+    if (error) console.warn("Session refresh failed and token is expired:", error.message);
+    return null;
   }
   return session.access_token ?? null;
 }
