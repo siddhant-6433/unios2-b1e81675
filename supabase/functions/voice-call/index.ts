@@ -11,6 +11,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,24 +78,16 @@ Deno.serve(async (req) => {
       return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
     }
 
-    // Auth: accept service role JWT (cron/queue) OR anon key (manual button).
-    // User identity is passed as caller_user_id in the request body for audit.
+    // Auth: accept a service caller (cron/queue via x-cron-secret or service
+    // key, drift-immune) OR an anon/staff key (manual button). User identity is
+    // passed as caller_user_id in the request body for audit.
     const authHeader = req.headers.get("authorization") || "";
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const token = authHeader.replace(/^Bearer\s+/i, "");
 
-    // Detect service role by decoding JWT payload
-    let isServiceRole = false;
-    try {
-      const [, payloadB64] = token.split(".");
-      if (payloadB64) {
-        const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-        isServiceRole = payload?.role === "service_role";
-      }
-    } catch { /* ignore */ }
+    const isServiceRole = await isServiceCaller(req, db);
 
-    // Reject if no auth header at all
-    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+    // Reject only if neither a service caller nor a bearer-bearing client.
+    if (!isServiceRole && !authHeader) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
     const { action, lead_id, caller_user_id } = body;

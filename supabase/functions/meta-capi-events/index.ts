@@ -45,6 +45,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -88,27 +89,17 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
-  // Same auth pattern as ga-conversions: x-internal-key OR a service-role bearer
-  const authHeader = req.headers.get("authorization") ?? "";
+  // Same auth pattern as ga-conversions: x-internal-key OR a service caller
   const internalKey = req.headers.get("x-internal-key") ?? "";
   const expectedInternal = Deno.env.get("META_CAPI_INTERNAL_KEY") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-  let okAuth = expectedInternal && internalKey === expectedInternal;
-  if (!okAuth && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.slice(7);
-    if (serviceRoleKey && token === serviceRoleKey) {
-      okAuth = true;
-    } else {
-      try {
-        const [, payloadB64] = token.split(".");
-        if (payloadB64) {
-          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-          if (payload?.role === "service_role") okAuth = true;
-        }
-      } catch { /* malformed token */ }
-    }
-  }
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const okAuth = (expectedInternal && internalKey === expectedInternal) ||
+    (await isServiceCaller(req, supabase));
   if (!okAuth) return json({ ok: false, error: "unauthorized" }, 401);
 
   let body: RelayBody;
@@ -117,11 +108,6 @@ Deno.serve(async (req) => {
   if (!body.lead_id || !body.event_name) {
     return json({ ok: false, error: "lead_id and event_name required" }, 400);
   }
-
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
 
   // Pull the lead's match-quality fields + brand routing key. email/phone
   // are hashed before sending.

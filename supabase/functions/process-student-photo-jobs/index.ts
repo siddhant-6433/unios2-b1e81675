@@ -12,6 +12,7 @@ import {
   processPassportPhoto,
 } from "../_shared/passportPhoto.ts";
 import { downscaleForDisplay } from "../_shared/resizeImage.ts";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -193,6 +194,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+    if (!(await isServiceCaller(req, admin))) return json({ error: "unauthorized" }, 401);
 
     let limit = 6;
     let preferJobId: string | null = null;

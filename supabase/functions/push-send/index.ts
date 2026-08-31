@@ -15,6 +15,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,8 +51,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const auth = req.headers.get("authorization") ?? "";
-  if (!auth.startsWith("Bearer ") || auth.slice(7) !== serviceKey) {
+  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
+  if (!(await isServiceCaller(req, supabase))) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -66,8 +67,6 @@ Deno.serve(async (req) => {
   if (userIds.length === 0 || !body.title) {
     return json({ error: "user_ids and title are required" }, 400);
   }
-
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
 
   const { data: devices, error: devErr } = await supabase
     .from("push_devices")
