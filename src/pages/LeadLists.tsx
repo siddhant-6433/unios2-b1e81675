@@ -7,7 +7,6 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCallListOverview, type CallListOverviewRow } from "@/components/dashboard/CallListProgressPanel";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { describeFilterDefinition, type DynamicListFilterDefinition } from "@/lib/dynamicListFilters";
-import { buildListName, dominantCourse } from "@/lib/leadListName";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +21,7 @@ import {
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown, Lock,
-  Megaphone, MoreHorizontal, Download,
+  Megaphone, MoreHorizontal, Download, Archive, PhoneForwarded,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -93,7 +92,36 @@ interface LeadList {
   include_terminal?: boolean;
   /** Free-form tags (e.g. city + type) — searchable on the dashboard. */
   tags?: string[] | null;
+  /** Non-null = archived. is_active is derived from this by a DB trigger. */
+  archived_at?: string | null;
+  /** Set when this list was spun out of another as the next calling attempt. */
+  parent_list_id?: string | null;
+  /** Attempt number in a follow-up chain. 1 = original list. */
+  generation?: number;
+  /** Retry cap for the chain before a lead is dropped as exhausted. */
+  max_attempts?: number;
 }
+
+/** Server-computed follow-up buckets + throughput for one list. */
+type FollowupCounts = {
+  pending: number;
+  no_answer: number;
+  unrecorded: number;
+  at_cap: number;
+  max_attempts: number;
+  dialable: number;
+  attempted: number;
+  connected: number;
+  contact_rate: number | null;
+};
+
+// The three buckets the rollover can carry forward. Labels match what the
+// admission head asked for; values match call_list_followup_candidates.
+const FOLLOWUP_BUCKETS = [
+  { value: "pending", label: "Never called", hint: "Still pending — nobody dialled them" },
+  { value: "no_answer", label: "Not answered", hint: "Dialled, but no answer / busy / voicemail" },
+  { value: "unrecorded", label: "No disposition", hint: "A call happened but no outcome was logged" },
+] as const;
 
 type CampaignChannel = "whatsapp" | "email";
 
@@ -362,13 +390,17 @@ export default function LeadLists() {
   const [reportProgress, setReportProgress] = useState<CallListProgress | null>(null);
   // Click an outcome chip to see only those leads.
   const [reportDispositionFilter, setReportDispositionFilter] = useState<string | null>(null);
-  // Spin a fresh calling list out of leads with chosen dispositions.
+  // Roll a list forward: archive it and spawn the next calling attempt out of the
+  // leads that were never actually reached.
   const [followupOpen, setFollowupOpen] = useState(false);
-  const [followupDispositions, setFollowupDispositions] = useState<string[]>([]);
+  const [followupList, setFollowupList] = useState<LeadList | null>(null);
+  const [followupBuckets, setFollowupBuckets] = useState<string[]>([]);
   const [followupDueDate, setFollowupDueDate] = useState("");
   const [followupIdentifier, setFollowupIdentifier] = useState("");
-  const [followupCounsellorIds, setFollowupCounsellorIds] = useState<string[]>([]);
+  const [followupArchiveSource, setFollowupArchiveSource] = useState(true);
+  const [followupCounts, setFollowupCounts] = useState<FollowupCounts | null>(null);
   const [followupCreating, setFollowupCreating] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   // One aggregated RPC for every active call list — cheaper and RLS-safe
   // compared with counting lead_list_members client-side per row.
   const { data: callListOverview = [] } = useCallListOverview({ enabled: role !== "counsellor" });
@@ -378,7 +410,9 @@ export default function LeadLists() {
   );
 
   // ── Filter / sort controls ──────────────────────────────────────────────
-  const [listFilter, setListFilter] = useState<"all" | "calling" | "mine">("all");
+  const [listFilter, setListFilter] = useState<"all" | "calling" | "mine" | "archived">("all");
+  // Archived lists live behind a different query, not a client-side filter.
+  const showArchived = listFilter === "archived";
   const [counsellorFilter, setCounsellorFilter] = useState<string>("");
   const [sortKey, setSortKey] = useState<"created" | "due" | "assigned" | "members" | "name">("created");
   const [search, setSearch] = useState("");
@@ -443,12 +477,24 @@ export default function LeadLists() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("lead_lists" as any)
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) console.error("Fetch lists failed:", error);
-    setLists((data || []) as any);
+    // Archived lists are hidden unless the Archived segment is selected — before
+    // archiving existed every list ever made stayed on this page forever.
+    // Paged because PostgREST caps every response at db-max-rows=1000 and this
+    // project is already at 652 lists and bulk-importing more.
+    const PAGE = 500;
+    const all: LeadList[] = [];
+    for (let from = 0; ; from += PAGE) {
+      let q = supabase.from("lead_lists" as any).select("*");
+      q = showArchived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
+      const { data, error } = await q
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) { console.error("Fetch lists failed:", error); break; }
+      const page = ((data as any[]) || []) as LeadList[];
+      all.push(...page);
+      if (page.length < PAGE) break;
+    }
+    setLists(all);
     setLoading(false);
   };
 
@@ -513,7 +559,7 @@ export default function LeadLists() {
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
-  }, [role]);
+  }, [role, showArchived]);
 
   // Deep link from the dashboard's "Assigned call lists" panel:
   // /lists?report=<id> opens that list's Calling Report directly.
@@ -841,17 +887,27 @@ export default function LeadLists() {
     // on any list worth assigning.
     supabase.rpc("call_list_progress" as any, { p_list_id: list.id })
       .then(({ data: p }) => setReportProgress((p as CallListProgress) || null));
-    const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
-      _list_id: list.id,
-      _batch_id: null,
-      _limit: 500,
-    });
-    if (error) {
-      toast({ title: "Could not load calling report", description: error.message, variant: "destructive" });
-      setAssignmentReport([]);
-    } else {
-      setAssignmentReport(((data as any[]) || []) as LeadListAssignmentReportRow[]);
+    supabase.rpc("call_list_followup_counts" as any, { _list_id: list.id })
+      .then(({ data: c }) => setFollowupCounts((c as FollowupCounts) || null));
+    // Page it. This used to be a single `_limit: 500` call, so every count and
+    // chip in the dialog silently described only the first 500 leads.
+    const PAGE = 1000;
+    const all: LeadListAssignmentReportRow[] = [];
+    let failed = false;
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
+        _list_id: list.id, _batch_id: null, _limit: PAGE, _offset: offset,
+      });
+      if (error) {
+        toast({ title: "Could not load calling report", description: error.message, variant: "destructive" });
+        failed = true;
+        break;
+      }
+      const page = ((data as any[]) || []) as LeadListAssignmentReportRow[];
+      all.push(...page);
+      if (page.length < PAGE) break;
     }
+    setAssignmentReport(failed ? [] : all);
     setReportLoading(false);
   };
 
@@ -875,8 +931,11 @@ export default function LeadLists() {
         all.push(...page);
         if (page.length < PAGE) break;
       }
+      // Must use the same bucketer the chips are built from — comparing against
+      // `latest_call_disposition || "unrecorded"` meant the "not_called" chip
+      // matched nothing and exported an empty file.
       const rows = reportDispositionFilter
-        ? all.filter((r) => (r.latest_call_disposition || "unrecorded") === reportDispositionFilter)
+        ? all.filter((r) => reportBucket(r) === reportDispositionFilter)
         : all;
       const dt = (v: string | null) => (v ? new Date(v).toLocaleString("en-IN") : "");
       const header = ["Lead", "Phone", "Course", "Campus", "Counsellor", "Assigned At", "Stage", "Latest Disposition", "Latest Call At", "Notes"];
@@ -902,88 +961,91 @@ export default function LeadLists() {
     }
   };
 
-  // Bucket a report row for the follow-up picker. A lead that was never called
-  // (no call since assignment) gets its own "not_called" segment instead of
-  // hiding under "unrecorded" — the latter means called but no outcome logged.
-  // This is what lets an assigner rebuild a fresh list from the uncalled leads.
+  // Bucket a report row for the outcome chips. A lead that was never called (no
+  // call since assignment) gets its own "not_called" segment instead of hiding
+  // under "unrecorded" — the latter means called but no outcome logged.
   const reportBucket = (r: LeadListAssignmentReportRow) =>
     !r.latest_call_at ? "not_called" : (r.latest_call_disposition || "unrecorded");
 
-  // Dispositions actually present in the loaded report — the follow-up picker.
-  const reportDispositionsPresent = useMemo(() => {
-    const counts = new Map<string, number>();
-    assignmentReport.forEach((r) => {
-      const d = reportBucket(r);
-      counts.set(d, (counts.get(d) ?? 0) + 1);
-    });
-    return [...counts].sort((a, b) => b[1] - a[1]);
-  }, [assignmentReport]);
+  // How many leads the chosen buckets cover, and how many of those would be
+  // dropped at the attempt cap. Server-computed, so it holds for lists of any size.
+  const followupSelected = useMemo(() => {
+    if (!followupCounts) return 0;
+    return followupBuckets.reduce((sum, b) => sum + (followupCounts[b as keyof FollowupCounts] as number ?? 0), 0);
+  }, [followupCounts, followupBuckets]);
 
-  const followupLeadIds = useMemo(() => {
-    const set = new Set(followupDispositions);
-    return Array.from(new Set(
-      assignmentReport
-        .filter((r) => set.has(reportBucket(r)))
-        .map((r) => r.lead_id),
-    ));
-  }, [assignmentReport, followupDispositions]);
-
-  const openFollowupFromReport = async () => {
-    setFollowupDispositions(reportDispositionFilter ? [reportDispositionFilter] : []);
+  const openFollowup = async (list: LeadList) => {
+    setFollowupList(list);
+    // Default to all three "never actually reached" buckets — that is the whole
+    // point of a rollover.
+    setFollowupBuckets(FOLLOWUP_BUCKETS.map((b) => b.value));
     setFollowupDueDate("");
     setFollowupIdentifier("");
-    setFollowupCounsellorIds([]);
+    setFollowupArchiveSource(true);
+    setFollowupCounts(null);
     setFollowupOpen(true);
-    await loadAssignableCounsellors();
+    const { data } = await supabase.rpc("call_list_followup_counts" as any, { _list_id: list.id });
+    setFollowupCounts((data as FollowupCounts) || null);
   };
 
-  const toggleFollowupDisposition = (d: string) =>
-    setFollowupDispositions((cur) => cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]);
-  const toggleFollowupCounsellor = (id: string) =>
-    setFollowupCounsellorIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  const toggleFollowupBucket = (b: string) =>
+    setFollowupBuckets((cur) => cur.includes(b) ? cur.filter((x) => x !== b) : [...cur, b]);
 
+  // One RPC does the whole rollover in a single transaction: pick the leads,
+  // split at the attempt cap, spawn the next list keeping each lead with the same
+  // counsellor, park + cool the exhausted ones, archive the source. Selection is
+  // server-side precisely because the old client version derived its ids from a
+  // 500-row report page and silently dropped everyone past it.
   const createFollowupList = async () => {
-    if (!reportList || followupLeadIds.length === 0 || followupCounsellorIds.length === 0) return;
+    if (!followupList || followupBuckets.length === 0) return;
     setFollowupCreating(true);
     try {
-      const set = new Set(followupDispositions);
-      const rows = assignmentReport.filter((r) => set.has(reportBucket(r)));
-      const course = dominantCourse(rows.map((r) => r.course_name));
-      const name = buildListName({
-        course,
-        dueDate: followupDueDate || null,
-        source: "followup",
-        identifier: followupIdentifier.trim() || null,
-      });
-      const { data: list, error: listErr } = await supabase
-        .from("lead_lists" as any)
-        .insert({ name, source: "filter", description: `Follow-up from “${reportList.name}” — ${followupLeadIds.length} leads` })
-        .select("id")
-        .single();
-      if (listErr || !list) throw listErr || new Error("Could not create list");
-      const listId = (list as any).id;
-      const members = followupLeadIds.map((lead_id) => ({ list_id: listId, lead_id }));
-      for (let i = 0; i < members.length; i += 500) {
-        const { error } = await supabase.from("lead_list_members" as any).insert(members.slice(i, i + 500));
-        if (error) throw error;
-      }
-      const { error: assignErr } = await supabase.rpc("assign_lead_list_round_robin" as any, {
-        _list_id: listId,
-        _counsellor_ids: followupCounsellorIds,
-        _only_unassigned: false,
-        _priority_note: `Follow-up from “${reportList.name}”`,
+      const { data, error } = await supabase.rpc("build_followup_list" as any, {
+        _source_list_id: followupList.id,
+        _buckets: followupBuckets,
         _due_date: followupDueDate || null,
-        _include_terminal: true, // follow-ups often re-engage cold / not-interested leads
+        _list_name: followupIdentifier.trim() || null,
+        _archive_source: followupArchiveSource,
       });
-      if (assignErr) throw assignErr;
-      toast({ title: "Follow-up list created", description: `${followupLeadIds.length} leads → ${name}` });
+      if (error) throw error;
+      const r = (data || {}) as {
+        carried?: number; exhausted?: number; cooled?: number; list_name?: string; message?: string;
+      };
+      if (!r.carried && !r.exhausted) {
+        toast({ title: "Nothing to roll forward", description: r.message || "No leads matched those buckets." });
+      } else {
+        const bits = [`${r.carried ?? 0} carried forward`];
+        if (r.exhausted) bits.push(`${r.exhausted} exhausted at the ${followupCounts?.max_attempts ?? 4}-attempt cap`);
+        if (r.cooled) bits.push(`${r.cooled} marked cold`);
+        toast({ title: r.list_name ? `Created “${r.list_name}”` : "Rolled forward", description: bits.join(" · ") });
+      }
       setFollowupOpen(false);
+      if (reportOpen) setReportOpen(false);
       await fetchLists();
     } catch (e: any) {
-      toast({ title: "Could not create follow-up list", description: e?.message, variant: "destructive" });
+      toast({ title: "Could not roll the list forward", description: e?.message, variant: "destructive" });
     } finally {
       setFollowupCreating(false);
     }
+  };
+
+  const setListArchived = async (list: LeadList, archived: boolean) => {
+    setArchivingId(list.id);
+    const { error } = await supabase.rpc("set_lead_list_archived" as any, {
+      _list_id: list.id, _archived: archived,
+    });
+    setArchivingId(null);
+    if (error) {
+      toast({ title: archived ? "Could not archive" : "Could not restore", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: archived ? "List archived" : "List restored",
+      description: archived
+        ? `“${list.name}” is off the dialer. Its members and call history are kept.`
+        : `“${list.name}” is active again.`,
+    });
+    await fetchLists();
   };
 
   const handleSendWhatsApp = async () => {
@@ -1381,7 +1443,7 @@ export default function LeadLists() {
           </CardContent>
         </Card>
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden">
+        <div className="rounded-xl border border-border overflow-x-auto">
           <div className="flex flex-col gap-2 border-b border-border bg-card px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold text-foreground">Lists</p>
@@ -1400,6 +1462,7 @@ export default function LeadLists() {
                   ["all", "All"],
                   ["calling", "Calling"],
                   ["mine", "My lists"],
+                  ["archived", "Archived"],
                 ] as const).map(([key, label]) => (
                   <button
                     key={key}
@@ -1501,6 +1564,22 @@ export default function LeadLists() {
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
+                      {/* Where this list sits in a follow-up chain. Only meaningful
+                          once it has been rolled forward at least once. */}
+                      {(list.generation ?? 1) > 1 && (
+                        <span
+                          className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium align-middle text-warning-foreground"
+                          title={`Attempt ${list.generation} of ${list.max_attempts ?? 4} in this follow-up chain`}
+                        >
+                          <PhoneForwarded className="h-2.5 w-2.5" />
+                          Attempt {list.generation}/{list.max_attempts ?? 4}
+                        </span>
+                      )}
+                      {list.archived_at && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium align-middle text-muted-foreground">
+                          <Archive className="h-2.5 w-2.5" />Archived
+                        </span>
+                      )}
                       {list.description && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-md">{list.description}</p>
                       )}
@@ -1589,6 +1668,22 @@ export default function LeadLists() {
                                 {refreshingListId === list.id
                                   ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                   : <RefreshCw className="mr-2 h-4 w-4" />} Refresh members
+                              </DropdownMenuItem>
+                            )}
+                            {canAssignLists && list.purpose === "calling" && !list.archived_at && (
+                              <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openFollowup(list); }}>
+                                <PhoneForwarded className="mr-2 h-4 w-4" /> Roll forward…
+                              </DropdownMenuItem>
+                            )}
+                            {canAssignLists && (
+                              <DropdownMenuItem
+                                onSelect={(e) => { e.preventDefault(); setListArchived(list, !list.archived_at); }}
+                                disabled={archivingId === list.id}
+                              >
+                                {archivingId === list.id
+                                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  : <Archive className="mr-2 h-4 w-4" />}
+                                {list.archived_at ? "Restore list" : "Archive list"}
                               </DropdownMenuItem>
                             )}
                             {canDeleteLists && (
@@ -2252,9 +2347,9 @@ export default function LeadLists() {
             <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
               <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
               <div className="flex items-center gap-2">
-                {canAssignLists && assignmentReport.length > 0 && (
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={openFollowupFromReport}>
-                    <Phone className="h-3.5 w-3.5" /> Create follow-up list
+                {canAssignLists && reportList && (
+                  <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openFollowup(reportList)}>
+                    <PhoneForwarded className="h-3.5 w-3.5" /> Roll forward
                   </Button>
                 )}
                 <Button size="sm" variant="outline" className="gap-1.5 h-8"
@@ -2286,6 +2381,23 @@ export default function LeadLists() {
                     : "no calls yet"}
                 </span>
               </div>
+              {/* Throughput: of the calls actually placed, how many reached someone.
+                  "Called" above counts attempts; this counts outcomes. */}
+              {followupCounts && followupCounts.attempted > 0 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <span><span className="font-semibold text-foreground">{followupCounts.connected}</span> connected</span>
+                  <span><span className="font-semibold text-foreground">{followupCounts.no_answer}</span> no answer</span>
+                  <span><span className="font-semibold text-foreground">{followupCounts.unrecorded}</span> no disposition</span>
+                  {followupCounts.contact_rate !== null && (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 font-semibold text-primary">
+                      {followupCounts.contact_rate}% contact rate
+                    </span>
+                  )}
+                  <span className="ml-auto">
+                    {followupCounts.pending + followupCounts.no_answer + followupCounts.unrecorded} can be rolled forward
+                  </span>
+                </div>
+              )}
               {/* What actually came back on the calls — the number the assigner
                   is looking for, not just how many were dialled. */}
               {Object.keys(reportProgress.dispositions || {}).length > 0 && (
@@ -2392,27 +2504,60 @@ export default function LeadLists() {
       <Dialog open={followupOpen} onOpenChange={setFollowupOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>New follow-up list — {reportList?.name}</DialogTitle>
+            <DialogTitle>Roll forward — {followupList?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Creates the next calling attempt from the leads that were never actually
+              reached. Each lead stays with the counsellor who already tried them.
+            </p>
+
             <div>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Include leads with disposition</p>
-              <div className="flex flex-wrap gap-1.5">
-                {reportDispositionsPresent.map(([d, n]) => (
-                  <button
-                    key={d}
-                    onClick={() => toggleFollowupDisposition(d)}
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
-                      followupDispositions.includes(d)
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {d.replace(/_/g, " ")} {n}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">{followupLeadIds.length} leads selected</p>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Carry forward</p>
+              {followupCounts === null ? (
+                <div className="rounded-md border border-border p-3 text-center text-xs text-muted-foreground">
+                  Counting leads…
+                </div>
+              ) : (
+                <div className="rounded-md border border-border">
+                  {FOLLOWUP_BUCKETS.map((b) => (
+                    <button
+                      key={b.value}
+                      onClick={() => toggleFollowupBucket(b.value)}
+                      className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left last:border-b-0 hover:bg-muted/40"
+                    >
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        followupBuckets.includes(b.value) ? "border-primary bg-primary text-primary-foreground" : "border-input"
+                      }`}>
+                        {followupBuckets.includes(b.value) && <Check className="h-3 w-3" />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-foreground">{b.label}</span>
+                        <span className="block text-[11px] text-muted-foreground">{b.hint}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold text-foreground">
+                        {followupCounts[b.value as keyof FollowupCounts] as number}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {followupCounts && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  {followupSelected} lead{followupSelected === 1 ? "" : "s"} selected.
+                  {" "}Leads with a real outcome (interested, not interested, …) are never carried forward.
+                </p>
+              )}
+              {!!followupCounts?.at_cap && (
+                <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-warning/10 p-2 text-[11px] text-warning-foreground">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span>
+                    {followupCounts.at_cap} lead{followupCounts.at_cap === 1 ? " has" : "s have"} reached the
+                    {" "}{followupCounts.max_attempts}-attempt cap. They will be parked in an
+                    “exhausted” list and marked cold instead of being called again.
+                  </span>
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -2427,47 +2572,40 @@ export default function LeadLists() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-foreground">Identifier (optional)</label>
+                <label className="mb-1 block text-xs font-medium text-foreground">List name (optional)</label>
                 <input
                   type="text"
                   value={followupIdentifier}
-                  placeholder="e.g. Retry batch"
+                  placeholder="Auto-named if blank"
                   onChange={(e) => setFollowupIdentifier(e.target.value)}
                   className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
                 />
               </div>
             </div>
 
-            <div>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assign to counsellors</p>
-              <div className="max-h-44 overflow-auto rounded-md border border-border">
-                {counsellors.length === 0 ? (
-                  <div className="p-3 text-center text-xs text-muted-foreground">Loading counsellors…</div>
-                ) : counsellors.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleFollowupCounsellor(c.id)}
-                    className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/40"
-                  >
-                    <span className={`flex h-4 w-4 items-center justify-center rounded border ${
-                      followupCounsellorIds.includes(c.id) ? "border-primary bg-primary text-primary-foreground" : "border-input"
-                    }`}>
-                      {followupCounsellorIds.includes(c.id) && <Check className="h-3 w-3" />}
-                    </span>
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={followupArchiveSource}
+                onChange={(e) => setFollowupArchiveSource(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                Archive “{followupList?.name}” afterwards
+                <span className="block text-[11px] text-muted-foreground">
+                  Takes it off the dialer and off this page. Members and call history are kept.
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFollowupOpen(false)}>Cancel</Button>
             <Button
               onClick={createFollowupList}
-              disabled={followupCreating || followupLeadIds.length === 0 || followupCounsellorIds.length === 0}
+              disabled={followupCreating || !followupCounts || followupSelected === 0}
             >
               {followupCreating && <ButtonOrb state="working" onFilled />}
-              Create &amp; assign
+              Roll forward
             </Button>
           </DialogFooter>
         </DialogContent>
