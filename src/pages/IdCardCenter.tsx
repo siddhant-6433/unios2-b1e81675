@@ -221,6 +221,7 @@ const IdCardCenter = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [batchFilter, setBatchFilter] = useState("all");
   const [photoFilter, setPhotoFilter] = useState<PhotoFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Transparent-background cutouts (Beacon front), keyed by student id. Generated on print.
@@ -255,6 +256,7 @@ const IdCardCenter = () => {
     const q = search.trim().toLowerCase();
     return activeRows.filter((row) => {
       if (groupFilter !== "all" && row.group !== groupFilter) return false;
+      if (mode === "students" && batchFilter !== "all" && row.extraValue !== batchFilter) return false;
       if (photoFilter === "missing" && row.photoUrl) return false;
       if (photoFilter === "has" && !row.photoUrl) return false;
       if (photoFilter === "ai_pending") {
@@ -274,12 +276,18 @@ const IdCardCenter = () => {
         row.group.toLowerCase().includes(q)
       );
     });
-  }, [activeRows, search, groupFilter, photoFilter]);
+  }, [activeRows, search, groupFilter, batchFilter, photoFilter, mode]);
 
   const groups = useMemo(() => {
     return Array.from(new Set(activeRows.map((row) => row.group || "Unassigned")))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [activeRows]);
+
+  // Batch names for the students-mode filter (batch is loaded into extraValue).
+  const batchNames = useMemo(() => {
+    return Array.from(new Set(students.map((row) => row.extraValue).filter((v) => v && v !== "-")))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [students]);
 
   const selectedRows = useMemo(() => {
     return activeRows.filter((row) => selectedIds.has(row.id));
@@ -760,6 +768,19 @@ const IdCardCenter = () => {
           triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:ring-2 focus:ring-ring/20"
           ariaLabel={mode === "students" ? "Filter by grade or programme" : "Filter by department"}
         />
+        {mode === "students" && (
+          <SelectField
+            value={batchFilter}
+            onValueChange={setBatchFilter}
+            options={[
+              { value: "all", label: "All batches" },
+              ...batchNames.map((b) => ({ value: b, label: b })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:ring-2 focus:ring-ring/20"
+            ariaLabel="Filter by batch"
+          />
+        )}
         {mode === "students" && (
           <div className="flex flex-wrap gap-1.5">
             {(

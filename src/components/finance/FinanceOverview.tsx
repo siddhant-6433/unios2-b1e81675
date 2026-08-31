@@ -6,6 +6,7 @@ import { IndianRupee, TrendingUp, AlertTriangle, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, CartesianGrid,
@@ -19,6 +20,7 @@ export function FinanceOverview() {
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [batchFilter, setBatchFilter] = useState("all");
 
   useEffect(() => {
     fetchData();
@@ -28,7 +30,7 @@ export function FinanceOverview() {
     setLoading(true);
     const [ledgerRes, paymentsRes] = await Promise.all([
       supabase.from("fee_ledger")
-        .select("id, total_amount, paid_amount, balance, status, due_date, student_id, students:student_id(name, admission_no, campus_id, campuses:campus_id(name))")
+        .select("id, total_amount, paid_amount, balance, status, due_date, student_id, students:student_id(name, admission_no, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name))")
         .order("due_date", { ascending: true })
         .limit(2000),
       // v_all_payments, not `payments`. public.payments has zero rows and never
@@ -45,9 +47,24 @@ export function FinanceOverview() {
     setLoading(false);
   };
 
-  const filteredLedger = useMemo(() =>
+  const campusLedger = useMemo(() =>
     selectedCampusId === "all" ? ledger : ledger.filter((l: any) => l.students?.campus_id === selectedCampusId),
   [ledger, selectedCampusId]);
+
+  // Batch options reflect the current campus scope.
+  const batchNames = useMemo(() =>
+    Array.from(new Set(campusLedger.map((l: any) => l.students?.batches?.name).filter(Boolean)))
+      .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
+  [campusLedger]);
+
+  const filteredLedger = useMemo(() =>
+    batchFilter === "all" ? campusLedger : campusLedger.filter((l: any) => l.students?.batches?.name === batchFilter),
+  [campusLedger, batchFilter]);
+
+  // Reset a stale batch selection when the campus scope no longer contains it.
+  useEffect(() => {
+    if (batchFilter !== "all" && !batchNames.includes(batchFilter)) setBatchFilter("all");
+  }, [batchNames, batchFilter]);
 
   const filteredPayments = useMemo(
     () => payments.filter((p: any) => matchesCampus(p.campus_id, selectedCampusId)),
@@ -134,6 +151,21 @@ export function FinanceOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Batch filter — scopes ledger-derived views (KPIs, campus split, overdue). */}
+      <div className="flex items-center gap-2">
+        <SelectField
+          value={batchFilter}
+          onValueChange={setBatchFilter}
+          options={[{ value: "all", label: "All batches" }, ...batchNames.map((b) => ({ value: b, label: b }))]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2 text-sm w-56"
+          ariaLabel="Filter by batch"
+        />
+        {batchFilter !== "all" && (
+          <span className="text-xs text-muted-foreground">Monthly collections show all batches (not batch-scoped).</span>
+        )}
+      </div>
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
