@@ -15,8 +15,15 @@ describe("Admissions selected-lead list action", () => {
     expect(admissions).toContain('.from("lead_list_members" as any)');
     expect(admissions).toContain('setListMode("new")');
     expect(admissions).toContain('setListMode("existing")');
-    expect(admissions).toContain("ignoreDuplicates: true");
-    expect(admissions).toContain('onConflict: "list_id,lead_id"');
+    // Members go in with a plain insert. This used to be
+    // `.upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true })`,
+    // but migration 20260830053655 replaced the (list_id, lead_id) primary key
+    // with a surrogate id and a PARTIAL unique index (WHERE lead_id IS NOT NULL).
+    // PostgREST cannot resolve a partial index as an upsert conflict target, so
+    // every chunk failed and lists were created empty. Asserting the conflict
+    // target is gone is what keeps that regression from coming back.
+    expect(admissions).toContain(".insert(chunk)");
+    expect(admissions).not.toContain('onConflict: "list_id,lead_id"');
   });
 
   it("can add all filtered leads to a list without selecting every page", () => {
