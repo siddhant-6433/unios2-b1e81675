@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2, XCircle, Clock, ChevronLeft, ChevronRight,
   ExternalLink, RefreshCw, FileText, Image as ImageIcon, GraduationCap,
+  ZoomIn, ZoomOut, RotateCcw,
 } from "lucide-react";
 import type { PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
@@ -143,7 +144,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
         </div>
         <div className="flex items-center gap-1.5 text-[11px]">
           <CountChip Icon={CheckCircle2} cls="bg-success/5 text-success">{counts.verified} verified</CountChip>
-          {counts.rejected > 0 && <CountChip Icon={XCircle} cls="bg-destructive/5 text-destructive">{counts.rejected} rejected</CountChip>}
+          {counts.rejected > 0 && <CountChip Icon={RefreshCw} cls="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">{counts.rejected} corrections</CountChip>}
           {counts.pending > 0 && <CountChip Icon={Clock} cls="bg-warning/5 text-warning-foreground">{counts.pending} pending</CountChip>}
         </div>
       </div>
@@ -189,9 +190,9 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
       )}
 
       {/* Body: sidebar list + main preview + action panel */}
-      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_240px] gap-0">
+      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_260px] gap-0">
         {/* Sidebar: doc list */}
-        <ul className="md:border-r border-border max-h-[480px] overflow-y-auto bg-muted/20">
+        <ul className="md:border-r border-border max-h-[600px] overflow-y-auto bg-muted/20">
           {docs.map((d, i) => {
             const s = reviews[d.path]?.status ?? "pending";
             const review = reviews[d.path];
@@ -209,7 +210,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                     </span>
                     {review?.reviewed_by_name && s !== "pending" && (
                       <span className="block text-[9px] text-muted-foreground truncate">
-                        {s === "verified" ? "Verified" : "Rejected"} by {review.reviewed_by_name}
+                        {s === "verified" ? "Verified" : "Corrections sent"} by {review.reviewed_by_name}
                       </span>
                     )}
                   </span>
@@ -256,17 +257,17 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               </div>
             </div>
           ) : activeStatus === "rejected" ? (
-            <div className="rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2.5 dark:bg-destructive/90/20 dark:border-destructive/60/40">
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 dark:bg-amber-900/20 dark:border-amber-700/40">
               <div className="flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-destructive" />
-                <p className="text-xs font-semibold text-destructive dark:text-destructive/40">Rejected</p>
+                <RefreshCw className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Sent for Corrections</p>
               </div>
-              <p className="text-[11px] text-destructive/90 dark:text-destructive/50/80 mt-1 leading-snug">
-                Waiting for the applicant to re-upload this document from the apply portal. Review actions will appear on the replacement file.
+              <p className="text-[11px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
+                The applicant has been notified to re-upload this document. Review actions will appear on the replacement file.
               </p>
               {activeReview?.reviewed_at && (
-                <p className="text-[10px] text-destructive/70 dark:text-destructive/50/70 mt-1.5">
-                  {activeReview.reviewed_by_name ? `Rejected by ${activeReview.reviewed_by_name}` : "Rejected"}
+                <p className="text-[10px] text-amber-600/70 dark:text-amber-500/60 mt-1.5">
+                  {activeReview.reviewed_by_name ? `Sent by ${activeReview.reviewed_by_name}` : "Sent for corrections"}
                   {" · "}
                   {new Date(activeReview.reviewed_at).toLocaleString()}
                 </p>
@@ -275,7 +276,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
           ) : readOnly ? (
             <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5">
               <p className="text-xs font-semibold text-foreground">
-                {activeStatus === "rejected" ? "Rejected" : "Pending"}
+                {activeStatus === "rejected" ? "Sent for Corrections" : "Pending"}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {readOnlyReason || "The application has been decided — no further doc review needed."}
@@ -285,7 +286,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
             <>
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Notes {notes ? "" : "(required for rejection)"}
+                  Notes {notes ? "" : "(required to send for corrections)"}
                 </label>
                 <Textarea
                   id="doc-reject-notes"
@@ -309,12 +310,12 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                 <Button
                   size="sm"
                   variant="outline"
-                  className="w-full text-destructive border-destructive/20 hover:bg-destructive/5"
+                  className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-900/20"
                   onClick={() => handleDecision("rejected")}
                   disabled={busy}
                 >
-                  <XCircle className="h-3.5 w-3.5 mr-1.5" />
-                  Reject — request re-upload
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                  Send for Corrections
                 </Button>
               </div>
             </>
@@ -355,17 +356,60 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
 
 // ── Inline preview ───────────────────────────────────────────────────
 
+// ponytail: zoom is CSS transform + overflow:auto — no lib needed
+const ZOOM_LEVELS = [1, 1.5, 2, 3] as const;
+
 function DocPreview({ doc }: { doc: PreviewDoc }) {
-  // Best-effort mime detection from filename. Storage signed URLs don't
-  // include a content-type query, so extension is the cheapest signal.
+  const [zoomIdx, setZoomIdx] = useState(0);
+  const scale = ZOOM_LEVELS[zoomIdx];
+
+  // Reset zoom when doc changes
+  useEffect(() => { setZoomIdx(0); }, [doc.path]);
+
   const lower = doc.name.toLowerCase();
   const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(lower);
   const isPdf = /\.pdf$/.test(lower);
 
   if (isImage) {
     return (
-      <div className="flex items-center justify-center bg-muted/30 max-h-[480px] overflow-auto">
-        <img src={doc.url} alt={doc.name} className="max-h-[480px] max-w-full object-contain" />
+      <div className="relative">
+        {/* Zoom controls */}
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-background/80 backdrop-blur-sm rounded-lg border border-border px-1.5 py-1 shadow-sm">
+          <button
+            onClick={() => setZoomIdx(i => Math.max(0, i - 1))}
+            disabled={zoomIdx === 0}
+            className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+            title="Zoom out"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <span className="text-[10px] font-mono text-muted-foreground w-8 text-center">{scale}×</span>
+          <button
+            onClick={() => setZoomIdx(i => Math.min(ZOOM_LEVELS.length - 1, i + 1))}
+            disabled={zoomIdx === ZOOM_LEVELS.length - 1}
+            className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+            title="Zoom in"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+          {zoomIdx > 0 && (
+            <button
+              onClick={() => setZoomIdx(0)}
+              className="p-1 rounded hover:bg-muted transition-colors ml-0.5"
+              title="Reset zoom"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <div className="overflow-auto max-h-[600px] bg-muted/30 cursor-zoom-in" onClick={() => setZoomIdx(i => (i + 1) % ZOOM_LEVELS.length)}>
+          <img
+            src={doc.url}
+            alt={doc.name}
+            className="max-w-full transition-transform duration-200 origin-top-left"
+            style={scale > 1 ? { transform: `scale(${scale})`, cursor: "zoom-out" } : undefined}
+          />
+        </div>
       </div>
     );
   }
@@ -374,11 +418,10 @@ function DocPreview({ doc }: { doc: PreviewDoc }) {
       <iframe
         src={doc.url}
         title={doc.name}
-        className="w-full h-[480px] bg-white"
+        className="w-full h-[600px] bg-white"
       />
     );
   }
-  // Unknown type — graceful fallback
   return (
     <div className="h-[200px] flex flex-col items-center justify-center gap-2 text-muted-foreground">
       <ImageIcon className="h-8 w-8" />
@@ -395,7 +438,7 @@ function DocPreview({ doc }: { doc: PreviewDoc }) {
 function DocStatusDot({ status }: { status: DocStatus }) {
   const cls = {
     verified: "bg-success/50",
-    rejected: "bg-destructive/50",
+    rejected: "bg-amber-500",
     pending:  "bg-warning/40",
   }[status];
   return <span className={`inline-block w-2 h-2 rounded-full shrink-0 mt-1.5 ${cls}`} aria-label={status} />;
