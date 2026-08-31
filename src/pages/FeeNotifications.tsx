@@ -18,11 +18,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Send, Info, AlertTriangle, Filter, ChevronDown, ChevronRight, RefreshCw, Copy, MessageCircle, Phone } from "lucide-react";
 
 interface CourseOption { id: string; name: string; code: string }
 interface SessionOption { id: string; name: string }
 interface CampusOption { id: string; name: string; city: string | null }
+interface BatchOption { id: string; name: string; section: string | null; course_id: string; session_id: string }
 
 const FEE_TERM_OPTIONS = [
   { value: "year_1", label: "Year 1" },
@@ -107,6 +109,14 @@ const DELIVERY_LABEL: Record<string, string> = {
   read: "Read", delivered: "Delivered", sent: "Sent", failed: "Failed", not_sent: "Not sent",
 };
 
+type StatusFilter = "all" | "read" | "delivered" | "sent" | "failed" | "paid" | "unpaid";
+const matchesStatus = (r: ReportRow, f: StatusFilter): boolean => {
+  if (f === "all") return true;
+  if (f === "paid") return r.paid;
+  if (f === "unpaid") return !r.paid;
+  return r.delivery_status === f;
+};
+
 const defaultExpiryDate = () => {
   const d = new Date();
   d.setDate(d.getDate() + 14);
@@ -119,11 +129,13 @@ const FeeNotifications = () => {
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
   const [campuses, setCampuses] = useState<CampusOption[]>([]);
+  const [batches, setBatches] = useState<BatchOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
 
   const [courseIds, setCourseIds] = useState<string[]>([]);
   const [sessionId, setSessionId] = useState<string>("");
   const [campusId, setCampusId] = useState<string>("");
+  const [batchId, setBatchId] = useState<string>("");
   const [feeTerm, setFeeTerm] = useState<string>("year_2");
   const [expiryDate, setExpiryDate] = useState<string>(defaultExpiryDate());
   const [purposeLabel, setPurposeLabel] = useState<string>("Fee due");
@@ -138,6 +150,9 @@ const FeeNotifications = () => {
   const [openCampaignId, setOpenCampaignId] = useState<string | null>(null);
   const [report, setReport] = useState<ReportRow[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
+  // Delivery-report table: click a pill to filter, checkboxes to refine, resend the selected set.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const loadCampaigns = async () => {
     const { data } = await supabase
@@ -153,6 +168,8 @@ const FeeNotifications = () => {
     setOpenCampaignId(id);
     setLoadingReport(true);
     setReport([]);
+    setStatusFilter("all");
+    setSelectedIds(new Set());
     const { data, error } = await supabase.rpc("get_fee_notification_report" as any, { p_campaign_id: id });
     setLoadingReport(false);
     if (error) {
@@ -188,14 +205,14 @@ const FeeNotifications = () => {
     if (openCampaignId) openReport(openCampaignId);
   };
 
-  const resendAllFailed = async () => {
-    const failed = report.filter((r) => (r.delivery_status === "failed" || r.delivery_status === "not_sent") && r.token);
-    if (!failed.length) { toast({ title: "No failed recipients to resend" }); return; }
+  // Resend the fee link to an arbitrary set of report rows (paced via the WA API).
+  const resendRows = async (rows: ReportRow[]) => {
+    const targets = rows.filter((r) => r.token);
+    if (!targets.length) { toast({ title: "No recipients to resend" }); return; }
     setResending("bulk");
     let ok = 0, err = 0;
-    for (const r of failed) {
-      const phones = getAvailablePhones(r);
-      const phone = phones[0]?.phone;
+    for (const r of targets) {
+      const phone = getAvailablePhones(r)[0]?.phone;
       if (!phone || !r.token) { err++; continue; }
       const { error } = await supabase.functions.invoke("fee-notify-bulk", {
         body: { resend: true, token: r.token, phone },
@@ -205,23 +222,52 @@ const FeeNotifications = () => {
     }
     setResending(null);
     toast({ title: `Resent: ${ok} ok, ${err} failed`, variant: err > 0 ? "destructive" : "default" });
-    if (openCampaignId) openReport(openCampaignId);
+    if (openCampaignId) {
+      // openReport toggles when re-called with the same id; reload in place instead.
+      const { data } = await supabase.rpc("get_fee_notification_report" as any, { p_campaign_id: openCampaignId });
+      setReport((data as unknown as ReportRow[]) || []);
+      setSelectedIds(new Set());
+    }
+  };
+
+  // Click a pill → filter the table and pre-select every tokened row in that set.
+  const applyStatusFilter = (f: StatusFilter) => {
+    const next: StatusFilter = statusFilter === f && f !== "all" ? "all" : f;
+    setStatusFilter(next);
+    setSelectedIds(new Set(report.filter((r) => matchesStatus(r, next) && r.token).map((r) => r.student_id)));
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
 
   useEffect(() => {
     (async () => {
-      const [c, s, cam] = await Promise.all([
+      const [c, s, cam, b] = await Promise.all([
         supabase.from("courses").select("id, name, code").order("name"),
         supabase.from("admission_sessions").select("id, name").order("name"),
         supabase.from("campuses").select("id, name, city").order("name"),
+        supabase.from("batches").select("id, name, section, course_id, session_id").order("name"),
       ]);
       setCourses(c.data || []);
       setSessions(s.data || []);
       setCampuses(cam.data || []);
+      setBatches((b.data as BatchOption[]) || []);
       setLoadingOptions(false);
     })();
     loadCampaigns();
   }, []);
+
+  // Drop a chosen batch if the course/session filters no longer include it.
+  useEffect(() => {
+    if (batchId && !batches.some((b) => b.id === batchId && (courseIds.length === 0 || courseIds.includes(b.course_id)) && (!sessionId || b.session_id === sessionId))) {
+      setBatchId("");
+    }
+  }, [courseIds, sessionId, batchId, batches]);
 
   const expiresDays = () => {
     const ms = new Date(expiryDate).getTime() - Date.now();
@@ -232,6 +278,7 @@ const FeeNotifications = () => {
     course_ids: courseIds,
     ...(sessionId ? { session_id: sessionId } : {}),
     ...(campusId ? { campus_id: campusId } : {}),
+    ...(batchId ? { batch_id: batchId } : {}),
     fee_term: feeTerm,
     expires_days: expiresDays(),
     purpose_label: purposeLabel.trim() || "Fee due",
@@ -285,6 +332,11 @@ const FeeNotifications = () => {
     setCourseIds((current) => current.includes(id) ? current.filter((c) => c !== id) : [...current, id]);
     setPreview(null);
   };
+
+  // Batch options narrow to the selected course(s)/session when set.
+  const batchOptions = batches
+    .filter((b) => (courseIds.length === 0 || courseIds.includes(b.course_id)) && (!sessionId || b.session_id === sessionId))
+    .map((b) => ({ value: b.id, label: b.section ? `${b.name} (${b.section})` : b.name }));
 
   const courseLabel = courseIds.length === 0
     ? "Select courses"
@@ -366,6 +418,14 @@ const FeeNotifications = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <SelectField
+            label="Batch"
+            value={batchId}
+            onValueChange={(v) => { setBatchId(v); setPreview(null); }}
+            options={batchOptions}
+            placeholder="All batches"
+          />
+
           <FieldShell label="Link valid until">
             <Input
               type="date"
@@ -479,6 +539,16 @@ const FeeNotifications = () => {
               const deliveredCount = report.filter((r) => r.delivery_status === "delivered").length;
               const failedCount = report.filter((r) => r.delivery_status === "failed").length;
               const paidCount = report.filter((r) => r.paid).length;
+              const unpaidCount = report.filter((r) => !r.paid).length;
+              const visibleRows = report.filter((r) => matchesStatus(r, statusFilter));
+              const selectedRows = report.filter((r) => selectedIds.has(r.student_id));
+              const pills: Array<{ key: StatusFilter; count: number; cls: string }> = [
+                { key: "read", count: readCount, cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+                { key: "delivered", count: deliveredCount, cls: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" },
+                { key: "failed", count: failedCount, cls: "bg-destructive/10 text-destructive" },
+                { key: "paid", count: paidCount, cls: "bg-primary/10 text-primary" },
+                { key: "unpaid", count: unpaidCount, cls: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" },
+              ];
               return (
                 <div key={c.id}>
                   <button
@@ -506,19 +576,34 @@ const FeeNotifications = () => {
                       ) : (
                         <>
                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className="rounded-md bg-emerald-100 px-2 py-1 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">{readCount} read</span>
-                            <span className="rounded-md bg-blue-100 px-2 py-1 font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{deliveredCount} delivered</span>
-                            <span className="rounded-md bg-destructive/10 px-2 py-1 font-medium text-destructive">{failedCount} failed</span>
-                            <span className="rounded-md bg-primary/10 px-2 py-1 font-medium text-primary">{paidCount} paid</span>
-                            {failedCount > 0 && (
+                            {pills.map((p) => (
+                              <button
+                                key={p.key}
+                                type="button"
+                                onClick={() => applyStatusFilter(p.key)}
+                                className={`rounded-md px-2 py-1 font-medium capitalize transition-shadow ${p.cls} ${statusFilter === p.key ? "ring-2 ring-foreground/40" : "opacity-90 hover:opacity-100"}`}
+                              >
+                                {p.count} {p.key}
+                              </button>
+                            ))}
+                            {statusFilter !== "all" && (
+                              <button
+                                type="button"
+                                onClick={() => applyStatusFilter("all")}
+                                className="rounded-md bg-muted px-2 py-1 font-medium text-muted-foreground hover:text-foreground"
+                              >
+                                Clear filter
+                              </button>
+                            )}
+                            {selectedRows.length > 0 && (
                               <Button
                                 type="button" variant="outline" size="sm"
                                 className="h-7 gap-1.5 ml-auto text-xs"
                                 disabled={resending === "bulk"}
-                                onClick={resendAllFailed}
+                                onClick={() => resendRows(selectedRows)}
                               >
                                 <Send className="h-3.5 w-3.5" />
-                                {resending === "bulk" ? "Resending…" : `Resend ${failedCount} failed via API`}
+                                {resending === "bulk" ? "Resending…" : `Resend to ${selectedRows.length} selected`}
                               </Button>
                             )}
                           </div>
@@ -526,6 +611,24 @@ const FeeNotifications = () => {
                             <Table>
                               <TableHeader>
                                 <TableRow>
+                                  <TableHead className="w-8">
+                                    {(() => {
+                                      const selectable = visibleRows.filter((r) => r.token);
+                                      const allSel = selectable.length > 0 && selectable.every((r) => selectedIds.has(r.student_id));
+                                      return (
+                                        <Checkbox
+                                          checked={allSel}
+                                          disabled={selectable.length === 0}
+                                          onCheckedChange={(v) => setSelectedIds((prev) => {
+                                            const next = new Set(prev);
+                                            selectable.forEach((r) => v ? next.add(r.student_id) : next.delete(r.student_id));
+                                            return next;
+                                          })}
+                                          aria-label="Select all shown"
+                                        />
+                                      );
+                                    })()}
+                                  </TableHead>
                                   <TableHead>Student</TableHead>
                                   <TableHead>Sent to</TableHead>
                                   <TableHead className="text-right">Due</TableHead>
@@ -535,10 +638,19 @@ const FeeNotifications = () => {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {report.map((r) => {
+                                {visibleRows.map((r) => {
                                   const phones = getAvailablePhones(r);
                                   return (
                                   <TableRow key={r.student_id}>
+                                    <TableCell className="w-8">
+                                      {r.token ? (
+                                        <Checkbox
+                                          checked={selectedIds.has(r.student_id)}
+                                          onCheckedChange={() => toggleSelected(r.student_id)}
+                                          aria-label={`Select ${r.name}`}
+                                        />
+                                      ) : null}
+                                    </TableCell>
                                     <TableCell>{r.name}</TableCell>
                                     <TableCell>
                                       <span className="text-xs">{r.sent_to_phone || r.phone || "—"}</span>
