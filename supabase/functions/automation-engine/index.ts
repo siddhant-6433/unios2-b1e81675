@@ -50,6 +50,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ponytail: concurrency guard — if too many automation-engine invocations
+    // are running (bulk stage change → 100+ pg_net calls), shed load early to
+    // protect the DB connection pool. The trigger retries via cooldown_hours.
+    const MAX_CONCURRENT = 20;
+    const { count: activeCount } = await admin
+      .from("automation_rule_executions")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", new Date(Date.now() - 60_000).toISOString());
+    if ((activeCount ?? 0) >= MAX_CONCURRENT) {
+      console.warn(`Automation engine: ${activeCount} executions in last 60s, shedding load`);
+      return new Response(JSON.stringify({ shed: true, reason: "rate_limited" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const payload = await req.json();
     const { trigger_type, lead_id, old_stage, new_stage, activity_type, counsellor_id } = payload;
 

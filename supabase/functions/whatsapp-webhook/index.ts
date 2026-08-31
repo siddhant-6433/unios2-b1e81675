@@ -1246,107 +1246,25 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Handle status updates (delivered, read)
+        // Handle status updates (delivered, read, failed)
+        // ponytail: queue instead of processing inline — Meta floods 300+
+        // receipts/min after bulk sends, each doing 5 queries. Queueing does
+        // 1 INSERT; a pg_cron batch processes them every minute in one connection.
         const statuses = value?.statuses || [];
-        for (const status of statuses) {
-          const waMessageId = status.id;
-          const newStatus = status.status; // sent, delivered, read, failed
-          if (waMessageId && newStatus) {
-            // Look up the prior state BEFORE updating so we can (a) attach a
-            // lead-timeline note on the first "failed" report and (b) skip it
-            // if Meta re-sends the same failed status.
-            let priorMsg: { status?: string; lead_id?: string; template_key?: string } | null = null;
-            if (newStatus === "failed") {
-              const { data } = await admin
-                .from("whatsapp_messages")
-                .select("status, lead_id, template_key")
-                .eq("wa_message_id", waMessageId)
-                .maybeSingle();
-              priorMsg = data as any;
-            }
-
-            const updates: Record<string, unknown> = {
-              status: newStatus,
-              ...(businessPnId ? { business_phone_number_id: businessPnId } : {}),
-              ...(status.errors ? { status_error: status.errors } : {}),
-            };
-            await admin
-              .from("whatsapp_messages")
-              .update(updates)
-              .eq("wa_message_id", waMessageId);
-
-            // On the first failed report for a message tied to a lead, drop a
-            // timeline activity + counsellor note. Fire-and-forget; never throw.
-            if (newStatus === "failed" && priorMsg?.lead_id && priorMsg.status !== "failed") {
-              const tmpl = priorMsg.template_key || "message";
-              const errTitle = String(status.errors?.[0]?.title || "").slice(0, 120);
-              const desc = `⚠️ WhatsApp delivery failed — ${tmpl}${errTitle ? ` (${errTitle})` : ""}`;
-              admin
-                .from("lead_activities")
-                .insert({ lead_id: priorMsg.lead_id, type: "system", description: desc })
-                .then(({ error }) => { if (error) console.error("failed-note lead_activities error:", error); });
-              admin
-                .from("lead_notes")
-                .insert({
-                  lead_id: priorMsg.lead_id,
-                  content: `${desc}\nCounsellor follow-up: send the details manually or from a different channel.`,
-                })
-                .then(({ error }) => { if (error) console.error("failed-note lead_notes error:", error); });
-            }
-
-            await admin
-              .from("whatsapp_otps")
-              .update({
-                wa_status: newStatus,
-                wa_status_error: status.errors || null,
-                wa_status_updated_at: new Date().toISOString(),
-              })
-              .eq("wa_message_id", waMessageId);
-
-            if (["sent", "delivered", "read", "failed"].includes(newStatus)) {
-              // Meta can deliver receipts out of order (read before delivered, a
-              // late sent after read). Advance `status` only forward and stamp
-              // per-stage timestamps so a stale receipt can't corrupt the funnel.
-              const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
-              const nowIso = new Date().toISOString();
-              const { data: cur } = await admin
-                .from("whatsapp_campaign_recipients")
-                .select("status, delivered_at")
-                .eq("message_id", waMessageId)
-                .maybeSingle();
-              if (cur) {
-                const patch: Record<string, unknown> = {};
-                if (newStatus === "delivered") patch.delivered_at = nowIso;
-                if (newStatus === "read") {
-                  patch.read_at = nowIso;
-                  // read implies delivered — backfill if the delivered receipt was lost/late.
-                  if (!(cur as any).delivered_at) patch.delivered_at = nowIso;
-                }
-                if (newStatus === "failed") {
-                  patch.failed_at = nowIso;
-                  if (status.errors) {
-                    patch.error_message = JSON.stringify(status.errors);
-                    // Record the Meta code so reports can tell a throttle (131049)
-                    // from a hard failure (131026 invalid number, etc.).
-                    const code = status.errors?.[0]?.code;
-                    if (code != null) patch.last_error_code = String(code);
-                  }
-                }
-                const curRank = RANK[(cur as any).status] ?? 0;
-                if (newStatus === "failed") {
-                  // A message that already reached the user isn't retroactively "failed".
-                  if (curRank < RANK.delivered) patch.status = "failed";
-                } else if ((RANK[newStatus] ?? 0) > curRank) {
-                  patch.status = newStatus;
-                }
-                if (Object.keys(patch).length > 0) {
-                  await admin
-                    .from("whatsapp_campaign_recipients")
-                    .update(patch)
-                    .eq("message_id", waMessageId);
-                }
-              }
-            }
+        if (statuses.length > 0) {
+          const statusRows = statuses
+            .filter((s: any) => s.id && s.status)
+            .map((s: any) => ({
+              wa_message_id: s.id,
+              status: s.status,
+              errors: s.errors || null,
+              business_phone_number_id: businessPnId || null,
+            }));
+          if (statusRows.length > 0) {
+            const { error: qErr } = await admin
+              .from("whatsapp_status_queue")
+              .insert(statusRows);
+            if (qErr) console.error("Status queue insert failed:", qErr.message);
           }
         }
       }
