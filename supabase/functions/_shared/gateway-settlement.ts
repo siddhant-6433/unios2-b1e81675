@@ -388,6 +388,89 @@ function fireReceiptPdf(supabaseUrl: string, serviceKey: string, paymentId: stri
   }).catch((e) => console.error("[gateway-settlement] receipt pdf mint failed:", e));
 }
 
+/** A phone is usable if it has at least 10 digits. */
+export function validPhone(v: unknown): string | null {
+  return v && String(v).replace(/\D/g, "").length >= 10 ? String(v) : null;
+}
+
+/**
+ * Best phone for a lead-less student's receipt: prefer the number the fee-notify
+ * invite actually reached (payment_links.sent_to_phone), else the student's own
+ * cascade — the same order fee-notify-bulk used to send the link.
+ */
+export function resolveReceiptPhone(
+  sentToPhone: unknown,
+  student: {
+    phone?: unknown; whatsapp_no?: unknown;
+    father_phone?: unknown; father_whatsapp?: unknown;
+    mother_phone?: unknown; mother_whatsapp?: unknown;
+    guardian_phone?: unknown;
+  } | null | undefined,
+): string | null {
+  return validPhone(sentToPhone)
+    || validPhone(student?.phone) || validPhone(student?.whatsapp_no)
+    || validPhone(student?.father_phone) || validPhone(student?.father_whatsapp)
+    || validPhone(student?.mother_phone) || validPhone(student?.mother_whatsapp)
+    || validPhone(student?.guardian_phone);
+}
+
+/**
+ * Lead-less (imported) student receipt delivery. notify-event — the only place a
+ * receipt PDF is pushed to WhatsApp — is lead-anchored and 404s without a lead, so
+ * fee-notify payers (lead_id=null) never got their receipt. Here we mint the PDF
+ * synchronously (generate-payment-receipt is student-aware) and WhatsApp it to the
+ * number the invite actually reached, mirroring notify-event's payment_receipt_pdf
+ * send (falls back to the text payment_receipt template if the PDF didn't render).
+ */
+export async function sendStudentReceipt(
+  supabaseUrl: string,
+  serviceKey: string,
+  paymentId: string,
+  student: { phone: string | null; name: string | null; amount: number },
+) {
+  const phone = student.phone;
+  if (!phone) return;
+  try {
+    let receiptUrl = "";
+    let receiptNo = "";
+    const gen = await fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({ payment_id: paymentId }),
+    });
+    if (gen.ok) {
+      const g = await gen.json().catch(() => ({} as any));
+      receiptUrl = g?.receipt_url || "";
+      receiptNo = g?.receipt_no || "";
+    } else {
+      console.error("[gateway-settlement] student receipt gen failed:", gen.status, await gen.text().catch(() => ""));
+    }
+
+    const name = student.name || "Student";
+    const amount = String(student.amount);
+    const wa = async (template_key: string, params: string[], options?: Record<string, unknown>) => {
+      const res = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ template_key, phone, params, ...(options || {}) }),
+      });
+      return res.ok;
+    };
+
+    const sent = receiptUrl
+      ? await wa("payment_receipt_pdf", [name, "Other Charges", amount, receiptNo], {
+          header_document_url: receiptUrl,
+          header_document_filename: `Receipt-${receiptNo || paymentId}.pdf`,
+        })
+      : false;
+    if (!sent) {
+      await wa("payment_receipt", [name, "Other Charges", amount, receiptNo, receiptUrl]);
+    }
+  } catch (e) {
+    console.error("[gateway-settlement] student receipt send failed:", e);
+  }
+}
+
 /**
  * Student fee ledger settlement — never re-applies ledger for an existing capture.
  */
@@ -611,11 +694,17 @@ export async function settlePaymentLink(
   // allocation to the matching fee_ledger heads — instead of the oldest-due sweep.
   const hasAllocations = Array.isArray(link.allocations) && link.allocations.length > 0;
 
-  const notifyPaymentReceived = (leadId: string | null, leadPaymentId: string) => {
-    // notify-event is lead-anchored (WhatsApp/email relay); skip it for lead-less
-    // (imported) students, but always mint the receipt PDF — it is student-aware
-    // and resolves branding off the student's own course→institution chain.
+  const notifyPaymentReceived = (
+    leadId: string | null,
+    leadPaymentId: string,
+    // Lead-less (imported) student context — needed because notify-event is
+    // lead-anchored and is the ONLY sender of the receipt-PDF on WhatsApp. Without
+    // this, ~66% of fee-notify payers (lead_id=null) get a receipt minted but never
+    // delivered. When present, we generate + WhatsApp the receipt directly here.
+    studentDirect?: { phone: string | null; name: string | null; amount: number } | null,
+  ) => {
     if (leadId) {
+      // Lead path: notify-event handles the WhatsApp/email receipt relay.
       fetch(`${supabaseUrl}/functions/v1/notify-event`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
@@ -625,7 +714,17 @@ export async function settlePaymentLink(
           context: { payment_id: leadPaymentId },
         }),
       }).catch((e) => console.error("[gateway-settlement] payment_link notify failed:", e));
+      fireReceiptPdf(supabaseUrl, serviceKey, leadPaymentId);
+      return;
     }
+    if (studentDirect?.phone) {
+      // No lead → generate the receipt synchronously (it's student-aware and
+      // returns the URL) then WhatsApp the PDF to the same number the fee-notify
+      // invite reached. Mirrors notify-event's payment_receipt_pdf send.
+      sendStudentReceipt(supabaseUrl, serviceKey, leadPaymentId, studentDirect);
+      return;
+    }
+    // No lead and no phone: at least mint the PDF so the UI/backfill can surface it.
     fireReceiptPdf(supabaseUrl, serviceKey, leadPaymentId);
   };
 
@@ -685,13 +784,24 @@ export async function settlePaymentLink(
 
   if (link.student_id) {
     const { data: student } = await admin
-      .from("students").select("lead_id").eq("id", link.student_id).maybeSingle();
+      .from("students")
+      .select("lead_id, name, phone, whatsapp_no, father_phone, father_whatsapp, mother_phone, mother_whatsapp, guardian_phone")
+      .eq("id", link.student_id).maybeSingle();
     // Imported students have no lead — leadId stays null. lead_payments.lead_id is
     // nullable and the oldest-due sweep below keys on student_id, so the payment
     // books fine without a lead; the receipt PDF resolves branding off the
     // student's own course→institution chain. (Previously this returned early and
     // stranded the already-claimed link as paid-but-unbooked.)
     const leadId = student?.lead_id || link.lead_id || null;
+
+    // For the lead-less case, deliver the receipt straight to the number the
+    // fee-notify invite reached (payment_links.sent_to_phone), falling back to the
+    // student's own phone cascade — same resolution fee-notify-bulk used to send
+    // the link. notify-event can't do this (it 404s without a lead).
+    const { data: linkRow } = await admin
+      .from("payment_links").select("sent_to_phone").eq("id", link.id).maybeSingle();
+    const receiptPhone = resolveReceiptPhone(linkRow?.sent_to_phone, student);
+    const studentDirect = { phone: receiptPhone, name: student?.name ?? null, amount: paidAmount };
 
     const { data: lp, error } = await admin
       .from("lead_payments")
@@ -723,7 +833,7 @@ export async function settlePaymentLink(
       if (hasAllocations) {
         // Breakup routing is handled by provision_student_fees (confirm trigger).
         await finalizeLink(lp.id);
-        notifyPaymentReceived(leadId, lp.id);
+        notifyPaymentReceived(leadId, lp.id, studentDirect);
         return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
       }
       // Apply amount to oldest due ledger rows (same as pay-link).
@@ -760,7 +870,7 @@ export async function settlePaymentLink(
         );
       }
       await finalizeLink(lp.id);
-      notifyPaymentReceived(leadId, lp.id);
+      notifyPaymentReceived(leadId, lp.id, studentDirect);
     }
     return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
   }
