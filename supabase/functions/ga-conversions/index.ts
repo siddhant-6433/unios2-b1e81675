@@ -32,6 +32,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -63,31 +64,18 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "method not allowed" }, 405);
   }
 
-  // Auth: accept x-internal-key OR a service-role token. Two paths to
-  // recognise service-role: direct string-equality against env (handles
-  // both legacy eyJ... JWTs and new sb_secret_... opaque keys), then JWT
-  // decode as a fallback for eyJ tokens whose env-var form happened to be
-  // rotated to sb_secret_ in the meantime.
-  const authHeader = req.headers.get("authorization") ?? "";
+  // Auth: accept x-internal-key OR a service caller (cron-secret / service
+  // role key, either env-var or sb_secret_... opaque-key form).
   const internalKey = req.headers.get("x-internal-key") ?? "";
   const expectedInternal = Deno.env.get("GA_RELAY_INTERNAL_KEY") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-  let okAuth = expectedInternal && internalKey === expectedInternal;
-  if (!okAuth && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.slice(7);
-    if (serviceRoleKey && token === serviceRoleKey) {
-      okAuth = true;
-    } else {
-      try {
-        const [, payloadB64] = token.split(".");
-        if (payloadB64) {
-          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-          if (payload?.role === "service_role") okAuth = true;
-        }
-      } catch { /* malformed token — leave okAuth false */ }
-    }
-  }
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const okAuth = (expectedInternal && internalKey === expectedInternal) ||
+    (await isServiceCaller(req, supabase));
   if (!okAuth) return json({ ok: false, error: "unauthorized" }, 401);
 
   let body: RelayBody;
@@ -100,11 +88,6 @@ Deno.serve(async (req) => {
   if (!body.lead_id || !body.event_name) {
     return json({ ok: false, error: "lead_id and event_name required" }, 400);
   }
-
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
 
   // Look up the lead's GA attribution context
   const { data: lead, error: leadErr } = await supabase

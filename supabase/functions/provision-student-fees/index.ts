@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -67,29 +68,16 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-    if (!authHeader) {
-      return json({ error: "Missing authorization header" }, 401);
-    }
-
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const token = (req.headers.get("authorization") || req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
 
-    // Accept service-role tokens directly (used by the
-    // trg_auto_provision_fees_on_admission trigger via pg_net). Decode the
-    // JWT payload — string equality covers both legacy + sb_secret formats.
-    let isServiceRole = token === serviceRoleKey;
-    if (!isServiceRole) {
-      try {
-        const [, payloadB64] = token.split(".");
-        if (payloadB64) {
-          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-          if (payload?.role === "service_role") isServiceRole = true;
-        }
-      } catch { /* not a JWT, fall through */ }
-    }
+    // Accept service callers via the shared drift-immune helper: DB triggers /
+    // cron (x-cron-secret) or edge-to-edge (service key / _app_config fallback).
+    // The trg_auto_provision_fees_on_admission trigger calls in through here.
+    let isServiceRole = await isServiceCaller(req, db);
 
     if (!isServiceRole) {
+      if (!token) return json({ error: "Missing authorization header" }, 401);
       const { data: { user }, error: authError } = await db.auth.getUser(token);
       if (authError || !user) {
         return json({ error: `Auth failed: ${authError?.message || "no user"}` }, 401);

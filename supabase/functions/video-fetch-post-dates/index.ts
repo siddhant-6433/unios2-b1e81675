@@ -18,6 +18,7 @@
 // The videos trigger recomputes posted_month on update.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -99,14 +100,21 @@ Deno.serve(async (req) => {
   try {
     const url = Deno.env.get("SUPABASE_URL")!;
     const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const caller = createClient(url, svc, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } }, auth: { persistSession: false } });
     const admin = createClient(url, svc, { auth: { persistSession: false } });
 
-    const { data: u } = await caller.auth.getUser();
-    const uid = u?.user?.id;
-    if (!uid) return json({ error: "Unauthorized" }, 401);
-    const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
-    const isSuper = (roles || []).some((r: { role: string }) => r.role === "super_admin");
+    // Service callers (fn_video_auto_fetch_dates cron via x-cron-secret /
+    // service key) run as super with no user; staff callers authenticate by JWT.
+    const svcCaller = await isServiceCaller(req, admin);
+    let uid: string | null = null;
+    let isSuper = svcCaller;
+    if (!svcCaller) {
+      const caller = createClient(url, svc, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } }, auth: { persistSession: false } });
+      const { data: u } = await caller.auth.getUser();
+      uid = u?.user?.id ?? null;
+      if (!uid) return json({ error: "Unauthorized" }, 401);
+      const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
+      isSuper = (roles || []).some((r: { role: string }) => r.role === "super_admin");
+    }
 
     const body = await req.json().catch(() => ({}));
     const force = body.force === true;

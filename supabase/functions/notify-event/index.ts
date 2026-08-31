@@ -19,6 +19,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,45 +49,41 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   // Auth — accept:
-  //   (a) the service-role token (used by DB pg_net trigger + edge-to-edge
-  //       calls like easebuzz/icici callbacks), OR
+  //   (a) a service caller: DB pg_net triggers / cron (x-cron-secret) or
+  //       edge-to-edge calls (service key), via the shared drift-immune helper.
   //   (b) an authenticated user JWT whose user_id maps to one of the
   //       admin-level roles in user_roles. This lets the client-side
   //       OfflinePaymentDialog / RecordPaymentDialog / "Resend receipt"
   //       button invoke notify-event directly without going through pg_net,
   //       which has been observed to drop silently in production.
-  const auth = req.headers.get("authorization") ?? "";
-  if (!auth.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
-  const token = auth.slice(7);
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  let okAuth = !!(serviceRoleKey && token === serviceRoleKey);
-  let jwtUserId: string | null = null;
-  let jwtRole: string | null = null;
-  if (!okAuth) {
-    try {
-      const [, payloadB64] = token.split(".");
-      if (payloadB64) {
-        const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-        jwtRole = payload?.role ?? null;
-        jwtUserId = payload?.sub ?? null;
-        if (jwtRole === "service_role") okAuth = true;
-      }
-    } catch { /* malformed token */ }
-  }
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  // If the caller wasn't service-role, accept an authenticated admin user.
-  // The JWT signature is verified by Supabase's gateway before the function
-  // runs (verify_jwt = true by default), so we can trust `sub` + `role`.
-  if (!okAuth && jwtRole === "authenticated" && jwtUserId) {
-    const SUPABASE_URL_FOR_AUTH = Deno.env.get("SUPABASE_URL")!;
-    const SERVICE_KEY_FOR_AUTH = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const adminCheck = createClient(SUPABASE_URL_FOR_AUTH, SERVICE_KEY_FOR_AUTH);
-    const { data: roles } = await adminCheck
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", jwtUserId);
-    const allowed = new Set(["super_admin", "campus_admin", "admission_head", "principal", "accountant", "counsellor"]);
-    if ((roles || []).some((r: any) => allowed.has(r.role))) okAuth = true;
+  let okAuth = await isServiceCaller(req, db);
+  if (!okAuth) {
+    // Authenticated admin-user path (client dialogs invoking directly).
+    const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    let jwtUserId: string | null = null;
+    let jwtRole: string | null = null;
+    if (token) {
+      try {
+        const [, payloadB64] = token.split(".");
+        if (payloadB64) {
+          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+          jwtRole = payload?.role ?? null;
+          jwtUserId = payload?.sub ?? null;
+        }
+      } catch { /* malformed token */ }
+    }
+    if (jwtRole === "authenticated" && jwtUserId) {
+      const { data: roles } = await db
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", jwtUserId);
+      const allowed = new Set(["super_admin", "campus_admin", "admission_head", "principal", "accountant", "counsellor"]);
+      if ((roles || []).some((r: any) => allowed.has(r.role))) okAuth = true;
+    }
   }
 
   if (!okAuth) return json({ error: "unauthorized" }, 401);
@@ -94,10 +91,6 @@ Deno.serve(async (req) => {
   let body: NotifyBody;
   try { body = await req.json(); } catch { return json({ error: "invalid json" }, 400); }
   if (!body.event || !body.lead_id) return json({ error: "event and lead_id required" }, 400);
-
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
   // ── Load shared lead context ────────────────────────────────────────
   const { data: lead, error: leadErr } = await db

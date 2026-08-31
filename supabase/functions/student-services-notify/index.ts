@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,21 +28,6 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-function requireServiceRole(req: Request, serviceRoleKey: string): boolean {
-  const auth = req.headers.get("authorization") || "";
-  if (!auth.startsWith("Bearer ")) return false;
-  const token = auth.slice(7);
-  if (serviceRoleKey && token === serviceRoleKey) return true;
-  try {
-    const [, payloadB64] = token.split(".");
-    if (!payloadB64) return false;
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-    return payload?.role === "service_role";
-  } catch {
-    return false;
-  }
-}
-
 function requestLink(requestId: string) {
   return `${CRM_BASE}/alumni-verifications?request=${encodeURIComponent(requestId)}`;
 }
@@ -52,7 +38,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  if (!requireServiceRole(req, serviceRoleKey)) return json({ error: "unauthorized" }, 401);
+  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  if (!(await isServiceCaller(req, db))) return json({ error: "unauthorized" }, 401);
 
   let body: NotifyBody;
   try {
@@ -62,8 +49,6 @@ Deno.serve(async (req) => {
   }
 
   if (!body.request_id) return json({ error: "request_id required" }, 400);
-
-  const db = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
   const { data: requestRow, error } = await db
     .from("alumni_verification_requests")
     .select("id, request_number, request_type, alumni_name, course, year_of_passing, due_date, assigned_handler_user_id, assigned_handler_name, assigned_handler_email, assigned_handler_official_phone, assignment_status")

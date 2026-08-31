@@ -14,6 +14,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 /** Returns the next ISO timestamp within the 9AM–8PM IST calling window. */
 function nextPermittedCallTime(delayMs = 0): string {
@@ -39,21 +40,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const cronSecret = req.headers.get("x-cron-secret");
-    const expectedSecret = Deno.env.get("CRON_SECRET");
-    const authHeader = req.headers.get("Authorization");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const token = authHeader?.replace("Bearer ", "") || "";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    // Accept cron secret OR service role key OR valid user auth
-    if (cronSecret !== expectedSecret && token !== serviceRoleKey && !authHeader) {
+    if (!(await isServiceCaller(req, admin))) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const admin = createClient(supabaseUrl, serviceRoleKey);
 
     const payload = await req.json();
     const { trigger_type, lead_id, old_stage, new_stage, activity_type, counsellor_id } = payload;

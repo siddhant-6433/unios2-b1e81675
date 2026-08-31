@@ -7,6 +7,7 @@
 //
 // Milestones: 30d, 7d, 1d (before expiry), and `expired` (the day after).
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +43,7 @@ Deno.serve(async (req) => {
     const fromEmail  = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
 
     const admin = createClient(supaUrl, serviceKey);
+    if (!(await isServiceCaller(req, admin))) return json({ error: "unauthorized" }, 401);
 
     // Pull all docs with an expiry within the window we care about (-3 .. 30d)
     // so a freshly-added doc that already expired up to 3 days ago still gets
