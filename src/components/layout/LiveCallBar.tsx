@@ -212,8 +212,16 @@ export function LiveCallBar() {
     };
 
     fetchActiveCalls();
-    const interval = setInterval(fetchActiveCalls, 5000);
-    return () => { clearInterval(interval); if (audioRef.current) { audioRef.current.pause(); } };
+    // Skip the 5s poll while the tab is backgrounded; refresh on refocus so a
+    // call that landed while hidden shows up immediately.
+    const tick = () => { if (document.visibilityState === "visible") fetchActiveCalls(); };
+    const interval = setInterval(tick, 5000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+      if (audioRef.current) { audioRef.current.pause(); }
+    };
   }, [canView, isAdmin, user?.id]);
 
   // Tick every second to update elapsed times

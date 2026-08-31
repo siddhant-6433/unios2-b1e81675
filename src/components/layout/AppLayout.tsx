@@ -185,10 +185,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {deferredShellReady && <CahetSprintTicker />}
             {deferredShellReady && <UpdeledSprintTicker />}
             {deferredShellReady && <ApplicantDeadlineTicker />}
-            {/* Every number in this bar is now a clickable bucket chip inside the
-                Cloud Dialer, which is the counsellor's landing page. Keeping both
-                meant two places to decide what to work on next. */}
-            {deferredShellReady && role !== "counsellor" && <GlobalActionBar />}
+            {/* Counsellors get the action bar as cross-page navigation everywhere
+                except the Cloud Dialer console, where these same numbers already
+                render as bucket chips (and vertical space on the full-viewport
+                console is tight). Every other role keeps it on all pages. */}
+            {deferredShellReady && !(role === "counsellor" && isConsole) && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : "overflow-auto p-6"}`}>
               {/* Same surface the RequirePermission gate and the page's own

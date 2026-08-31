@@ -8,6 +8,7 @@ const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "u
 const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTime.tsx", "utf8");
 const useTatDefaults = readFileSync("src/hooks/useTatDefaults.ts", "utf8");
 const actionBadgeCountsHelper = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
+const liveCallBar = readFileSync("src/components/layout/LiveCallBar.tsx", "utf8");
 const migration = readFileSync("supabase/migrations/20260618150000_crm_layout_perf_indexes.sql", "utf8");
 const actionBadgeCounts = readFileSync("supabase/migrations/20260618183000_action_badge_counts.sql", "utf8");
 const fastActionBadgeCounts = readFileSync("supabase/migrations/20260625130000_fast_action_badge_counts.sql", "utf8");
@@ -72,6 +73,35 @@ describe("CRM layout performance guardrails", () => {
     expect(fastActionBadgeCounts).not.toContain("whatsapp_unreplied_message_count");
     expect(fastActionBadgeCounts).toContain("idx_whatsapp_messages_unread_phone_conversation_created");
     expect(fastActionBadgeCounts).toContain("idx_whatsapp_messages_outbound_phone_conversation_created");
+  });
+
+  it("restores the action bar for counsellors on every page except the dialer console", () => {
+    // Counsellors lost the GlobalActionBar entirely; it now renders for them
+    // everywhere except /cloud-dialer (isConsole), where the numbers duplicate
+    // as bucket chips. The old blanket `role !== "counsellor"` gate is gone.
+    expect(appLayout).not.toContain('role !== "counsellor" && <GlobalActionBar');
+    expect(appLayout).toContain('!(role === "counsellor" && isConsole) && <GlobalActionBar');
+  });
+
+  it("skips background polling of the expensive aggregates while the tab is hidden", () => {
+    // Every open CRM tab polls independently; a backgrounded tab must not keep
+    // firing the 5-min action-badge aggregate or the 5s active-call poll.
+    expect(globalActionBar).toContain('document.visibilityState === "visible"');
+    expect(globalActionBar).toContain('addEventListener("visibilitychange"');
+    expect(liveCallBar).toContain('document.visibilityState === "visible"');
+    expect(liveCallBar).toContain('addEventListener("visibilitychange"');
+  });
+
+  it("moves the Counsellor Dashboard activity log off client-side row scans", () => {
+    const dashboard = readFileSync("src/pages/CounsellorDashboard.tsx", "utf8");
+    const activityRpc = readFileSync(
+      "supabase/migrations/20260831084853_counsellor_activity_log_rpc.sql", "utf8");
+    // No more .limit(500) client scans of lead_activities/call_logs in fetchActivity.
+    expect(dashboard).toContain('rpc("get_counsellor_activity_log"');
+    expect(dashboard).not.toContain('.from("lead_activities" as any)');
+    expect(activityRpc).toMatch(/CREATE OR REPLACE FUNCTION public\.get_counsellor_activity_log/i);
+    expect(activityRpc).toMatch(/\bSECURITY\s+DEFINER\b/i);
+    expect(activityRpc).toContain("TO authenticated");
   });
 
   it("archives pg_stat_statements before the nightly reset", () => {

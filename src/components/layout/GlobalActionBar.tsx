@@ -47,6 +47,9 @@ export function GlobalActionBar() {
     }
     if (!profileId && isCounsellor) return;
 
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retries = 0;
+
     const fetchCounts = async () => {
       try {
         const effectiveProfileId = counsellorFilter !== "all"
@@ -125,14 +128,26 @@ export function GlobalActionBar() {
         });
 
         setItems(result);
+        retries = 0;
       } catch (err) {
         console.error("[GlobalActionBar] fetchCounts error:", err);
+        // The first fetch after login can land while the session/JWT is still
+        // settling; without a retry the bar sits empty until the 5-min poll.
+        if (retries++ < 3) retryTimer = setTimeout(fetchCounts, 2000);
       }
     };
 
     fetchCounts();
-    const interval = setInterval(fetchCounts, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    // Don't hammer the expensive aggregate from a backgrounded tab — poll only
+    // while visible, and refresh once on the way back to foreground.
+    const tick = () => { if (document.visibilityState === "visible") fetchCounts(); };
+    const interval = setInterval(tick, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      if (retryTimer) clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [profileId, isCounsellor, role, counsellorFilter]);
 
   if (items.length === 0 && !canFilterCounsellor) return null;
