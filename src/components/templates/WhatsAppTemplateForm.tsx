@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
@@ -134,6 +134,21 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // WABA picker. Sourced from the edge function's `wabas` action rather than
+  // whatsapp_channels directly, so this list and the sync picker can't drift —
+  // it reports exactly the accounts a usable token was resolved for.
+  const [wabaOptions, setWabaOptions] = useState<{ value: string; label: string }[]>([]);
+  const [wabaId, setWabaId] = useState("");
+  useEffect(() => {
+    invokeEdge<{ wabas?: Array<{ waba_id: string; label: string; is_default: boolean }> }>(
+      "whatsapp-templates", { body: { action: "wabas" } },
+    ).then(({ data }) => {
+      const opts = (data?.wabas ?? []).map((w) => ({ value: w.waba_id, label: w.label }));
+      setWabaOptions(opts);
+      setWabaId((cur) => cur || (data?.wabas ?? []).find((w) => w.is_default)?.waba_id || opts[0]?.value || "");
+    }).catch(() => {});
+  }, []);
+
   // Placeholder count drives the sample-value inputs.
   const placeholderCount = useMemo(
     () => (body.match(/\{\{\d+\}\}/g) || []).length,
@@ -214,6 +229,7 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
       name: name.trim(),
       category,
       body_text: body,
+      ...(wabaId ? { waba_id: wabaId } : {}),
     };
     if (headerType === "TEXT") {
       payload.header_format = "TEXT";
@@ -274,6 +290,16 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
         <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-5">
           {/* ── Form ── */}
           <div className="space-y-4">
+            {wabaOptions.length > 1 && (
+              <SelectField
+                label="Submit to"
+                value={wabaId}
+                onValueChange={setWabaId}
+                options={wabaOptions}
+                allowEmpty={false}
+                triggerClassName={inputCls}
+              />
+            )}
             <div className="grid grid-cols-2 gap-3">
               <TextField
                 label="Template Name"

@@ -1260,13 +1260,39 @@ export default function Applications() {
       return;
     }
 
-    const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+    // Drop leads already on the list BEFORE inserting. The unique index on
+    // (list_id, lead_id) is PARTIAL (WHERE lead_id IS NOT NULL), so PostgREST
+    // cannot target it for an upsert — hence the plain insert. But on "add to
+    // existing list" one duplicate raises 23505 and rolls back the entire
+    // 500-row chunk, silently losing up to 499 new leads.
+    // Probed with `.in()` over the leads being added rather than by paging the
+    // whole list — bounded by the selection, not by list size.
+    let toAdd = leadIds;
+    if (listMode === "existing") {
+      const existing = new Set<string>();
+      for (let i = 0; i < leadIds.length; i += 500) {
+        const probe = leadIds.slice(i, i + 500);
+        const { data, error } = await supabase
+          .from("lead_list_members" as any)
+          .select("lead_id")
+          .eq("list_id", listId)
+          .in("lead_id", probe);
+        if (error) { console.error("Could not read existing list members:", error); break; }
+        ((data as any[]) || []).forEach((row: { lead_id: string | null }) => {
+          if (row.lead_id) existing.add(row.lead_id);
+        });
+      }
+      toAdd = leadIds.filter((id) => !existing.has(id));
+    }
+    const alreadyOnList = leadIds.length - toAdd.length;
+
+    const members = toAdd.map((lead_id) => ({ list_id: listId, lead_id }));
     let memberErrors = 0;
     for (let i = 0; i < members.length; i += 500) {
       const chunk = members.slice(i, i + 500);
       const { error: memberErr } = await supabase
         .from("lead_list_members" as any)
-        .upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true } as any);
+        .insert(chunk);
       if (memberErr) {
         memberErrors++;
         console.error("Application list member insert failed:", memberErr);
@@ -1277,7 +1303,7 @@ export default function Applications() {
     if (memberErrors > 0) {
       toast({
         title: "List partially updated",
-        description: `"${listName}" was saved, but some applications could not be added. Check console.`,
+        description: `"${listName}" saved, but ${memberErrors * 500} application lead(s) could not be added. Check console.`,
         variant: "destructive",
       });
       return;
@@ -1285,7 +1311,9 @@ export default function Applications() {
 
     toast({
       title: listMode === "new" ? "List created" : "List updated",
-      description: `"${listName}" — ${leadIds.length} application lead${leadIds.length === 1 ? "" : "s"} added. Use Lists for bulk WhatsApp or email.`,
+      description: `"${listName}" — ${toAdd.length} application lead${toAdd.length === 1 ? "" : "s"} added`
+        + (alreadyOnList > 0 ? `, ${alreadyOnList} already on the list.` : ".")
+        + " Use Lists for bulk WhatsApp or email.",
     });
     setShowAddToList(false);
     resetListDialog();

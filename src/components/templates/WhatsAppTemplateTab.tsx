@@ -8,7 +8,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle, Eye, EyeOff, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
@@ -50,7 +54,22 @@ interface MetaTemplate {
   category: string;
   language: string;
   components: TemplateComponent[];
+  waba_id?: string | null;
 }
+
+/** A WhatsApp Business Account we hold a usable token for. */
+type WabaOption = { waba_id: string; label: string; is_default: boolean };
+
+/** Per-account outcome of one sync run. `error` = that account was unreadable. */
+type SyncWabaResult = { waba_id: string; label: string; fetched: number; error?: string };
+
+type SyncResponse = {
+  synced?: number;
+  per_waba?: SyncWabaResult[];
+  duplicate_names_skipped?: string[];
+  warning?: string;
+  error?: string;
+};
 
 // Pre-built templates ready to submit (match approved Meta templates).
 const SUGGESTED_TEMPLATES = [
@@ -367,6 +386,10 @@ export function WhatsAppTemplateTab({
   const [rows, setRows] = useState<WaTemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [wabaOptions, setWabaOptions] = useState<WabaOption[]>([]);
+  // Per-account outcome of the last sync. Kept on screen because a partial
+  // failure (one bad token) is invisible in a single-line toast.
+  const [syncReport, setSyncReport] = useState<SyncWabaResult[] | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [initialForm, setInitialForm] = useState<{ name?: string; category?: string; body?: string } | undefined>();
@@ -436,20 +459,38 @@ export function WhatsAppTemplateTab({
     return () => { supabase.removeChannel(channel); };
   }, [fetchRows]);
 
-  const syncFromMeta = async () => {
+  // Sync covers every connected WhatsApp account by default. `wabaId` narrows it
+  // to one — handy for retrying a single account whose token was just fixed.
+  const syncFromMeta = async (wabaId?: string) => {
     setSyncing(true);
-    const { data, error } = await invokeEdge<{ synced?: number; error?: string }>("whatsapp-templates", { body: { action: "sync" } });
+    setSyncReport(null);
+    const { data, error } = await invokeEdge<SyncResponse>("whatsapp-templates", {
+      body: { action: "sync", ...(wabaId ? { waba_id: wabaId } : {}) },
+    });
     if (error || data?.error) {
       toast({ title: "Sync failed", description: edgeErrorMessage(error, data), variant: "destructive" });
     } else {
+      const perWaba = data?.per_waba ?? [];
+      setSyncReport(perWaba);
+      const failed = perWaba.filter((w) => w.error);
       toast({
         title: data?.warning ? "Meta fetched" : "Synced from Meta",
-        description: data?.warning || `${data?.synced ?? 0} template(s) reconciled.`,
+        description: data?.warning
+          || `${data?.synced ?? 0} template(s) reconciled across ${perWaba.length || 1} account(s).`
+            + (failed.length ? ` ${failed.length} account(s) could not be read — see below.` : ""),
+        variant: failed.length ? "destructive" : undefined,
       });
       await fetchRows();
     }
     setSyncing(false);
   };
+
+  // Accounts we hold a usable token for, for the "sync just this one" menu.
+  useEffect(() => {
+    invokeEdge<{ wabas?: WabaOption[] }>("whatsapp-templates", { body: { action: "wabas" } })
+      .then(({ data }) => setWabaOptions(data?.wabas ?? []))
+      .catch(() => {});
+  }, []);
 
   const deleteTemplate = async (template: WaTemplateRow) => {
     setDeleting(template.name);
@@ -527,14 +568,87 @@ export function WhatsAppTemplateTab({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={syncFromMeta} disabled={syncing}>
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} /> Sync from Meta
-          </Button>
+          {/* Split button: the main action syncs every account, the caret targets one. */}
+          <div className="flex">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 rounded-r-none"
+              onClick={() => syncFromMeta()}
+              disabled={syncing}
+              title="Sync templates from every connected WhatsApp Business Account"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              Sync all WABAs
+              {wabaOptions.length > 1 && (
+                <span className="text-[10px] text-muted-foreground">({wabaOptions.length})</span>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-l-none border-l-0 px-2"
+                  disabled={syncing || wabaOptions.length === 0}
+                  title="Sync a single account"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="text-xs">Sync one account only</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {wabaOptions.map((w) => (
+                  <DropdownMenuItem
+                    key={w.waba_id}
+                    onSelect={(e) => { e.preventDefault(); void syncFromMeta(w.waba_id); }}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="text-xs">{w.label}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground">{w.waba_id}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           <Button size="sm" className="gap-2" onClick={openBlank}>
             <Plus className="h-4 w-4" /> Submit New Template
           </Button>
         </div>
       </div>
+
+      {/* A single-line toast hides a partial failure, and a WABA whose token has
+          lapsed fails quietly forever. Show the per-account outcome instead. */}
+      {syncReport && syncReport.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-foreground">Last sync by account</p>
+            <button
+              onClick={() => setSyncReport(null)}
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </div>
+          <ul className="space-y-1">
+            {syncReport.map((w) => (
+              <li key={w.waba_id} className="flex flex-wrap items-center gap-2 text-xs">
+                {w.error
+                  ? <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                  : <CheckCircle className="h-3.5 w-3.5 shrink-0 text-success" />}
+                <span className="text-foreground">{w.label}</span>
+                <span className="font-mono text-[10px] text-muted-foreground">{w.waba_id}</span>
+                {w.error ? (
+                  <span className="text-destructive">{w.error}</span>
+                ) : (
+                  <span className="text-muted-foreground">{w.fetched} template{w.fetched === 1 ? "" : "s"}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

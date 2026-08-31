@@ -1145,13 +1145,42 @@ const Admissions = () => {
       listName = (list as any).name;
     }
 
-    const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+    // Drop leads already on the list BEFORE inserting. lead_list_members' unique
+    // index on (list_id, lead_id) is PARTIAL (WHERE lead_id IS NOT NULL), so
+    // PostgREST cannot use it as an upsert conflict target — which is why the old
+    // `.upsert(..., onConflict)` failed outright. A plain insert fixes creation,
+    // but on "add to existing list" a single duplicate raises 23505 and Postgres
+    // rolls back the WHOLE 500-row chunk, silently losing up to 499 new leads.
+    // Pre-filtering is what makes the existing-list path safe.
+    // Probed with `.in()` over the leads being added rather than by paging the
+    // whole list: bounded by the selection, and it keeps this hot page off
+    // offset/range pagination (see hot-list-database-load.test.ts).
+    let toAdd = leadIds;
+    if (listMode === "existing") {
+      const existing = new Set<string>();
+      for (let i = 0; i < leadIds.length; i += 500) {
+        const probe = leadIds.slice(i, i + 500);
+        const { data, error } = await supabase
+          .from("lead_list_members" as any)
+          .select("lead_id")
+          .eq("list_id", listId)
+          .in("lead_id", probe);
+        if (error) { console.error("Could not read existing list members:", error); break; }
+        ((data as any[]) || []).forEach((row: { lead_id: string | null }) => {
+          if (row.lead_id) existing.add(row.lead_id);
+        });
+      }
+      toAdd = leadIds.filter((id) => !existing.has(id));
+    }
+    const alreadyOnList = leadIds.length - toAdd.length;
+
+    const members = toAdd.map((lead_id) => ({ list_id: listId, lead_id }));
     let memberErrors = 0;
     for (let i = 0; i < members.length; i += 500) {
       const chunk = members.slice(i, i + 500);
       const { error: memberErr } = await supabase
         .from("lead_list_members" as any)
-        .upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true } as any);
+        .insert(chunk);
       if (memberErr) {
         memberErrors++;
         console.error("List member insert failed:", memberErr);
@@ -1162,7 +1191,7 @@ const Admissions = () => {
       setSavingList(false);
       toast({
         title: "List partially updated",
-        description: `"${listName}" was created, but some leads could not be added. Check console.`,
+        description: `"${listName}" saved, but ${memberErrors * 500} lead(s) could not be added. Check console.`,
         variant: "destructive",
       });
       return;
@@ -1195,7 +1224,8 @@ const Admissions = () => {
       setSavingList(false);
       toast({
         title: listMode === "new" ? "List created" : "List updated",
-        description: `"${listName}" — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${leadIds.length === 1 ? "" : "s"} added.`,
+        description: `"${listName}" — ${toAdd.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${toAdd.length === 1 ? "" : "s"} added`
+          + (alreadyOnList > 0 ? `, ${alreadyOnList} already on the list.` : "."),
       });
     }
 

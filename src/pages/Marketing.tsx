@@ -676,19 +676,35 @@ export default function Marketing() {
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
     (async () => {
-      const [listsRes, templatesRes] = await Promise.all([
-        supabase
-          .from("lead_lists" as any)
-          .select("id,name,member_count")
-          .order("created_at", { ascending: false })
-          .limit(200),
+      // Paged, not a bare select. This used to carry `.limit(200)`, which hid
+      // most of the 652 saved lists from the campaign picker. Dropping the limit
+      // alone is not enough — PostgREST still caps every response at
+      // db-max-rows=1000, so the same silent truncation returns once the list
+      // count crosses 1000. Page until a short page comes back.
+      const fetchAllLists = async () => {
+        const PAGE = 500;
+        const all: LeadList[] = [];
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await supabase
+            .from("lead_lists" as any)
+            .select("id,name,member_count")
+            .order("created_at", { ascending: false })
+            .range(from, from + PAGE - 1);
+          if (error) { console.error("Fetch lead lists failed:", error); break; }
+          const page = ((data as any[]) || []) as LeadList[];
+          all.push(...page);
+          if (page.length < PAGE) break;
+        }
+        return all;
+      };
+      const [nextLists, templatesRes] = await Promise.all([
+        fetchAllLists(),
         supabase
           .from("email_templates" as any)
           .select("id,slug,name,subject,body_html")
           .eq("is_active", true)
           .order("name"),
       ]);
-      const nextLists = ((listsRes.data as any[]) || []) as LeadList[];
       const nextTemplates = ((templatesRes.data as any[]) || []) as EmailTemplate[];
       setLists(nextLists);
       setEmailTemplates(nextTemplates);
@@ -1349,7 +1365,7 @@ export default function Marketing() {
   if (accessDecision.allowed === false) return <Navigate to={accessDecision.redirectTo} replace />;
 
   return (
-    <div className="space-y-5 p-6">
+    <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Marketing Hub</h1>
@@ -2062,7 +2078,7 @@ export default function Marketing() {
             <div className="py-12 text-center text-sm text-muted-foreground">No campaigns yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[1200px] w-full text-sm">
                 <thead className="border-b border-border bg-muted/30 text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left">Campaign</th>
