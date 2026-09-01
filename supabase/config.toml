@@ -298,3 +298,6 @@ verify_jwt = false
 
 [functions.email-ai-reply]
 verify_jwt = false
+
+[functions.whatsapp-webhook-subscriptions]
+verify_jwt = false
