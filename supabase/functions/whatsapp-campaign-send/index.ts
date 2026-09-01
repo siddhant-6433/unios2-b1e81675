@@ -622,6 +622,9 @@ Deno.serve(async (req) => {
     // resolution, phone fallback) identical instead of forking the send loop.
     // `stage` stays null so the DNC check below can't false-positive; contact
     // opt-out is enforced separately via marketing_contacts.opted_out.
+    // `shared_with_nimt` MUST stay null, not false: false means "academic-partner
+    // private" and is a hard skip at the guard below, which silently dropped every
+    // contact-backed recipient. Mirrors campaignMemberToLead in src/lib/campaignEligibility.ts.
     for (const r of (recipients || []) as any[]) {
       if (!r.leads && r.marketing_contacts) {
         r.leads = {
@@ -630,7 +633,7 @@ Deno.serve(async (req) => {
           email: r.marketing_contacts.email,
           source: "import",
           stage: null,
-          shared_with_nimt: false,
+          shared_with_nimt: null,
         };
       }
     }
@@ -1044,7 +1047,7 @@ Deno.serve(async (req) => {
     const counts = await syncCampaignCounts(adminClient, campaign_id);
     const done = counts.pendingCount === 0;
 
-    await adminClient
+    const { error: finalizeErr } = await adminClient
       .from("whatsapp_campaigns")
       .update({
         sent_count: counts.totalSent,
@@ -1053,6 +1056,20 @@ Deno.serve(async (req) => {
         completed_at: done ? new Date().toISOString() : null,
       })
       .eq("id", campaign_id);
+
+    // This write was previously unchecked. When it was lost to a statement
+    // timeout the campaign stayed "sending" forever: claim_due_marketing_campaigns
+    // only claims campaigns that still have a pending recipient, so nothing ever
+    // re-ran the sync. Fail loudly so the dispatcher retries instead of clearing
+    // next_attempt_at on a done:true it never actually persisted.
+    // (finalize_stranded_campaigns() is the cron-side backstop.)
+    if (finalizeErr) {
+      console.error("Campaign finalize update failed:", finalizeErr.message);
+      return new Response(
+        JSON.stringify({ error: `Failed to finalize campaign: ${finalizeErr.message}`, retryable: true }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     return new Response(
       JSON.stringify({

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_status_queue (
   processed_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_wsq_unprocessed
+CREATE INDEX IF NOT EXISTS idx_wsq_unprocessed
   ON public.whatsapp_status_queue (queued_at)
   WHERE processed_at IS NULL;
 
@@ -134,6 +134,17 @@ $$;
 
 -- ponytail: cron every minute processes the queue in one connection
 -- instead of 300+ concurrent webhook connections each doing 5 queries
+-- Re-runnable: cron.schedule errors on a duplicate name, and this migration has
+-- to be safe to apply twice (it was deployed to prod out of band).
+DO $do$
+BEGIN
+  PERFORM cron.unschedule('process-whatsapp-status-queue')
+    WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'process-whatsapp-status-queue');
+  PERFORM cron.unschedule('cleanup-whatsapp-status-queue')
+    WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-whatsapp-status-queue');
+END
+$do$;
+
 SELECT cron.schedule(
   'process-whatsapp-status-queue',
   '* * * * *',

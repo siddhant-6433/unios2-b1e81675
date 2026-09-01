@@ -63,10 +63,11 @@ import {
   type CampaignSendMode,
 } from "@/lib/campaignPacing";
 import {
+  campaignMemberToLead,
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
-import { fetchLastWhatsAppMarketingAtByLeadIds } from "@/lib/campaignEligibilityFetch";
+import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 
 const BulkLeadImportDialog = lazy(() =>
@@ -1072,18 +1073,24 @@ export default function LeadLists() {
 
     // Fetch members + lead phone/stage so we can materialize recipients with
     // the same shape whatsapp-campaign-send expects. DNC is always hard-excluded.
-    const { data: members, error: memErr } = await supabase
-      .from("lead_list_members" as any)
-      .select("lead_id, leads(id, phone, stage)")
-      .eq("list_id", waList.id);
-    if (memErr || !members) {
-      toast({ title: "Could not load list members", description: memErr?.message, variant: "destructive" });
+    // Paginated (a raw select is capped at PostgREST's 1000 rows) and polymorphic
+    // — a marketing list is mostly marketing_contacts, not leads.
+    let members: any[];
+    try {
+      members = await fetchListMembers(
+        supabase as any,
+        waList.id,
+        "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
+      );
+    } catch (memErr) {
+      const message = memErr instanceof Error ? memErr.message : String(memErr);
+      toast({ title: "Could not load list members", description: message, variant: "destructive" });
       setWaSending(false);
       return;
     }
 
-    const rawLeads = (members as any)
-      .map((m: any) => m.leads)
+    const rawLeads = members
+      .map((m: any) => campaignMemberToLead(m, "whatsapp"))
       .filter((l: any) => l && l.id);
 
     const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
@@ -1167,16 +1174,29 @@ export default function LeadLists() {
     const campaignId = (campaign as any).id;
     const rows = valid.map((l: any, index: number) => ({
       campaign_id: campaignId,
-      lead_id: l.id,
+      // Exactly one target — whatsapp_campaign_recipients_one_target enforces it.
+      lead_id: l.isContact ? null : l.id,
+      contact_id: l.isContact ? l.id : null,
       phone: l.phone,
       eligible_at: pacePlan.eligibleAtByIndex[index] || schedule.nextAttemptAt,
     }));
 
-    // Chunked insert to stay under PostgREST's request size cap.
+    // Chunked insert to stay under PostgREST's request size cap. A swallowed
+    // error here leaves the campaign claiming total_recipients with no rows to
+    // send, so surface it instead of only logging.
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
       const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(chunk);
-      if (error) console.error("Recipient insert failed:", error);
+      if (error) {
+        console.error("Recipient insert failed:", error);
+        toast({
+          title: "Campaign only partially queued",
+          description: `${i} of ${rows.length} recipients were added before this failed: ${error.message}`,
+          variant: "destructive",
+        });
+        setWaSending(false);
+        return;
+      }
     }
 
     setWaSending(false);
@@ -1225,18 +1245,23 @@ export default function LeadLists() {
       return;
     }
 
-    const { data: members, error: memErr } = await supabase
-      .from("lead_list_members" as any)
-      .select("lead_id, leads(id, email, stage)")
-      .eq("list_id", emailList.id);
-    if (memErr || !members) {
-      toast({ title: "Could not load list members", description: memErr?.message, variant: "destructive" });
+    // Paginated + polymorphic, same as the WhatsApp path above.
+    let members: any[];
+    try {
+      members = await fetchListMembers(
+        supabase as any,
+        emailList.id,
+        "lead_id, contact_id, leads(id, email, stage, shared_with_nimt), marketing_contacts(id, email, opted_out, promoted_lead_id)",
+      );
+    } catch (memErr) {
+      const message = memErr instanceof Error ? memErr.message : String(memErr);
+      toast({ title: "Could not load list members", description: message, variant: "destructive" });
       setEmailSending(false);
       return;
     }
 
-    const valid = (members as any)
-      .map((m: any) => m.leads)
+    const valid = members
+      .map((m: any) => campaignMemberToLead(m, "email"))
       .filter((l: any) => l && l.email && l.stage !== "dnc");
     if (!valid.length) {
       toast({ title: "No reachable leads", description: "All members are DNC or missing an email.", variant: "destructive" });
@@ -1270,13 +1295,24 @@ export default function LeadLists() {
     const campaignId = (campaign as any).id;
     const rows = valid.map((l: any) => ({
       campaign_id: campaignId,
-      lead_id: l.id,
+      // Exactly one target — email_campaign_recipients_one_target enforces it.
+      lead_id: l.isContact ? null : l.id,
+      contact_id: l.isContact ? l.id : null,
       to_email: l.email,
     }));
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
       const { error } = await supabase.from("email_campaign_recipients" as any).insert(chunk);
-      if (error) console.error("Email recipient insert failed:", error);
+      if (error) {
+        console.error("Email recipient insert failed:", error);
+        toast({
+          title: "Campaign only partially queued",
+          description: `${i} of ${rows.length} recipients were added before this failed: ${error.message}`,
+          variant: "destructive",
+        });
+        setEmailSending(false);
+        return;
+      }
     }
 
     setEmailSending(false);

@@ -30,6 +30,7 @@ import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/d
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
 import {
+  campaignMemberToLead,
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
@@ -878,20 +879,12 @@ export default function Marketing() {
           "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
         );
 
-        // Members are polymorphic (lead or bulk-imported marketing contact).
-        // Contacts are normalised into the lead shape so filterCampaignRecipients
-        // and the pacing plan need no changes; `isContact` is carried through so
-        // the recipient row can be written against the right column.
-        // A contact whose number is already a lead (promoted_lead_id set) is
-        // dropped here — the lead-backed member covers that person, and sending
-        // to both would message them twice.
+        // Members are polymorphic (lead or bulk-imported marketing contact);
+        // campaignMemberToLead normalises both into the shape
+        // filterCampaignRecipients and the pacing plan expect, and carries
+        // `isContact` through so the recipient row targets the right column.
         const rawLeads = ((members as any[]) || [])
-          .map((member) => {
-            if (member.leads?.id) return member.leads;
-            const c = member.marketing_contacts;
-            if (!c?.id || c.opted_out || c.promoted_lead_id) return null;
-            return { id: c.id, phone: c.phone, stage: null, shared_with_nimt: false, isContact: true };
-          })
+          .map((member) => campaignMemberToLead(member, "whatsapp"))
           .filter((lead) => lead && lead.id);
 
         const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
@@ -980,12 +973,7 @@ export default function Marketing() {
         // filter, but without this an email campaign over a marketing list
         // would silently resolve every member to null and reach nobody.
         const rawEmailLeads = ((members as any[]) || [])
-          .map((member) => {
-            if (member.leads?.id) return member.leads;
-            const c = member.marketing_contacts;
-            if (!c?.id || c.opted_out || c.promoted_lead_id) return null;
-            return { id: c.id, email: c.email, stage: null, shared_with_nimt: false, isContact: true };
-          })
+          .map((member) => campaignMemberToLead(member, "email"))
           .filter((lead) => lead && lead.id);
         const emailEligibility = filterCampaignRecipients(rawEmailLeads, {
           channel: "email",

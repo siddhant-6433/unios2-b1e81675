@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
 
     const { data: recipients, error: recError } = await admin
       .from("email_campaign_recipients")
-      .select("id, campaign_id, lead_id, to_email, status, leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
+      .select("id, campaign_id, lead_id, contact_id, to_email, status, marketing_contacts(name, phone, email, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -272,7 +272,22 @@ Deno.serve(async (req) => {
         );
       }
 
-      const lead = (r as any).leads || {};
+      // Recipients are polymorphic (lead or bulk-imported marketing contact).
+      // Shape the contact into the lead object so every downstream var/template
+      // path is identical. `shared_with_nimt` stays null, never false — false
+      // means "academic-partner private" and is a hard skip just below.
+      const contact = (r as any).marketing_contacts;
+      if (contact?.opted_out) {
+        await admin.from("email_campaign_recipients")
+          .update({ status: "skipped", error_message: "Skipped: marketing contact opted out" })
+          .eq("id", r.id);
+        skipped++;
+        continue;
+      }
+      const lead = (r as any).leads
+        || (contact
+          ? { name: contact.name, phone: contact.phone, email: contact.email, source: "import", stage: null, shared_with_nimt: null }
+          : {});
       // Skip DNC leads — same rule as the single-send path.
       if (lead.stage === "dnc") {
         await admin.from("email_campaign_recipients")
@@ -314,7 +329,9 @@ Deno.serve(async (req) => {
       let bodyHtml = substitute(bodyTpl!, vars as any);
 
       // Open tracking pixel
-      const pixelUrl = `${trackingBaseUrl}?t=email_open&lid=${r.lead_id}`;
+      // Contact-backed recipients have no lead_id; omit it rather than sending
+      // the literal "null", which track-engagement would try to cast to a uuid.
+      const pixelUrl = `${trackingBaseUrl}?t=email_open${r.lead_id ? `&lid=${r.lead_id}` : ""}`;
       const pixelTag = `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
       bodyHtml = bodyHtml.includes("</body>")
         ? bodyHtml.replace("</body>", `${pixelTag}</body>`)
@@ -345,12 +362,17 @@ Deno.serve(async (req) => {
             sent_at: new Date().toISOString(),
           });
 
-          await admin.from("lead_activities").insert({
-            lead_id: r.lead_id,
-            user_id: actorProfileId,
-            type: "email",
-            description: `Email campaign "${(campaign as any).name}" — ${subject}`,
-          });
+          // lead_activities.lead_id is NOT NULL — a contact-backed recipient has
+          // no lead to log against, so skip the timeline entry rather than
+          // failing the send.
+          if (r.lead_id) {
+            await admin.from("lead_activities").insert({
+              lead_id: r.lead_id,
+              user_id: actorProfileId,
+              type: "email",
+              description: `Email campaign "${(campaign as any).name}" — ${subject}`,
+            });
+          }
 
           sent++;
         } else {

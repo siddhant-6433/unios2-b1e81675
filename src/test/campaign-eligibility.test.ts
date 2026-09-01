@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 import {
+  campaignMemberToLead,
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
   isHardBlockedStage,
@@ -97,5 +98,62 @@ describe("campaign eligibility (DNC + quality)", () => {
     expect(marketing).toContain("filterCampaignRecipients");
     expect(marketing).toContain("DNC is always excluded");
     expect(marketing).toContain("evaluateTemplateQualityForBulk");
+  });
+});
+
+describe("polymorphic list members (leads + marketing contacts)", () => {
+  const now = new Date("2026-09-01T12:00:00.000Z");
+
+  // Regression: the marketing_contacts split made lead_list_members polymorphic,
+  // and every campaign path normalised a contact with `shared_with_nimt: false`.
+  // That value means "academic-partner private" and is a hard exclusion, so 100%
+  // of bulk-imported members were silently dropped — a 4,000-member list enrolled
+  // 1 recipient. A contact has no partner and must never carry that flag.
+  const members = [
+    { lead_id: "lead-1", contact_id: null, leads: { id: "lead-1", phone: "919000000001", stage: "new" }, marketing_contacts: null },
+    { lead_id: "lead-dnc", contact_id: null, leads: { id: "lead-dnc", phone: "919000000002", stage: "dnc" }, marketing_contacts: null },
+    { lead_id: null, contact_id: "c-plain", leads: null, marketing_contacts: { id: "c-plain", phone: "919000000003", opted_out: false, promoted_lead_id: null } },
+    { lead_id: null, contact_id: "c-optout", leads: null, marketing_contacts: { id: "c-optout", phone: "919000000004", opted_out: true, promoted_lead_id: null } },
+    { lead_id: null, contact_id: "c-promoted", leads: null, marketing_contacts: { id: "c-promoted", phone: "919000000005", opted_out: false, promoted_lead_id: "lead-9" } },
+  ];
+
+  it("keeps plain marketing contacts eligible for WhatsApp", () => {
+    const raw = members.map((m) => campaignMemberToLead(m, "whatsapp")).filter((l) => l && l.id);
+    const result = filterCampaignRecipients(raw as never[], {
+      channel: "whatsapp", excludeCold: false, quietDays: 0, now,
+    });
+    expect(result.eligible.map((l) => l.id)).toEqual(["lead-1", "c-plain"]);
+    expect(result.counts.notShared).toBe(0);
+    expect(result.counts.dnc).toBe(1);
+  });
+
+  it("never tags a contact shared_with_nimt: false", () => {
+    const contact = campaignMemberToLead(members[2], "whatsapp");
+    expect(contact?.shared_with_nimt).not.toBe(false);
+    expect(contact?.isContact).toBe(true);
+  });
+
+  it("drops opted-out and already-promoted contacts", () => {
+    expect(campaignMemberToLead(members[3], "whatsapp")).toBeNull();
+    expect(campaignMemberToLead(members[4], "whatsapp")).toBeNull();
+  });
+
+  it("maps the email field for email campaigns", () => {
+    const m = { lead_id: null, contact_id: "c", leads: null, marketing_contacts: { id: "c", email: "a@b.com", opted_out: false, promoted_lead_id: null } };
+    expect(campaignMemberToLead(m, "email")?.email).toBe("a@b.com");
+  });
+
+  it("no campaign path re-introduces the shared_with_nimt: false placeholder", () => {
+    for (const [name, src] of [["Marketing.tsx", marketing], ["LeadLists.tsx", leadLists], ["whatsapp-campaign-send", sender]] as const) {
+      expect(src, name).not.toContain("shared_with_nimt: false");
+    }
+  });
+
+  it("every list-member fetch joins marketing_contacts", () => {
+    for (const [name, src] of [["Marketing.tsx", marketing], ["LeadLists.tsx", leadLists]] as const) {
+      const selects = src.match(/"lead_id[^"]*"/g) || [];
+      expect(selects.length, `${name} has no lead_list_members select`).toBeGreaterThan(0);
+      for (const sel of selects) expect(sel, name).toContain("marketing_contacts");
+    }
   });
 });
