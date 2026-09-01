@@ -83,6 +83,57 @@ function lastContactMap(
   return new Map(Object.entries(input));
 }
 
+/** A polymorphic `lead_list_members` row with its embeds. */
+export type CampaignListMember = {
+  lead_id?: string | null;
+  contact_id?: string | null;
+  leads?: (CampaignLeadLike & Record<string, unknown>) | null;
+  marketing_contacts?: {
+    id?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    opted_out?: boolean | null;
+    promoted_lead_id?: string | null;
+  } | null;
+};
+
+/** Marketing-contact-backed members carry this so callers write the right column. */
+export type CampaignRecipientLead = CampaignLeadLike & { isContact?: boolean };
+
+/**
+ * Normalise one polymorphic list member into the lead shape this filter expects.
+ * Returns null for members that must not be messaged at all.
+ *
+ * `lead_list_members` became polymorphic in the marketing_contacts split — a member
+ * targets either a real lead or a bulk-imported contact. Every campaign path needs
+ * the same mapping, so it lives here rather than being re-derived per caller.
+ *
+ * CRITICAL: a marketing contact has no academic partner, so it must NOT carry
+ * `shared_with_nimt: false`. That value means "partner-private" and is a hard
+ * exclusion below — setting it on contacts silently dropped every bulk-imported
+ * member of every campaign. Covered by campaign-eligibility.test.ts.
+ */
+export function campaignMemberToLead(
+  member: CampaignListMember,
+  channel: "whatsapp" | "email",
+): CampaignRecipientLead | null {
+  if (member?.leads?.id) return member.leads;
+
+  const contact = member?.marketing_contacts;
+  if (!contact?.id) return null;
+  // Opted out, or already promoted to a lead (the lead-backed member covers that
+  // person — sending to both would message them twice).
+  if (contact.opted_out || contact.promoted_lead_id) return null;
+
+  return {
+    id: contact.id,
+    ...(channel === "email" ? { email: contact.email } : { phone: contact.phone }),
+    stage: null,
+    shared_with_nimt: null,
+    isContact: true,
+  };
+}
+
 /**
  * Filter list members for a campaign. DNC is never optional.
  */
