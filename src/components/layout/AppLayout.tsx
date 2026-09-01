@@ -15,6 +15,7 @@ import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
 import { useLocation } from "react-router-dom";
 import { Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { isPortalRole } from "@/lib/accessPolicy";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useEffect, useState, lazy } from "react";
@@ -141,6 +142,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // shell stops growing and <main> stops padding, so a three-column layout can
   // just use h-full instead of guessing the chrome height with calc(100vh-Npx).
   const isConsole = location.pathname === "/cloud-dialer";
+  // Partner portals (admission/academic) live inside this same staff shell, so
+  // the counsellor/staff status chrome — WhatsApp reply pills, sprint tickers,
+  // action bar, live-call bar — would otherwise leak into their view. Gate the
+  // whole cluster in one place; each pill's own poll never mounts for portals.
+  const isPortal = isPortalRole(role);
   usePresenceHeartbeat();
 
   useEffect(() => {
@@ -174,23 +180,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     <Footprints className="h-3.5 w-3.5" /> Record Walk-in
                   </Button>
                 )}
-                <HeaderSearch />
+                {!isPortal && <HeaderSearch />}
                 {deferredShellReady && <HeaderFeedbackWidget />}
-                {deferredShellReady && <WhatsAppPanel />}
+                {deferredShellReady && !isPortal && <WhatsAppPanel />}
                 {deferredShellReady && <NotificationPanel />}
                 <div className="w-px h-6 bg-border/60 mx-0.5" />
                 <HeaderProfile />
               </div>
             </header>
-            {deferredShellReady && <CahetSprintTicker />}
-            {deferredShellReady && <UpdeledSprintTicker />}
-            {deferredShellReady && <ApplicantDeadlineTicker />}
+            {deferredShellReady && !isPortal && <CahetSprintTicker />}
+            {deferredShellReady && !isPortal && <UpdeledSprintTicker />}
+            {deferredShellReady && !isPortal && <ApplicantDeadlineTicker />}
             {/* Counsellors get the action bar as cross-page navigation everywhere
                 except the Cloud Dialer console, where these same numbers already
                 render as bucket chips (and vertical space on the full-viewport
-                console is tight). Every other role keeps it on all pages. */}
-            {deferredShellReady && !(role === "counsellor" && isConsole) && <GlobalActionBar />}
-            {deferredShellReady && <LiveCallBar />}
+                console is tight). Every other staff role keeps it on all pages;
+                partner portals never get it. */}
+            {deferredShellReady && !isPortal && !(role === "counsellor" && isConsole) && <GlobalActionBar />}
+            {deferredShellReady && !isPortal && <LiveCallBar />}
             <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : "overflow-auto p-6"}`}>
               {/* Same surface the RequirePermission gate and the page's own
                   loading branch render, so the three handoffs read as one. */}
