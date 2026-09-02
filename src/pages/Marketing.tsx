@@ -35,6 +35,7 @@ import {
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
 import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
+import { campaignHealth } from "@/lib/campaignHealth";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -84,6 +85,12 @@ interface CampaignRow {
   completedAt: string | null;
   nextAttemptAt: string | null;
   workerError: string | null;
+  /** Recipients still to send (any eligible_at). */
+  pendingRecipients: number;
+  /** Pending AND already eligible — a worker should be sending these now. */
+  dueNow: number;
+  /** When the next paced wave unlocks. */
+  nextEligibleAt: string | null;
 }
 
 interface LeadList {
@@ -119,16 +126,6 @@ interface RecipientRow {
   readAt: string | null;
   failedAt: string | null;
 }
-
-const statusTone = (status: string) => {
-  if (status === "scheduled") return "bg-sky-100 text-sky-700";
-  if (status === "completed") return "bg-success/10 text-success";
-  if (status === "failed") return "bg-destructive/10 text-destructive";
-  if (status === "sending") return "bg-info/10 text-info-foreground";
-  if (status === "paused") return "bg-slate-100 text-slate-700";
-  if (status === "terminated") return "bg-zinc-200 text-zinc-700";
-  return "bg-warning/10 text-warning-foreground";
-};
 
 function scheduledDatePart(value: string) {
   return value.match(/^(\d{4}-\d{2}-\d{2})T/)?.[1] || "";
@@ -594,10 +591,17 @@ export default function Marketing() {
     const funnelRes = waIds.length
       ? await supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: waIds })
       : null;
-    const funnelById = new Map<string, { delivered: number; read: number; failed: number }>(
+    const funnelById = new Map<string, { delivered: number; read: number; failed: number; pending: number; dueNow: number; nextEligibleAt: string | null }>(
       ((funnelRes?.data as any[]) || []).map((r) => [
         r.campaign_id,
-        { delivered: Number(r.delivered || 0), read: Number(r.read || 0), failed: Number(r.failed || 0) },
+        {
+          delivered: Number(r.delivered || 0),
+          read: Number(r.read || 0),
+          failed: Number(r.failed || 0),
+          pending: Number(r.pending || 0),
+          dueNow: Number(r.due_now || 0),
+          nextEligibleAt: r.next_eligible_at || null,
+        },
       ]),
     );
 
@@ -626,6 +630,13 @@ export default function Marketing() {
         completedAt: row.completed_at,
         nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
+        // Real queue depth from the recipients table. The stored counters can
+        // lag (they are only rewritten at the end of a batch), so pacing state
+        // is derived from the rows themselves.
+        pendingRecipients: funnelById.get(row.id)?.pending
+          ?? (row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed)),
+        dueNow: funnelById.get(row.id)?.dueNow ?? 0,
+        nextEligibleAt: funnelById.get(row.id)?.nextEligibleAt ?? null,
       };
     });
 
@@ -654,6 +665,10 @@ export default function Marketing() {
         completedAt: row.completed_at,
         nextAttemptAt: row.next_attempt_at || null,
         workerError: row.worker_error || null,
+        // No funnel RPC for email; derive queue depth from the counters.
+        pendingRecipients: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        dueNow: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        nextEligibleAt: null,
       };
     });
 
@@ -1294,8 +1309,8 @@ export default function Marketing() {
       campaigns.map((campaign) => [
         campaign.name,
         campaign.channel,
-        campaignDisplayStatus(campaign),
-        campaign.nextAttemptAt || "",
+        campaignHealth(campaign).label,
+        campaign.nextEligibleAt || campaign.nextAttemptAt || "",
         campaign.listName || "",
         campaign.template || "",
         campaign.total,
@@ -2102,8 +2117,15 @@ export default function Marketing() {
                       </td>
                       <td className="px-4 py-3">
                         {(() => {
-                          const displayStatus = campaignDisplayStatus(campaign);
-                          return <Badge className={`border-0 ${statusTone(displayStatus)}`}>{displayStatus}</Badge>;
+                          const health = campaignHealth(campaign);
+                          return (
+                            <div className="space-y-1">
+                              <Badge className={`border-0 ${health.tone}`}>{health.label}</Badge>
+                              {health.detail && (
+                                <p className="text-[11px] leading-tight text-muted-foreground">{health.detail}</p>
+                              )}
+                            </div>
+                          );
                         })()}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
