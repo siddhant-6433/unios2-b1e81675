@@ -156,7 +156,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     whyNimt: "NCTE recognised, strong school network for teaching practice, experienced faculty.",
     eligibility: "Arts/Science/Humanities graduates: min 50% (45% SC/ST). B.E./B.Tech: min 55%.",
     entrance: "UP B.Ed Joint Entrance Examination (UP BED JEE). Kotputli: State Level PTET.",
-    duration: "2 Years (4 Semesters)",
+    duration: "2 Years — Annual System (Greater Noida & Ghaziabad) | Semester System (Kotputli, 4 semesters)",
     campus: "Greater Noida, Ghaziabad (Arthala), Kotputli (Jaipur)",
     fee: "Rs 56,000/year (Greater Noida & Ghaziabad) | Rs 27,000/year (Kotputli) — first year fee",
   },
