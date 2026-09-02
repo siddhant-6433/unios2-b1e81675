@@ -49,7 +49,8 @@ import {
   Users,
 } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel } from "@/lib/feeTermLabels";
+import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import {
   type FeeReceipt,
   PartnerReceiptsTable,
@@ -606,6 +607,12 @@ export default function AcademicPartnerPortal() {
   );
   const feeDetailsSummary = feeDetailsStudentId ? feeByStudent.get(feeDetailsStudentId) : null;
   const feeDetailsStudent = feeDetailsRows[0] || null;
+  // Partners see students across programmes; D.AOTT's year_N terms are semesters.
+  const feeMetaByCourse = useFeeStructureMetaByCourse(
+    useMemo(() => students.map((s) => s.course_id), [students]),
+  );
+  const feeDetailsMeta =
+    feeMetaByCourse[students.find((s) => s.id === feeDetailsStudentId)?.course_id || ""];
 
   // Fee-terms rows currently ticked in the fee-details dialog, turned into the
   // create-payment-link allocation shape — mirrors openLinkForSelection in
@@ -619,7 +626,7 @@ export default function AcademicPartnerPortal() {
         fee_code_id: fee.fee_code_id,
         fee_ledger_id: fee.id,
         amount,
-        label: `${fee.fee_code_name || "Fee"} — ${defaultFeeTermLabel(fee.term)}`,
+        label: `${fee.fee_code_name || "Fee"} — ${feeTermLabel(fee.term, feeDetailsMeta)}`,
       });
     }
     return allocs;
@@ -2315,7 +2322,7 @@ export default function AcademicPartnerPortal() {
                           })}
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${defaultFeeTermLabel(fee.term)}` : defaultFeeTermLabel(fee.term)}</td>
+                      <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${feeTermLabel(fee.term, feeDetailsMeta)}` : feeTermLabel(fee.term, feeDetailsMeta)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{fee.due_date ? new Date(fee.due_date).toLocaleDateString("en-IN") : "-"}</td>
                       <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
                       <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>

@@ -7,6 +7,8 @@ import {
 
 export { buildTemporalContext };
 
+import { feeTermLabelLong } from "./feeTermLabels.ts";
+
 const FEE_STRUCTURE_URL = "https://nimt.ac.in/admissions/fees/";
 
 type SupabaseLike = {
@@ -68,12 +70,6 @@ function normalize(value: string | null | undefined): string {
   return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function titleCaseTerm(term: string): string {
-  return term
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 function formatMoney(value: number | string | null | undefined): string {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount) || amount <= 0) return "";
@@ -121,27 +117,62 @@ function formatEligibility(row: EligibilityRow | null, course: CourseRow | null,
 function feeMetadataSummary(metadata: Record<string, unknown> | null | undefined): string {
   if (!metadata) return "";
   const summaries: string[] = [];
+
+  // How long the programme actually runs and how it is billed. D.AOTT is
+  // "2.5 yrs · 5 semesters" — without this Navya reads 5 collection terms off a
+  // 2-year course and invents a 5-year programme.
+  const planName = metadata.plan_name || metadata.display_name;
+  if (typeof planName === "string" && planName.trim()) summaries.push(`Plan: ${planName.trim()}`);
+  const durationLabel = metadata.duration_label;
+  if (typeof durationLabel === "string" && durationLabel.trim()) {
+    summaries.push(`Duration: ${durationLabel.trim()}`);
+  }
+
   const yearWise = metadata.year_wise || metadata.yearWise || metadata.years;
   if (yearWise && typeof yearWise === "object" && !Array.isArray(yearWise)) {
-    for (const [key, value] of Object.entries(yearWise as Record<string, unknown>).slice(0, 6)) {
+    for (const [key, value] of Object.entries(yearWise as Record<string, unknown>).slice(0, 8)) {
       if (typeof value === "number" || typeof value === "string") {
         const money = formatMoney(value);
-        if (money) summaries.push(`${titleCaseTerm(key)}: ${money}`);
+        if (money) summaries.push(`${feeTermLabelLong(key, metadata)}: ${money}`);
       }
     }
+  } else {
+    // The common shape is top-level per-term keys (year_1 … year_5), each an
+    // object carrying { fee, label, payment_note }. This branch never existed,
+    // so a structure like D.AOTT's contributed no fee summary at all.
+    const perTerm = Object.keys(metadata)
+      .filter((k) => /^(year|sem(?:ester)?|term|q(?:uarter)?)[_\s-]?\d+$/i.test(k))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .slice(0, 8);
+    for (const key of perTerm) {
+      const entry = metadata[key];
+      const fee = entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>).fee
+        : entry;
+      const money = formatMoney(fee as number | string | null);
+      if (money) summaries.push(`${feeTermLabelLong(key, metadata)}: ${money}`);
+    }
   }
-  const total = metadata.total || metadata.programme_total || metadata.programmeTotal;
+
+  const total = metadata.total || metadata.total_fee || metadata.programme_total || metadata.programmeTotal;
   const formattedTotal = formatMoney(total as number | string | null);
   if (formattedTotal) summaries.push(`Programme total: ${formattedTotal}`);
   return summaries.join("; ");
 }
 
 function formatFeeItems(items: FeeItemRow[], feeStructure: FeeStructureRow | null, knowledge: CourseKnowledge | null): string {
+  // Was .slice(0, 12): D.AOTT has 16 fee items, so its final semester was
+  // silently cut off and Navya quoted a 4-semester programme. 40 covers the
+  // widest structure (school, every boarding/transport tier) without bloat.
   const relevant = items
     .filter((item) => Number(item.amount || 0) > 0)
-    .slice(0, 12)
+    .slice(0, 40)
     .map((item) => {
-      const label = item.term ? titleCaseTerm(item.term) : item.fee_codes?.name || item.fee_codes?.code || "Fee";
+      // The term string alone cannot say "Semester 3" — the structure metadata
+      // can, so pass it in rather than title-casing "year_3" into "Year 3".
+      const label = item.term
+        ? feeTermLabelLong(item.term, feeStructure?.metadata)
+        : item.fee_codes?.name || item.fee_codes?.code || "Fee";
       const code = item.fee_codes?.name || item.fee_codes?.code;
       const money = formatMoney(item.amount);
       return `${label}${code && !label.includes(code) ? ` (${code})` : ""}: ${money}`;

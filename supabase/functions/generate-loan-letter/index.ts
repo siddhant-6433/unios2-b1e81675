@@ -1,3 +1,4 @@
+import { feeTermLabel, feeTermLabelLong } from "../_shared/feeTermLabels.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, PDFImage, PDFFont, PDFPage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 
@@ -101,6 +102,9 @@ type LoanLetterOpts = {
   firstYearAmountDue: number;
   loanLetterUnlockAmount: number;
   yearItems: { term: string; total: number; waiver: number; applicable: number; dueDate?: string | null }[];
+  /** fee_structures.metadata — says whether a year_N term is a year or, as for
+   *  D.AOTT, a semester. Without it the schedule table headed every row "Year N". */
+  feeStructureMeta?: Record<string, unknown> | null;
 };
 
 type LoanLetterCtx = {
@@ -262,11 +266,14 @@ function drawKVGrid(ctx: LoanLetterCtx, pairs: { label: string; value: string }[
   }
 }
 
-function drawFeeTable(ctx: LoanLetterCtx, items: LoanLetterOpts["yearItems"]) {
+function drawFeeTable(ctx: LoanLetterCtx, items: LoanLetterOpts["yearItems"], meta?: Record<string, unknown> | null) {
   const totalW = ctx.width - ctx.margin * 2;
   const colW = [totalW * 0.28, totalW * 0.18, totalW * 0.18, totalW * 0.18, totalW * 0.18];
   const colX = [ctx.margin, ctx.margin + colW[0], ctx.margin + colW[0] + colW[1], ctx.margin + colW[0] + colW[1] + colW[2], ctx.margin + colW[0] + colW[1] + colW[2] + colW[3]];
-  const headers = ["Year", "Due Date", "Published", "Waiver", "Applicable"];
+  const periodHeader = typeof (meta as any)?.period_label === "string" && (meta as any).period_label.trim()
+    ? String((meta as any).period_label).trim()
+    : "Year";
+  const headers = [periodHeader, "Due Date", "Published", "Waiver", "Applicable"];
   const rowH = 16;
   const drawRow = (values: string[], header = false, highlight = false) => {
     ensureSpace(ctx, rowH);
@@ -297,7 +304,7 @@ function drawFeeTable(ctx: LoanLetterCtx, items: LoanLetterOpts["yearItems"]) {
     totalWaiver += item.waiver;
     totalApplicable += item.applicable;
     drawRow([
-      item.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+      feeTermLabel(item.term, meta),
       fmtDate(item.dueDate),
       fmtINR(item.total),
       item.waiver > 0 ? "- " + fmtINR(item.waiver) : "—",
@@ -387,11 +394,11 @@ async function buildLoanLetterPdf(opts: LoanLetterOpts): Promise<Uint8Array> {
 
   ctx.y -= 1;
   drawSection(ctx, "FEE DETAILS");
-  drawFeeTable(ctx, opts.yearItems);
+  drawFeeTable(ctx, opts.yearItems, opts.feeStructureMeta);
   ctx.y -= 3;
   drawKVGrid(ctx, [
-    { label: "First-Year Applicable Fee", value: fmtINR(opts.firstYearFee) },
-    { label: "First-Year Amount Due", value: fmtINR(opts.firstYearAmountDue) },
+    { label: `${feeTermLabelLong("year_1", opts.feeStructureMeta)} Applicable Fee`, value: fmtINR(opts.firstYearFee) },
+    { label: `${feeTermLabelLong("year_1", opts.feeStructureMeta)} Amount Due`, value: fmtINR(opts.firstYearAmountDue) },
     { label: "Token Fee Required", value: fmtINR(opts.tokenRequired) },
     { label: "Token Fee Paid", value: fmtINR(opts.tokenPaid) },
   ]);
@@ -562,7 +569,7 @@ Deno.serve(async (req) => {
 
     const { data: yearRows } = await admin
       .from("fee_structures")
-      .select("id, fee_structure_items ( term, amount )")
+      .select("id, metadata, fee_structure_items ( term, amount )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
       .eq("is_active", true)
@@ -655,6 +662,7 @@ Deno.serve(async (req) => {
       firstYearAmountDue,
       loanLetterUnlockAmount,
       yearItems,
+      feeStructureMeta: (yearRows as any)?.metadata ?? null,
     });
 
     const refSlug = letterRefNo(offer.id, appRow.application_id).replace(/[^A-Za-z0-9]+/g, "-");

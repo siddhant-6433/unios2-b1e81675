@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { OrbLoader } from "@/components/ui/thinking-orb";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabelLong } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, ChevronRight, Receipt, CreditCard } from "lucide-react";
 
@@ -18,6 +19,8 @@ interface StudentInfo {
   id: string;
   name: string;
   admission_no: string;
+  course_id: string | null;
+  session_id: string | null;
   course_name: string;
   campus_name: string;
   batch_name: string;
@@ -26,6 +29,7 @@ interface StudentInfo {
 interface FeeItem {
   id: string;
   fee_code_name: string;
+  term: string;
   category: string;
   total_amount: number;
   paid_amount: number;
@@ -47,6 +51,7 @@ export default function ParentPortal() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
+  const { metadata: feeMeta } = useFeeStructureMeta(student?.course_id, student?.session_id);
   const [fees, setFees] = useState<FeeItem[]>([]);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +67,7 @@ export default function ParentPortal() {
     // Find student linked to this parent/user
     const { data: studentData } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, course_id, session_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
       .or(`user_id.eq.${user?.id},father_user_id.eq.${user?.id},mother_user_id.eq.${user?.id},guardian_user_id.eq.${user?.id}`)
       .limit(1)
       .single();
@@ -72,6 +77,8 @@ export default function ParentPortal() {
         id: studentData.id,
         name: studentData.name,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
+        course_id: studentData.course_id || null,
+        session_id: studentData.session_id || null,
         course_name: (studentData as any).courses?.name || "",
         campus_name: (studentData as any).campuses?.name || "",
         batch_name: (studentData as any).batches?.name || "",
@@ -87,7 +94,8 @@ export default function ParentPortal() {
       if (feeData) {
         setFees(feeData.map((f: any) => ({
           id: f.id,
-          fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
+          fee_code_name: f.fee_codes?.name || "",
+          term: f.term || "",
           category: f.fee_codes?.category || "other",
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
@@ -235,7 +243,9 @@ export default function ParentPortal() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{fee.fee_code_name}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {fee.fee_code_name || feeTermLabelLong(fee.term, feeMeta) || "Fee"}
+                      </p>
                       <p className="text-xs text-gray-400">
                         Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                       </p>

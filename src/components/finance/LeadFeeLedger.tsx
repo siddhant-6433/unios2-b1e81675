@@ -3,6 +3,8 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useEffect, useMemo, useState, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { feeTermLabelWithMonths } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -90,6 +92,10 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
   const { role } = useAuth();
   const [resolvedLeadId, setResolvedLeadId] = useState<string | null>(leadId ?? null);
   const [resolvedStudentId, setResolvedStudentId] = useState<string | null>(studentId ?? null);
+  const [feeCourse, setFeeCourse] = useState<{ courseId: string | null; sessionId: string | null }>(
+    { courseId: null, sessionId: null },
+  );
+  const { metadata: feeMeta } = useFeeStructureMeta(feeCourse.courseId, feeCourse.sessionId);
   const [payments, setPayments] = useState<LeadPayment[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [links, setLinks] = useState<LedgerLink[]>([]);
@@ -141,6 +147,17 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
       if (!alive) return;
       setResolvedLeadId(lid);
       setResolvedStudentId(sid);
+
+      // The programme decides whether a year_N term reads "Year 3" or
+      // "Semester 3" (D.AOTT bills 5 semesters under year_1..year_5).
+      if (sid) {
+        const { data: courseRow } = await supabase
+          .from("students").select("course_id, session_id").eq("id", sid).maybeSingle();
+        if (alive) setFeeCourse({
+          courseId: (courseRow as any)?.course_id ?? null,
+          sessionId: (courseRow as any)?.session_id ?? null,
+        });
+      }
 
       const queries: any[] = [];
       if (lid) {
@@ -520,13 +537,6 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
 
       {/* Ledger grouped by term */}
       {ledger.length > 0 && (() => {
-        const TERM_LABELS: Record<string, string> = {
-          admission: "Admission", registration: "Registration",
-          q1: "Quarter 1 (Apr–Jun)", q2: "Quarter 2 (Jul–Sep)",
-          q3: "Quarter 3 (Oct–Dec)", q4: "Quarter 4 (Jan–Mar)",
-          year_1: "Year 1", year_2: "Year 2", year_3: "Year 3",
-          year_4: "Year 4", year_5: "Year 5",
-        };
         const groups: { term: string; rows: LedgerRow[] }[] = [];
         for (const r of ledger) {
           const last = groups[groups.length - 1];
@@ -561,7 +571,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
                     <Fragment key={g.term}>
                       <tr className="bg-muted/40 border-t border-border">
                         <td className="px-3 py-1.5 text-foreground font-semibold text-[11px]" colSpan={2}>
-                          {TERM_LABELS[g.term] || g.term.replace(/_/g, " ")}
+                          {feeTermLabelWithMonths(g.term, feeMeta)}
                         </td>
                         <td className="px-3 py-1.5 text-center text-[10px] text-muted-foreground tabular-nums">
                           {gConcession > 0 ? fmt(gConcession) : ""}

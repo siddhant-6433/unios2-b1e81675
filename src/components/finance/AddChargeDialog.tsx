@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell, DatePickerField } from "@/components/ui/state-fields";
 import { PlusCircle } from "lucide-react";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel, type FeeStructureMetadata } from "@/lib/feeTermLabels";
 
 type TermOption = { term: string; due_date: string | null; rows: number };
 
@@ -32,10 +32,14 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   studentId: string;
+  /** Period wording from the programme's active fee structure — D.AOTT's
+   *  year_N terms are semesters. Threaded from StudentFeePanel, which has
+   *  already resolved it, so each dialog need not re-query. */
+  feeMeta?: FeeStructureMetadata;
   onAdded?: () => void;
 }
 
-export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Props) {
+export function AddChargeDialog({ open, onOpenChange, studentId, onAdded, feeMeta }: Props) {
   const { toast } = useToast();
   const [heads, setHeads] = useState<ChargeHead[]>([]);
   const [headId, setHeadId] = useState("");
@@ -190,7 +194,7 @@ export function AddChargeDialog({ open, onOpenChange, studentId, onAdded }: Prop
                           className="h-3.5 w-3.5 shrink-0 accent-primary"
                         />
                         <span className="min-w-0 flex-1 truncate text-foreground">
-                          {defaultFeeTermLabel(t.term)}
+                          {feeTermLabel(t.term, feeMeta)}
                         </span>
                         {t.due_date && (
                           <span className="shrink-0 text-[10px] text-muted-foreground">

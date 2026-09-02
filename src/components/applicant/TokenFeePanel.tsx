@@ -14,7 +14,8 @@ import {
 } from "@/lib/deadlineRollover";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel, feeTermLabelLong, feePeriodNoun } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -82,6 +83,7 @@ interface Lead {
   email: string | null;
   stage: string;
   session_id: string | null;
+  course_id: string | null;
   token_amount: number | null;
   pre_admission_no: string | null;
   admission_no: string | null;
@@ -177,6 +179,10 @@ function pickPhone(...candidates: Array<string | null | undefined>): string | nu
 
 export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment, onBehalfContext }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
+  // D.AOTT bills 5 semesters but stores them as year_1..year_5 like every other
+  // programme, so only the fee structure's metadata can say "Semester 3".
+  const { metadata: feeMeta } = useFeeStructureMeta(lead?.course_id, lead?.session_id);
+  const termLabel = (term: string) => feeTermLabelLong(term, feeMeta);
   const [leadPhone, setLeadPhone] = useState<string | null>(null);
   const [leadEmail, setLeadEmail] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
@@ -426,6 +432,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       email: resolvedEmail,
       stage: leadRow.stage,
       session_id: leadRow.session_id,
+      course_id: leadRow.course_id ?? null,
       token_amount: null,
       pre_admission_no: leadRow.pre_admission_no,
       admission_no: leadRow.admission_no,
@@ -808,7 +815,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         });
         y += 16;
       };
-      draw(["Year", "Due Date", "Published", "Waiver", "Applicable"], true);
+      draw([feePeriodNoun(feeMeta), "Due Date", "Published", "Waiver", "Applicable"], true);
       rows.forEach(row => draw([
         row.label,
         row.dueDate,
@@ -912,7 +919,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     heading("FEE DETAILS");
     feeTable([
       ...feeRows.map(r => ({
-        label: r.term.replace("year_", "Year "),
+        label: feeTermLabel(r.term, feeMeta),
         dueDate: estimatedDueDate(r.term),
         published: r.raw,
         waiver: r.totalDeduction,
@@ -931,7 +938,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     kvGrid([
       { label: "Token Fee Required", value: fmt(feeStatus.token_required || offer.token_fee_amount || 0) },
       { label: "Token Fee Paid", value: fmt(paidTowardCourse) },
-      { label: "First-Year Amount Due", value: fmt(firstYearAmountDue) },
+      { label: `${termLabel("year_1")} Amount Due`, value: fmt(firstYearAmountDue) },
     ], 3);
 
     y += 3;
@@ -1414,7 +1421,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             );
           })()}
 
-          {/* Step 4 — First Semester Fee */}
+          {/* Step 4 — opening-term fee (Semester 1 / Year 1 per programme) */}
           {(() => {
             const semDaysLeft = daysUntil(semesterFeeDeadline);
             const semDone = isAdmitted && feeStatus.twenty_five_complete; // admitted = semester fee paid or confirmed
@@ -1438,12 +1445,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <p className={`text-sm font-semibold ${semDone ? "text-success-foreground" : semActive ? "text-info-foreground" : "text-gray-500"}`}>
-                        Pay First Semester Fee
+                        Pay {termLabel("year_1")} Fee
                       </p>
                       {semUrgent && !semExpired && <span className="text-[10px] font-bold text-warning-foreground bg-warning/10 border border-warning/20 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Pay the remaining first-year fee by {fmtDate(semesterFeeDeadline)} to begin classes.
+                      Pay the remaining {termLabel("year_1").toLowerCase()} fee by {fmtDate(semesterFeeDeadline)} to begin classes.
                     </p>
                     {!semDone && (
                       <div className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -1473,7 +1480,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           <div className="mt-2 space-y-0.5">
                             {feeDue.heads.map((h, i) => (
                               <div key={i} className="flex justify-between text-[11px] text-gray-500">
-                                <span>{h.code} · {defaultFeeTermLabel(h.term)}</span>
+                                <span>{h.code} · {termLabel(h.term)}</span>
                                 <span>₹{Number(h.balance).toLocaleString("en-IN")}</span>
                               </div>
                             ))}
@@ -1541,7 +1548,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 <div key={term} className="px-4 py-3 space-y-1.5">
                   {/* Year header */}
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-semibold text-gray-800">{defaultFeeTermLabel(term)} Fee</span>
+                    <span className="text-sm font-semibold text-gray-800">{termLabel(term)} Fee</span>
                     <span className="text-sm font-semibold text-gray-900">{fmt(raw)}</span>
                   </div>
                   {/* Scholarship */}
@@ -1561,7 +1568,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   {/* Net for this year */}
                   {totalDeduction > 0 && (
                     <div className="flex justify-between items-center pl-3 pt-0.5 border-t border-dashed border-gray-100">
-                      <span className="text-xs font-semibold text-gray-600">{defaultFeeTermLabel(term)} Net</span>
+                      <span className="text-xs font-semibold text-gray-600">{termLabel(term)} Net</span>
                       <span className="text-xs font-bold text-gray-800">{fmt(net)}</span>
                     </div>
                   )}
@@ -1690,7 +1697,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </p>
               <p className="text-xs text-info-foreground/80 mt-0.5">
                 Upload your ABVMU challan details here. After super-admin approval, ₹
-                {abvmuDepositAmount.toLocaleString("en-IN")} is reduced from your first-year due
+                {abvmuDepositAmount.toLocaleString("en-IN")} is reduced from your {termLabel("year_1").toLowerCase()} due
                 (receipt is issued later when the university remits funds to the college).
               </p>
             </div>
@@ -1911,12 +1918,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Clear course fees</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
                 {hasDiscount
-                  ? "Prefer Year 1 or full course first — calculated after approved waiver."
-                  : "Prefer Year 1 or full course first; token fee is only a seat-hold fallback."}
+                  ? `Prefer ${termLabel("year_1")} or full course first — calculated after approved waiver.`
+                  : `Prefer ${termLabel("year_1")} or full course first; token fee is only a seat-hold fallback.`}
               </p>
             </div>
 
-            {/* ── Year 1 (preferred path to clear first-year fee) ─────── */}
+            {/* ── First term (preferred path to clear the opening fee) ── */}
             {(y1Fee > 0) && (
               <div className={`rounded-2xl border-2 p-4 shadow-md space-y-3 ${
                 y1Covered ? "border-gray-200 bg-gray-50" : "border-success/30 bg-gradient-to-br from-emerald-50 to-green-50"
@@ -1927,7 +1934,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   </div>
                   {y1Covered ? (
                     <p className="text-sm font-bold text-success-foreground flex items-center gap-1.5">
-                      <Check className="h-4 w-4" /> Year 1 covered
+                      <Check className="h-4 w-4" /> {termLabel("year_1")} covered
                       {surplusPaidVsY1 > 0 && (
                         <span className="text-xs font-normal text-gray-500 italic">
                           · {fmtRupee(surplusPaidVsY1)} surplus carries forward
@@ -1936,11 +1943,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </p>
                   ) : (
                     <>
-                      <p className="text-base font-bold text-success-foreground">Pay year 1 fee now</p>
+                      <p className="text-base font-bold text-success-foreground">Pay {termLabel("year_1").toLowerCase()} fee now</p>
                       <p className="text-xs text-success mt-0.5 leading-relaxed">
                         {y1Disc > 0
-                          ? `Clear first-year fee in one go — save ${fmtRupee(y1Disc)}. Best path to complete Year 1.`
-                          : "Clear the full first-year fee and stay on track for admission milestones."}
+                          ? `Clear the ${termLabel("year_1").toLowerCase()} fee in one go — save ${fmtRupee(y1Disc)}. Best path to complete ${termLabel("year_1")}.`
+                          : `Clear the full ${termLabel("year_1").toLowerCase()} fee and stay on track for admission milestones.`}
                       </p>
                     </>
                   )}
@@ -1948,7 +1955,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 {!y1Covered && (
                   <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-success/10 px-3.5 py-2.5">
                     <div>
-                      <p className="text-[10px] text-gray-400 font-medium">Year 1 amount due</p>
+                      <p className="text-[10px] text-gray-400 font-medium">{termLabel("year_1")} amount due</p>
                       <p className="text-lg font-bold text-gray-900">{fmtRupee(y1Due)}</p>
                     </div>
                     {y1Disc > 0 && (
@@ -1968,15 +1975,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     disabled={paying || !paymentPhone || y1Due <= 0}
                     onClick={() => startPayment(y1Due, {
                       paymentType: "other",
-                      productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
+                      productinfo: y1Disc > 0 ? `${termLabel("year_1")} fee (lump-sum)` : `${termLabel("year_1")} fee`,
                       concession: y1Disc,
-                      reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
+                      reason: y1Disc > 0 ? `Lump-sum ${termLabel("year_1")} ${lumpSumPct}%` : `Full ${termLabel("year_1")} fee`,
                       concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
                     })}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-success py-3.5 text-sm font-bold text-white hover:bg-success/90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
                   >
                     {paying ? <ButtonOrb state="composing" onFilled /> : <CreditCard className="h-4 w-4" />}
-                    Pay {fmtRupee(y1Due)} · Year 1 fee
+                    Pay {fmtRupee(y1Due)} · {termLabel("year_1")} fee
                   </button>
                 )}
 
@@ -1990,7 +1997,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </summary>
                     <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-warning/20/50">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Year 1 fee after waiver</span>
+                        <span className="text-gray-600">{termLabel("year_1")} fee after waiver</span>
                         <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
                       </div>
                       {paid > 0 && (
@@ -2051,10 +2058,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         </p>
                         {fcDisc > 0 && (
                           <p className="text-[11px] text-success mt-0.5">
-                            {lumpSumPct}% off year 1
+                            {lumpSumPct}% off {termLabel("year_1").toLowerCase()}
                             {inMultiYearWindow
-                              ? ` + extra ${multiYearPct}% off all other years.`
-                              : ` + ${lumpSumPct}% off other years.`}
+                              ? ` + extra ${multiYearPct}% off all other ${feePeriodNoun(feeMeta, { plural: true }).toLowerCase()}.`
+                              : ` + ${lumpSumPct}% off other ${feePeriodNoun(feeMeta, { plural: true }).toLowerCase()}.`}
                           </p>
                         )}
                         {inMultiYearWindow && multiYearPct > 0 && (
@@ -2130,7 +2137,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-success">
-                          <span>{lumpSumPct}% one-time off year 1</span>
+                          <span>{lumpSumPct}% one-time off {termLabel("year_1").toLowerCase()}</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}

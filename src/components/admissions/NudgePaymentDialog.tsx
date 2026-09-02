@@ -7,7 +7,7 @@
  * must be approved separately in Meta WhatsApp Business Manager — see
  * migration 20260613140000 for the required body-param order.
  *
- * The Sem 1 due date used in the message is the global
+ * The first-term due date used in the message is the global
  * `fee_submission_deadline` app-config value (the same key edited in
  * Settings → Applicant Deadlines). This dialog only previews it; to change
  * it, open Settings.
@@ -27,6 +27,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { MessageCircle, CalendarDays, ExternalLink } from "lucide-react";
+import { feeTermLabelLong } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 
 interface Props {
   open: boolean;
@@ -36,6 +38,10 @@ interface Props {
     full_name: string;
     phone: string | null;
     course_name: string | null;
+    /** Resolves the programme's period wording. The preview used to hardcode
+     *  "Sem 1", which is right for D.AOTT and wrong for the 21 programmes that
+     *  really are billed annually. */
+    course_id: string | null;
     an_due: number | null;
     year1_due: number | null;
   } | null;
@@ -58,6 +64,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
   const [dueDate, setDueDate] = useState<string>("");
   const [loadingDate, setLoadingDate] = useState(false);
   const [sending, setSending] = useState(false);
+  const { metadata: feeMeta } = useFeeStructureMeta(candidate?.course_id);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +82,8 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
   const year1Due = candidate.year1_due ?? 0;
   const dateLabel = fmtDateHuman(dueDate);
   const courseName = candidate.course_name || "your course";
+  // "Semester 1" for D.AOTT, "Year 1" for an annual programme.
+  const firstTermLabel = feeTermLabelLong("year_1", feeMeta);
 
   // Message preview — must match the body of the Meta template
   // `admission_payment_nudge` so admins know what will actually go out.
@@ -85,7 +94,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
     "",
     `Please pay ₹${fmtINR(anDue)} now to confirm admission and receive your Admission Number.`,
     "",
-    `The full Sem 1 balance of ₹${fmtINR(year1Due)} must be cleared before ${dateLabel}.`,
+    `The full ${firstTermLabel} balance of ₹${fmtINR(year1Due)} must be cleared before ${dateLabel}.`,
     "",
     "Reply here if you need any help with the payment.",
   ];
@@ -160,7 +169,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
               <span className="text-sm font-semibold tabular-nums text-success">₹{fmtINR(anDue)}</span>
             </div>
             <div className="flex items-center justify-between px-3 py-2">
-              <span className="text-xs text-muted-foreground">Full Sem 1 balance</span>
+              <span className="text-xs text-muted-foreground">Full {firstTermLabel} balance</span>
               <span className="text-sm font-semibold tabular-nums">₹{fmtINR(year1Due)}</span>
             </div>
             <div className="flex items-center justify-between px-3 py-2">
@@ -174,7 +183,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
             <div className="flex items-center gap-2 min-w-0">
               <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
               <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">Sem 1 2026 Due Date</p>
+                <p className="text-xs font-medium text-foreground">{firstTermLabel} Due Date</p>
                 <p className="text-xs text-muted-foreground truncate">
                   {loadingDate ? "Loading…" : dateLabel}
                 </p>

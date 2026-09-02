@@ -1,6 +1,6 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle, XCircle, Clock, HandCoins } from "lucide-react";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel } from "@/lib/feeTermLabels";
+import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 
 const statusBadge: Record<string, string> = {
   pending_principal: "bg-warning/10 text-warning-foreground",
@@ -21,6 +22,10 @@ export function ConcessionApprovalPanel() {
   const { role, user } = useAuth();
   const { toast } = useToast();
   const [concessions, setConcessions] = useState<any[]>([]);
+  // Approval queue spans programmes; each course names its terms its own way.
+  const feeMetaByCourse = useFeeStructureMetaByCourse(
+    useMemo(() => concessions.map((c: any) => c.students?.course_id), [concessions]),
+  );
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
 
@@ -35,7 +40,7 @@ export function ConcessionApprovalPanel() {
       .from("concessions")
       .select(`
         *,
-        students:student_id(name, admission_no, pre_admission_no),
+        students:student_id(name, admission_no, pre_admission_no, course_id),
         fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
         requester:requested_by(display_name),
         approver:approved_by(display_name)
@@ -169,7 +174,7 @@ export function ConcessionApprovalPanel() {
                         <div className="text-[10px] font-mono text-muted-foreground">{admNo}</div>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.fee_ledger?.fee_codes?.code || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(c.fee_ledger?.term || "—")}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{feeTermLabel(c.fee_ledger?.term || "—", feeMetaByCourse[c.students?.course_id || ""])}</td>
                       <td className="px-4 py-3 text-right text-foreground">
                         {c.fee_ledger?.total_amount ? `₹${Number(c.fee_ledger.total_amount).toLocaleString("en-IN")}` : "—"}
                       </td>

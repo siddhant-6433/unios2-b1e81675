@@ -66,7 +66,11 @@ describe("DAOTT seat-block fee", () => {
     expect(offerGenerator).toContain("Seat Block");
     expect(offerGenerator).toContain("Waiver/Adjustment");
     expect(offerGenerator).toContain("applicationAdjustment");
-    expect(offerGenerator).toContain("label: `${labelForOfferTerm(it.term, true)} - ${daottFeeHeadLabel(it)}`");
+    // The period wording now comes from the fee structure's own metadata
+    // (D.AOTT's stetho_batch declares period_label "Semester" / labels "Sem N")
+    // rather than a hardcoded isDaott flag, so the same row reads "Sem 1 - Seat
+    // Block" without the course code being special-cased here.
+    expect(offerGenerator).toContain("label: `${labelForOfferTerm(it.term, opts.feeStructureMeta)} - ${daottFeeHeadLabel(it)}`");
   });
 
   it("unlocks DAOTT loan letters with course-applied paid amount", () => {

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { History } from "lucide-react";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel, type FeeStructureMetadata } from "@/lib/feeTermLabels";
 
 interface AuditRow {
   id: string;
@@ -26,6 +26,10 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   studentId: string;
+  /** Period wording from the programme's active fee structure — D.AOTT's
+   *  year_N terms are semesters. Threaded from StudentFeePanel, which has
+   *  already resolved it, so each dialog need not re-query. */
+  feeMeta?: FeeStructureMetadata;
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -34,10 +38,10 @@ const ACTION_LABEL: Record<string, string> = {
   unapply_to_credit: "Unapplied to Credit",
 };
 
-const headLabel = (code: string | null, term: string | null) =>
-  code ? `${code}${term ? ` — ${defaultFeeTermLabel(term)}` : ""}` : "Credit";
+const headLabel = (code: string | null, term: string | null, feeMeta?: FeeStructureMetadata) =>
+  code ? `${code}${term ? ` — ${feeTermLabel(term, feeMeta)}` : ""}` : "Credit";
 
-export function FeeLedgerAuditDialog({ open, onOpenChange, studentId }: Props) {
+export function FeeLedgerAuditDialog({ open, onOpenChange, studentId, feeMeta }: Props) {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,8 +112,8 @@ export function FeeLedgerAuditDialog({ open, onOpenChange, studentId }: Props) {
                   <td className="px-2 py-2">
                     <Badge variant="outline" className="text-[10px] font-normal">{ACTION_LABEL[r.action] || r.action}</Badge>
                   </td>
-                  <td className="px-2 py-2 text-foreground">{headLabel(r.from_fee_code, r.from_term)}</td>
-                  <td className="px-2 py-2 text-foreground">{headLabel(r.to_fee_code, r.to_term)}</td>
+                  <td className="px-2 py-2 text-foreground">{headLabel(r.from_fee_code, r.from_term, feeMeta)}</td>
+                  <td className="px-2 py-2 text-foreground">{headLabel(r.to_fee_code, r.to_term, feeMeta)}</td>
                   <td className="px-2 py-2 text-right font-medium text-foreground">₹{Number(r.amount).toLocaleString("en-IN")}</td>
                   <td className="px-2 py-2 text-muted-foreground italic">{r.reason || "—"}</td>
                   <td className="px-2 py-2 text-muted-foreground capitalize">{r.actor_role?.replace(/_/g, " ") || "—"}</td>

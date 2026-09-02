@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { Wallet } from "lucide-react";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel, type FeeStructureMetadata } from "@/lib/feeTermLabels";
 
 const AUTO = "__auto__";
 
@@ -19,13 +19,17 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   studentId?: string;
+  /** Period wording from the programme's active fee structure — D.AOTT's
+   *  year_N terms are semesters. Threaded from StudentFeePanel, which has
+   *  already resolved it, so each dialog need not re-query. */
+  feeMeta?: FeeStructureMetadata;
   leadId?: string;
   fees: any[];
   availableCredit: number;
   onSuccess: () => void;
 }
 
-export function ApplyCreditDialog({ open, onOpenChange, studentId, leadId, fees, availableCredit, onSuccess }: Props) {
+export function ApplyCreditDialog({ open, onOpenChange, studentId, leadId, fees, availableCredit, onSuccess, feeMeta }: Props) {
   const { toast } = useToast();
   const [feeLedgerId, setFeeLedgerId] = useState<string>(AUTO);
   const [amount, setAmount] = useState<string>("");
@@ -87,7 +91,7 @@ export function ApplyCreditDialog({ open, onOpenChange, studentId, leadId, fees,
               { value: AUTO, label: "Auto (earliest due first)" },
               ...payableFees.map(f => ({
                 value: f.id,
-                label: `${f.fee_codes?.code || "Fee"} — ${defaultFeeTermLabel(f.term)} — ₹${Number(f.balance).toLocaleString("en-IN")} due`,
+                label: `${f.fee_codes?.code || "Fee"} — ${feeTermLabel(f.term, feeMeta)} — ₹${Number(f.balance).toLocaleString("en-IN")} due`,
               })),
             ]}
             label="Apply to"

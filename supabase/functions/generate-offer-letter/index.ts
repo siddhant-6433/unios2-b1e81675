@@ -9,6 +9,7 @@
  * two PDFs visually consistent.
  */
 
+import { feeTermLabel, feeTermLabelLong } from "../_shared/feeTermLabels.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, PDFImage, PDFFont, PDFPage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import { uploadToR2 } from "../_shared/r2.ts";
@@ -123,6 +124,8 @@ type OfferFeeStructureRow = {
   version?: string | null;
   created_at?: string | null;
   policy?: FeeStructurePolicy | null;
+  /** Declares the programme's period wording (period_label / year_N.label). */
+  metadata?: Record<string, unknown> | null;
   fee_structure_items?: {
     term: string;
     amount: number;
@@ -650,6 +653,10 @@ interface BuildOpts {
   yearItems: { term: string; total: number }[];
   feeItems: FeeStructureItem[];
   branding: any;
+  /** fee_structures.metadata — declares how this programme names its collection
+   *  periods (period_label / year_N.label). D.AOTT stores 5 semesters under the
+   *  terms year_1..year_5, so the term string alone cannot say "Sem 3". */
+  feeStructureMeta?: Record<string, unknown> | null;
   totalCourseFee: number;
   tokenAmount: number;
   tokenAlreadyPaid?: number;
@@ -689,11 +696,12 @@ function isBptOrBmritCourse(course: BuildOpts["course"]) {
     (name.includes("radiology") && name.includes("b.sc"));
 }
 
-function labelForOfferTerm(term: string, isDaott: boolean) {
+// Was gated on a hardcoded D.AOTT course-code check. The programme's own
+// fee-structure metadata says how to name a term, so any future semester
+// structure gets it right without another special case here.
+function labelForOfferTerm(term: string, meta?: Record<string, unknown> | null) {
   if (term === "security_deposit") return "Security Deposit (Refundable)";
-  return isDaott
-    ? term.replace(/^year_(\d+)$/, "Sem $1")
-    : term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return feeTermLabel(term, meta);
 }
 
 function daottFeeHeadLabel(item: FeeStructureItem) {
@@ -871,7 +879,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
       const applicable = Math.max(0, amount - lineAdjustment);
 
       ledgerRows.push({
-        label: `${labelForOfferTerm(it.term, true)} - ${daottFeeHeadLabel(it)}`,
+        label: `${labelForOfferTerm(it.term, opts.feeStructureMeta)} - ${daottFeeHeadLabel(it)}`,
         amount,
         waiver: lineAdjustment,
         applicable,
@@ -883,7 +891,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     }
   } else {
     for (const it of opts.yearItems) {
-      const yearLabel = labelForOfferTerm(it.term, isDaott);
+      const yearLabel = labelForOfferTerm(it.term, opts.feeStructureMeta);
       const waiverForYear = opts.waivers
         .filter(w => w.term === it.term)
         .reduce((s, w) => s + Number(w.amount || 0), 0);
@@ -957,7 +965,8 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   // ── Terms (compact, smaller font) ──────────────────────────────────────
   drawSection(ctx, "TERMS & NEXT STEPS");
-  const firstFeePeriod = isDaott ? "Semester 1" : labelForOfferTerm(firstOfferFeeTerm(opts.yearItems), false);
+  // Prose line ("payable before Semester 1 begins"), so spell the period out.
+  const firstFeePeriod = feeTermLabelLong(firstOfferFeeTerm(opts.yearItems), opts.feeStructureMeta);
   const terms = [
     "Provisional offer subject to verification of original documents at physical admission.",
     `Token fee is adjustable against the ${firstFeePeriod} programme fee and is non-refundable once paid.`,
@@ -1118,7 +1127,7 @@ Deno.serve(async (req) => {
     // PDFs, where the seat-block fee must be shown explicitly.
     const { data: feeStructures, error: feeStructureError } = await admin
       .from("fee_structures")
-      .select("id, version, created_at, policy, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
+      .select("id, version, created_at, policy, metadata, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
       .eq("is_active", true);
@@ -1374,6 +1383,7 @@ Deno.serve(async (req) => {
       yearItems,
       feeItems,
       branding: brandingResolved,
+      feeStructureMeta: yearRows?.metadata ?? null,
       totalCourseFee,
       tokenAmount,
       tokenAlreadyPaid,

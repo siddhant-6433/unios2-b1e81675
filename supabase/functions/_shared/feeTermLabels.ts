@@ -1,3 +1,13 @@
+// Deno copy of src/lib/feeTermLabels.ts — edge functions cannot import from
+// src/. Keep the two in sync; src/test/fee-term-labels.test.ts asserts both
+// produce identical output for the same inputs.
+//
+// Why this exists at all: a fee term is stored as a free-text string
+// (year_1, q1, m_2026_07, registration). "year_2" does NOT reliably mean a
+// year — D.AOTT bills 5 semesters and stores them as year_1..year_5, like
+// every other programme. Only the fee structure's own metadata
+// (period_label / year_N.label) knows which word is right.
+
 export type FeeStructureMetadata = Record<string, unknown> | null | undefined;
 
 const titleCase = (value: string) =>
@@ -10,8 +20,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// Month-anchored ad-hoc fee heads, e.g. m_2026_07 → "Jul 2026". Returns null
-// when the term isn't a month term so callers fall through to their normal path.
 const monthTermLabel = (normalized: string): string | null => {
   const m = normalized.match(/^m_(\d{4})_(\d{2})$/);
   if (!m) return null;
@@ -28,45 +36,16 @@ const TERM_PATTERNS = [
   { regex: /^installment[_\s-]?(\d+)$/i, label: (n: string) => `Installment ${n}` },
 ];
 
-// Verbose quarter wording for the lead-side ledger, which has room for it and
-// where the parent needs to know which months the quarter covers. Keyed off the
-// same q1..q4 terms the compact "Q1" form uses.
-const QUARTER_MONTHS: Record<string, string> = {
-  "1": "Apr–Jun",
-  "2": "Jul–Sep",
-  "3": "Oct–Dec",
-  "4": "Jan–Mar",
-};
-
-// Terms that aren't part of a numbered series. 'adhoc' is the term the cashier
-// desk levies one-off charges under (Sports, Transfer Certificate, Arrear Fee).
 const EXPLICIT_TERM_LABELS: Record<string, string> = {
   adhoc: "Other Charges",
   admission: "Admission",
   security_deposit: "Security Deposit",
-  // The NB-REG head has been called "Application Fee" since the app_fee↔
-  // registration naming was unified; the term label was the last place still
-  // saying "Registration".
   registration: "Application Fee",
 };
 
-// One-time charges: billed once at admission rather than per quarter/year.
-// They are collected under one heading so the ledger opens with what the
-// candidate paid to join, before the recurring collection terms.
 export const ONE_TIME_TERMS = ["registration", "admission", "security_deposit"];
-export const ONE_TIME_GROUP = "__one_time__";
 
-// Order inside the one-time group: application fee, admission fee, then the
-// refundable security deposit last. Matched on the fee code/name rather than a
-// hardcoded code list so non-Beacon structures sort sensibly too.
-export const oneTimeRank = (code?: string | null, name?: string | null) => {
-  const hay = `${code || ""} ${name || ""}`.toLowerCase();
-  if (hay.includes("application") || hay.includes("reg")) return 0;
-  if (hay.includes("security") || hay.includes("sec") || hay.includes("deposit")) return 2;
-  return 1; // admission fee and anything else one-time
-};
-
-export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {
+export const defaultFeeTermLabel = (term: string, periodLabel?: string): string => {
   const normalized = String(term || "").trim().toLowerCase();
   if (EXPLICIT_TERM_LABELS[normalized]) return EXPLICIT_TERM_LABELS[normalized];
   const monthLabel = monthTermLabel(normalized);
@@ -81,17 +60,12 @@ export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {
   return titleCase(normalized || "Term");
 };
 
-// Late-fine heads are minted as `late_<term>` (late_year_2, late_q1). Without
-// this they title-cased to "Late Year 2" and kept saying "Year" on a semester
-// programme even after every other label was fixed.
 const LATE_PREFIX = /^late[_\s-]/;
 
 const withoutLatePrefix = (normalized: string) =>
   LATE_PREFIX.test(normalized) ? normalized.replace(LATE_PREFIX, "") : null;
 
-// Compact label — for dense tables (ledger rows, reports, dropdowns). Prefers
-// the structure's short per-term label ("Sem 1"), which is also what the
-// offer-letter PDF prints, so offer → ledger → receipt read identically.
+/** Compact label — dense tables and PDF line items ("Sem 1"). */
 export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata): string => {
   const meta = asRecord(metadata);
   const normalized = String(term || "").trim().toLowerCase();
@@ -123,10 +97,7 @@ export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata): str
   return defaultFeeTermLabel(term);
 };
 
-// Prose label — for surfaces a candidate or parent reads as a sentence (student
-// and parent portals, applicant portal, Navya replies). Always spells the period
-// out from period_label ("Semester 1"), deliberately ignoring the abbreviated
-// per-term label that suits a table cell but not a WhatsApp message.
+/** Prose label — anything a candidate reads as a sentence ("Semester 1"). */
 export const feeTermLabelLong = (term: string, metadata?: FeeStructureMetadata): string => {
   const meta = asRecord(metadata);
   const normalized = String(term || "").trim().toLowerCase();
@@ -144,31 +115,8 @@ export const feeTermLabelLong = (term: string, metadata?: FeeStructureMetadata):
   return feeTermLabel(term, metadata);
 };
 
-// Verbose form for the lead ledger: quarters carry their month span.
-export const feeTermLabelWithMonths = (term: string, metadata?: FeeStructureMetadata): string => {
-  const normalized = String(term || "").trim().toLowerCase();
-  const quarter = normalized.match(/^q(?:uarter)?[_\s-]?([1-4])$/);
-  if (quarter && !asRecord(metadata)?.period_label) {
-    return `Quarter ${quarter[1]} (${QUARTER_MONTHS[quarter[1]]})`;
-  }
-  return feeTermLabelLong(term, metadata);
-};
-
-// The ledger collapses one-time heads under a synthetic group term. Callers used
-// to branch on ONE_TIME_GROUP themselves at every render site.
-export const feeTermGroupLabel = (
-  term: string,
-  metadata?: FeeStructureMetadata,
-  opts?: { long?: boolean },
-): string => {
-  if (term === ONE_TIME_GROUP) return "One-time Fees";
-  return opts?.long ? feeTermLabelLong(term, metadata) : feeTermLabel(term, metadata);
-};
-
 // Singular/plural period noun for copy that talks about the unit rather than a
-// numbered term ("other semesters", "Annual Pay All"). Does NOT use
-// metadata.period_label_plural — D.AOTT stores "Semester-wise Breakdown" there,
-// which is a section heading, not a noun.
+// numbered term. Mirror of src/lib/feeTermLabels.ts — keep in sync.
 export const feePeriodNoun = (
   metadata?: FeeStructureMetadata,
   opts?: { plural?: boolean },

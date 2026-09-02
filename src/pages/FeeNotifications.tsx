@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { feeTermLabel, ONE_TIME_TERMS } from "@/lib/feeTermLabels";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,12 +27,12 @@ interface SessionOption { id: string; name: string }
 interface CampusOption { id: string; name: string; city: string | null }
 interface BatchOption { id: string; name: string; section: string | null; course_id: string; session_id: string }
 
-const FEE_TERM_OPTIONS = [
-  { value: "year_1", label: "Year 1" },
-  { value: "year_2", label: "Year 2" },
-  { value: "year_3", label: "Year 3" },
-  { value: "year_4", label: "Year 4" },
-];
+// Fallback only — used before the real terms load, or if the selected courses
+// have no active fee structure. The live list comes from the courses' own
+// fee_structure_items so a programme with more (or differently named) terms is
+// selectable: D.AOTT bills 5 semesters and its Sem 5 was previously
+// unreachable, because this list stopped at a hardcoded year_4.
+const FALLBACK_FEE_TERMS = ["year_1", "year_2", "year_3", "year_4"];
 
 interface MatchedStudent { student_id: string; name: string; phone: string; due: number }
 interface PreviewResponse {
@@ -137,6 +138,10 @@ const FeeNotifications = () => {
   const [campusId, setCampusId] = useState<string>("");
   const [batchId, setBatchId] = useState<string>("");
   const [feeTerm, setFeeTerm] = useState<string>("year_2");
+  // { value: term, label: programme-correct wording } for the selected courses.
+  const [feeTermOptions, setFeeTermOptions] = useState<{ value: string; label: string }[]>(
+    FALLBACK_FEE_TERMS.map((t) => ({ value: t, label: feeTermLabel(t) })),
+  );
   const [expiryDate, setExpiryDate] = useState<string>(defaultExpiryDate());
   const [purposeLabel, setPurposeLabel] = useState<string>("Fee due");
 
@@ -268,6 +273,49 @@ const FeeNotifications = () => {
       setBatchId("");
     }
   }, [courseIds, sessionId, batchId, batches]);
+
+  // The selectable fee terms are whatever the chosen programmes actually bill,
+  // labelled the way that programme names its periods. Reading fee_structure_items
+  // (not the ledger) keeps a term selectable before anyone has been provisioned.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let q = supabase
+        .from("fee_structures")
+        .select("course_id, metadata, fee_structure_items(term)")
+        .eq("is_active", true);
+      if (courseIds.length > 0) q = q.in("course_id", courseIds);
+      const { data } = await q;
+      if (cancelled) return;
+
+      // Same term can appear under several courses; first label wins, and a
+      // single-course selection therefore gets that course's own wording.
+      const seen = new Map<string, string>();
+      for (const fs of (data || []) as any[]) {
+        for (const item of (fs.fee_structure_items || []) as { term: string }[]) {
+          const term = String(item?.term || "").trim().toLowerCase();
+          // One-time joining charges aren't a recurring due to chase.
+          if (!term || ONE_TIME_TERMS.includes(term) || seen.has(term)) continue;
+          seen.set(term, feeTermLabel(term, fs.metadata));
+        }
+      }
+      const opts = [...seen.entries()]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
+      setFeeTermOptions(
+        opts.length ? opts : FALLBACK_FEE_TERMS.map((t) => ({ value: t, label: feeTermLabel(t) })),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [courseIds]);
+
+  // Keep the selection valid when the course filter narrows the term list.
+  useEffect(() => {
+    if (feeTermOptions.length && !feeTermOptions.some((o) => o.value === feeTerm)) {
+      setFeeTerm(feeTermOptions[0].value);
+      setPreview(null);
+    }
+  }, [feeTermOptions]);
 
   const expiresDays = () => {
     const ms = new Date(expiryDate).getTime() - Date.now();
@@ -412,7 +460,7 @@ const FeeNotifications = () => {
             required
             value={feeTerm}
             onValueChange={(v) => { setFeeTerm(v); setPreview(null); }}
-            options={FEE_TERM_OPTIONS}
+            options={feeTermOptions}
             allowEmpty={false}
           />
         </div>
@@ -559,7 +607,7 @@ const FeeNotifications = () => {
                     {isOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-foreground">
-                        {c.purpose_label || "Fee due"} · {FEE_TERM_OPTIONS.find((t) => t.value === c.fee_term)?.label || c.fee_term}
+                        {c.purpose_label || "Fee due"} · {feeTermOptions.find((t) => t.value === c.fee_term)?.label || feeTermLabel(c.fee_term)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(c.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}

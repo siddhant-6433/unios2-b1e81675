@@ -23,7 +23,8 @@ import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
 import { AbvmuInlineControls } from "./AbvmuInlineControls";
 import { useAbvmuDeposit } from "./useAbvmuDeposit";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
-import { defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
+import { feeTermLabel, feeTermGroupLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 
 interface StudentFeePanelProps {
   student: any;
@@ -91,7 +92,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canPick = canCollect || canSendLink;
   const courseCode = student?.courses?.code || student?.course_code || "";
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
-  const isStethoBatch = student?.fee_structure_version === "stetho_batch";
+  // How this programme names its collection periods. D.AOTT bills 5 semesters
+  // but stores them as year_1..year_5 like everyone else, so the term string
+  // alone can't say "Sem 3" — only the structure's metadata can. Resolved from
+  // the active structure rather than students.fee_structure_version, which is
+  // null for every student in production and left this reading "Year 3".
+  const { version: feeStructureVersion, metadata: feeMeta } =
+    useFeeStructureMeta(student?.course_id, student?.session_id);
+  const isStethoBatch = feeStructureVersion === "stetho_batch";
+  const termLabel = (term: string) => feeTermLabel(term, feeMeta);
 
   useEffect(() => {
     if (student?.id) {
@@ -309,8 +318,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         fee_code_id: f.fee_code_id,
         fee_ledger_id: f.id,
         amount: Number(picked[f.id]),
-        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
-          defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
+        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${termLabel(f.term)}`,
       }));
     if (!allocs.length) return;
     setCollectAllocations(allocs);
@@ -327,8 +335,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         fee_code_id: f.fee_code_id,
         fee_ledger_id: f.id,
         amount: Number(picked[f.id]),
-        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${
-          defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}`,
+        label: `${f.fee_codes?.name || f.fee_codes?.code || "Fee"} — ${termLabel(f.term)}`,
       }));
     if (!allocs.length) return;
     setLinkAllocations(allocs);
@@ -479,9 +486,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             Hostel: {student.hostel_type === "ac_central" ? "AC C Block" : student.hostel_type === "ac_individual" ? "AC B Block" : "Non-AC"}
           </Badge>
         )}
+        {/* Describes the version recorded ON THE STUDENT, so it reads that column
+            rather than the structure resolved for labelling — the two can differ. */}
         {student.fee_structure_version && (
-          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-warning/10 text-warning-foreground border-warning/20" : isStethoBatch ? "bg-primary/10 text-primary border-primary/20" : "bg-info/10 text-info-foreground border-info/20"}>
-            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : isStethoBatch ? "Stetho Batch" : "New Admission"}
+          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-warning/10 text-warning-foreground border-warning/20" : student.fee_structure_version === "stetho_batch" ? "bg-primary/10 text-primary border-primary/20" : "bg-info/10 text-info-foreground border-info/20"}>
+            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : student.fee_structure_version === "stetho_batch" ? "Stetho Batch" : "New Admission"}
           </Badge>
         )}
       </div>
@@ -699,9 +708,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                     </td>
                   )}
                   <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-foreground">
-                    {g.term === ONE_TIME_GROUP
-                      ? "One-time Fees"
-                      : defaultFeeTermLabel(g.term, isStethoBatch ? "Semester" : undefined)}
+                    {feeTermGroupLabel(g.term, feeMeta)}
                   </td>
                   <td className="px-4 py-2.5 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">₹{gTotal.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-2.5 text-right text-[11px] tabular-nums text-success">{gConcession > 0 ? `−₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
@@ -1027,6 +1034,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         onOpenChange={setChargeOpen}
         studentId={student.id}
         onAdded={() => { fetchFees(); onRefresh?.(); }}
+        feeMeta={feeMeta}
       />
 
       <SendPaymentLinkDialog
@@ -1052,6 +1060,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         onOpenChange={setApplyCreditOpen}
         studentId={student.id}
         fees={fees}
+        feeMeta={feeMeta}
         availableCredit={Number(credit?.general_credit || 0)}
         onSuccess={() => { fetchFees(); fetchCredit(); onRefresh?.(); }}
       />
@@ -1061,6 +1070,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         onOpenChange={setTransferOpen}
         studentId={student.id}
         fees={fees}
+        feeMeta={feeMeta}
         onSuccess={() => { fetchFees(); fetchCredit(); onRefresh?.(); }}
       />
 
@@ -1068,6 +1078,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         open={auditOpen}
         onOpenChange={setAuditOpen}
         studentId={student.id}
+        feeMeta={feeMeta}
       />
     </div>
   );

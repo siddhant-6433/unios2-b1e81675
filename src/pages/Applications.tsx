@@ -2872,6 +2872,9 @@ export default function Applications() {
           phone: nudgeTarget.phone,
           course_name: (nudgeTarget.course_selections || [])
             .map((c: any) => c.course_name).filter(Boolean).join(", ") || null,
+          // Drives the period wording in the nudge ("Semester 1" vs "Year 1").
+          course_id: (nudgeTarget.course_selections || [])
+            .find((c: any) => c?.course_id)?.course_id ?? null,
           an_due: nudgeTarget.an_due ?? null,
           year1_due: nudgeTarget.year1_due ?? null,
         } : null}
