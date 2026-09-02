@@ -8,6 +8,8 @@ import {
   formatSenderNumber,
   senderHealthClass,
   formatPct,
+  metaQualityClass,
+  formatMessagingTier,
 } from "@/lib/waSenders";
 
 export const WhatsAppBusinessIdentity = ({
@@ -57,6 +59,16 @@ export const WhatsAppBusinessIdentity = ({
             )}
             {sender.qualityRiskLevel && (
               <span className="text-[11px] text-muted-foreground">Risk: {sender.qualityRiskLevel}</span>
+            )}
+            {/* Meta's own view of the number. Quality drives whether Meta throttles
+                us; the tier is the hard 24h ceiling on unique recipients. */}
+            {sender.qualityRating && sender.qualityRating !== "UNKNOWN" && (
+              <Badge className={`border-0 text-[10px] ${metaQualityClass(sender.qualityRating)}`}>
+                Meta {sender.qualityRating.toLowerCase()}
+              </Badge>
+            )}
+            {sender.messagingLimitTier && (
+              <span className="text-[11px] text-muted-foreground">{formatMessagingTier(sender.messagingLimitTier)}</span>
             )}
           </div>
         )}

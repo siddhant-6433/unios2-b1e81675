@@ -22,6 +22,10 @@ export type WaSenderOption = {
   failedPct: number | null;
   readPct: number | null;
   qualityRiskLevel: string | null;
+  /** Meta's own quality rating for the number: GREEN / YELLOW / RED / UNKNOWN. */
+  qualityRating: string | null;
+  /** Meta's 24h messaging tier, e.g. TIER_1K / TIER_100K / UNLIMITED. */
+  messagingLimitTier: string | null;
   verifiedName: string | null;
   profilePictureUrl: string | null;
   availableTemplates: string[] | null;
@@ -46,6 +50,8 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
   failedPct: null,
   readPct: null,
   qualityRiskLevel: null,
+  qualityRating: null,
+  messagingLimitTier: null,
   verifiedName: null,
   profilePictureUrl: null,
   availableTemplates: null,
@@ -64,6 +70,8 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     failedPct: null,
     readPct: null,
     qualityRiskLevel: "normal",
+    qualityRating: null,
+    messagingLimitTier: null,
     verifiedName: null,
     profilePictureUrl: null,
     availableTemplates: null,
@@ -80,6 +88,8 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     failedPct: null,
     readPct: null,
     qualityRiskLevel: "watch",
+    qualityRating: null,
+    messagingLimitTier: null,
     verifiedName: null,
     profilePictureUrl: null,
     availableTemplates: null,
@@ -96,6 +106,8 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     failedPct: null,
     readPct: null,
     qualityRiskLevel: "normal",
+    qualityRating: null,
+    messagingLimitTier: null,
     verifiedName: null,
     profilePictureUrl: null,
     availableTemplates: null,
@@ -132,6 +144,24 @@ export const formatSenderNumber = (value: string | null | undefined) => {
 
 export const formatPct = (value: number | null | undefined) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
+
+/** Meta's quality rating → badge colour. RED means Meta is already throttling us. */
+export const metaQualityClass = (rating: string | null | undefined) => {
+  const r = String(rating || "").toUpperCase();
+  if (r === "RED" || r === "LOW") return "bg-destructive/10 text-destructive";
+  if (r === "YELLOW" || r === "MEDIUM") return "bg-warning/10 text-warning-foreground";
+  if (r === "GREEN" || r === "HIGH") return "bg-success/10 text-success";
+  return "bg-muted text-muted-foreground";
+};
+
+/** "TIER_100K" → "100K/day"; "UNLIMITED" → "unlimited/day". */
+export const formatMessagingTier = (tier: string | null | undefined): string | null => {
+  const t = String(tier || "").toUpperCase();
+  if (!t || t === "UNTIERED") return null;
+  if (t === "UNLIMITED") return "unlimited/day";
+  const m = t.match(/^TIER_(\d+K?)$/);
+  return m ? `${m[1]}/day` : t.toLowerCase();
+};
 
 export const senderHealthClass = (failedPct: number | null | undefined) => {
   if (typeof failedPct !== "number") return "bg-muted text-muted-foreground";
@@ -185,7 +215,7 @@ export async function loadWaSenders(
   const [channelsRes, healthRes] = await Promise.all([
     supabase
       .from("whatsapp_channels" as any)
-      .select("id,label,provider,route,business_number,meta_phone_number_id,waba_id,allow_bulk,quality_risk_level,verified_name,profile_picture_url,available_templates")
+      .select("id,label,provider,route,business_number,meta_phone_number_id,waba_id,allow_bulk,quality_risk_level,quality_rating,messaging_limit_tier,verified_name,profile_picture_url,available_templates")
       .eq("is_active", true)
       .eq("allow_bulk", true)
       .order("label", { ascending: true }),
@@ -223,6 +253,8 @@ export async function loadWaSenders(
         failedPct: health?.failed_pct ?? null,
         readPct: health?.read_pct ?? null,
         qualityRiskLevel: channel.quality_risk_level || null,
+        qualityRating: channel.quality_rating || null,
+        messagingLimitTier: channel.messaging_limit_tier || null,
         verifiedName: channel.verified_name || null,
         profilePictureUrl: channel.profile_picture_url || null,
         availableTemplates: channel.available_templates ?? null,

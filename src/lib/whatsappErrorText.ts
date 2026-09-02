@@ -38,6 +38,11 @@ const META_ERROR_TEXT: Record<string, { text: string; ourFault?: boolean }> = {
   // 155 hits — the free-form window closed.
   "131047": { text: "The 24-hour reply window has closed. Send a template instead." },
   "131048": { text: "Meta blocked this send (spam rate limit on our number)." },
+  // Account-level, not per-recipient: every send on the number fails until a
+  // payment method is attached. Cost 402 sends on 2026-09-01 before we saw it.
+  "131042": { text: "WhatsApp billing isn't set up for this number — add a payment method.", ourFault: true },
+  "131056": { text: "Too many messages to this number in a short window. Try later." },
+  "130429": { text: "Meta rate limit on our number — the send will be retried." },
   "130472": { text: "This number is in a Meta experiment group and was excluded." },
   "131053": { text: "Meta couldn't fetch the template's media. The image URL must be publicly reachable." },
   // Ours: the parameters we sent don't match the approved template.
