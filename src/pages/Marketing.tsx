@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -40,10 +40,13 @@ import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/c
 import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
 import { describeWhatsAppError, whatsAppErrorTextForCode } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
+import { classifyHeaderMediaUrl, probePublicMediaUrl } from "@/lib/publicMediaUrl";
+import { waitForWhatsAppDelivery } from "@/lib/whatsappTestDelivery";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
   resolveSendableTemplateMediaUrl,
+  sendableHeaderMediaUrl,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -358,6 +361,8 @@ export default function Marketing() {
   // to Meta's placeholder_count, shared with the server.
   const [paramSpecsByKey, setParamSpecsByKey] = useState<Record<string, WaBulkTemplate["params"]>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  // Sendable header files saved in Template Manager (whatsapp_template_settings.media_url).
+  const [waTemplateMediaUrlByKey, setWaTemplateMediaUrlByKey] = useState<Record<string, string>>({});
   // Real Meta template arity + which keys actually exist as APPROVED Meta templates.
   // The hardcoded WA_BULK_TEMPLATES params/keys drift from Meta (e.g. lead_welcome
   // has 3 body placeholders in Meta but 2 in config; kb_placements isn't a Meta
@@ -373,6 +378,14 @@ export default function Marketing() {
   const [waTestPhone, setWaTestPhone] = useState("");
   const [waTestSending, setWaTestSending] = useState(false);
   const [waTestSent, setWaTestSent] = useState(false);
+  const [waTestDelivered, setWaTestDelivered] = useState(false);
+  const [waTestPhase, setWaTestPhase] = useState<"idle" | "sending" | "waiting" | "delivered" | "failed">("idle");
+  const [waTestError, setWaTestError] = useState<string | null>(null);
+  const [waTestCanConfirm, setWaTestCanConfirm] = useState(false);
+  const [mediaProbe, setMediaProbe] = useState<{ status: "idle" | "checking" | "ok" | "bad"; reason: string | null }>({
+    status: "idle",
+    reason: null,
+  });
   const [builderOpen, setBuilderOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [senderPickerOpen, setSenderPickerOpen] = useState(false);
@@ -486,9 +499,71 @@ export default function Marketing() {
     () => resolveSendableTemplateMediaUrl(
       selectedWaTemplate?.key,
       waTemplateComponentsByKey[selectedWaTemplate?.key || ""],
+      waTemplateMediaUrlByKey[selectedWaTemplate?.key || ""],
     ),
-    [selectedWaTemplate?.key, waTemplateComponentsByKey],
+    [selectedWaTemplate?.key, waTemplateComponentsByKey, waTemplateMediaUrlByKey],
   );
+  const headerMediaFieldValue = effectiveWaParamValue(waStaticParams, "template_header_media_url").trim();
+  const hasMediaHeader = (selectedWaTemplate?.params || []).some((param) => isWaMediaTemplateParam(param.name));
+  const headerMediaReady = !hasMediaHeader || mediaProbe.status === "ok";
+
+  // Existing approved templates: prefill the saved public URL so the counsellor
+  // can see it and edit it. Switching templates replaces the field with that
+  // template's default (or blank if none is saved yet). A typed override is kept
+  // until the template itself changes.
+  const autoFilledMediaKey = useRef("");
+  const autoFilledMediaUrl = useRef("");
+  useEffect(() => {
+    const key = selectedWaTemplate?.key || "";
+    const def = selectedWaTemplateDefaultMediaUrl || "";
+    const templateChanged = autoFilledMediaKey.current !== key;
+    autoFilledMediaKey.current = key;
+    setWaStaticParams((current) => {
+      const existing = current.template_header_media_url || "";
+      if (!templateChanged && existing && existing !== autoFilledMediaUrl.current) {
+        autoFilledMediaUrl.current = def;
+        return current;
+      }
+      autoFilledMediaUrl.current = def;
+      if (existing === def) return current;
+      return { ...current, template_header_media_url: def };
+    });
+  }, [selectedWaTemplate?.key, selectedWaTemplateDefaultMediaUrl]);
+
+  useEffect(() => {
+    if (!hasMediaHeader) {
+      setMediaProbe({ status: "idle", reason: null });
+      return;
+    }
+    const classified = classifyHeaderMediaUrl(headerMediaFieldValue);
+    if (!classified.ok) {
+      setMediaProbe({ status: headerMediaFieldValue ? "bad" : "idle", reason: classified.reason });
+      return;
+    }
+    let cancelled = false;
+    setMediaProbe({ status: "checking", reason: null });
+    const timer = window.setTimeout(() => {
+      void probePublicMediaUrl(classified.url!).then((result) => {
+        if (cancelled) return;
+        setMediaProbe({ status: result.ok ? "ok" : "bad", reason: result.reason });
+      });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [hasMediaHeader, headerMediaFieldValue]);
+  const rememberTemplateHeaderMedia = useCallback(async (templateKey: string, url: string) => {
+    const sendable = sendableHeaderMediaUrl(url);
+    if (!sendable || sendableHeaderMediaUrl(waTemplateMediaUrlByKey[templateKey])) return;
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .update({ media_url: sendable, updated_at: new Date().toISOString() })
+      .eq("template_key", templateKey);
+    if (!error) {
+      setWaTemplateMediaUrlByKey((current) => ({ ...current, [templateKey]: sendable }));
+    }
+  }, [waTemplateMediaUrlByKey]);
   const handleSendTest = useCallback(async () => {
     if (!waTemplate || !waTestPhone.trim()) return;
     if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
@@ -501,7 +576,16 @@ export default function Marketing() {
       toast({ title: "Invalid number", description: "Enter a valid phone number with its country code.", variant: "destructive" });
       return;
     }
+    if (hasMediaHeader && mediaProbe.status !== "ok") {
+      toast({ title: "Header file not public", description: mediaProbe.reason || "Check the header media URL first.", variant: "destructive" });
+      return;
+    }
     setWaTestSending(true);
+    setWaTestPhase("sending");
+    setWaTestDelivered(false);
+    setWaTestSent(false);
+    setWaTestError(null);
+    setWaTestCanConfirm(false);
     try {
       // Body params, resolved like the preview. Then reconcile the count against
       // Meta's real placeholder_count — the hardcoded config drifts (e.g.
@@ -554,10 +638,6 @@ export default function Marketing() {
         },
       });
       if (error || data?.error || data?.ok === false) {
-        // supabase functions.invoke throws a FunctionsHttpError whose generic
-        // message is "non-2xx status code" — the real reason (e.g. Meta's
-        // "template does not exist in this WABA" or "number not found") is in
-        // the response body. Surface it so the failure is actionable.
         let detail = (error as any)?.message || data?.error || data?.meta_error || "Send failed.";
         const ctx = (error as any)?.context;
         if (ctx && typeof ctx.json === "function") {
@@ -568,9 +648,53 @@ export default function Marketing() {
         }
         throw new Error(detail);
       }
-      toast({ title: "Test sent", description: `Sent to ${phone}` });
+
+      const messageId = String(data?.message_id || "").trim();
       setWaTestSent(true);
+      setWaTestPhase("waiting");
+      toast({ title: "Test sent", description: "Waiting for delivery confirmation…" });
+      if (headerImageUrl) void rememberTemplateHeaderMedia(waTemplate, headerImageUrl);
+
+      if (!messageId) {
+        setWaTestCanConfirm(true);
+        setWaTestError("Sent, but no message id came back. Confirm on the phone that it arrived.");
+        return;
+      }
+
+      const confirmTimer = window.setTimeout(() => setWaTestCanConfirm(true), 15_000);
+      try {
+        const outcome = await waitForWhatsAppDelivery(
+          async (waMessageId) => {
+            const { data: row } = await supabase
+              .from("whatsapp_messages" as any)
+              .select("status, status_error, read_at")
+              .eq("wa_message_id", waMessageId)
+              .maybeSingle();
+            return (row as { status: string | null; status_error: unknown; read_at: string | null } | null) ?? null;
+          },
+          messageId,
+        );
+        if (outcome.status === "failed") {
+          setWaTestPhase("failed");
+          setWaTestDelivered(false);
+          setWaTestError(outcome.errorText);
+          toast({ title: "Test not delivered", description: outcome.errorText, variant: "destructive" });
+        } else if (outcome.status === "timeout") {
+          setWaTestCanConfirm(true);
+          setWaTestError("No delivery receipt yet. If the message arrived on the phone, confirm it below.");
+        } else {
+          setWaTestPhase("delivered");
+          setWaTestDelivered(true);
+          setWaTestError(null);
+          toast({ title: "Test received", description: `Delivered to ${phone}` });
+        }
+      } finally {
+        window.clearTimeout(confirmTimer);
+      }
     } catch (err) {
+      setWaTestPhase("failed");
+      setWaTestDelivered(false);
+      setWaTestSent(false);
       toast({
         title: "Test failed",
         description: err instanceof Error ? err.message : "Could not send test message.",
@@ -579,15 +703,21 @@ export default function Marketing() {
     } finally {
       setWaTestSending(false);
     }
-  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, toast]);
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, rememberTemplateHeaderMedia, hasMediaHeader, mediaProbe, toast]);
 
   useEffect(() => {
     setWaTestSent(false);
+    setWaTestDelivered(false);
+    setWaTestPhase("idle");
+    setWaTestError(null);
+    setWaTestCanConfirm(false);
   }, [waTemplate, waSenderValue, waStaticParams, waTestPhone]);
 
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
-    if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
+    if (isWaMediaTemplateParam(param.name)) {
+      return classifyHeaderMediaUrl(value).ok === false;
+    }
     return !decodeWaParamFieldMapping(value) && !value.trim();
   });
   const waRenderedPreview = useMemo(
@@ -928,13 +1058,20 @@ export default function Marketing() {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, visibility, param_specs")
+        .select("template_key, display_name, description, category, visibility, param_specs, media_url")
         .in("visibility", ["marketing_only", "all"]);
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;
         description?: string | null;
+        media_url?: string | null;
       }>);
+      const mediaUrlByKey: Record<string, string> = {};
+      for (const setting of settingsRows) {
+        const url = sendableHeaderMediaUrl(setting.media_url);
+        if (setting.template_key && url) mediaUrlByKey[setting.template_key] = url;
+      }
+      setWaTemplateMediaUrlByKey(mediaUrlByKey);
       const specsByKey: Record<string, WaBulkTemplate["params"]> = {};
       for (const s of (settings || []) as any[]) {
         if (Array.isArray(s.param_specs)) {
@@ -1156,6 +1293,10 @@ export default function Marketing() {
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
+        if (hasMediaHeader && mediaProbe.status !== "ok") {
+          throw new Error(mediaProbe.reason || "Header media URL must be a public HTTPS file.");
+        }
+        if (!waTestDelivered) throw new Error("Send a test and confirm it was received before queueing.");
         if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
         if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
@@ -1173,7 +1314,11 @@ export default function Marketing() {
         for (const field of waStaticFields) {
           const value = effectiveWaParamValue(waStaticParams, field.name).trim();
           if (value) staticParamsToSend[field.name] = value;
+          else if (isWaMediaTemplateParam(field.name) && selectedWaTemplateDefaultMediaUrl) {
+            staticParamsToSend[field.name] = selectedWaTemplateDefaultMediaUrl;
+          }
         }
+        const headerMediaToRemember = sendableHeaderMediaUrl(staticParamsToSend.template_header_media_url);
 
         const pacePlan = buildCampaignPacePlan({
           recipientCount: valid.length,
@@ -1203,6 +1348,7 @@ export default function Marketing() {
           .select("id")
           .single();
         if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
+        if (headerMediaToRemember) void rememberTemplateHeaderMedia(waTemplate, headerMediaToRemember);
 
         const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
@@ -2010,14 +2156,43 @@ export default function Marketing() {
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || !selectedSenderCanSend}
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || waTestPhase === "waiting" || !selectedSenderCanSend || !headerMediaReady}
                     onClick={handleSendTest}
                   >
-                    {waTestSending ? "Sending…" : "Send test"}
+                    {waTestSending || waTestPhase === "waiting" ? "Sending…" : "Send test"}
                   </Button>
                 </div>
-                {waTestSent && (
-                  <p className="text-xs font-medium text-emerald-600">Test sent — queueing is now enabled.</p>
+                {waTestPhase === "waiting" && (
+                  <p className="text-xs font-medium text-info-foreground">
+                    Test sent — waiting for delivery confirmation on the phone…
+                  </p>
+                )}
+                {waTestPhase === "delivered" && (
+                  <p className="text-xs font-medium text-emerald-600">
+                    Test received successfully. Queue campaign is now enabled.
+                  </p>
+                )}
+                {waTestPhase === "failed" && waTestError && (
+                  <p className="text-xs font-medium text-destructive">{waTestError}</p>
+                )}
+                {waTestPhase === "waiting" && waTestCanConfirm && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {waTestError || "No delivery receipt yet. If you received the message, confirm it."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setWaTestPhase("delivered");
+                        setWaTestDelivered(true);
+                        setWaTestError(null);
+                      }}
+                    >
+                      I received it
+                    </Button>
+                  </div>
                 )}
                 <div className="space-y-2">
                   {waStaticFields.length === 0 ? (
@@ -2030,9 +2205,8 @@ export default function Marketing() {
                       const mappedToken = decodeWaParamFieldMapping(value);
                       const canMap = isWaMappableTemplateParam(field.name);
                       const isMediaParam = isWaMediaTemplateParam(field.name);
-                      const hasDefaultMedia = isMediaParam && !!selectedWaTemplateDefaultMediaUrl;
                       const label = isMediaParam
-                        ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
+                        ? "Header media URL"
                         : field.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
                       return (
                         <div key={field.name}>
@@ -2061,8 +2235,8 @@ export default function Marketing() {
                             <Input
                               value={canMap ? (waStaticParams[field.name] || "") : value}
                               onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                              placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : field.placeholder || field.name}
-                              className="mt-1"
+                              placeholder={isMediaParam ? "Public https:// image URL" : field.placeholder || field.name}
+                              className={`mt-1 ${isMediaParam && mediaProbe.status === "bad" ? "border-destructive/50" : ""}`}
                             />
                           )}
                           {mappedToken && (
@@ -2070,12 +2244,22 @@ export default function Marketing() {
                               Filled per recipient from {waParamFieldLabel(mappedToken)}.
                             </p>
                           )}
-                          {hasDefaultMedia && !value.trim() && (
+                          {isMediaParam && mediaProbe.status === "checking" && (
+                            <p className="mt-1 text-xs text-muted-foreground">Checking that this URL is public…</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "ok" && (
+                            <p className="mt-1 text-xs font-medium text-emerald-600">Public URL verified — Meta can fetch this file.</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "bad" && mediaProbe.reason && (
+                            <p className="mt-1 text-xs font-medium text-destructive">{mediaProbe.reason}</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "idle" && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                              Existing templates fill this from Template Manager when a header file is saved. Edit it here if you need a different image.{" "}
+                              <Link to="/template-manager" className="underline underline-offset-2">Open Template Manager</Link>
                             </p>
                           )}
-                          {field.help && !hasDefaultMedia && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                          {field.help && !isMediaParam && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
                         </div>
                       );
                     })
@@ -2089,6 +2273,7 @@ export default function Marketing() {
                   components={waTemplateComponentsByKey[selectedWaTemplate?.key || ""]}
                   bodyText={waRenderedPreview}
                   fallbackText={waRenderedPreview}
+                  mediaUrl={sendableHeaderMediaUrl(effectiveWaParamValue(waStaticParams, "template_header_media_url")) || selectedWaTemplateDefaultMediaUrl}
                   className="max-h-[420px] overflow-y-auto"
                 />
               </div>
@@ -2253,14 +2438,16 @@ export default function Marketing() {
                   || !selectedList
                   || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
                   || (campaignChannel === "whatsapp" && !selectedSenderCanSend)
-                  || (campaignChannel === "whatsapp" && !waTestSent)
+                  || (campaignChannel === "whatsapp" && !waTestDelivered)
                 }
               >
                 {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
                 Queue Campaign
               </Button>
-              {campaignChannel === "whatsapp" && !waTestSent && (
-                <p className="text-xs text-muted-foreground">Send a successful test message to enable queueing.</p>
+              {campaignChannel === "whatsapp" && !waTestDelivered && (
+                <p className="text-xs text-muted-foreground">
+                  Send a test and wait until it is received before queueing.
+                </p>
               )}
             </div>
           </div>

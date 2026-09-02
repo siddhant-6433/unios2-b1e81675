@@ -4,6 +4,8 @@ import {
   templateMediaUrlFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import { classifyHeaderMediaUrl } from "@/lib/publicMediaUrl";
+import { interpretWhatsAppMessageStatus } from "@/lib/whatsappTestDelivery";
 
 // Regression: a media-header template whose only example is Meta's scontent
 // sample handle used to report a usable "default" media URL. The bulk-send UI
@@ -44,5 +46,45 @@ describe("resolveSendableTemplateMediaUrl", () => {
 
   it("returns null when there is no media header", () => {
     expect(resolveSendableTemplateMediaUrl(null, [{ type: "BODY", text: "Hi" }])).toBeNull();
+  });
+
+  it("prefers a Template Manager media_url over Meta's sample handle", () => {
+    expect(resolveSendableTemplateMediaUrl(
+      "bba_bca_admissions_2026",
+      scontentImageHeader,
+      "https://cdn.example.com/bba-header.jpg",
+    )).toBe("https://cdn.example.com/bba-header.jpg");
+  });
+
+  it("rejects a stored scontent URL so the campaign field stays required", () => {
+    expect(resolveSendableTemplateMediaUrl(
+      null,
+      scontentImageHeader,
+      "https://scontent.whatsapp.net/v/t61.29466-34/sample.jpg",
+    )).toBeNull();
+  });
+});
+
+describe("classifyHeaderMediaUrl", () => {
+  it("rejects empty, http, and Meta sample handles", () => {
+    expect(classifyHeaderMediaUrl("").ok).toBe(false);
+    expect(classifyHeaderMediaUrl("http://cdn.example.com/a.jpg").reason).toMatch(/https/i);
+    expect(classifyHeaderMediaUrl("https://scontent.whatsapp.net/v/x.jpg").ok).toBe(false);
+  });
+
+  it("accepts a public https URL", () => {
+    expect(classifyHeaderMediaUrl("https://cdn.example.com/header.jpg")).toMatchObject({
+      ok: true,
+      url: "https://cdn.example.com/header.jpg",
+    });
+  });
+});
+
+describe("interpretWhatsAppMessageStatus", () => {
+  it("treats delivered and read as success, failed as a hard stop", () => {
+    expect(interpretWhatsAppMessageStatus({ status: "sent", status_error: null, read_at: null })).toBe("pending");
+    expect(interpretWhatsAppMessageStatus({ status: "delivered", status_error: null, read_at: null })).toEqual({ status: "delivered" });
+    expect(interpretWhatsAppMessageStatus({ status: "read", status_error: null, read_at: "2026-09-02T00:00:00Z" })).toEqual({ status: "read" });
+    expect(interpretWhatsAppMessageStatus({ status: "failed", status_error: [{ code: 131026, message: "not on whatsapp" }], read_at: null }).status).toBe("failed");
   });
 });

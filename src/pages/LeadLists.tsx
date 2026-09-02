@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -27,6 +27,7 @@ import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from 
 import {
   WhatsAppTemplatePreviewBubble,
   resolveSendableTemplateMediaUrl,
+  sendableHeaderMediaUrl,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -302,6 +303,7 @@ export default function LeadLists() {
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  const [waTemplateMediaUrlByKey, setWaTemplateMediaUrlByKey] = useState<Record<string, string>>({});
 
   // Selected template definition — drives which static inputs we render.
   const availableWaBulkTemplates = useMemo(
@@ -323,9 +325,21 @@ export default function LeadLists() {
     () => resolveSendableTemplateMediaUrl(
       waTemplateDef.key,
       waTemplateComponentsByKey[waTemplateDef.key],
+      waTemplateMediaUrlByKey[waTemplateDef.key],
     ),
-    [waTemplateDef.key, waTemplateComponentsByKey]
+    [waTemplateDef.key, waTemplateComponentsByKey, waTemplateMediaUrlByKey]
   );
+  const rememberTemplateHeaderMedia = useCallback(async (templateKey: string, url: string) => {
+    const sendable = sendableHeaderMediaUrl(url);
+    if (!sendable || sendableHeaderMediaUrl(waTemplateMediaUrlByKey[templateKey])) return;
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .update({ media_url: sendable, updated_at: new Date().toISOString() })
+      .eq("template_key", templateKey);
+    if (!error) {
+      setWaTemplateMediaUrlByKey((current) => ({ ...current, [templateKey]: sendable }));
+    }
+  }, [waTemplateMediaUrlByKey]);
   const waMissingStatic = waStaticFields.some((p) => {
     const value = effectiveWaParamValue(waStaticParams, p.name);
     if (isWaMediaTemplateParam(p.name) && waTemplateDefaultMediaUrl) return false;
@@ -592,20 +606,28 @@ export default function LeadLists() {
       setDynamicWaBulkTemplates([]);
       setWaMetaTemplateOverrides({});
       setWaTemplateComponentsByKey({});
+      setWaTemplateMediaUrlByKey({});
       return;
     }
     (async () => {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, visibility")
+        .select("template_key, display_name, description, category, visibility, media_url")
         .in("visibility", ["marketing_only", "all"]);
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;
         description?: string | null;
         category?: string | null;
+        media_url?: string | null;
       }>);
+      const mediaUrlByKey: Record<string, string> = {};
+      for (const setting of settingsRows) {
+        const url = sendableHeaderMediaUrl(setting.media_url);
+        if (setting.template_key && url) mediaUrlByKey[setting.template_key] = url;
+      }
+      setWaTemplateMediaUrlByKey(mediaUrlByKey);
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format, quality_score")
@@ -1127,7 +1149,11 @@ export default function LeadLists() {
     for (const f of waStaticFields) {
       const v = effectiveWaParamValue(waStaticParams, f.name).trim();
       if (v) staticParamsToSend[f.name] = v;
+      else if (isWaMediaTemplateParam(f.name) && waTemplateDefaultMediaUrl) {
+        staticParamsToSend[f.name] = waTemplateDefaultMediaUrl;
+      }
     }
+    const headerMediaToRemember = sendableHeaderMediaUrl(staticParamsToSend.template_header_media_url);
 
     let pacePlan;
     try {
@@ -1170,6 +1196,7 @@ export default function LeadLists() {
       setWaSending(false);
       return;
     }
+    if (headerMediaToRemember) void rememberTemplateHeaderMedia(waTemplate, headerMediaToRemember);
 
     const campaignId = (campaign as any).id;
     const rows = valid.map((l: any, index: number) => ({
@@ -2038,10 +2065,19 @@ export default function LeadLists() {
                       )}
                       {hasDefaultMedia && !value.trim() && (
                         <p className="text-[11px] text-muted-foreground mt-1">
-                          Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                          Uses the saved header file. Add a public URL here only to replace it for this campaign.
                         </p>
                       )}
-                      {p.help && !hasDefaultMedia && !mappedToken && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
+                      {isMediaParam && !hasDefaultMedia && !mappedToken && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Public URL Meta can download — not the WhatsApp preview link.{" "}
+                          <Link to="/template-manager" className="underline underline-offset-2">
+                            Save it once in Template Manager → Header file
+                          </Link>
+                          {" "}and future campaigns can leave this blank. The first successful send also saves it.
+                        </p>
+                      )}
+                      {p.help && !hasDefaultMedia && !isMediaParam && !mappedToken && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
                     </div>
                   );
                 })}
@@ -2061,6 +2097,7 @@ export default function LeadLists() {
                 components={waTemplateComponentsByKey[waTemplateDef.key]}
                 bodyText={waRenderedPreview}
                 fallbackText={waRenderedPreview}
+                mediaUrl={sendableHeaderMediaUrl(effectiveWaParamValue(waStaticParams, "template_header_media_url")) || waTemplateDefaultMediaUrl}
                 className="max-h-[360px] overflow-y-auto"
               />
             </div>

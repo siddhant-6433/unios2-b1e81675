@@ -137,7 +137,18 @@ describe("media-header templates", () => {
   });
 
   it("rejects a Meta header handle pasted as the media URL", () => {
-    expect(templateManager).toContain("scontent\\.whatsapp\\.net|lookaside\\.fbsbx\\.com");
+    expect(readFileSync("src/lib/publicMediaUrl.ts", "utf8")).toContain("classifyHeaderMediaUrl");
+    expect(readFileSync("src/components/templates/WhatsAppTemplatePreviewBubble.tsx", "utf8"))
+      .toContain("scontent\\.whatsapp\\.net|lookaside\\.fbsbx\\.com");
+  });
+
+  it("uses the saved Template Manager header file as the campaign send default", () => {
+    const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
+    const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
+    expect(marketingPage).toContain("media_url");
+    expect(marketingPage).toContain("waTemplateMediaUrlByKey");
+    expect(leadLists).toContain("media_url");
+    expect(leadLists).toContain("waTemplateMediaUrlByKey");
   });
 });
 
