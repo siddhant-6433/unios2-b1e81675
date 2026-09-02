@@ -81,11 +81,15 @@ export function HeaderActiveUsers() {
   const [leads, setLeads] = useState<ActiveLead[]>([]);
   const [open, setOpen] = useState(false);
 
-  const refresh = useCallback(async () => {
-    const { data, error } = await fetchActiveOverview();
+  // The background poll only needs presence (cheap); the recently-active leads
+  // list (~2s server-side) is fetched only when the popover opens. When polling
+  // presence-only we leave the last-known leads list untouched so it doesn't
+  // flicker away between opens.
+  const refresh = useCallback(async (includeLeads = false) => {
+    const { data, error } = await fetchActiveOverview(includeLeads);
     if (!error && data) {
       setPresence(Array.isArray(data.presence) ? data.presence : []);
-      setLeads(Array.isArray(data.leads) ? data.leads : []);
+      if (includeLeads) setLeads(Array.isArray(data.leads) ? data.leads : []);
     }
   }, []);
 
@@ -111,7 +115,7 @@ export function HeaderActiveUsers() {
   const total = presence.length + leads.length;
 
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) refresh(); }}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) refresh(true); }}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="h-9 gap-1.5 rounded-xl px-2 text-muted-foreground" title="Active now">
           <span className="relative flex h-2 w-2">
