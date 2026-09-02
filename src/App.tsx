@@ -7,6 +7,7 @@ import { OrbLoader } from "@/components/ui/thinking-orb";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { PresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { CampusProvider } from "@/contexts/CampusContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
 import { getStudentClaimToken } from "@/lib/studentClaim";
@@ -239,6 +240,7 @@ const App = () => (
       <BrowserRouter>
         <GoogleRouteTracker />
         <AuthProvider>
+          <PresenceHeartbeat />
           {/* All routes are React.lazy() — wrap in Suspense so concurrent
               renders can pause for the chunk instead of throwing
               "suspended while responding to synchronous input". */}

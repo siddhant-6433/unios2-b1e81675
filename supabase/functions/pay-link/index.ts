@@ -192,18 +192,21 @@ Deno.serve(async (req) => {
     // fine (freezes to today) and sum the term head + its late_<term> head so the
     // payer always owes exactly what the ledger says on the day they open the link.
     let effectiveAmount = Number(link.amount);
-    if (link.live_fee && link.student_id && link.fee_term) {
+    if (link.live_fee && link.student_id) {
       try {
         await admin.rpc("fn_recompute_late_fees", { _student_id: link.student_id });
       } catch (e) {
         console.error("[pay-link] fn_recompute_late_fees failed:", e);
       }
-      const { data: heads } = await admin
+      // fee_term set → scope to [term, late_term]. fee_term null (all-dues links
+      // from the Fee Dues report) → sum every due/overdue head, i.e. full balance.
+      let hq = admin
         .from("fee_ledger")
         .select("balance")
         .eq("student_id", link.student_id)
-        .in("status", ["due", "overdue"])
-        .in("term", [link.fee_term, `late_${link.fee_term}`]);
+        .in("status", ["due", "overdue"]);
+      if (link.fee_term) hq = hq.in("term", [link.fee_term, `late_${link.fee_term}`]);
+      const { data: heads } = await hq;
       const live = (heads || []).reduce((s: number, r: any) => s + Number(r.balance || 0), 0);
       effectiveAmount = Math.round(live * 100) / 100;
     }

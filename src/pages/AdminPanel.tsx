@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Users, UserPlus, FileSpreadsheet, Search, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check } from "lucide-react";
+import { Users, UserPlus, FileSpreadsheet, Search, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, LogOut, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -158,6 +158,8 @@ const AdminPanel = () => {
   const [deleting, setDeleting] = useState(false);
   const [disableTarget, setDisableTarget] = useState<{ userId: string; name: string; nextDisabled: boolean } | null>(null);
   const [togglingLogin, setTogglingLogin] = useState(false);
+  const [logoutTarget, setLogoutTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [showArchivedUsers, setShowArchivedUsers] = useState(false);
   const [archivingUser, setArchivingUser] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState<{ profileId: string; userId: string; name: string } | null>(null);
@@ -482,6 +484,29 @@ const AdminPanel = () => {
       toast({ title: "Action failed", description: err.message, variant: "destructive" });
     } finally {
       setTogglingLogin(false);
+    }
+  };
+
+  const handleForceLogout = async () => {
+    if (!logoutTarget) return;
+    setLoggingOut(true);
+    try {
+      // super_admin can call this DEFINER RPC directly; it revokes sessions and
+      // audits server-side. No account change — the user can sign back in.
+      const { error } = await supabase.rpc("admin_force_logout_user" as any, {
+        _user_id: logoutTarget.userId,
+        _display_name: logoutTarget.name,
+      });
+      if (error) throw error;
+      toast({
+        title: "Sessions revoked",
+        description: `${logoutTarget.name} will be signed out and must log in again.`,
+      });
+      setLogoutTarget(null);
+    } catch (err: any) {
+      toast({ title: "Force logout failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -867,7 +892,7 @@ const AdminPanel = () => {
                       <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Login</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Sign-in</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Last Active</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
                     </tr>
@@ -975,9 +1000,11 @@ const AdminPanel = () => {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            {user.profile_updated_at ? (
-                              <span className="text-xs text-foreground" title={new Date(user.profile_updated_at).toLocaleString("en-IN")}>
-                                {timeAgo(user.profile_updated_at)}
+                            {/* Last Active = real presence (same signal as the green dot),
+                                NOT profile_updated_at — the heartbeat bumps updated_at every 60s. */}
+                            {user.last_seen_at ? (
+                              <span className="text-xs text-foreground" title={new Date(user.last_seen_at).toLocaleString("en-IN")}>
+                                {timeAgo(user.last_seen_at)}
                               </span>
                             ) : (
                               <span className="text-xs text-muted-foreground italic">—</span>
@@ -1032,6 +1059,13 @@ const AdminPanel = () => {
                                       {user.login_disabled
                                         ? <LockOpen className="h-3.5 w-3.5" />
                                         : <Lock className="h-3.5 w-3.5" />}
+                                    </button>
+                                  )}
+                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && !user.login_disabled && (
+                                    <button onClick={() => setLogoutTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
+                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-warning-foreground dark:hover:text-warning hover:bg-warning/50/10 transition-colors"
+                                      title="Force logout (revoke sessions)">
+                                      <LogOut className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                   {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
@@ -1228,6 +1262,29 @@ const AdminPanel = () => {
                   >
                     {togglingLogin && <ButtonOrb state="working" />}
                     {disableTarget?.nextDisabled ? "Disable login" : "Enable login"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={!!logoutTarget} onOpenChange={(o) => !o && setLogoutTarget(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Force logout "{logoutTarget?.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Their active sessions will be revoked, so they'll be signed out and asked to log
+                    in again. Their account stays enabled — this doesn't disable login or change any data.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={loggingOut}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleForceLogout}
+                    disabled={loggingOut}
+                    className="bg-warning text-white hover:bg-warning/60"
+                  >
+                    {loggingOut && <ButtonOrb state="working" />}
+                    Force logout
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

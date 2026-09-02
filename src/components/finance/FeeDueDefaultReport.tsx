@@ -7,9 +7,15 @@ import { IndianRupee, AlertTriangle, Wallet, Search, Download, Users } from "luc
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { Send } from "lucide-react";
 
 type StudentRow = {
   student_id: string;
@@ -75,6 +81,11 @@ export function FeeDueDefaultReport() {
   const [courseF, setCourseF] = useState("all");
   const [batchF, setBatchF] = useState("all");
   const [sessionF, setSessionF] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [previewing, setPreviewing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [preview, setPreview] = useState<{ total: number; skipped_no_due: number; skipped_no_phone: number } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -236,6 +247,72 @@ export function FeeDueDefaultReport() {
     toast({ title: `Exported ${rows.length} rows` });
   };
 
+  // Only students who actually owe can be reminded; fully-paid rows aren't selectable.
+  const sendableStudents = useMemo(
+    () => filteredStudents.filter((s) => Number(s.balance) > 0),
+    [filteredStudents],
+  );
+  const selectableIds = useMemo(() => new Set(sendableStudents.map((s) => s.student_id)), [sendableStudents]);
+  // Only count selections still visible under the current filters.
+  const selectedVisible = useMemo(
+    () => [...selectedIds].filter((id) => selectableIds.has(id)),
+    [selectedIds, selectableIds],
+  );
+  const allSelected = sendableStudents.length > 0 && selectedVisible.length === sendableStudents.length;
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((cur) => {
+      const next = new Set(cur);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelectedIds(allSelected ? new Set() : new Set(sendableStudents.map((s) => s.student_id)));
+
+  const extractError = async (error: unknown, data: any) => {
+    if (data?.error) return data.error as string;
+    const ctx = (error as { context?: { text?: () => Promise<string> } })?.context;
+    const text = await ctx?.text?.().catch(() => "");
+    try { return JSON.parse(text || "{}").error || (error as Error)?.message || "Request failed"; }
+    catch { return (error as Error)?.message || "Request failed"; }
+  };
+
+  const handleRemindPreview = async () => {
+    if (selectedVisible.length === 0) return;
+    setPreviewing(true);
+    setPreview(null);
+    const { data, error } = await supabase.functions.invoke("fee-notify-bulk", {
+      body: { student_ids: selectedVisible, purpose_label: "Fee due", expires_days: 7, dry_run: true },
+    });
+    setPreviewing(false);
+    if (error || data?.error) {
+      toast({ title: "Preview failed", description: await extractError(error, data), variant: "destructive" });
+      return;
+    }
+    setPreview(data as { total: number; skipped_no_due: number; skipped_no_phone: number });
+    setConfirmOpen(true);
+  };
+
+  const handleRemindSend = async () => {
+    setConfirmOpen(false);
+    setSending(true);
+    const { data, error } = await supabase.functions.invoke("fee-notify-bulk", {
+      body: { student_ids: selectedVisible, purpose_label: "Fee due", expires_days: 7, dry_run: false },
+    });
+    setSending(false);
+    if (error || data?.error) {
+      toast({ title: "Send failed", description: await extractError(error, data), variant: "destructive" });
+      return;
+    }
+    const res = data as { sent: number; failed: number };
+    toast({
+      title: `Sent ${res.sent}, failed ${res.failed}`,
+      variant: res.failed > 0 ? "destructive" : "default",
+    });
+    setSelectedIds(new Set());
+    setPreview(null);
+  };
+
   if (loading) {
     return (
       <div className="flex h-48 items-center justify-center">
@@ -280,10 +357,21 @@ export function FeeDueDefaultReport() {
             className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </div>
+        {granularity === "student" && selectedVisible.length > 0 && (
+          <Button
+            size="sm"
+            className="gap-1.5 h-9 text-xs ml-auto"
+            disabled={previewing || sending}
+            onClick={handleRemindPreview}
+          >
+            {previewing || sending ? <ButtonOrb state="composing" /> : <Send className="h-3.5 w-3.5" />}
+            Send Fee Reminder ({selectedVisible.length})
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5 h-9 text-xs ml-auto"
+          className={`gap-1.5 h-9 text-xs ${granularity === "student" && selectedVisible.length > 0 ? "" : "ml-auto"}`}
           disabled={exporting || rowCount === 0}
           onClick={handleExport}
         >
@@ -306,6 +394,14 @@ export function FeeDueDefaultReport() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      aria-label="Select all"
+                      checked={allSelected}
+                      disabled={sendableStudents.length === 0}
+                      onCheckedChange={toggleAll}
+                    />
+                  </th>
                   <th className={thClass}>Student</th>
                   <th className={thClass}>Adm. No</th>
                   <th className={thClass}>Course</th>
@@ -322,7 +418,7 @@ export function FeeDueDefaultReport() {
               <tbody>
                 {filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                       No records
                     </td>
                   </tr>
@@ -332,6 +428,15 @@ export function FeeDueDefaultReport() {
                       key={s.student_id}
                       className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
                     >
+                      <td className="px-4 py-3">
+                        {Number(s.balance) > 0 && (
+                          <Checkbox
+                            aria-label={`Select ${s.name || "student"}`}
+                            checked={selectedIds.has(s.student_id)}
+                            onCheckedChange={() => toggleSelected(s.student_id)}
+                          />
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-medium text-foreground">{s.name || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.admission_no || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{s.course_name || "—"}</td>
@@ -401,6 +506,27 @@ export function FeeDueDefaultReport() {
       <p className="text-xs text-muted-foreground">
         {rowCount} {granularity === "student" ? "students" : "fee lines"} · Overdue = balance past its due date.
       </p>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send fee reminder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {preview
+                ? `A WhatsApp payment link for their full outstanding dues will be sent to ${preview.total} student${preview.total === 1 ? "" : "s"}.` +
+                  (preview.skipped_no_due ? ` ${preview.skipped_no_due} skipped (nothing due).` : "") +
+                  (preview.skipped_no_phone ? ` ${preview.skipped_no_phone} skipped (no phone).` : "")
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={!preview || preview.total === 0} onClick={handleRemindSend}>
+              Send {preview?.total ?? 0}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

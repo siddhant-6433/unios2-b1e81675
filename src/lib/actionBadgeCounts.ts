@@ -88,3 +88,32 @@ export async function fetchWhatsAppReplyStateCounts(args: ReplyStateArgs): Promi
 export function invalidateWhatsAppReplyStateCounts(): void {
   replyStateCache.clear();
 }
+
+// get_active_overview returns { presence, leads } for the header widget:
+// online login-users (scoped) + recently-active leads/applicants. Presence is
+// coarse (60s heartbeat), so a short TTL + dedup keeps a poll and an on-open
+// refetch from double-firing the RPC.
+const ACTIVE_OVERVIEW_TTL_MS = 30000;
+let activeOverviewInflight: Promise<RpcResult> | null = null;
+let activeOverviewCache: { at: number; res: RpcResult } | null = null;
+
+export async function fetchActiveOverview(): Promise<RpcResult> {
+  if (activeOverviewCache && Date.now() - activeOverviewCache.at < ACTIVE_OVERVIEW_TTL_MS) {
+    return activeOverviewCache.res;
+  }
+  if (activeOverviewInflight) return activeOverviewInflight;
+
+  activeOverviewInflight = (supabase as any)
+    .rpc("get_active_overview")
+    .then((res: RpcResult) => {
+      activeOverviewInflight = null;
+      if (!res.error) activeOverviewCache = { at: Date.now(), res };
+      return res;
+    })
+    .catch((err: any) => {
+      activeOverviewInflight = null;
+      throw err;
+    });
+
+  return activeOverviewInflight;
+}

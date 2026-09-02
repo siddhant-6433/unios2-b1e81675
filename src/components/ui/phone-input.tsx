@@ -197,7 +197,7 @@ export function PhoneInput({ id, value, onChange, placeholder, required, classNa
         maxLength={selectedCountry.digits}
         inputMode="numeric"
         pattern={`\\d{${selectedCountry.digits}}`}
-        className={`flex-1 min-w-0 rounded-xl border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:cursor-not-allowed ${
+        className={`flex-1 min-w-0 rounded-xl border bg-background px-3 py-2.5 text-base md:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:cursor-not-allowed ${
           invalid ? "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30" : "border-input focus:ring-ring/20"
         }`}
       />

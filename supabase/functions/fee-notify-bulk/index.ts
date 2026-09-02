@@ -115,6 +115,11 @@ Deno.serve(async (req) => {
 
     const courseIds = (Array.isArray(parsed.course_ids) ? parsed.course_ids : [])
       .filter(isUuid).map(String);
+    // student_ids path: the Fee Dues report hand-picks students (all-terms dues),
+    // so we target them by id and skip the course/fee_term filter contract.
+    const studentIds = (Array.isArray(parsed.student_ids) ? parsed.student_ids : [])
+      .filter(isUuid).map(String);
+    const byStudentIds = studentIds.length > 0;
     const sessionId = isUuid(parsed.session_id) ? String(parsed.session_id) : null;
     const campusId = isUuid(parsed.campus_id) ? String(parsed.campus_id) : null;
     const batchId = isUuid(parsed.batch_id) ? String(parsed.batch_id) : null;
@@ -125,22 +130,27 @@ Deno.serve(async (req) => {
       ? Math.max(1, Math.min(365, Math.round(Number(parsed.expires_days))))
       : 7;
 
-    if (!courseIds.length && !batchId) {
-      return json({ error: "course_ids or batch_id is required" }, 400);
+    if (!byStudentIds) {
+      if (!courseIds.length && !batchId) {
+        return json({ error: "course_ids, batch_id or student_ids is required" }, 400);
+      }
+      if (!feeTerm) return json({ error: "fee_term is required" }, 400);
     }
-    if (!feeTerm) return json({ error: "fee_term is required" }, 400);
 
     // --- Resolve candidate students -----------------------------------------
-    // No status filter: whoever still owes the term is a valid target (the
-    // due-balance filter below scopes it), and a .neq would silently drop
-    // null-status rows.
+    // No status filter: whoever still owes is a valid target (the due-balance
+    // filter below scopes it), and a .neq would silently drop null-status rows.
     let sq = admin
       .from("students")
       .select("id, name, phone, whatsapp_no, father_phone, father_whatsapp, mother_phone, mother_whatsapp, guardian_phone, lead_id, course_id, session_id, campus_id, batch_id, status");
-    if (courseIds.length) sq = sq.in("course_id", courseIds);
-    if (sessionId) sq = sq.eq("session_id", sessionId);
-    if (campusId) sq = sq.eq("campus_id", campusId);
-    if (batchId) sq = sq.eq("batch_id", batchId);
+    if (byStudentIds) {
+      sq = sq.in("id", studentIds);
+    } else {
+      if (courseIds.length) sq = sq.in("course_id", courseIds);
+      if (sessionId) sq = sq.eq("session_id", sessionId);
+      if (campusId) sq = sq.eq("campus_id", campusId);
+      if (batchId) sq = sq.eq("batch_id", batchId);
+    }
     const { data: students, error: sErr } = await sq;
     if (sErr) return json({ error: sErr.message }, 500);
     if (!students?.length) return json({ matched: [], total: 0, skipped_no_due: 0, skipped_no_phone: 0 });
@@ -156,13 +166,17 @@ Deno.serve(async (req) => {
 
     // --- Current due per student for [term, late_term] ----------------------
     const ids = students.map((s: any) => s.id);
-    const { data: ledger, error: lErr } = await admin
+    // student_ids mode: no fee_term → sum the student's entire due/overdue
+    // outstanding across all terms (full balance chase). Filter mode: scope to
+    // [feeTerm, late_feeTerm] as before.
+    let lq = admin
       .from("fee_ledger")
       .select("student_id, balance, term")
       .in("student_id", ids)
-      .in("term", [feeTerm, `late_${feeTerm}`])
       .in("status", ["due", "overdue"])
       .gt("balance", 0);
+    if (!byStudentIds && feeTerm) lq = lq.in("term", [feeTerm, `late_${feeTerm}`]);
+    const { data: ledger, error: lErr } = await lq;
     if (lErr) return json({ error: lErr.message }, 500);
 
     const dueByStudent = new Map<string, number>();
@@ -214,8 +228,10 @@ Deno.serve(async (req) => {
       .from("fee_notification_campaigns")
       .insert({
         created_by: user.id,
-        filter: { course_ids: courseIds, session_id: sessionId, campus_id: campusId, batch_id: batchId },
-        fee_term: feeTerm,
+        filter: byStudentIds
+          ? { student_ids: studentIds }
+          : { course_ids: courseIds, session_id: sessionId, campus_id: campusId, batch_id: batchId },
+        fee_term: byStudentIds ? "all_dues" : feeTerm,
         purpose_label: purposeLabel,
         expires_at: new Date(Date.now() + expiresDays * 86400000).toISOString(),
         total: targets.length,
@@ -252,7 +268,8 @@ Deno.serve(async (req) => {
         note: purposeLabel,
         created_by: user.id,
         live_fee: true,
-        fee_term: feeTerm,
+        // null term → pay-link recomputes over ALL due/overdue heads (full dues)
+        fee_term: byStudentIds ? null : feeTerm,
         fee_campaign_id: campaign.id,
         expires_at: expiresAt,
       })))
