@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { matchesCampus } from "@/lib/campusFilter";
-import { defaultFeeTermLabel, oneTimeRank } from "@/lib/feeTermLabels";
+import { defaultFeeTermLabel, feeTermGroupLabel, oneTimeRank, ONE_TIME_GROUP } from "@/lib/feeTermLabels";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -293,7 +293,9 @@ describe("ledger reads the way the cashier thinks", () => {
 
   it("groups the one-time charges first, application fee at the top", () => {
     expect(studentFeePanel).toContain("ONE_TIME_GROUP");
-    expect(studentFeePanel).toContain('"One-time Fees"');
+    // The heading itself now lives in the shared labeller (feeTermGroupLabel)
+    // so every ledger surface spells it the same way.
+    expect(feeTermGroupLabel(ONE_TIME_GROUP)).toBe("One-time Fees");
     expect(defaultFeeTermLabel("registration")).toBe("Application Fee");
     expect(oneTimeRank("NB-REG", "Application Fee")).toBeLessThan(oneTimeRank("NB-ADM", "Beacon Admission Fee"));
     expect(oneTimeRank("NB-ADM", "Beacon Admission Fee")).toBeLessThan(oneTimeRank("NB-SEC", "Security Deposit"));
@@ -578,7 +580,9 @@ describe("student portal fee ledger", () => {
     expect(studentPortal).toContain("ONE_TIME_TERMS");
     expect(studentPortal).toContain("ONE_TIME_GROUP");
     expect(studentPortal).toContain("oneTimeRank");
-    expect(studentPortal).toContain("One-time Fees");
+    // The heading itself comes from the shared labeller, so the student portal
+    // and the staff ledger cannot drift apart on the wording.
+    expect(studentPortal).toContain("feeTermGroupLabel");
   });
 
   it("shows the waiver on the head it was applied to", () => {

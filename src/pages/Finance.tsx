@@ -23,7 +23,8 @@ import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
 import FeeCollections from "./FeeCollections";
 import { CashierConsole } from "@/components/finance/CashierConsole";
 import { CustomFeeHeadsPanel } from "@/components/finance/CustomFeeHeadsPanel";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel } from "@/lib/feeTermLabels";
+import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import { matchesCampus } from "@/lib/campusFilter";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -46,6 +47,11 @@ const Finance = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
+  // Ledger rows here span many programmes, so resolve each course's period
+  // wording once for the page rather than per row.
+  const feeMetaByCourse = useFeeStructureMetaByCourse(
+    useMemo(() => ledger.map((l: any) => l.students?.course_id), [ledger]),
+  );
   const [payments, setPayments] = useState<any[]>([]);
   const [structures, setStructures] = useState<any[]>([]);
   const [summary, setSummary] = useState<Record<string, number> | null>(null);
@@ -99,7 +105,7 @@ const Finance = () => {
     (supabase.rpc as any)("is_day_closed", { _campus_id: selectedCampusId ?? null })
       .then(({ data }: { data: boolean | null }) => setDayClosed(!!data));
     const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes, summaryRes] = await Promise.all([
-      supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
+      supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id, course_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       // v_all_payments unifies pre-admission lead_payments (token / application
       // fees confirmed before AN issuance) with post-admission payments. Without
       // this UNION, Diya's ₹5000 token fee — confirmed in lead_payments — was
@@ -307,7 +313,7 @@ const Finance = () => {
                         <td className="px-4 py-3">
                           <Badge className={`text-[10px] font-medium border-0 capitalize ${categoryBadge[fee.fee_codes?.category] || "bg-muted"}`}>{fee.fee_codes?.category || "—"}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(fee.term)}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{feeTermLabel(fee.term, feeMetaByCourse[fee.students?.course_id || ""])}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.total_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right text-foreground">₹{Number(fee.paid_amount).toLocaleString()}</td>
                         <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(fee.balance || 0).toLocaleString()}</td>

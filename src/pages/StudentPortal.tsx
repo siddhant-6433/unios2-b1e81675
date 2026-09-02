@@ -6,8 +6,9 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import {
-  defaultFeeTermLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
+  feeTermLabelLong, feeTermGroupLabel, feePeriodNoun, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
 } from "@/lib/feeTermLabels";
+import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
@@ -25,6 +26,7 @@ interface StudentInfo {
   photo_url: string | null;
   admission_no: string;
   course_id: string | null;
+  session_id: string | null;
   campus_id: string | null;
   course_name: string;
   campus_name: string;
@@ -69,6 +71,8 @@ export default function StudentPortal() {
   const claimToken = getStudentClaimToken(searchParams);
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
+  // Programme-specific period wording (D.AOTT bills semesters stored as year_N).
+  const { metadata: feeMeta } = useFeeStructureMeta(student?.course_id, student?.session_id);
   const [fees, setFees] = useState<FeeItem[]>([]);
   // Consultant-managed fee hiding: when the fee structure is hidden, the
   // student-role fee_ledger SELECT returns zero rows. This holds the RPC-backed
@@ -148,7 +152,7 @@ export default function StudentPortal() {
 
     const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, session_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("user_id", user?.id)
       .limit(1)
       .single();
@@ -162,6 +166,7 @@ export default function StudentPortal() {
         photo_url: (studentData as any).photo_url || null,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
         course_id: studentData.course_id || null,
+        session_id: studentData.session_id || null,
         campus_id: studentData.campus_id || null,
         course_name: course?.name || "",
         campus_name: (studentData as any).campuses?.name || "",
@@ -189,7 +194,7 @@ export default function StudentPortal() {
       if (feeRes.data) {
         setFees(feeRes.data.map((f: any) => ({
           id: f.id,
-          fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
+          fee_code_name: f.fee_codes?.name || "",
           fee_code: f.fee_codes?.code || null,
           term: f.term,
           total_amount: Number(f.total_amount),
@@ -258,7 +263,7 @@ export default function StudentPortal() {
       })
       .map((fee) => ({
         id: fee.id,
-        fee_head: fee.fee_code_name,
+        fee_head: fee.fee_code_name || feeTermLabelLong(fee.term, feeMeta),
         amount: fee.total_amount,
         balance: fee.balance,
         status: fee.status,
@@ -479,7 +484,9 @@ export default function StudentPortal() {
           {futureFees.length > 0 && totalOutstanding > totalDueNow && (
             <div className="rounded-xl bg-white border border-gray-200 p-4 flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs text-gray-500">Annual Pay All</p>
+                <p className="text-xs text-gray-500">
+                  {/^year$/i.test(feePeriodNoun(feeMeta)) ? "Annual Pay All" : "Pay All Remaining"}
+                </p>
                 <p className="text-sm font-semibold text-gray-900">
                   ₹{payAllAmount.toLocaleString("en-IN")}
                   <span className="ml-2 text-xs font-medium text-success">
@@ -510,7 +517,7 @@ export default function StudentPortal() {
                 <Fragment key={g.term}>
                   <div className="flex items-center gap-2 bg-gray-50 px-4 py-2">
                     <span className="text-xs font-semibold text-gray-700">
-                      {g.term === ONE_TIME_GROUP ? "One-time Fees" : defaultFeeTermLabel(g.term)}
+                      {feeTermGroupLabel(g.term, feeMeta, { long: true })}
                     </span>
                     {gWaived > 0 && (
                       <span className="text-[10px] font-medium text-success">
@@ -546,7 +553,9 @@ export default function StudentPortal() {
                      <Clock className={`h-4 w-4 ${futureDue ? "text-info-foreground" : "text-yellow-600"}`} />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{fee.fee_code_name}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {fee.fee_code_name || feeTermLabelLong(fee.term, feeMeta)}
+                    </p>
                     <p className="text-xs text-gray-400">
                       {futureDue ? "Upcoming" : "Due"} {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </p>

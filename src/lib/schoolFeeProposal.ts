@@ -1,3 +1,4 @@
+import { defaultFeeTermLabel } from "./feeTermLabels";
 export type SchoolFeeCategory = "tuition" | "hostel" | "transport" | "enrollment" | "other";
 
 export interface SchoolFeeItem {
@@ -254,24 +255,10 @@ function titleCaseTerm(value: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+// Kept as a named export because school-proposal callers read better with it,
+// but the wording itself lives in one place now.
 export function formatFeeTerm(term: string | null | undefined): string {
-  const normalized = String(term || "").trim().toLowerCase();
-  const yearMatch = normalized.match(/^year[_\s-]?(\d+)$/);
-  if (yearMatch) return `Year ${yearMatch[1]}`;
-
-  const semesterMatch = normalized.match(/^(sem|semester)[_\s-]?(\d+)$/);
-  if (semesterMatch) return `Sem ${semesterMatch[2]}`;
-
-  const quarterMatch = normalized.match(/^q(?:uarter)?[_\s-]?(\d+)$/);
-  if (quarterMatch) return `Q${quarterMatch[1]}`;
-
-  const termMatch = normalized.match(/^term[_\s-]?(\d+)$/);
-  if (termMatch) return `Term ${termMatch[1]}`;
-
-  const installmentMatch = normalized.match(/^installment[_\s-]?(\d+)$/);
-  if (installmentMatch) return `Installment ${installmentMatch[1]}`;
-
-  return titleCaseTerm(normalized || "fee");
+  return defaultFeeTermLabel(String(term || "").trim().toLowerCase() || "fee");
 }
 
 function canonicalFeeTerm(term: string | null | undefined): string {
@@ -331,7 +318,10 @@ function termSortRank(label: string): number {
   const quarterMatch = label.match(/^Q(\d+)$/i);
   if (quarterMatch) return 300 + Number(quarterMatch[1]);
   if (/admission/i.test(label)) return 10;
-  if (/registration/i.test(label)) return 11;
+  // The registration head has read "Application Fee" since the app_fee↔
+  // registration naming was unified; match both so it keeps sorting with the
+  // joining charges rather than falling to the end.
+  if (/registration|application/i.test(label)) return 11;
   if (/one time/i.test(label)) return 12;
   return 900;
 }

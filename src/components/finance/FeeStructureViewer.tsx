@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, ChevronDown, ChevronUp, Building2, Plus, Pencil, Trash2, Power } from "lucide-react";
 import { ScholarshipPanel } from "./ScholarshipPanel";
-import { formatFeeTerm } from "@/lib/schoolFeeProposal";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 import { FeeStructureEditDialog, EditableFeeItem } from "./FeeStructureEditDialog";
 
 const categoryBadge: Record<string, string> = {
@@ -660,7 +660,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 items.map((item, i) => (
                   <tr key={i} className="border-b border-border/40 last:border-0">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{formatFeeTerm(item.term)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{feeTermLabel(item.term, fs.metadata)}</td>
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
                       {canManage ? (
                         <input

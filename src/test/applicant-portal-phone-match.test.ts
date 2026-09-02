@@ -32,7 +32,10 @@ describe("applicant portal phone/lead match", () => {
   });
 
   it("places year-1 fee CTA above confirm-admission and token-fee fallback", () => {
-    const y1 = tokenPanel.indexOf("Pay year 1 fee now");
+    // Anchored on the CTA's payment handler rather than its label: the label is
+    // now built from the programme's own period wording (termLabel), so D.AOTT
+    // reads "Pay semester 1 fee now" and an annual course "Pay year 1 fee now".
+    const y1 = tokenPanel.indexOf("startPayment(y1Due,");
     const confirm = tokenPanel.indexOf("Confirm Your Admission");
     const token = tokenPanel.indexOf("Can't pay full amount right now?");
     expect(y1).toBeGreaterThan(-1);

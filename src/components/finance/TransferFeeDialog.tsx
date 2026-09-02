@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { ArrowLeftRight } from "lucide-react";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel, type FeeStructureMetadata } from "@/lib/feeTermLabels";
 
 const TO_CREDIT = "__credit__";
 
@@ -19,11 +19,15 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   studentId: string;
+  /** Period wording from the programme's active fee structure — D.AOTT's
+   *  year_N terms are semesters. Threaded from StudentFeePanel, which has
+   *  already resolved it, so each dialog need not re-query. */
+  feeMeta?: FeeStructureMetadata;
   fees: any[];
   onSuccess: () => void;
 }
 
-export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess }: Props) {
+export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess, feeMeta }: Props) {
   const { toast } = useToast();
   const [fromId, setFromId] = useState<string>("");
   const [toId, setToId] = useState<string>("");
@@ -78,7 +82,7 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess }: Props
             onValueChange={(v) => { setFromId(v); setAmount(""); if (toId === v) setToId(""); }}
             options={fromOptions.map(f => ({
               value: f.id,
-              label: `${f.fee_codes?.code || "Fee"} — ${defaultFeeTermLabel(f.term)} — ₹${Number(f.paid_amount).toLocaleString("en-IN")} paid`,
+              label: `${f.fee_codes?.code || "Fee"} — ${feeTermLabel(f.term, feeMeta)} — ₹${Number(f.paid_amount).toLocaleString("en-IN")} paid`,
             }))}
             label="From"
             placeholder="Select source head"
@@ -91,7 +95,7 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess }: Props
               { value: TO_CREDIT, label: "→ Credit (unallocate)" },
               ...toOptions.map(f => ({
                 value: f.id,
-                label: `${f.fee_codes?.code || "Fee"} — ${defaultFeeTermLabel(f.term)} — ₹${Number(f.balance || 0).toLocaleString("en-IN")} due`,
+                label: `${f.fee_codes?.code || "Fee"} — ${feeTermLabel(f.term, feeMeta)} — ₹${Number(f.balance || 0).toLocaleString("en-IN")} due`,
               })),
             ]}
             label="To"

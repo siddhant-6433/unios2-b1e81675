@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
+import { feeTermLabel } from "@/lib/feeTermLabels";
+import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import { Send } from "lucide-react";
 
 type StudentRow = {
@@ -22,6 +23,7 @@ type StudentRow = {
   name: string | null;
   admission_no: string | null;
   campus_name: string | null;
+  course_id: string | null;
   course_name: string | null;
   batch_name: string | null;
   session_name: string | null;
@@ -41,6 +43,7 @@ type LineRow = {
   name: string | null;
   admission_no: string | null;
   campus_name: string | null;
+  course_id: string | null;
   course_name: string | null;
   batch_name: string | null;
   session_name: string | null;
@@ -72,6 +75,13 @@ export function FeeDueDefaultReport() {
   const { toast } = useToast();
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [lines, setLines] = useState<LineRow[]>([]);
+  // The report spans every programme, so each course's own period wording
+  // (D.AOTT calls its year_N terms semesters) is resolved once for the page.
+  const feeMetaByCourse = useFeeStructureMetaByCourse(
+    useMemo(() => lines.map((l) => l.course_id), [lines]),
+  );
+  const termLabel = (l: LineRow) =>
+    feeTermLabel(l.term || "", feeMetaByCourse[l.course_id || ""]);
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState<Granularity>("student");
   const [scope, setScope] = useState<Scope>("all");
@@ -228,7 +238,7 @@ export function FeeDueDefaultReport() {
             Session: l.session_name || "",
             Campus: l.campus_name || "",
             "Fee Head": l.fee_name || l.fee_code || "",
-            Term: defaultFeeTermLabel(l.term || ""),
+            Term: termLabel(l),
             Total: Number(l.total_amount || 0),
             Concession: Number(l.concession || 0),
             Paid: Number(l.paid_amount || 0),
@@ -485,7 +495,7 @@ export function FeeDueDefaultReport() {
                       <td className="px-4 py-3 font-medium text-foreground">{l.name || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{l.admission_no || "—"}</td>
                       <td className="px-4 py-3 text-foreground">{l.fee_name || l.fee_code || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(l.term || "")}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{termLabel(l)}</td>
                       <td className="px-4 py-3 text-right text-foreground">{inr(l.total_amount)}</td>
                       <td className="px-4 py-3 text-right text-foreground">{inr(l.paid_amount)}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground">{inr(l.balance)}</td>
