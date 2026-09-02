@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,7 +16,7 @@ import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, PauseCircle, PlayCircle, RefreshCw, Send, StopCircle, Trash2, UserX } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
@@ -180,6 +180,29 @@ const pct = (num: number, den: number) => {
   return `${((num / den) * 100).toFixed(1)}%`;
 };
 
+/** Numeric rate, for threshold comparisons (pct() returns a display string). */
+const rate = (num: number, den: number) => (den ? (num / den) * 100 : 0);
+
+/**
+ * Health tone from a rate. Kind-aware because the metrics point in different
+ * directions — a high delivered rate is good, a high failed rate is not.
+ * Mirrors pctClass() in PublisherAnalytics.tsx.
+ */
+type StatTone = "ok" | "warn" | "bad";
+const rateTone = (value: number, kind: "delivered" | "read" | "failed"): StatTone => {
+  if (kind === "failed") return value >= 25 ? "bad" : value >= 10 ? "warn" : "ok";
+  const t = kind === "read" ? { good: 30, warn: 15 } : { good: 85, warn: 60 };
+  return value >= t.good ? "ok" : value >= t.warn ? "warn" : "bad";
+};
+
+/** Count + percentage in one pill, coloured by health. */
+const ratePillClass = (value: number, kind: "delivered" | "read" | "failed") => {
+  const tone = rateTone(value, kind);
+  if (tone === "bad") return "text-destructive bg-destructive/5";
+  if (tone === "warn") return "text-warning-foreground bg-warning/5";
+  return "text-success bg-success/5";
+};
+
 const fmtDate = (value: string | null) => {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-IN", {
@@ -282,6 +305,8 @@ export default function Marketing() {
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [visibleCampaigns, setVisibleCampaigns] = useState(10);
+  /** Row whose failure breakdown is expanded (Applications.tsx pattern). */
+  const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
   const [lists, setLists] = useState<LeadList[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2271,42 +2296,23 @@ export default function Marketing() {
           <p className="text-sm text-muted-foreground">Running, completed, paused, failed, and terminated campaign results.</p>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
-          <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
-          <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
-          <Metric title="Delivered" value={`${totals.delivered.toLocaleString("en-IN")} (${pct(totals.delivered, totals.sent)})`} icon={CheckCircle2} tone="blue" />
-          <Metric title="Read" value={`${totals.read.toLocaleString("en-IN")} (${pct(totals.read, totals.sent)})`} icon={MessageSquare} tone="emerald" />
-          <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
-          <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
+        {/* One row of five, matching the WhatsAppHealth tile shape. Was twelve
+            tiles across three grids — including a six-tile row inside
+            md:grid-cols-4, which wrapped 4+2 and left two dead cells. */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <CampaignStat label="Audience" value={totals.total} hint={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`} />
+          <CampaignStat label="Sent" value={totals.sent} hint={`${pct(totals.sent, totals.sent + totals.failed)} success rate`} />
+          <CampaignStat label="Delivered" value={totals.delivered} hint={`${pct(totals.delivered, totals.sent)} of sent`} tone={rateTone(rate(totals.delivered, totals.sent), "delivered")} />
+          <CampaignStat label="Read" value={totals.read} hint={`${pct(totals.read, totals.sent)} of sent`} tone={rateTone(rate(totals.read, totals.sent), "read")} />
+          <CampaignStat label="Failed" value={totals.failed} hint={`${pct(totals.failed, totals.sent + totals.failed)} of attempts`} tone={rateTone(rate(totals.failed, totals.sent + totals.failed), "failed")} />
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
-          <Metric title="Responded" value={totals.responded.toLocaleString("en-IN")} icon={Reply} tone="blue" />
-          <Metric title="Called" value={totals.called.toLocaleString("en-IN")} icon={PhoneCall} tone="emerald" />
-          <Metric title="Clicked link" value={totals.clickedLink.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
-          <Metric title="Clicked button" value={totals.clickedButton.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp sent</p>
-                <p className="mt-1 text-2xl font-bold">{totals.whatsapp.toLocaleString("en-IN")}</p>
-              </div>
-              <MessageSquare className="h-8 w-8 text-success" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email sent</p>
-                <p className="mt-1 text-2xl font-bold">{totals.email.toLocaleString("en-IN")}</p>
-              </div>
-              <Mail className="h-8 w-8 text-info-foreground" />
-            </CardContent>
-          </Card>
-        </div>
+        {/* Engagement and channel split are secondary — a line, not six tiles. */}
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {totals.responded.toLocaleString("en-IN")} responded · {totals.called.toLocaleString("en-IN")} called ·{" "}
+          {(totals.clickedLink + totals.clickedButton).toLocaleString("en-IN")} clicks ·{" "}
+          {totals.whatsapp.toLocaleString("en-IN")} WhatsApp / {totals.email.toLocaleString("en-IN")} email sent
+        </p>
       </div>
 
       <Card>
@@ -2329,39 +2335,66 @@ export default function Marketing() {
             <div className="py-12 text-center text-sm text-muted-foreground">No campaigns yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-[1200px] w-full text-sm">
-                <thead className="border-b border-border bg-muted/30 text-xs uppercase text-muted-foreground">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
+                    <th className="w-8 px-2 py-3" />
                     <th className="px-4 py-3 text-left">Campaign</th>
-                    <th className="px-4 py-3 text-left">Channel</th>
                     <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Recipients</th>
+                    <th className="px-4 py-3 text-right">Audience</th>
                     <th className="px-4 py-3 text-right">Sent</th>
                     <th className="px-4 py-3 text-right">Delivered</th>
                     <th className="px-4 py-3 text-right">Read</th>
                     <th className="px-4 py-3 text-right">Failed</th>
-                    <th className="px-4 py-3 text-right">Responded</th>
-                    <th className="px-4 py-3 text-right">Called</th>
-                    <th className="px-4 py-3 text-right">Clicks</th>
-                    <th className="px-4 py-3 text-right">Success</th>
                     <th className="px-4 py-3 text-left">Scheduled / Created</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {campaigns.slice(0, visibleCampaigns).map((campaign) => (
-                    <tr key={`${campaign.channel}-${campaign.id}`} className="border-b border-border last:border-b-0">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{campaign.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {campaign.template || "No template"}{campaign.listName ? ` - ${campaign.listName}` : ""}
-                        </p>
-                        {campaign.workerError && (
-                          <p className="mt-1 text-xs text-destructive">{campaign.workerError}</p>
+                    <Fragment key={`${campaign.channel}-${campaign.id}`}>
+                    <tr className="border-b border-border transition-colors duration-160 ease-standard last:border-b-0 hover:bg-muted/20">
+                      <td className="w-8 px-2 py-3 align-top">
+                        {campaign.failureBreakdown.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedCampaignId((c) => (c === campaign.id ? null : campaign.id))}
+                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            aria-label={expandedCampaignId === campaign.id ? "Hide failure reasons" : "Show failure reasons"}
+                          >
+                            <ChevronDown className={`h-4 w-4 transition-transform duration-160 ease-standard ${expandedCampaignId === campaign.id ? "rotate-180" : ""}`} />
+                          </button>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="capitalize">{campaign.channel}</Badge>
+                        <div className="flex items-start gap-2">
+                          {campaign.channel === "whatsapp"
+                            ? <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-label="WhatsApp" />
+                            : <Mail className="mt-0.5 h-4 w-4 shrink-0 text-info-foreground" aria-label="Email" />}
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground">{campaign.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {campaign.template || "No template"}{campaign.listName ? ` · ${campaign.listName}` : ""}
+                            </p>
+                            {/* Live progress belongs here, not stacked inside the Sent
+                                column where it was one of two causes of 400px rows. */}
+                            {!isCampaignTerminal(campaign.status) && campaign.pendingRecipients > 0 && (
+                              <div className="mt-1.5 h-1 w-40 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-info transition-all"
+                                  style={{ width: `${campaignProgressPct(campaign.total - campaign.pendingRecipients, campaign.total)}%` }}
+                                />
+                              </div>
+                            )}
+                            {/* Auto-pause writes a full sentence here; clamp it so an
+                                error can never blow the row height open again. */}
+                            {campaign.workerError && (
+                              <p className="mt-1 line-clamp-2 max-w-[22rem] text-xs text-destructive" title={campaign.workerError}>
+                                {campaign.workerError}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         {(() => {
@@ -2376,76 +2409,27 @@ export default function Marketing() {
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">{campaign.total.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right font-medium text-success tabular-nums">{campaign.sent.toLocaleString("en-IN")}</td>
+                      {/* Count and rate in one pill, coloured by health — the
+                          PublisherAnalytics idiom. Two lines became one. */}
                       <td className="px-4 py-3 text-right">
-                        {(() => {
-                          // Attempted, not campaign.sent: sent_count is only rewritten at
-                          // the end of a batch, which is why the table once read "260 sent"
-                          // while 378 had actually gone out.
-                          const attempted = campaign.total - campaign.pendingRecipients;
-                          const pct = campaignProgressPct(attempted, campaign.total);
-                          const live = !isCampaignTerminal(campaign.status) && campaign.pendingRecipients > 0;
-                          const eta = live ? countdownTo(campaign.nextEligibleAt, nowTick) : null;
-                          return (
-                            <div className="space-y-1">
-                              <div className="font-medium text-success">{campaign.sent.toLocaleString("en-IN")}</div>
-                              {live && (
-                                <>
-                                  <div className="h-1 w-24 overflow-hidden rounded-full bg-muted">
-                                    <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
-                                  </div>
-                                  <div className="text-[11px] leading-tight text-muted-foreground">
-                                    {attempted.toLocaleString("en-IN")} / {campaign.total.toLocaleString("en-IN")} · {pct}%
-                                  </div>
-                                  <div className="text-[11px] leading-tight text-muted-foreground">
-                                    {eta ? `next batch in ${eta}` : `${campaign.dueNow.toLocaleString("en-IN")} due now`}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })()}
+                        {campaign.channel === "whatsapp" ? (
+                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.delivered, campaign.sent), "delivered")}`}>
+                            {campaign.delivered.toLocaleString("en-IN")} · {pct(campaign.delivered, campaign.sent)}
+                          </span>
+                        ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-success">
-                          {campaign.channel === "whatsapp" ? campaign.delivered.toLocaleString("en-IN") : "—"}
-                        </div>
-                        {campaign.channel === "whatsapp" && (
-                          <div className="text-[11px] text-muted-foreground">{pct(campaign.delivered, campaign.sent)}</div>
-                        )}
+                        {campaign.channel === "whatsapp" ? (
+                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.read, campaign.sent), "read")}`}>
+                            {campaign.read.toLocaleString("en-IN")} · {pct(campaign.read, campaign.sent)}
+                          </span>
+                        ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-success">
-                          {campaign.channel === "whatsapp" ? campaign.read.toLocaleString("en-IN") : "—"}
-                        </div>
-                        {campaign.channel === "whatsapp" && (
-                          <div className="text-[11px] text-muted-foreground">{pct(campaign.read, campaign.sent)}</div>
-                        )}
+                      <td className="px-4 py-3 text-right font-medium text-destructive tabular-nums">
+                        {campaign.failed.toLocaleString("en-IN")}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-destructive">{campaign.failed.toLocaleString("en-IN")}</div>
-                        {/* "504 failed" is not actionable; "402 billing / 98 unreachable" is. */}
-                        {campaign.failureBreakdown.slice(0, 3).map((f) => (
-                          <div key={f.code} className="text-[11px] leading-tight text-muted-foreground" title={`Meta ${f.code}`}>
-                            {f.count.toLocaleString("en-IN")} {f.text}
-                          </div>
-                        ))}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">{pct(campaign.responded, campaign.total)}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{campaign.called.toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">{pct(campaign.called, campaign.total)}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{(campaign.clickedLink + campaign.clickedButton).toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {campaign.clickedLink.toLocaleString("en-IN")} link / {campaign.clickedButton.toLocaleString("en-IN")} button
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {campaignDisplayStatus(campaign) === "scheduled" ? (
                           <div>
@@ -2523,6 +2507,50 @@ export default function Marketing() {
                         </div>
                       </td>
                     </tr>
+                    {expandedCampaignId === campaign.id && (
+                      <tr className="border-b border-border last:border-b-0">
+                        <td colSpan={10} className="bg-primary/5 px-4 py-3">
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Why {campaign.failed.toLocaleString("en-IN")} failed
+                              </p>
+                              <ul className="space-y-1">
+                                {campaign.failureBreakdown.map((f) => (
+                                  <li key={f.code} className="flex items-baseline gap-2 text-xs">
+                                    <span className="min-w-[3.5rem] text-right font-semibold tabular-nums text-destructive">
+                                      {f.count.toLocaleString("en-IN")}
+                                    </span>
+                                    <span className="text-foreground">{f.text}</span>
+                                    {f.code !== "unknown" && (
+                                      <span className="text-[11px] text-muted-foreground/70">Meta {f.code}</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Engagement
+                              </p>
+                              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                                <dt className="text-muted-foreground">Responded</dt>
+                                <dd className="tabular-nums">{campaign.responded.toLocaleString("en-IN")} · {pct(campaign.responded, campaign.total)}</dd>
+                                <dt className="text-muted-foreground">Called</dt>
+                                <dd className="tabular-nums">{campaign.called.toLocaleString("en-IN")} · {pct(campaign.called, campaign.total)}</dd>
+                                <dt className="text-muted-foreground">Clicks</dt>
+                                <dd className="tabular-nums">
+                                  {campaign.clickedLink.toLocaleString("en-IN")} link / {campaign.clickedButton.toLocaleString("en-IN")} button
+                                </dd>
+                                <dt className="text-muted-foreground">Success rate</dt>
+                                <dd className="tabular-nums">{pct(campaign.sent, campaign.sent + campaign.failed)}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -2713,35 +2741,33 @@ export default function Marketing() {
   );
 }
 
-function Metric({
-  title,
+/**
+ * Summary tile. Same shape as WhatsAppHealth's SummaryCard: small label, big
+ * tabular number, a hint line carrying the percentage, and a tone derived from
+ * thresholds rather than hard-coded per call site (which is what the older
+ * local `Metric` does).
+ */
+function CampaignStat({
+  label,
   value,
-  icon: Icon,
-  tone = "slate",
+  hint,
+  tone = "ok",
 }: {
-  title: string;
-  value: string;
-  icon: any;
-  tone?: "slate" | "emerald" | "red" | "blue";
+  label: string;
+  value: number;
+  hint?: string;
+  tone?: StatTone;
 }) {
-  const toneClass = {
-    slate: "text-slate-600 bg-slate-100",
-    emerald: "text-success bg-success/10",
-    red: "text-destructive bg-destructive/10",
-    blue: "text-info-foreground bg-info/10",
-  }[tone];
-
+  const toneClass =
+    tone === "bad" ? "text-destructive" : tone === "warn" ? "text-warning-foreground" : "text-foreground";
   return (
-    <Card>
-      <CardContent className="flex items-center justify-between p-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-          <p className="mt-1 text-2xl font-bold">{value}</p>
-        </div>
-        <div className={`rounded-lg p-2 ${toneClass}`}>
-          <Icon className="h-5 w-5" />
-        </div>
+    <Card className="border-border/60 shadow-none">
+      <CardContent className="p-4">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString("en-IN")}</p>
+        {hint && <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
   );
 }
+
