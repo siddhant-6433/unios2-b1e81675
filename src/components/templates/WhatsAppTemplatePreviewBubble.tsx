@@ -68,16 +68,23 @@ export const templateMediaUrlFromComponents = (
 // pipeline as a message header link. It must NOT count as a usable campaign
 // send default, or the bulk UI hides the "Header media URL" field and the whole
 // campaign fails at send. Mirrors the guard in whatsapp-campaign-send.
-const isSampleHeaderHandle = (url: string) =>
+export const isSampleHeaderHandle = (url: string) =>
   /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/i.test(url);
+
+/** Public https URL Meta will actually fetch at send time. Rejects sample handles. */
+export const sendableHeaderMediaUrl = (url?: string | null): string | null => {
+  const trimmed = url?.trim() || "";
+  if (!trimmed || !/^https?:\/\//i.test(trimmed) || isSampleHeaderHandle(trimmed)) return null;
+  return trimmed;
+};
 
 export const resolveSendableTemplateMediaUrl = (
   templateKey?: string | null,
   components?: WhatsAppTemplateComponent[] | null,
-) => {
-  const url = templateMediaUrlFromComponents(templateKey, components);
-  return url && isSampleHeaderHandle(url) ? null : url;
-};
+  storedMediaUrl?: string | null,
+) =>
+  sendableHeaderMediaUrl(storedMediaUrl) ||
+  sendableHeaderMediaUrl(templateMediaUrlFromComponents(templateKey, components));
 
 const buttonIcon = (type?: string) => {
   const normalized = normalizeType(type);
@@ -97,19 +104,22 @@ export function WhatsAppTemplatePreviewBubble({
   components,
   bodyText,
   fallbackText,
+  mediaUrl: mediaUrlOverride,
   className = "",
 }: {
   templateKey?: string | null;
   components?: WhatsAppTemplateComponent[] | null;
   bodyText?: string | null;
   fallbackText?: string | null;
+  /** Sendable header file (Template Manager / campaign override). Wins over Meta's sample handle. */
+  mediaUrl?: string | null;
   className?: string;
 }) {
   const header = templateHeaderFromComponents(components);
   const headerFormat = normalizeType(header?.format);
   const footer = templateFooterFromComponents(components);
   const buttons = templateButtonsFromComponents(components);
-  const mediaUrl = resolveTemplateMediaUrl(templateKey, header);
+  const mediaUrl = sendableHeaderMediaUrl(mediaUrlOverride) || resolveTemplateMediaUrl(templateKey, header);
   const messageBody = bodyText || templateBodyFromComponents(components) || fallbackText || "No body text synced for this template.";
   const MediaIcon = mediaIcon(headerFormat);
   const showMediaPlaceholder = headerFormat && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) && !mediaUrl;

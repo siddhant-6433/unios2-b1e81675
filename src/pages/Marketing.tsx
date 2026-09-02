@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,7 +16,8 @@ import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, MousePointerClick, PauseCircle, PhoneCall, PlayCircle, RefreshCw, Reply, Send, StopCircle, Trash2, UserX, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, PauseCircle, PlayCircle, RefreshCw, Send, StopCircle, Trash2, Users, UserX, XCircle } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
@@ -39,10 +40,13 @@ import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/c
 import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
 import { describeWhatsAppError, whatsAppErrorTextForCode } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
+import { classifyHeaderMediaUrl, probePublicMediaUrl } from "@/lib/publicMediaUrl";
+import { waitForWhatsAppDelivery } from "@/lib/whatsappTestDelivery";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
   resolveSendableTemplateMediaUrl,
+  sendableHeaderMediaUrl,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -180,6 +184,48 @@ const pct = (num: number, den: number) => {
   return `${((num / den) * 100).toFixed(1)}%`;
 };
 
+/** Numeric rate, for threshold comparisons (pct() returns a display string). */
+const rate = (num: number, den: number) => (den ? (num / den) * 100 : 0);
+
+/**
+ * Health tone from a rate. Kind-aware because the metrics point in different
+ * directions — a high delivered rate is good, a high failed rate is not.
+ * Mirrors pctClass() in PublisherAnalytics.tsx.
+ */
+type StatTone = "ok" | "warn" | "bad";
+const rateTone = (value: number, kind: "delivered" | "read" | "failed"): StatTone => {
+  if (kind === "failed") return value >= 25 ? "bad" : value >= 10 ? "warn" : "ok";
+  const t = kind === "read" ? { good: 30, warn: 15 } : { good: 85, warn: 60 };
+  return value >= t.good ? "ok" : value >= t.warn ? "warn" : "bad";
+};
+
+/** Count + percentage in one pill, coloured by health. */
+const ratePillClass = (value: number, kind: "delivered" | "read" | "failed") => {
+  const tone = rateTone(value, kind);
+  if (tone === "bad") return "text-destructive bg-destructive/5";
+  if (tone === "warn") return "text-warning-foreground bg-warning/5";
+  return "text-success bg-success/5";
+};
+
+/**
+ * Compact date for the table cell — "02 Sep, 10:52 am", with the year only when
+ * it isn't the current one. The full fmtDate string ran 190px wide, a seventh of
+ * the table, to say something the reader mostly already knows.
+ */
+const fmtDateCompact = (value: string | null) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    ...(sameYear ? {} : { year: "2-digit" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const fmtDate = (value: string | null) => {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-IN", {
@@ -282,6 +328,8 @@ export default function Marketing() {
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [visibleCampaigns, setVisibleCampaigns] = useState(10);
+  /** Row whose failure breakdown is expanded (Applications.tsx pattern). */
+  const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
   const [lists, setLists] = useState<LeadList[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -313,6 +361,8 @@ export default function Marketing() {
   // to Meta's placeholder_count, shared with the server.
   const [paramSpecsByKey, setParamSpecsByKey] = useState<Record<string, WaBulkTemplate["params"]>>({});
   const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  // Sendable header files saved in Template Manager (whatsapp_template_settings.media_url).
+  const [waTemplateMediaUrlByKey, setWaTemplateMediaUrlByKey] = useState<Record<string, string>>({});
   // Real Meta template arity + which keys actually exist as APPROVED Meta templates.
   // The hardcoded WA_BULK_TEMPLATES params/keys drift from Meta (e.g. lead_welcome
   // has 3 body placeholders in Meta but 2 in config; kb_placements isn't a Meta
@@ -328,6 +378,14 @@ export default function Marketing() {
   const [waTestPhone, setWaTestPhone] = useState("");
   const [waTestSending, setWaTestSending] = useState(false);
   const [waTestSent, setWaTestSent] = useState(false);
+  const [waTestDelivered, setWaTestDelivered] = useState(false);
+  const [waTestPhase, setWaTestPhase] = useState<"idle" | "sending" | "waiting" | "delivered" | "failed">("idle");
+  const [waTestError, setWaTestError] = useState<string | null>(null);
+  const [waTestCanConfirm, setWaTestCanConfirm] = useState(false);
+  const [mediaProbe, setMediaProbe] = useState<{ status: "idle" | "checking" | "ok" | "bad"; reason: string | null }>({
+    status: "idle",
+    reason: null,
+  });
   const [builderOpen, setBuilderOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [senderPickerOpen, setSenderPickerOpen] = useState(false);
@@ -441,9 +499,71 @@ export default function Marketing() {
     () => resolveSendableTemplateMediaUrl(
       selectedWaTemplate?.key,
       waTemplateComponentsByKey[selectedWaTemplate?.key || ""],
+      waTemplateMediaUrlByKey[selectedWaTemplate?.key || ""],
     ),
-    [selectedWaTemplate?.key, waTemplateComponentsByKey],
+    [selectedWaTemplate?.key, waTemplateComponentsByKey, waTemplateMediaUrlByKey],
   );
+  const headerMediaFieldValue = effectiveWaParamValue(waStaticParams, "template_header_media_url").trim();
+  const hasMediaHeader = (selectedWaTemplate?.params || []).some((param) => isWaMediaTemplateParam(param.name));
+  const headerMediaReady = !hasMediaHeader || mediaProbe.status === "ok";
+
+  // Existing approved templates: prefill the saved public URL so the counsellor
+  // can see it and edit it. Switching templates replaces the field with that
+  // template's default (or blank if none is saved yet). A typed override is kept
+  // until the template itself changes.
+  const autoFilledMediaKey = useRef("");
+  const autoFilledMediaUrl = useRef("");
+  useEffect(() => {
+    const key = selectedWaTemplate?.key || "";
+    const def = selectedWaTemplateDefaultMediaUrl || "";
+    const templateChanged = autoFilledMediaKey.current !== key;
+    autoFilledMediaKey.current = key;
+    setWaStaticParams((current) => {
+      const existing = current.template_header_media_url || "";
+      if (!templateChanged && existing && existing !== autoFilledMediaUrl.current) {
+        autoFilledMediaUrl.current = def;
+        return current;
+      }
+      autoFilledMediaUrl.current = def;
+      if (existing === def) return current;
+      return { ...current, template_header_media_url: def };
+    });
+  }, [selectedWaTemplate?.key, selectedWaTemplateDefaultMediaUrl]);
+
+  useEffect(() => {
+    if (!hasMediaHeader) {
+      setMediaProbe({ status: "idle", reason: null });
+      return;
+    }
+    const classified = classifyHeaderMediaUrl(headerMediaFieldValue);
+    if (!classified.ok) {
+      setMediaProbe({ status: headerMediaFieldValue ? "bad" : "idle", reason: classified.reason });
+      return;
+    }
+    let cancelled = false;
+    setMediaProbe({ status: "checking", reason: null });
+    const timer = window.setTimeout(() => {
+      void probePublicMediaUrl(classified.url!).then((result) => {
+        if (cancelled) return;
+        setMediaProbe({ status: result.ok ? "ok" : "bad", reason: result.reason });
+      });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [hasMediaHeader, headerMediaFieldValue]);
+  const rememberTemplateHeaderMedia = useCallback(async (templateKey: string, url: string) => {
+    const sendable = sendableHeaderMediaUrl(url);
+    if (!sendable || sendableHeaderMediaUrl(waTemplateMediaUrlByKey[templateKey])) return;
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .update({ media_url: sendable, updated_at: new Date().toISOString() })
+      .eq("template_key", templateKey);
+    if (!error) {
+      setWaTemplateMediaUrlByKey((current) => ({ ...current, [templateKey]: sendable }));
+    }
+  }, [waTemplateMediaUrlByKey]);
   const handleSendTest = useCallback(async () => {
     if (!waTemplate || !waTestPhone.trim()) return;
     if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
@@ -456,7 +576,16 @@ export default function Marketing() {
       toast({ title: "Invalid number", description: "Enter a valid phone number with its country code.", variant: "destructive" });
       return;
     }
+    if (hasMediaHeader && mediaProbe.status !== "ok") {
+      toast({ title: "Header file not public", description: mediaProbe.reason || "Check the header media URL first.", variant: "destructive" });
+      return;
+    }
     setWaTestSending(true);
+    setWaTestPhase("sending");
+    setWaTestDelivered(false);
+    setWaTestSent(false);
+    setWaTestError(null);
+    setWaTestCanConfirm(false);
     try {
       // Body params, resolved like the preview. Then reconcile the count against
       // Meta's real placeholder_count — the hardcoded config drifts (e.g.
@@ -509,10 +638,6 @@ export default function Marketing() {
         },
       });
       if (error || data?.error || data?.ok === false) {
-        // supabase functions.invoke throws a FunctionsHttpError whose generic
-        // message is "non-2xx status code" — the real reason (e.g. Meta's
-        // "template does not exist in this WABA" or "number not found") is in
-        // the response body. Surface it so the failure is actionable.
         let detail = (error as any)?.message || data?.error || data?.meta_error || "Send failed.";
         const ctx = (error as any)?.context;
         if (ctx && typeof ctx.json === "function") {
@@ -523,9 +648,53 @@ export default function Marketing() {
         }
         throw new Error(detail);
       }
-      toast({ title: "Test sent", description: `Sent to ${phone}` });
+
+      const messageId = String(data?.message_id || "").trim();
       setWaTestSent(true);
+      setWaTestPhase("waiting");
+      toast({ title: "Test sent", description: "Waiting for delivery confirmation…" });
+      if (headerImageUrl) void rememberTemplateHeaderMedia(waTemplate, headerImageUrl);
+
+      if (!messageId) {
+        setWaTestCanConfirm(true);
+        setWaTestError("Sent, but no message id came back. Confirm on the phone that it arrived.");
+        return;
+      }
+
+      const confirmTimer = window.setTimeout(() => setWaTestCanConfirm(true), 15_000);
+      try {
+        const outcome = await waitForWhatsAppDelivery(
+          async (waMessageId) => {
+            const { data: row } = await supabase
+              .from("whatsapp_messages" as any)
+              .select("status, status_error, read_at")
+              .eq("wa_message_id", waMessageId)
+              .maybeSingle();
+            return (row as { status: string | null; status_error: unknown; read_at: string | null } | null) ?? null;
+          },
+          messageId,
+        );
+        if (outcome.status === "failed") {
+          setWaTestPhase("failed");
+          setWaTestDelivered(false);
+          setWaTestError(outcome.errorText);
+          toast({ title: "Test not delivered", description: outcome.errorText, variant: "destructive" });
+        } else if (outcome.status === "timeout") {
+          setWaTestCanConfirm(true);
+          setWaTestError("No delivery receipt yet. If the message arrived on the phone, confirm it below.");
+        } else {
+          setWaTestPhase("delivered");
+          setWaTestDelivered(true);
+          setWaTestError(null);
+          toast({ title: "Test received", description: `Delivered to ${phone}` });
+        }
+      } finally {
+        window.clearTimeout(confirmTimer);
+      }
     } catch (err) {
+      setWaTestPhase("failed");
+      setWaTestDelivered(false);
+      setWaTestSent(false);
       toast({
         title: "Test failed",
         description: err instanceof Error ? err.message : "Could not send test message.",
@@ -534,15 +703,21 @@ export default function Marketing() {
     } finally {
       setWaTestSending(false);
     }
-  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, toast]);
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, rememberTemplateHeaderMedia, hasMediaHeader, mediaProbe, toast]);
 
   useEffect(() => {
     setWaTestSent(false);
+    setWaTestDelivered(false);
+    setWaTestPhase("idle");
+    setWaTestError(null);
+    setWaTestCanConfirm(false);
   }, [waTemplate, waSenderValue, waStaticParams, waTestPhone]);
 
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
-    if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
+    if (isWaMediaTemplateParam(param.name)) {
+      return classifyHeaderMediaUrl(value).ok === false;
+    }
     return !decodeWaParamFieldMapping(value) && !value.trim();
   });
   const waRenderedPreview = useMemo(
@@ -883,13 +1058,20 @@ export default function Marketing() {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, visibility, param_specs")
+        .select("template_key, display_name, description, category, visibility, param_specs, media_url")
         .in("visibility", ["marketing_only", "all"]);
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;
         description?: string | null;
+        media_url?: string | null;
       }>);
+      const mediaUrlByKey: Record<string, string> = {};
+      for (const setting of settingsRows) {
+        const url = sendableHeaderMediaUrl(setting.media_url);
+        if (setting.template_key && url) mediaUrlByKey[setting.template_key] = url;
+      }
+      setWaTemplateMediaUrlByKey(mediaUrlByKey);
       const specsByKey: Record<string, WaBulkTemplate["params"]> = {};
       for (const s of (settings || []) as any[]) {
         if (Array.isArray(s.param_specs)) {
@@ -1111,6 +1293,10 @@ export default function Marketing() {
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
+        if (hasMediaHeader && mediaProbe.status !== "ok") {
+          throw new Error(mediaProbe.reason || "Header media URL must be a public HTTPS file.");
+        }
+        if (!waTestDelivered) throw new Error("Send a test and confirm it was received before queueing.");
         if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
         if (!senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
@@ -1128,7 +1314,11 @@ export default function Marketing() {
         for (const field of waStaticFields) {
           const value = effectiveWaParamValue(waStaticParams, field.name).trim();
           if (value) staticParamsToSend[field.name] = value;
+          else if (isWaMediaTemplateParam(field.name) && selectedWaTemplateDefaultMediaUrl) {
+            staticParamsToSend[field.name] = selectedWaTemplateDefaultMediaUrl;
+          }
         }
+        const headerMediaToRemember = sendableHeaderMediaUrl(staticParamsToSend.template_header_media_url);
 
         const pacePlan = buildCampaignPacePlan({
           recipientCount: valid.length,
@@ -1158,6 +1348,7 @@ export default function Marketing() {
           .select("id")
           .single();
         if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
+        if (headerMediaToRemember) void rememberTemplateHeaderMedia(waTemplate, headerMediaToRemember);
 
         const rows = valid.map((lead, index) => ({
           campaign_id: (campaign as any).id,
@@ -1965,14 +2156,43 @@ export default function Marketing() {
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || !selectedSenderCanSend}
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || waTestPhase === "waiting" || !selectedSenderCanSend || !headerMediaReady}
                     onClick={handleSendTest}
                   >
-                    {waTestSending ? "Sending…" : "Send test"}
+                    {waTestSending || waTestPhase === "waiting" ? "Sending…" : "Send test"}
                   </Button>
                 </div>
-                {waTestSent && (
-                  <p className="text-xs font-medium text-emerald-600">Test sent — queueing is now enabled.</p>
+                {waTestPhase === "waiting" && (
+                  <p className="text-xs font-medium text-info-foreground">
+                    Test sent — waiting for delivery confirmation on the phone…
+                  </p>
+                )}
+                {waTestPhase === "delivered" && (
+                  <p className="text-xs font-medium text-emerald-600">
+                    Test received successfully. Queue campaign is now enabled.
+                  </p>
+                )}
+                {waTestPhase === "failed" && waTestError && (
+                  <p className="text-xs font-medium text-destructive">{waTestError}</p>
+                )}
+                {waTestPhase === "waiting" && waTestCanConfirm && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {waTestError || "No delivery receipt yet. If you received the message, confirm it."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setWaTestPhase("delivered");
+                        setWaTestDelivered(true);
+                        setWaTestError(null);
+                      }}
+                    >
+                      I received it
+                    </Button>
+                  </div>
                 )}
                 <div className="space-y-2">
                   {waStaticFields.length === 0 ? (
@@ -1985,9 +2205,8 @@ export default function Marketing() {
                       const mappedToken = decodeWaParamFieldMapping(value);
                       const canMap = isWaMappableTemplateParam(field.name);
                       const isMediaParam = isWaMediaTemplateParam(field.name);
-                      const hasDefaultMedia = isMediaParam && !!selectedWaTemplateDefaultMediaUrl;
                       const label = isMediaParam
-                        ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
+                        ? "Header media URL"
                         : field.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
                       return (
                         <div key={field.name}>
@@ -2016,8 +2235,8 @@ export default function Marketing() {
                             <Input
                               value={canMap ? (waStaticParams[field.name] || "") : value}
                               onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                              placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : field.placeholder || field.name}
-                              className="mt-1"
+                              placeholder={isMediaParam ? "Public https:// image URL" : field.placeholder || field.name}
+                              className={`mt-1 ${isMediaParam && mediaProbe.status === "bad" ? "border-destructive/50" : ""}`}
                             />
                           )}
                           {mappedToken && (
@@ -2025,12 +2244,22 @@ export default function Marketing() {
                               Filled per recipient from {waParamFieldLabel(mappedToken)}.
                             </p>
                           )}
-                          {hasDefaultMedia && !value.trim() && (
+                          {isMediaParam && mediaProbe.status === "checking" && (
+                            <p className="mt-1 text-xs text-muted-foreground">Checking that this URL is public…</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "ok" && (
+                            <p className="mt-1 text-xs font-medium text-emerald-600">Public URL verified — Meta can fetch this file.</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "bad" && mediaProbe.reason && (
+                            <p className="mt-1 text-xs font-medium text-destructive">{mediaProbe.reason}</p>
+                          )}
+                          {isMediaParam && mediaProbe.status === "idle" && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                              Existing templates fill this from Template Manager when a header file is saved. Edit it here if you need a different image.{" "}
+                              <Link to="/template-manager" className="underline underline-offset-2">Open Template Manager</Link>
                             </p>
                           )}
-                          {field.help && !hasDefaultMedia && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                          {field.help && !isMediaParam && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
                         </div>
                       );
                     })
@@ -2044,6 +2273,7 @@ export default function Marketing() {
                   components={waTemplateComponentsByKey[selectedWaTemplate?.key || ""]}
                   bodyText={waRenderedPreview}
                   fallbackText={waRenderedPreview}
+                  mediaUrl={sendableHeaderMediaUrl(effectiveWaParamValue(waStaticParams, "template_header_media_url")) || selectedWaTemplateDefaultMediaUrl}
                   className="max-h-[420px] overflow-y-auto"
                 />
               </div>
@@ -2208,14 +2438,16 @@ export default function Marketing() {
                   || !selectedList
                   || (campaignChannel === "whatsapp" && (waMissingStatic || !waTemplateQuality.allowBulk))
                   || (campaignChannel === "whatsapp" && !selectedSenderCanSend)
-                  || (campaignChannel === "whatsapp" && !waTestSent)
+                  || (campaignChannel === "whatsapp" && !waTestDelivered)
                 }
               >
                 {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
                 Queue Campaign
               </Button>
-              {campaignChannel === "whatsapp" && !waTestSent && (
-                <p className="text-xs text-muted-foreground">Send a successful test message to enable queueing.</p>
+              {campaignChannel === "whatsapp" && !waTestDelivered && (
+                <p className="text-xs text-muted-foreground">
+                  Send a test and wait until it is received before queueing.
+                </p>
               )}
             </div>
           </div>
@@ -2271,42 +2503,23 @@ export default function Marketing() {
           <p className="text-sm text-muted-foreground">Running, completed, paused, failed, and terminated campaign results.</p>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
-          <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
-          <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
-          <Metric title="Delivered" value={`${totals.delivered.toLocaleString("en-IN")} (${pct(totals.delivered, totals.sent)})`} icon={CheckCircle2} tone="blue" />
-          <Metric title="Read" value={`${totals.read.toLocaleString("en-IN")} (${pct(totals.read, totals.sent)})`} icon={MessageSquare} tone="emerald" />
-          <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
-          <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
+        {/* One row of five, matching the WhatsAppHealth tile shape. Was twelve
+            tiles across three grids — including a six-tile row inside
+            md:grid-cols-4, which wrapped 4+2 and left two dead cells. */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <CampaignStat index={0} icon={Users} chip="bg-pastel-purple" wash="bg-pastel-purple/60" label="Audience" value={totals.total} hint={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`} />
+          <CampaignStat index={1} icon={Send} chip="bg-pastel-blue" wash="bg-pastel-blue/60" label="Sent" value={totals.sent} hint={`${pct(totals.sent, totals.sent + totals.failed)} success rate`} />
+          <CampaignStat index={2} icon={CheckCircle2} chip="bg-pastel-green" wash="bg-pastel-green/60" label="Delivered" value={totals.delivered} hint={`${pct(totals.delivered, totals.sent)} of sent`} tone={rateTone(rate(totals.delivered, totals.sent), "delivered")} />
+          <CampaignStat index={3} icon={MessageSquare} chip="bg-pastel-mint" wash="bg-pastel-mint/60" label="Read" value={totals.read} hint={`${pct(totals.read, totals.sent)} of sent`} tone={rateTone(rate(totals.read, totals.sent), "read")} />
+          <CampaignStat index={4} icon={XCircle} chip="bg-pastel-red" wash="bg-pastel-red/60" label="Failed" value={totals.failed} hint={`${pct(totals.failed, totals.sent + totals.failed)} of attempts`} tone={rateTone(rate(totals.failed, totals.sent + totals.failed), "failed")} />
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
-          <Metric title="Responded" value={totals.responded.toLocaleString("en-IN")} icon={Reply} tone="blue" />
-          <Metric title="Called" value={totals.called.toLocaleString("en-IN")} icon={PhoneCall} tone="emerald" />
-          <Metric title="Clicked link" value={totals.clickedLink.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
-          <Metric title="Clicked button" value={totals.clickedButton.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp sent</p>
-                <p className="mt-1 text-2xl font-bold">{totals.whatsapp.toLocaleString("en-IN")}</p>
-              </div>
-              <MessageSquare className="h-8 w-8 text-success" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email sent</p>
-                <p className="mt-1 text-2xl font-bold">{totals.email.toLocaleString("en-IN")}</p>
-              </div>
-              <Mail className="h-8 w-8 text-info-foreground" />
-            </CardContent>
-          </Card>
-        </div>
+        {/* Engagement and channel split are secondary — a line, not six tiles. */}
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {totals.responded.toLocaleString("en-IN")} responded · {totals.called.toLocaleString("en-IN")} called ·{" "}
+          {(totals.clickedLink + totals.clickedButton).toLocaleString("en-IN")} clicks ·{" "}
+          {totals.whatsapp.toLocaleString("en-IN")} WhatsApp / {totals.email.toLocaleString("en-IN")} email sent
+        </p>
       </div>
 
       <Card>
@@ -2329,39 +2542,53 @@ export default function Marketing() {
             <div className="py-12 text-center text-sm text-muted-foreground">No campaigns yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-[1200px] w-full text-sm">
-                <thead className="border-b border-border bg-muted/30 text-xs uppercase text-muted-foreground">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left">Campaign</th>
-                    <th className="px-4 py-3 text-left">Channel</th>
                     <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Recipients</th>
-                    <th className="px-4 py-3 text-right">Sent</th>
-                    <th className="px-4 py-3 text-right">Delivered</th>
-                    <th className="px-4 py-3 text-right">Read</th>
-                    <th className="px-4 py-3 text-right">Failed</th>
-                    <th className="px-4 py-3 text-right">Responded</th>
-                    <th className="px-4 py-3 text-right">Called</th>
-                    <th className="px-4 py-3 text-right">Clicks</th>
-                    <th className="px-4 py-3 text-right">Success</th>
-                    <th className="px-4 py-3 text-left">Scheduled / Created</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-3 py-3 text-right">Audience</th>
+                    <th className="px-3 py-3 text-right">Sent</th>
+                    <th className="px-3 py-3 text-right">Delivered</th>
+                    <th className="px-3 py-3 text-right">Read</th>
+                    <th className="px-3 py-3 text-right">Failed</th>
+                    <th className="px-3 py-3 text-left">Scheduled / Created</th>
+                    <th className="px-3 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {campaigns.slice(0, visibleCampaigns).map((campaign) => (
-                    <tr key={`${campaign.channel}-${campaign.id}`} className="border-b border-border last:border-b-0">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{campaign.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {campaign.template || "No template"}{campaign.listName ? ` - ${campaign.listName}` : ""}
-                        </p>
-                        {campaign.workerError && (
-                          <p className="mt-1 text-xs text-destructive">{campaign.workerError}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="outline" className="capitalize">{campaign.channel}</Badge>
+                    <Fragment key={`${campaign.channel}-${campaign.id}`}>
+                    <tr className="border-b border-border transition-colors duration-160 ease-standard last:border-b-0 hover:bg-muted/20">
+                      <td className="max-w-[260px] px-4 py-3">
+                        <div className="flex items-start gap-2">
+                          {campaign.channel === "whatsapp"
+                            ? <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-label="WhatsApp" />
+                            : <Mail className="mt-0.5 h-4 w-4 shrink-0 text-info-foreground" aria-label="Email" />}
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-foreground" title={campaign.name}>{campaign.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {campaign.template || "No template"}{campaign.listName ? ` · ${campaign.listName}` : ""}
+                            </p>
+                            {/* Live progress belongs here, not stacked inside the Sent
+                                column where it was one of two causes of 400px rows. */}
+                            {!isCampaignTerminal(campaign.status) && campaign.pendingRecipients > 0 && (
+                              <div className="mt-1.5 h-1 w-40 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-info transition-all"
+                                  style={{ width: `${campaignProgressPct(campaign.total - campaign.pendingRecipients, campaign.total)}%` }}
+                                />
+                              </div>
+                            )}
+                            {/* Auto-pause writes a full sentence here; clamp it so an
+                                error can never blow the row height open again. */}
+                            {campaign.workerError && (
+                              <p className="mt-1 line-clamp-2 max-w-[22rem] text-xs text-destructive" title={campaign.workerError}>
+                                {campaign.workerError}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         {(() => {
@@ -2376,87 +2603,55 @@ export default function Marketing() {
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right">
-                        {(() => {
-                          // Attempted, not campaign.sent: sent_count is only rewritten at
-                          // the end of a batch, which is why the table once read "260 sent"
-                          // while 378 had actually gone out.
-                          const attempted = campaign.total - campaign.pendingRecipients;
-                          const pct = campaignProgressPct(attempted, campaign.total);
-                          const live = !isCampaignTerminal(campaign.status) && campaign.pendingRecipients > 0;
-                          const eta = live ? countdownTo(campaign.nextEligibleAt, nowTick) : null;
-                          return (
-                            <div className="space-y-1">
-                              <div className="font-medium text-success">{campaign.sent.toLocaleString("en-IN")}</div>
-                              {live && (
-                                <>
-                                  <div className="h-1 w-24 overflow-hidden rounded-full bg-muted">
-                                    <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
-                                  </div>
-                                  <div className="text-[11px] leading-tight text-muted-foreground">
-                                    {attempted.toLocaleString("en-IN")} / {campaign.total.toLocaleString("en-IN")} · {pct}%
-                                  </div>
-                                  <div className="text-[11px] leading-tight text-muted-foreground">
-                                    {eta ? `next batch in ${eta}` : `${campaign.dueNow.toLocaleString("en-IN")} due now`}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })()}
+                      <td className="px-3 py-3 text-right font-medium tabular-nums">{campaign.total.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-3 text-right font-medium text-success tabular-nums">{campaign.sent.toLocaleString("en-IN")}</td>
+                      {/* Count and rate in one pill, coloured by health — the
+                          PublisherAnalytics idiom. Two lines became one. */}
+                      <td className="px-3 py-3 text-right">
+                        {campaign.channel === "whatsapp" ? (
+                          <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.delivered, campaign.sent), "delivered")}`}>
+                            {campaign.delivered.toLocaleString("en-IN")} · {pct(campaign.delivered, campaign.sent)}
+                          </span>
+                        ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-success">
-                          {campaign.channel === "whatsapp" ? campaign.delivered.toLocaleString("en-IN") : "—"}
-                        </div>
-                        {campaign.channel === "whatsapp" && (
-                          <div className="text-[11px] text-muted-foreground">{pct(campaign.delivered, campaign.sent)}</div>
-                        )}
+                      <td className="px-3 py-3 text-right">
+                        {campaign.channel === "whatsapp" ? (
+                          <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.read, campaign.sent), "read")}`}>
+                            {campaign.read.toLocaleString("en-IN")} · {pct(campaign.read, campaign.sent)}
+                          </span>
+                        ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-success">
-                          {campaign.channel === "whatsapp" ? campaign.read.toLocaleString("en-IN") : "—"}
-                        </div>
-                        {campaign.channel === "whatsapp" && (
-                          <div className="text-[11px] text-muted-foreground">{pct(campaign.read, campaign.sent)}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium text-destructive">{campaign.failed.toLocaleString("en-IN")}</div>
-                        {/* "504 failed" is not actionable; "402 billing / 98 unreachable" is. */}
-                        {campaign.failureBreakdown.slice(0, 3).map((f) => (
-                          <div key={f.code} className="text-[11px] leading-tight text-muted-foreground" title={`Meta ${f.code}`}>
-                            {f.count.toLocaleString("en-IN")} {f.text}
-                          </div>
-                        ))}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">{pct(campaign.responded, campaign.total)}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{campaign.called.toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">{pct(campaign.called, campaign.total)}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-medium">{(campaign.clickedLink + campaign.clickedButton).toLocaleString("en-IN")}</div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {campaign.clickedLink.toLocaleString("en-IN")} link / {campaign.clickedButton.toLocaleString("en-IN")} button
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Disclosure sits with the number it discloses, and to its
+                              left so the numeral stays flush with the column edge. */}
+                          {campaign.failureBreakdown.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCampaignId((c) => (c === campaign.id ? null : campaign.id))}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label={expandedCampaignId === campaign.id ? "Hide failure reasons" : "Show failure reasons"}
+                              aria-expanded={expandedCampaignId === campaign.id}
+                            >
+                              <ChevronDown className={`h-4 w-4 transition-transform duration-160 ease-standard ${expandedCampaignId === campaign.id ? "rotate-180" : ""}`} />
+                            </button>
+                          )}
+                          <span className="font-medium text-destructive tabular-nums">
+                            {campaign.failed.toLocaleString("en-IN")}
+                          </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
                         {campaignDisplayStatus(campaign) === "scheduled" ? (
                           <div>
-                            <div className="font-medium text-foreground">{fmtDate(campaign.nextAttemptAt)}</div>
-                            <div className="text-[11px]">Created {fmtDate(campaign.createdAt)}</div>
+                            <div className="font-medium text-foreground">{fmtDateCompact(campaign.nextAttemptAt)}</div>
+                            <div className="text-[11px]">Created {fmtDateCompact(campaign.createdAt)}</div>
                           </div>
                         ) : (
-                          fmtDate(campaign.createdAt)
+                          fmtDateCompact(campaign.createdAt)
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-3 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                         {campaign.pending > 0 && campaign.status !== "paused" && (
                           <Button
@@ -2523,6 +2718,50 @@ export default function Marketing() {
                         </div>
                       </td>
                     </tr>
+                    {expandedCampaignId === campaign.id && (
+                      <tr className="border-b border-border last:border-b-0">
+                        <td colSpan={9} className="bg-primary/5 px-4 py-3">
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Why {campaign.failed.toLocaleString("en-IN")} failed
+                              </p>
+                              <ul className="space-y-1">
+                                {campaign.failureBreakdown.map((f) => (
+                                  <li key={f.code} className="flex items-baseline gap-2 text-xs">
+                                    <span className="min-w-[3.5rem] text-right font-semibold tabular-nums text-destructive">
+                                      {f.count.toLocaleString("en-IN")}
+                                    </span>
+                                    <span className="text-foreground">{f.text}</span>
+                                    {f.code !== "unknown" && (
+                                      <span className="text-[11px] text-muted-foreground/70">Meta {f.code}</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Engagement
+                              </p>
+                              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                                <dt className="text-muted-foreground">Responded</dt>
+                                <dd className="tabular-nums">{campaign.responded.toLocaleString("en-IN")} · {pct(campaign.responded, campaign.total)}</dd>
+                                <dt className="text-muted-foreground">Called</dt>
+                                <dd className="tabular-nums">{campaign.called.toLocaleString("en-IN")} · {pct(campaign.called, campaign.total)}</dd>
+                                <dt className="text-muted-foreground">Clicks</dt>
+                                <dd className="tabular-nums">
+                                  {campaign.clickedLink.toLocaleString("en-IN")} link / {campaign.clickedButton.toLocaleString("en-IN")} button
+                                </dd>
+                                <dt className="text-muted-foreground">Success rate</dt>
+                                <dd className="tabular-nums">{pct(campaign.sent, campaign.sent + campaign.failed)}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -2713,35 +2952,54 @@ export default function Marketing() {
   );
 }
 
-function Metric({
-  title,
+/**
+ * Summary tile. Same shape as WhatsAppHealth's SummaryCard: small label, big
+ * tabular number, a hint line carrying the percentage, and a tone derived from
+ * thresholds rather than hard-coded per call site (which is what the older
+ * local `Metric` does).
+ */
+function CampaignStat({
+  label,
   value,
+  hint,
+  tone = "ok",
   icon: Icon,
-  tone = "slate",
+  chip,
+  wash,
+  index = 0,
 }: {
-  title: string;
-  value: string;
-  icon: any;
-  tone?: "slate" | "emerald" | "red" | "blue";
+  label: string;
+  value: number;
+  hint?: string;
+  tone?: StatTone;
+  icon: LucideIcon;
+  /** Full literal class for the icon chip — must be literal so Tailwind emits it. */
+  chip: string;
+  /** Full literal class for the card wash — likewise literal, not composed. */
+  wash: string;
+  /** Position in the row — drives the staggered entrance. */
+  index?: number;
 }) {
-  const toneClass = {
-    slate: "text-slate-600 bg-slate-100",
-    emerald: "text-success bg-success/10",
-    red: "text-destructive bg-destructive/10",
-    blue: "text-info-foreground bg-info/10",
-  }[tone];
-
+  const toneClass =
+    tone === "bad" ? "text-destructive" : tone === "warn" ? "text-warning-foreground" : "text-foreground";
   return (
-    <Card>
-      <CardContent className="flex items-center justify-between p-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-          <p className="mt-1 text-2xl font-bold">{value}</p>
+    <Card
+      className="overflow-hidden border-border/40 shadow-none transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1 animate-rs-slide-up"
+      style={{ animationDelay: `${index * 60}ms`, animationFillMode: "both" }}
+    >
+      {/* The wash goes on the content, not the Card: Card carries .blade-surface,
+          which sets background-color and would win over a bg-* utility. */}
+      <CardContent className={`p-4 ${wash}`}>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${chip}`}>
+            <Icon className="h-4 w-4 text-foreground/70" />
+          </span>
         </div>
-        <div className={`rounded-lg p-2 ${toneClass}`}>
-          <Icon className="h-5 w-5" />
-        </div>
+        <p className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString("en-IN")}</p>
+        {hint && <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
   );
 }
+

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle, GraduationCap, Save, Filter } from "lucide-react";
 import { cahetDeadlineDescription } from "@/lib/deadlineRollover";
+import { probePublicMediaUrl } from "@/lib/publicMediaUrl";
 import { WhatsAppTemplateTab } from "@/components/templates/WhatsAppTemplateTab";
 import { WHATSAPP_BUSINESS_NAME } from "@/lib/waSenders";
 
@@ -305,13 +306,16 @@ Buttons:
    */
   const saveWaMediaUrl = async (templateKey: string, mediaUrl: string) => {
     const current = waSettings.find((setting) => setting.template_key === templateKey);
-    if (mediaUrl && /scontent\.whatsapp\.net|lookaside\.fbsbx\.com/.test(mediaUrl)) {
-      toast({
-        title: "That URL won't work",
-        description: "Meta's own header link is rejected at send time (131053). Upload the file somewhere public and paste that URL.",
-        variant: "destructive",
-      });
-      return;
+    if (mediaUrl) {
+      const probe = await probePublicMediaUrl(mediaUrl);
+      if (!probe.ok) {
+        toast({
+          title: "That URL isn't public",
+          description: probe.reason || "Meta has to download this file without logging in.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
     const { error } = await (supabase as any)
       .from("whatsapp_template_settings")
@@ -893,7 +897,12 @@ Buttons:
                             />
                             {!s.media_url && (
                               <p className="mt-0.5 text-[10px] text-destructive">
-                                Required — this template sends a {s.header_format.toLowerCase()}.
+                                Required — this template sends a {s.header_format.toLowerCase()}. The URL is checked automatically when you save.
+                              </p>
+                            )}
+                            {s.media_url && (
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                Saved. Change it and click away — we'll verify it's publicly fetchable.
                               </p>
                             )}
                           </div>
