@@ -23,3 +23,11 @@ export function usePresenceHeartbeat() {
     return () => clearInterval(id);
   }, [user?.id]);
 }
+
+// Mount once under AuthProvider so EVERY logged-in user heartbeats — staff
+// (AppLayout), portal students/parents (PortalLayout), and the partner/consultant
+// portals that use neither. No-op until a user is present. Renders nothing.
+export function PresenceHeartbeat() {
+  usePresenceHeartbeat();
+  return null;
+}
