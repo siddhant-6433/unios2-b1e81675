@@ -90,30 +90,36 @@ export function invalidateWhatsAppReplyStateCounts(): void {
 }
 
 // get_active_overview returns { presence, leads } for the header widget:
-// online login-users (scoped) + recently-active leads/applicants. Presence is
-// coarse (60s heartbeat), so a short TTL + dedup keeps a poll and an on-open
-// refetch from double-firing the RPC.
+// online login-users (scoped) + recently-active leads/applicants. The presence
+// list is cheap; the super_admin "recently active leads" UNION is ~2s and only
+// visible once the popover is open. So the every-page background poll passes
+// includeLeads=false (presence only), and we pay for the leads list on demand.
+// Separate cache slots per flag; dedup + TTL absorb the mount triple-fire.
 const ACTIVE_OVERVIEW_TTL_MS = 30000;
-let activeOverviewInflight: Promise<RpcResult> | null = null;
-let activeOverviewCache: { at: number; res: RpcResult } | null = null;
+const activeOverviewInflight = new Map<string, Promise<RpcResult>>();
+const activeOverviewCache = new Map<string, { at: number; res: RpcResult }>();
 
-export async function fetchActiveOverview(): Promise<RpcResult> {
-  if (activeOverviewCache && Date.now() - activeOverviewCache.at < ACTIVE_OVERVIEW_TTL_MS) {
-    return activeOverviewCache.res;
-  }
-  if (activeOverviewInflight) return activeOverviewInflight;
+export async function fetchActiveOverview(includeLeads = true): Promise<RpcResult> {
+  const key = includeLeads ? "full" : "presence";
 
-  activeOverviewInflight = (supabase as any)
-    .rpc("get_active_overview")
+  const hit = activeOverviewCache.get(key);
+  if (hit && Date.now() - hit.at < ACTIVE_OVERVIEW_TTL_MS) return hit.res;
+
+  const existing = activeOverviewInflight.get(key);
+  if (existing) return existing;
+
+  const p = (supabase as any)
+    .rpc("get_active_overview", { _include_leads: includeLeads })
     .then((res: RpcResult) => {
-      activeOverviewInflight = null;
-      if (!res.error) activeOverviewCache = { at: Date.now(), res };
+      activeOverviewInflight.delete(key);
+      if (!res.error) activeOverviewCache.set(key, { at: Date.now(), res });
       return res;
     })
     .catch((err: any) => {
-      activeOverviewInflight = null;
+      activeOverviewInflight.delete(key);
       throw err;
     });
 
-  return activeOverviewInflight;
+  activeOverviewInflight.set(key, p);
+  return p;
 }

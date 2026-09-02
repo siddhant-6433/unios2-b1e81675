@@ -76,9 +76,11 @@ export function useAdmissionsFollowupCounts(opts: {
   return useQuery<AdmissionsFollowupCounts>({
     queryKey: ["admissions-followup-counts", counsellorId],
     enabled,
-    staleTime: 5_000,
-    refetchInterval: 30_000,
-    refetchOnMount: "always",
+    // pending_followups_payload is a ~2.5s aggregate. Follow-up counts drift on
+    // the scale of minutes, not seconds, so a 30s poll just burned DB capacity.
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+    refetchOnMount: true,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("pending_followups_payload" as any, {
         p_tab: "overdue",
