@@ -80,10 +80,22 @@ function toCode(value: unknown): string | null {
 export function describeWhatsAppError(statusError: unknown): WhatsAppErrorDetail | null {
   if (!statusError) return null;
 
+  // Some callers hold the error as a JSON *string* rather than a parsed value —
+  // `whatsapp_campaign_recipients.error_message` stores Meta's array verbatim as
+  // text. Without this, a perfectly recognisable error rendered as a wall of raw
+  // JSON in the campaigns table.
+  let parsed: unknown = statusError;
+  if (typeof parsed === "string") {
+    const trimmed = parsed.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try { parsed = JSON.parse(trimmed); } catch { /* keep the string */ }
+    }
+  }
+
   // Meta's webhook shape: an array of error objects.
-  const source: any = Array.isArray(statusError) ? statusError[0] : statusError;
+  const source: any = Array.isArray(parsed) ? parsed[0] : parsed;
   if (!source || typeof source !== "object") {
-    const raw = typeof statusError === "string" ? statusError : null;
+    const raw = typeof parsed === "string" ? parsed : null;
     return raw ? { code: null, text: raw, raw, ourFault: false } : null;
   }
 
@@ -112,4 +124,15 @@ export function describeWhatsAppError(statusError: unknown): WhatsAppErrorDetail
 /** Convenience for surfaces that only want the one-line string. */
 export function whatsAppErrorText(statusError: unknown): string | null {
   return describeWhatsAppError(statusError)?.text ?? null;
+}
+
+/**
+ * Friendly text when the Meta code is already known (e.g. from
+ * `whatsapp_campaign_recipients.last_error_code`), without re-serialising an
+ * error object just to parse it back out.
+ */
+export function whatsAppErrorTextForCode(code: string | number | null | undefined): string {
+  const key = code == null ? "" : String(code).trim();
+  if (!key || key === "unknown") return "Unknown error";
+  return META_ERROR_TEXT[key]?.text ?? `WhatsApp error ${key}`;
 }
