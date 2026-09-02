@@ -16,7 +16,8 @@ import { DatePickerField, FieldShell, SelectField } from "@/components/ui/state-
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { AlertTriangle, Check, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, PauseCircle, PlayCircle, RefreshCw, Send, StopCircle, Trash2, UserX } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Download, ListPlus, Mail, Megaphone, MessageSquare, PauseCircle, PlayCircle, RefreshCw, Send, StopCircle, Trash2, Users, UserX, XCircle } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   type WaSenderOption,
   DEFAULT_WA_SENDER,
@@ -201,6 +202,25 @@ const ratePillClass = (value: number, kind: "delivered" | "read" | "failed") => 
   if (tone === "bad") return "text-destructive bg-destructive/5";
   if (tone === "warn") return "text-warning-foreground bg-warning/5";
   return "text-success bg-success/5";
+};
+
+/**
+ * Compact date for the table cell — "02 Sep, 10:52 am", with the year only when
+ * it isn't the current one. The full fmtDate string ran 190px wide, a seventh of
+ * the table, to say something the reader mostly already knows.
+ */
+const fmtDateCompact = (value: string | null) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    ...(sameYear ? {} : { year: "2-digit" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const fmtDate = (value: string | null) => {
@@ -2300,11 +2320,11 @@ export default function Marketing() {
             tiles across three grids — including a six-tile row inside
             md:grid-cols-4, which wrapped 4+2 and left two dead cells. */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <CampaignStat label="Audience" value={totals.total} hint={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`} />
-          <CampaignStat label="Sent" value={totals.sent} hint={`${pct(totals.sent, totals.sent + totals.failed)} success rate`} />
-          <CampaignStat label="Delivered" value={totals.delivered} hint={`${pct(totals.delivered, totals.sent)} of sent`} tone={rateTone(rate(totals.delivered, totals.sent), "delivered")} />
-          <CampaignStat label="Read" value={totals.read} hint={`${pct(totals.read, totals.sent)} of sent`} tone={rateTone(rate(totals.read, totals.sent), "read")} />
-          <CampaignStat label="Failed" value={totals.failed} hint={`${pct(totals.failed, totals.sent + totals.failed)} of attempts`} tone={rateTone(rate(totals.failed, totals.sent + totals.failed), "failed")} />
+          <CampaignStat index={0} icon={Users} chip="bg-pastel-purple" wash="bg-pastel-purple/60" label="Audience" value={totals.total} hint={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`} />
+          <CampaignStat index={1} icon={Send} chip="bg-pastel-blue" wash="bg-pastel-blue/60" label="Sent" value={totals.sent} hint={`${pct(totals.sent, totals.sent + totals.failed)} success rate`} />
+          <CampaignStat index={2} icon={CheckCircle2} chip="bg-pastel-green" wash="bg-pastel-green/60" label="Delivered" value={totals.delivered} hint={`${pct(totals.delivered, totals.sent)} of sent`} tone={rateTone(rate(totals.delivered, totals.sent), "delivered")} />
+          <CampaignStat index={3} icon={MessageSquare} chip="bg-pastel-mint" wash="bg-pastel-mint/60" label="Read" value={totals.read} hint={`${pct(totals.read, totals.sent)} of sent`} tone={rateTone(rate(totals.read, totals.sent), "read")} />
+          <CampaignStat index={4} icon={XCircle} chip="bg-pastel-red" wash="bg-pastel-red/60" label="Failed" value={totals.failed} hint={`${pct(totals.failed, totals.sent + totals.failed)} of attempts`} tone={rateTone(rate(totals.failed, totals.sent + totals.failed), "failed")} />
         </div>
 
         {/* Engagement and channel split are secondary — a line, not six tiles. */}
@@ -2338,41 +2358,28 @@ export default function Marketing() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="w-8 px-2 py-3" />
                     <th className="px-4 py-3 text-left">Campaign</th>
                     <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Audience</th>
-                    <th className="px-4 py-3 text-right">Sent</th>
-                    <th className="px-4 py-3 text-right">Delivered</th>
-                    <th className="px-4 py-3 text-right">Read</th>
-                    <th className="px-4 py-3 text-right">Failed</th>
-                    <th className="px-4 py-3 text-left">Scheduled / Created</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-3 py-3 text-right">Audience</th>
+                    <th className="px-3 py-3 text-right">Sent</th>
+                    <th className="px-3 py-3 text-right">Delivered</th>
+                    <th className="px-3 py-3 text-right">Read</th>
+                    <th className="px-3 py-3 text-right">Failed</th>
+                    <th className="px-3 py-3 text-left">Scheduled / Created</th>
+                    <th className="px-3 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {campaigns.slice(0, visibleCampaigns).map((campaign) => (
                     <Fragment key={`${campaign.channel}-${campaign.id}`}>
                     <tr className="border-b border-border transition-colors duration-160 ease-standard last:border-b-0 hover:bg-muted/20">
-                      <td className="w-8 px-2 py-3 align-top">
-                        {campaign.failureBreakdown.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedCampaignId((c) => (c === campaign.id ? null : campaign.id))}
-                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                            aria-label={expandedCampaignId === campaign.id ? "Hide failure reasons" : "Show failure reasons"}
-                          >
-                            <ChevronDown className={`h-4 w-4 transition-transform duration-160 ease-standard ${expandedCampaignId === campaign.id ? "rotate-180" : ""}`} />
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
+                      <td className="max-w-[260px] px-4 py-3">
                         <div className="flex items-start gap-2">
                           {campaign.channel === "whatsapp"
                             ? <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-label="WhatsApp" />
                             : <Mail className="mt-0.5 h-4 w-4 shrink-0 text-info-foreground" aria-label="Email" />}
                           <div className="min-w-0">
-                            <p className="font-medium text-foreground">{campaign.name}</p>
+                            <p className="truncate font-medium text-foreground" title={campaign.name}>{campaign.name}</p>
                             <p className="truncate text-xs text-muted-foreground">
                               {campaign.template || "No template"}{campaign.listName ? ` · ${campaign.listName}` : ""}
                             </p>
@@ -2409,38 +2416,55 @@ export default function Marketing() {
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">{campaign.total.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right font-medium text-success tabular-nums">{campaign.sent.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-3 text-right font-medium tabular-nums">{campaign.total.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-3 text-right font-medium text-success tabular-nums">{campaign.sent.toLocaleString("en-IN")}</td>
                       {/* Count and rate in one pill, coloured by health — the
                           PublisherAnalytics idiom. Two lines became one. */}
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-3 text-right">
                         {campaign.channel === "whatsapp" ? (
-                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.delivered, campaign.sent), "delivered")}`}>
+                          <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.delivered, campaign.sent), "delivered")}`}>
                             {campaign.delivered.toLocaleString("en-IN")} · {pct(campaign.delivered, campaign.sent)}
                           </span>
                         ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-3 text-right">
                         {campaign.channel === "whatsapp" ? (
-                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.read, campaign.sent), "read")}`}>
+                          <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums ${ratePillClass(rate(campaign.read, campaign.sent), "read")}`}>
                             {campaign.read.toLocaleString("en-IN")} · {pct(campaign.read, campaign.sent)}
                           </span>
                         ) : <span className="text-muted-foreground/60">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium text-destructive tabular-nums">
-                        {campaign.failed.toLocaleString("en-IN")}
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Disclosure sits with the number it discloses, and to its
+                              left so the numeral stays flush with the column edge. */}
+                          {campaign.failureBreakdown.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCampaignId((c) => (c === campaign.id ? null : campaign.id))}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label={expandedCampaignId === campaign.id ? "Hide failure reasons" : "Show failure reasons"}
+                              aria-expanded={expandedCampaignId === campaign.id}
+                            >
+                              <ChevronDown className={`h-4 w-4 transition-transform duration-160 ease-standard ${expandedCampaignId === campaign.id ? "rotate-180" : ""}`} />
+                            </button>
+                          )}
+                          <span className="font-medium text-destructive tabular-nums">
+                            {campaign.failed.toLocaleString("en-IN")}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
                         {campaignDisplayStatus(campaign) === "scheduled" ? (
                           <div>
-                            <div className="font-medium text-foreground">{fmtDate(campaign.nextAttemptAt)}</div>
-                            <div className="text-[11px]">Created {fmtDate(campaign.createdAt)}</div>
+                            <div className="font-medium text-foreground">{fmtDateCompact(campaign.nextAttemptAt)}</div>
+                            <div className="text-[11px]">Created {fmtDateCompact(campaign.createdAt)}</div>
                           </div>
                         ) : (
-                          fmtDate(campaign.createdAt)
+                          fmtDateCompact(campaign.createdAt)
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-3 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                         {campaign.pending > 0 && campaign.status !== "paused" && (
                           <Button
@@ -2509,7 +2533,7 @@ export default function Marketing() {
                     </tr>
                     {expandedCampaignId === campaign.id && (
                       <tr className="border-b border-border last:border-b-0">
-                        <td colSpan={10} className="bg-primary/5 px-4 py-3">
+                        <td colSpan={9} className="bg-primary/5 px-4 py-3">
                           <div className="grid gap-4 md:grid-cols-2">
                             <div>
                               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2752,18 +2776,39 @@ function CampaignStat({
   value,
   hint,
   tone = "ok",
+  icon: Icon,
+  chip,
+  wash,
+  index = 0,
 }: {
   label: string;
   value: number;
   hint?: string;
   tone?: StatTone;
+  icon: LucideIcon;
+  /** Full literal class for the icon chip — must be literal so Tailwind emits it. */
+  chip: string;
+  /** Full literal class for the card wash — likewise literal, not composed. */
+  wash: string;
+  /** Position in the row — drives the staggered entrance. */
+  index?: number;
 }) {
   const toneClass =
     tone === "bad" ? "text-destructive" : tone === "warn" ? "text-warning-foreground" : "text-foreground";
   return (
-    <Card className="border-border/60 shadow-none">
-      <CardContent className="p-4">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+    <Card
+      className="overflow-hidden border-border/40 shadow-none transition-all duration-280 ease-standard hover:elevation-mid hover:-translate-y-1 animate-rs-slide-up"
+      style={{ animationDelay: `${index * 60}ms`, animationFillMode: "both" }}
+    >
+      {/* The wash goes on the content, not the Card: Card carries .blade-surface,
+          which sets background-color and would win over a bg-* utility. */}
+      <CardContent className={`p-4 ${wash}`}>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${chip}`}>
+            <Icon className="h-4 w-4 text-foreground/70" />
+          </span>
+        </div>
         <p className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString("en-IN")}</p>
         {hint && <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{hint}</p>}
       </CardContent>

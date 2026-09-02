@@ -131,6 +131,13 @@ function getGreeting(displayName: string | null | undefined): string {
   return pool[dayIndex].replace(/\{\{name\}\}/g, firstName);
 }
 
+
+/**
+ * Pages whose main content is a wide table. They trade the 24px page gutter for
+ * horizontal room; everything else about the shell is unchanged.
+ */
+const WIDE_TABLE_ROUTES = new Set(["/marketing", "/applications", "/admissions"]);
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || "NIMT UniOs";
@@ -145,6 +152,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // shell stops growing and <main> stops padding, so a three-column layout can
   // just use h-full instead of guessing the chrome height with calc(100vh-Npx).
   const isConsole = location.pathname === "/cloud-dialer";
+  // Dense table pages reclaim the page gutter so wide tables stop wrapping their
+  // cells. Deliberately NOT isConsole: that also locks the viewport height and
+  // hands scrolling to the page, which these pages don't want.
+  const isWideTable = WIDE_TABLE_ROUTES.has(location.pathname);
   // Partner portals (admission/academic) live inside this same staff shell, so
   // the counsellor/staff status chrome — WhatsApp reply pills, sprint tickers,
   // action bar, live-call bar — would otherwise leak into their view. Gate the
@@ -203,7 +214,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 partner portals never get it. */}
             {deferredShellReady && !isPortal && !(role === "counsellor" && isConsole) && <GlobalActionBar />}
             {deferredShellReady && !isPortal && <LiveCallBar />}
-            <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : "overflow-auto p-6"}`}>
+            <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : isWideTable ? "overflow-auto px-3 py-4" : "overflow-auto p-6"}`}>
               {/* Same surface the RequirePermission gate and the page's own
                   loading branch render, so the three handoffs read as one. */}
               <Suspense fallback={<PageLoader className={isConsole ? "p-6" : undefined} />}>
