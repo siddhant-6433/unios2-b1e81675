@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { campaignHealth } from "@/lib/campaignHealth";
+import { campaignHealth, countdownTo, campaignProgressPct, isCampaignTerminal } from "@/lib/campaignHealth";
 
 // A paced campaign sits at status='pending' between daily waves for hours. That
 // looked identical in the UI to a campaign stranded by a lost finalisation
@@ -36,7 +36,7 @@ describe("campaignHealth", () => {
       { ...base, pendingRecipients: 500, dueNow: 412, nextEligibleAt: agoMin(5) },
       NOW,
     );
-    expect(h.label).toBe("Sending now");
+    expect(h.label).toBe("Live");
     expect(h.detail).toContain("412 due");
   });
 
@@ -53,7 +53,7 @@ describe("campaignHealth", () => {
       { ...base, status: "sending", pendingRecipients: 120, nextAttemptAt: agoMin(1) },
       NOW,
     );
-    expect(h.label).toBe("Sending now");
+    expect(h.label).toBe("Live");
   });
 
   it("shows Wrapping up when nothing is pending but status lags", () => {
@@ -65,8 +65,9 @@ describe("campaignHealth", () => {
   });
 
   it("keeps terminal states plain", () => {
-    expect(campaignHealth({ ...base, status: "completed" }, NOW).label).toBe("Completed");
-    expect(campaignHealth({ ...base, status: "terminated" }, NOW).label).toBe("Terminated");
+    // BSP-standard vocabulary (AiSensy/Interakt/WATI): Sent / Stopped / Live.
+    expect(campaignHealth({ ...base, status: "completed" }, NOW).label).toBe("Sent");
+    expect(campaignHealth({ ...base, status: "terminated" }, NOW).label).toBe("Stopped");
     expect(campaignHealth({ ...base, status: "paused", pendingRecipients: 9 }, NOW).detail).toBe("9 left");
   });
 
@@ -79,5 +80,28 @@ describe("campaignHealth", () => {
   it("falls back to Scheduled for a future attempt with no queue data", () => {
     const h = campaignHealth({ ...base, pendingRecipients: 10, nextAttemptAt: inHours(5) }, NOW);
     expect(h.label).toBe("Scheduled");
+  });
+
+  it("counts down to the next wave and goes null once due", () => {
+    expect(countdownTo(inHours(4.2), NOW)).toBe("4h 12m");
+    expect(countdownTo(inHours(30), NOW)).toBe("1d 6h");
+    expect(countdownTo(new Date(NOW + 45_000).toISOString(), NOW)).toBe("45s");
+    // Due or past-due → no countdown, the progress line takes over.
+    expect(countdownTo(agoMin(5), NOW)).toBeNull();
+    expect(countdownTo(null, NOW)).toBeNull();
+  });
+
+  it("computes progress without dividing by zero", () => {
+    expect(campaignProgressPct(1240, 4000)).toBe(31);
+    expect(campaignProgressPct(0, 0)).toBe(0);
+    expect(campaignProgressPct(9, 4)).toBe(100); // never over 100
+  });
+
+  it("knows which campaigns still need polling", () => {
+    expect(isCampaignTerminal("completed")).toBe(true);
+    expect(isCampaignTerminal("terminated")).toBe(true);
+    expect(isCampaignTerminal("pending")).toBe(false);
+    expect(isCampaignTerminal("sending")).toBe(false);
+    expect(isCampaignTerminal("paused")).toBe(false); // resumable → keep watching
   });
 });

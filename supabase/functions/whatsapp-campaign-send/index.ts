@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
 import { expectedReplyTypeForTemplate } from "../_shared/whatsapp-outbound-context.ts";
 import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
-import { isTransientFailure, isThrottleCode, retryBackoffMs, MAX_SEND_RETRIES } from "../_shared/campaign-retry.ts";
+import { classifyFailure, isAccountLevelCode, maxRetriesFor, retryBackoffMs } from "../_shared/campaign-retry.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -638,6 +638,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // One lookup per batch rather than per recipient.
+    const suppressedPhones = new Set<string>();
+    {
+      const phones = (recipients || [])
+        .map((r: any) => String(r.phone || "").replace(/[^0-9]/g, ""))
+        .filter(Boolean);
+      if (phones.length) {
+        const { data: sup, error: supErr } = await adminClient
+          .rpc("wa_suppressed_phones", { _phones: phones });
+        if (supErr) {
+          // Fail open: a suppression-lookup outage must not halt the campaign.
+          console.error("wa_suppressed_phones failed:", supErr.message);
+        } else {
+          for (const row of (sup as Array<{ phone: string }> | null) || []) {
+            if (row?.phone) suppressedPhones.add(row.phone);
+          }
+        }
+      }
+    }
+
     if (!recipients || recipients.length === 0) {
       const counts = await syncCampaignCounts(adminClient, campaign_id);
 
@@ -784,17 +804,38 @@ Deno.serve(async (req) => {
     // Transient failures (throttle 131049, 5xx, network) are requeued with
     // backoff instead of being burned into a terminal `failed` bucket; permanent
     // ones (invalid recipient, template error) fail immediately.
+    // Account-level failures (billing, deregistered number, dead token) will hit
+    // every recipient identically. Counting them lets us stop the campaign
+    // instead of burning the whole audience: on 2026-09-01 a billing block
+    // consumed 402 sends that could never have landed.
+    let accountLevelFailures = 0;
+
     const handleSendFailure = async (recipient: any, errorMsg: string, code: number | null, httpStatus: number) => {
       const priorRetries = Number(recipient.retry_count) || 0;
       const nextRetry = priorRetries + 1;
-      if (isTransientFailure(code, httpStatus, errorMsg) && nextRetry <= MAX_SEND_RETRIES) {
-        const backoff = retryBackoffMs(priorRetries, isThrottleCode(code));
+      const cls = classifyFailure(code, httpStatus, errorMsg);
+
+      if (isAccountLevelCode(code)) accountLevelFailures++;
+
+      // Meta's per-recipient marketing cap. Record a strike so a chronically
+      // fatigued number drops out of future audiences rather than being
+      // re-targeted every campaign.
+      if (cls === "fatigue" && recipient.phone) {
+        const { error: strikeErr } = await adminClient.rpc("record_wa_send_strike", {
+          _phone: recipient.phone,
+          _code: code != null ? String(code) : "131049",
+        });
+        if (strikeErr) console.error("record_wa_send_strike failed:", strikeErr.message);
+      }
+
+      if (cls !== null && nextRetry <= maxRetriesFor(cls)) {
+        const backoff = retryBackoffMs(priorRetries, cls);
         await adminClient.from("whatsapp_campaign_recipients").update({
           status: "pending",
           eligible_at: new Date(Date.now() + backoff).toISOString(),
           retry_count: nextRetry,
           last_error_code: code != null ? String(code) : null,
-          error_message: `Retry ${nextRetry}/${MAX_SEND_RETRIES} after transient error: ${errorMsg}`,
+          error_message: `Retry ${nextRetry}/${maxRetriesFor(cls)} after ${cls} error: ${errorMsg}`,
         }).eq("id", recipient.id);
         return; // requeued: neither sent nor failed this round
       }
@@ -831,6 +872,17 @@ Deno.serve(async (req) => {
 
       // DNC is a hard stop: never send further communications (stage may have
       // changed after the campaign was queued).
+      // Suppressed for repeated marketing-fatigue rejections. Re-checked here as
+      // well as at enrollment, because a campaign queued days ago may target a
+      // number that has since hit Meta's cap.
+      if (suppressedPhones.has(waPhone)) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({ status: "skipped", error_message: "Skipped: suppressed after repeated Meta marketing-cap rejections" })
+          .eq("id", recipient.id);
+        return;
+      }
+
       if (recipient.marketing_contacts?.opted_out) {
         await adminClient
           .from("whatsapp_campaign_recipients")
@@ -1016,6 +1068,38 @@ Deno.serve(async (req) => {
     };
 
     await runPool(recipients, SEND_CONCURRENCY, processRecipient);
+
+    // Every send in this batch failed for a reason no recipient can fix (billing,
+    // deregistered number, expired token). Continuing would burn the rest of the
+    // audience against a wall, so pause and surface why. Resuming is the existing
+    // Resume button once the account issue is sorted.
+    const ACCOUNT_FAILURE_PAUSE_THRESHOLD = 5;
+    if (accountLevelFailures >= ACCOUNT_FAILURE_PAUSE_THRESHOLD) {
+      const counts = await syncCampaignCounts(adminClient, campaign_id);
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          status: "paused",
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+          worker_locked_at: null,
+          next_attempt_at: null,
+          worker_error:
+            `Paused automatically: ${accountLevelFailures} account-level failures in one batch ` +
+            `(billing / number registration / access token). Fix the account issue, then Resume.`,
+        })
+        .eq("id", campaign_id);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          paused: true,
+          reason: "account_level_failures",
+          account_level_failures: accountLevelFailures,
+          ...counts,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Update campaign totals
     // Fetch current counts in case there were already some sent/failed from a previous run

@@ -51,8 +51,8 @@ export const campaignHealth = (
 ): CampaignHealth => {
   const { status, pendingRecipients, dueNow, nextEligibleAt } = campaign;
 
-  if (status === "completed") return { label: "Completed", detail: null, tone: "bg-success/10 text-success" };
-  if (status === "terminated") return { label: "Terminated", detail: null, tone: "bg-zinc-200 text-zinc-700" };
+  if (status === "completed") return { label: "Sent", detail: null, tone: "bg-success/10 text-success" };
+  if (status === "terminated") return { label: "Stopped", detail: null, tone: "bg-zinc-200 text-zinc-700" };
   if (status === "paused") return { label: "Paused", detail: `${pendingRecipients.toLocaleString("en-IN")} left`, tone: "bg-slate-100 text-slate-700" };
   if (status === "failed") return { label: "Failed", detail: campaign.workerError, tone: "bg-destructive/10 text-destructive" };
 
@@ -66,7 +66,7 @@ export const campaignHealth = (
     if (Number.isFinite(lockedAt) && lockedAt > 0 && now - lockedAt > STALL_AFTER_MS) {
       return { label: "Stalled", detail: "no worker progress in 15+ min", tone: "bg-destructive/10 text-destructive" };
     }
-    return { label: "Sending now", detail: `${pendingRecipients.toLocaleString("en-IN")} left`, tone: "bg-info/10 text-info-foreground" };
+    return { label: "Live", detail: `${pendingRecipients.toLocaleString("en-IN")} left`, tone: "bg-info/10 text-info-foreground" };
   }
 
   // status === "pending"
@@ -74,7 +74,7 @@ export const campaignHealth = (
     return { label: "Wrapping up", detail: "finishing final counts", tone: "bg-info/10 text-info-foreground" };
   }
   if (dueNow > 0) {
-    return { label: "Sending now", detail: `${dueNow.toLocaleString("en-IN")} due`, tone: "bg-info/10 text-info-foreground" };
+    return { label: "Live", detail: `${dueNow.toLocaleString("en-IN")} due now`, tone: "bg-info/10 text-info-foreground" };
   }
   if (nextEligibleAt) {
     return {
@@ -90,4 +90,32 @@ export const campaignHealth = (
     return { label: "Scheduled", detail: fmtWave(campaign.nextAttemptAt), tone: "bg-sky-100 text-sky-700" };
   }
   return { label: "Waiting to start", detail: `${pendingRecipients.toLocaleString("en-IN")} queued`, tone: "bg-sky-100 text-sky-700" };
+};
+
+/** Terminal campaigns need no polling and no countdown. */
+export const isCampaignTerminal = (status: string): boolean =>
+  status === "completed" || status === "terminated" || status === "failed";
+
+/**
+ * "4h 12m" / "45s" until a paced wave unlocks. Returns null once it is due, so
+ * the caller can swap the countdown for the live progress line.
+ */
+export const countdownTo = (iso: string | null, now: number = Date.now()): string | null => {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  if (totalMin > 0) return `${totalMin}m`;
+  return `${Math.max(1, Math.ceil(ms / 1000))}s`;
+};
+
+/** Percent of the audience already attempted (sent or failed), 0–100. */
+export const campaignProgressPct = (attempted: number, total: number): number => {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((attempted / total) * 100)));
 };

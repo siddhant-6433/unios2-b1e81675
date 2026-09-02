@@ -1,10 +1,55 @@
 // deno test supabase/functions/_shared/campaign-retry.test.ts
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { isTransientFailure, isThrottleCode, retryBackoffMs, MAX_SEND_RETRIES } from "./campaign-retry.ts";
+import {
+  classifyFailure,
+  isAccountLevelCode,
+  isFatigueCode,
+  isThrottleCode,
+  isTransientFailure,
+  maxRetriesFor,
+  retryBackoffMs,
+  MAX_FATIGUE_RETRIES,
+  MAX_SEND_RETRIES,
+} from "./campaign-retry.ts";
 
-Deno.test("ecosystem throttle 131049 is transient and throttle-classed", () => {
-  assert(isTransientFailure(131049, 200, "throttled"));
-  assert(isThrottleCode(131049));
+Deno.test("131049 is fatigue, not a throttle", () => {
+  // Regression: 131049 used to share the 15m→6h throttle curve, so we re-hit
+  // users inside Meta's per-user marketing window and fed the block signal.
+  assertEquals(classifyFailure(131049, 200, "healthy ecosystem"), "fatigue");
+  assert(isFatigueCode(131049));
+  assert(!isThrottleCode(131049));
+});
+
+Deno.test("fatigue waits a full day minimum and gives up early", () => {
+  assertEquals(retryBackoffMs(0, "fatigue"), 24 * 60 * 60 * 1000);
+  assertEquals(retryBackoffMs(1, "fatigue"), 48 * 60 * 60 * 1000);
+  assertEquals(retryBackoffMs(9, "fatigue"), 72 * 60 * 60 * 1000); // capped
+  // Never shorter than a day, at any retry count.
+  for (let i = 0; i < 6; i++) {
+    assert(retryBackoffMs(i, "fatigue") >= 24 * 60 * 60 * 1000);
+  }
+  assertEquals(maxRetriesFor("fatigue"), MAX_FATIGUE_RETRIES);
+  assert(MAX_FATIGUE_RETRIES < MAX_SEND_RETRIES);
+});
+
+Deno.test("real rate limits keep the short throttle curve", () => {
+  for (const code of [131048, 131056, 130429, 80007]) {
+    assertEquals(classifyFailure(code, 200, ""), "throttle");
+  }
+  assertEquals(retryBackoffMs(0, "throttle"), 15 * 60 * 1000);
+  assertEquals(retryBackoffMs(20, "throttle"), 6 * 60 * 60 * 1000); // capped
+  assert(retryBackoffMs(3, "throttle") > retryBackoffMs(3, "infra"));
+});
+
+Deno.test("account-level failures are permanent and flagged for pausing", () => {
+  for (const code of [131042, 133010, 190]) {
+    assert(isAccountLevelCode(code), `${code} should be account-level`);
+    assertEquals(classifyFailure(code, 400, ""), null);
+    assert(!isTransientFailure(code, 400, ""));
+  }
+  // A billing error whose message happens to contain "rate limit" must not be
+  // rescued into an infinite infra retry by the message regex.
+  assertEquals(classifyFailure(131042, 400, "payment rate limit"), null);
 });
 
 Deno.test("invalid recipient / template errors are permanent", () => {
@@ -15,21 +60,16 @@ Deno.test("invalid recipient / template errors are permanent", () => {
 });
 
 Deno.test("5xx and network/timeout messages are transient without a code", () => {
-  assert(isTransientFailure(null, 503, "service unavailable"));
-  assert(isTransientFailure(null, 0, "request aborted after timeout"));
-  assert(isTransientFailure(null, 0, "fetch failed"));
-  assert(!isTransientFailure(null, 400, "some 4xx with no known code"));
+  assertEquals(classifyFailure(null, 503, "service unavailable"), "infra");
+  assertEquals(classifyFailure(null, 0, "request aborted after timeout"), "infra");
+  assertEquals(classifyFailure(null, 0, "fetch failed"), "infra");
+  assertEquals(classifyFailure(null, 400, "some 4xx with no known code"), null);
 });
 
-Deno.test("backoff grows exponentially, is longer for throttles, and is capped", () => {
-  // infra: 2m base, 30m cap
-  assertEquals(retryBackoffMs(0, false), 2 * 60 * 1000);
-  assertEquals(retryBackoffMs(1, false), 4 * 60 * 1000);
-  assertEquals(retryBackoffMs(10, false), 30 * 60 * 1000); // capped
-  // throttle: 15m base, 6h cap — and always longer than the infra path
-  assertEquals(retryBackoffMs(0, true), 15 * 60 * 1000);
-  assert(retryBackoffMs(3, true) > retryBackoffMs(3, false));
-  assertEquals(retryBackoffMs(20, true), 6 * 60 * 60 * 1000); // capped
+Deno.test("infra backoff grows exponentially and is capped", () => {
+  assertEquals(retryBackoffMs(0, "infra"), 2 * 60 * 1000);
+  assertEquals(retryBackoffMs(1, "infra"), 4 * 60 * 1000);
+  assertEquals(retryBackoffMs(10, "infra"), 30 * 60 * 1000); // capped
 });
 
 Deno.test("retry cap is a sane small number", () => {

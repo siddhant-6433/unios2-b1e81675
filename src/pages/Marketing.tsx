@@ -22,6 +22,7 @@ import {
   DEFAULT_WA_SENDER,
   WHATSAPP_BUSINESS_NAME,
   defaultWaSenderOption,
+  formatMessagingTier,
   loadWaSenders,
   senderCanSendTemplate,
 } from "@/lib/waSenders";
@@ -35,7 +36,8 @@ import {
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
 import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
-import { campaignHealth } from "@/lib/campaignHealth";
+import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
+import { describeWhatsAppError } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -91,7 +93,28 @@ interface CampaignRow {
   dueNow: number;
   /** When the next paced wave unlocks. */
   nextEligibleAt: string | null;
+  /** Failure counts grouped by Meta error code, worst first. */
+  failureBreakdown: Array<{ code: string; count: number; text: string }>;
 }
+
+/** Row shape of the campaign_failure_breakdown RPC. */
+type FailureBreakdownRow = {
+  campaign_id: string;
+  error_code: string | null;
+  failures: number;
+  sample_message: string | null;
+};
+
+/** Row shape of the campaign_funnel_counts RPC. */
+type FunnelRow = {
+  campaign_id: string;
+  delivered: number;
+  read: number;
+  failed: number;
+  pending: number;
+  due_now: number;
+  next_eligible_at: string | null;
+};
 
 interface LeadList {
   id: string;
@@ -125,6 +148,8 @@ interface RecipientRow {
   deliveredAt: string | null;
   readAt: string | null;
   failedAt: string | null;
+  errorCode: string | null;
+  retryCount: number;
 }
 
 function scheduledDatePart(value: string) {
@@ -588,9 +613,30 @@ export default function Marketing() {
     ]);
 
     const waIds = ((waRes.data as any[]) || []).map((row) => row.id);
-    const funnelRes = waIds.length
-      ? await supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: waIds })
-      : null;
+    const [funnelRes, failureRes] = waIds.length
+      ? await Promise.all([
+          supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: waIds }),
+          supabase.rpc("campaign_failure_breakdown" as any, { p_campaign_ids: waIds }),
+        ])
+      : [null, null];
+
+    // Group failures by campaign, worst reason first, with the same plain-English
+    // wording the inbox uses so "504 failed" becomes three actionable numbers.
+    const failuresById = new Map<string, Array<{ code: string; count: number; text: string }>>();
+    for (const row of ((failureRes?.data as FailureBreakdownRow[] | null) || [])) {
+      const code = String(row.error_code || "unknown");
+      const described = describeWhatsAppError(
+        code === "unknown" ? row.sample_message : JSON.stringify([{ code, title: row.sample_message }]),
+      );
+      const list = failuresById.get(row.campaign_id) || [];
+      list.push({
+        code,
+        count: Number(row.failures || 0),
+        text: described.text,
+      });
+      failuresById.set(row.campaign_id, list);
+    }
+    for (const list of failuresById.values()) list.sort((a, b) => b.count - a.count);
     const funnelById = new Map<string, { delivered: number; read: number; failed: number; pending: number; dueNow: number; nextEligibleAt: string | null }>(
       ((funnelRes?.data as any[]) || []).map((r) => [
         r.campaign_id,
@@ -637,6 +683,7 @@ export default function Marketing() {
           ?? (row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed)),
         dueNow: funnelById.get(row.id)?.dueNow ?? 0,
         nextEligibleAt: funnelById.get(row.id)?.nextEligibleAt ?? null,
+        failureBreakdown: failuresById.get(row.id) || [],
       };
     });
 
@@ -669,6 +716,7 @@ export default function Marketing() {
         pendingRecipients: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
         dueNow: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
         nextEligibleAt: null,
+        failureBreakdown: [],
       };
     });
 
@@ -677,6 +725,96 @@ export default function Marketing() {
   }, [dateBounds, role]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ---- Live progress -------------------------------------------------------
+  // A campaign in flight should be watchable without refreshing. Two separate
+  // clocks, deliberately: a cheap local tick for the countdown, and a much
+  // rarer network refresh for the counts. Polled RPCs have caused site-wide
+  // slowness here before, so the network side is gated hard.
+
+  const liveCampaigns = useMemo(
+    () => campaigns.filter((c) => !isCampaignTerminal(c.status) && c.pendingRecipients > 0),
+    [campaigns],
+  );
+  const hasLive = liveCampaigns.length > 0;
+  const anyDueNow = liveCampaigns.some((c) => c.dueNow > 0);
+
+  // Countdown clock. Local only — no queries. Runs solely while something is live.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasLive) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasLive]);
+
+  // Refresh just the funnel + failure counts for live campaigns. Deliberately
+  // not `load()` — that re-queries campaigns, senders and templates.
+  const refreshFunnels = useCallback(async () => {
+    const ids = liveCampaigns.filter((c) => c.channel === "whatsapp").map((c) => c.id);
+    if (!ids.length) return;
+    const [funnelRes, failureRes] = await Promise.all([
+      supabase.rpc("campaign_funnel_counts" as any, { p_campaign_ids: ids }),
+      supabase.rpc("campaign_failure_breakdown" as any, { p_campaign_ids: ids }),
+    ]);
+    if (funnelRes.error) return;
+
+    const byId = new Map(((funnelRes.data as FunnelRow[] | null) || []).map((r) => [r.campaign_id, r]));
+    const failuresById = new Map<string, Array<{ code: string; count: number; text: string }>>();
+    for (const row of ((failureRes?.data as FailureBreakdownRow[] | null) || [])) {
+      const code = String(row.error_code || "unknown");
+      const described = describeWhatsAppError(
+        code === "unknown" ? row.sample_message : JSON.stringify([{ code, title: row.sample_message }]),
+      );
+      const list = failuresById.get(row.campaign_id) || [];
+      list.push({ code, count: Number(row.failures || 0), text: described.text });
+      failuresById.set(row.campaign_id, list);
+    }
+    for (const list of failuresById.values()) list.sort((a, b) => b.count - a.count);
+
+    setCampaigns((prev) => prev.map((c) => {
+      const f = byId.get(c.id);
+      if (!f) return c;
+      const pending = Number(f.pending || 0);
+      const failed = Number(f.failed || 0);
+      return {
+        ...c,
+        delivered: Number(f.delivered || 0),
+        read: Number(f.read || 0),
+        failed,
+        pendingRecipients: pending,
+        dueNow: Number(f.due_now || 0),
+        nextEligibleAt: f.next_eligible_at || null,
+        // Derived, so the Sent column advances mid-batch instead of jumping at
+        // the end when the worker finally rewrites sent_count.
+        sent: Math.max(0, c.total - pending - failed),
+        failureBreakdown: failuresById.get(c.id) || c.failureBreakdown,
+      };
+    }));
+  }, [liveCampaigns]);
+
+  useEffect(() => {
+    if (!hasLive) return;                       // nothing live → no timer at all
+    // 20s while a batch is actually sending; 2min while idle between paced waves.
+    const intervalMs = anyDueNow ? 20_000 : 120_000;
+    let id: number | undefined;
+    const start = () => {
+      if (id != null) return;
+      id = window.setInterval(() => {
+        if (document.visibilityState === "visible") void refreshFunnels();
+      }, intervalMs);
+    };
+    const onVisibility = () => {
+      // A backgrounded tab polls nothing, and catches up on return.
+      if (document.visibilityState === "visible") { void refreshFunnels(); start(); }
+      else if (id != null) { window.clearInterval(id); id = undefined; }
+    };
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (id != null) window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [hasLive, anyDueNow, refreshFunnels]);
 
   useEffect(() => {
     loadWaSenders(supabase as any)
@@ -841,6 +979,95 @@ export default function Marketing() {
     );
   }, [campaigns]);
 
+  /**
+   * Resolve a WhatsApp list into the exact audience `launchCampaign` will use.
+   *
+   * Shared deliberately: a preview computed by separate code drifts from the
+   * send, and this is precisely the path where a silent mismatch cost us a
+   * 4,000-member campaign. Returns the eligibility `counts` the builder throws
+   * away today, plus the suppression figure.
+   */
+  const resolveWhatsAppAudience = useCallback(async (listId: string) => {
+    const members = await fetchListMembers(
+      supabase as any,
+      listId,
+      "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
+    );
+
+    // Members are polymorphic (lead or bulk-imported marketing contact);
+    // campaignMemberToLead normalises both into the shape
+    // filterCampaignRecipients and the pacing plan expect, and carries
+    // `isContact` through so the recipient row targets the right column.
+    let rawLeads = ((members as any[]) || [])
+      .map((member) => campaignMemberToLead(member, "whatsapp"))
+      .filter((lead) => lead && lead.id) as Array<{ id: string; phone?: string | null }>;
+
+    // Numbers that keep hitting Meta's per-user marketing cap. Excluded here so
+    // they never enter the campaign, not just skipped at send time.
+    let suppressedCount = 0;
+    const phones = rawLeads.map((l) => String(l.phone || "")).filter(Boolean);
+    if (phones.length) {
+      const { data: sup, error: supErr } = await supabase
+        .rpc("wa_suppressed_phones" as any, { _phones: phones });
+      if (!supErr) {
+        const blocked = new Set(((sup as Array<{ phone: string }> | null) || []).map((r) => String(r.phone)));
+        if (blocked.size) {
+          const before = rawLeads.length;
+          rawLeads = rawLeads.filter((l) => !blocked.has(String(l.phone || "").replace(/[^0-9]/g, "")));
+          suppressedCount = before - rawLeads.length;
+        }
+      }
+    }
+
+    const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
+    let lastMarketingAtByLeadId = new Map<string, string>();
+    if (quietDays > 0 && rawLeads.length > 0) {
+      lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByLeadIds(
+        supabase as any,
+        rawLeads.map((lead) => lead.id),
+        Math.max(quietDays, 30),
+      );
+    }
+
+    const eligibility = filterCampaignRecipients(rawLeads as never[], {
+      channel: "whatsapp",
+      excludeCold: waExcludeCold,
+      quietDays,
+      lastMarketingAtByLeadId,
+    });
+    return { eligibility, suppressedCount, memberCount: (members as any[])?.length || 0 };
+  }, [waExcludeCold, waQuietDaysEnabled, waQuietDays]);
+
+  const [audiencePreview, setAudiencePreview] = useState<
+    { eligible: number; memberCount: number; suppressed: number; counts: Record<string, number> } | null
+  >(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Reset whenever anything that changes the audience changes.
+  useEffect(() => { setAudiencePreview(null); }, [selectedListId, waExcludeCold, waQuietDaysEnabled, waQuietDays]);
+
+  const previewAudience = useCallback(async () => {
+    if (!selectedList) return;
+    setPreviewing(true);
+    try {
+      const { eligibility, suppressedCount, memberCount } = await resolveWhatsAppAudience(selectedList.id);
+      setAudiencePreview({
+        eligible: eligibility.counts.eligible,
+        memberCount,
+        suppressed: suppressedCount,
+        counts: eligibility.counts as unknown as Record<string, number>,
+      });
+    } catch (err) {
+      toast({
+        title: "Could not check audience",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setPreviewing(false);
+    }
+  }, [selectedList, resolveWhatsAppAudience, toast]);
+
   const launchCampaign = async () => {
     if (!selectedList) {
       setLaunchError("Pick a lead list first.");
@@ -885,40 +1112,10 @@ export default function Marketing() {
           throw new Error(`This sender doesn't have "${waTemplate}" approved. Pick another sender or template.`);
         }
 
-        // Paginated past PostgREST's 1000-row cap (see fetchListMembers), with
-        // the contact join added: a marketing list is exactly the case where
-        // both matter — it is >1000 members AND contact-backed.
-        const members = await fetchListMembers(
-          supabase as any,
-          selectedList.id,
-          "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
-        );
-
-        // Members are polymorphic (lead or bulk-imported marketing contact);
-        // campaignMemberToLead normalises both into the shape
-        // filterCampaignRecipients and the pacing plan expect, and carries
-        // `isContact` through so the recipient row targets the right column.
-        const rawLeads = ((members as any[]) || [])
-          .map((member) => campaignMemberToLead(member, "whatsapp"))
-          .filter((lead) => lead && lead.id);
-
-        const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
-        let lastMarketingAtByLeadId = new Map<string, string>();
-        if (quietDays > 0 && rawLeads.length > 0) {
-          lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByLeadIds(
-            supabase as any,
-            rawLeads.map((lead: { id: string }) => lead.id),
-            Math.max(quietDays, 30),
-          );
-        }
-
-        const eligibility = filterCampaignRecipients(rawLeads, {
-          channel: "whatsapp",
-          excludeCold: waExcludeCold,
-          quietDays,
-          lastMarketingAtByLeadId,
-        });
-        const valid = eligibility.eligible;
+        // Same resolver the audience preview uses, so what the builder promised
+        // is exactly what gets enrolled.
+        const { eligibility } = await resolveWhatsAppAudience(selectedList.id);
+        const valid = eligibility.eligible as any[];
         if (!valid.length) {
           throw new Error(eligibility.preview || "No reachable WhatsApp recipients after DNC/quality filters.");
         }
@@ -1084,7 +1281,7 @@ export default function Marketing() {
     const funnelColumns = campaign.channel === "whatsapp" ? ",delivered_at,read_at,failed_at" : "";
     const { data } = await supabase
       .from(table as any)
-      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title${funnelColumns},leads(name)`)
+      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title${funnelColumns}${campaign.channel === "whatsapp" ? ",last_error_code,retry_count" : ""},leads(name)`)
       .eq("campaign_id", campaign.id)
       .order("created_at", { ascending: false })
       .limit(500);
@@ -1104,6 +1301,8 @@ export default function Marketing() {
       clickedUrl: row.clicked_url || null,
       clickedButtonAt: row.clicked_button_at || null,
       clickedButtonTitle: row.clicked_button_title || null,
+      errorCode: row.last_error_code ?? null,
+      retryCount: Number(row.retry_count || 0),
       deliveredAt: row.delivered_at ?? null,
       readAt: row.read_at ?? null,
       failedAt: row.failed_at ?? null,
@@ -1947,6 +2146,51 @@ export default function Marketing() {
             </div>
           )}
 
+          {campaignChannel === "whatsapp" && selectedList && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Audience</p>
+                <Button type="button" variant="outline" size="sm" onClick={previewAudience} disabled={previewing}>
+                  {previewing ? "Checking…" : audiencePreview ? "Re-check" : "Check audience"}
+                </Button>
+              </div>
+              {!audiencePreview ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {selectedList.member_count.toLocaleString("en-IN")} on this list. Check to see how many will
+                  actually receive it after DNC, opt-outs, quiet days and Meta suppression.
+                </p>
+              ) : (
+                <div className="mt-2 space-y-1">
+                  <p className="text-sm">
+                    <span className="font-semibold text-success">{audiencePreview.eligible.toLocaleString("en-IN")}</span>
+                    {" will receive"}
+                    <span className="text-muted-foreground">
+                      {" "}of {audiencePreview.memberCount.toLocaleString("en-IN")} on the list
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      audiencePreview.counts.dnc ? `${audiencePreview.counts.dnc} DNC` : null,
+                      audiencePreview.suppressed ? `${audiencePreview.suppressed} suppressed (Meta cap)` : null,
+                      audiencePreview.counts.recentContact ? `${audiencePreview.counts.recentContact} recently messaged` : null,
+                      audiencePreview.counts.noContact ? `${audiencePreview.counts.noContact} no phone` : null,
+                      audiencePreview.counts.cold ? `${audiencePreview.counts.cold} cold` : null,
+                      audiencePreview.counts.notShared ? `${audiencePreview.counts.notShared} not shared` : null,
+                    ].filter(Boolean).join(" · ") || "No exclusions."}
+                  </p>
+                  {waSelectedSender?.messagingLimitTier && (
+                    <p className="text-xs text-muted-foreground">
+                      Sender limit: {formatMessagingTier(waSelectedSender.messagingLimitTier)}
+                      {waSelectedSender.qualityRating && waSelectedSender.qualityRating !== "UNKNOWN"
+                        ? ` · Meta quality ${waSelectedSender.qualityRating.toLowerCase()}`
+                        : ""}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {launchError && <p className="text-sm text-destructive">{launchError}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
@@ -2129,7 +2373,35 @@ export default function Marketing() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right text-success">{campaign.sent.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right">
+                        {(() => {
+                          // Attempted, not campaign.sent: sent_count is only rewritten at
+                          // the end of a batch, which is why the table once read "260 sent"
+                          // while 378 had actually gone out.
+                          const attempted = campaign.total - campaign.pendingRecipients;
+                          const pct = campaignProgressPct(attempted, campaign.total);
+                          const live = !isCampaignTerminal(campaign.status) && campaign.pendingRecipients > 0;
+                          const eta = live ? countdownTo(campaign.nextEligibleAt, nowTick) : null;
+                          return (
+                            <div className="space-y-1">
+                              <div className="font-medium text-success">{campaign.sent.toLocaleString("en-IN")}</div>
+                              {live && (
+                                <>
+                                  <div className="h-1 w-24 overflow-hidden rounded-full bg-muted">
+                                    <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <div className="text-[11px] leading-tight text-muted-foreground">
+                                    {attempted.toLocaleString("en-IN")} / {campaign.total.toLocaleString("en-IN")} · {pct}%
+                                  </div>
+                                  <div className="text-[11px] leading-tight text-muted-foreground">
+                                    {eta ? `next batch in ${eta}` : `${campaign.dueNow.toLocaleString("en-IN")} due now`}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="font-medium text-success">
                           {campaign.channel === "whatsapp" ? campaign.delivered.toLocaleString("en-IN") : "—"}
@@ -2146,7 +2418,15 @@ export default function Marketing() {
                           <div className="text-[11px] text-muted-foreground">{pct(campaign.read, campaign.sent)}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right text-destructive">{campaign.failed.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium text-destructive">{campaign.failed.toLocaleString("en-IN")}</div>
+                        {/* "504 failed" is not actionable; "402 billing / 98 unreachable" is. */}
+                        {campaign.failureBreakdown.slice(0, 3).map((f) => (
+                          <div key={f.code} className="text-[11px] leading-tight text-muted-foreground" title={`Meta ${f.code}`}>
+                            {f.count.toLocaleString("en-IN")} {f.text}
+                          </div>
+                        ))}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
                         <div className="text-[11px] text-muted-foreground">{pct(campaign.responded, campaign.total)}</div>
@@ -2317,7 +2597,27 @@ export default function Marketing() {
                         )}
                       </td>
                       <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground">{row.providerId || "-"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{row.error || "-"}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {(() => {
+                          // Was the raw Meta JSON. Route it through the same
+                          // plain-English map the inbox uses.
+                          if (!row.error && !row.errorCode) return "-";
+                          const described = describeWhatsAppError(
+                            row.errorCode
+                              ? JSON.stringify([{ code: row.errorCode, title: row.error }])
+                              : row.error,
+                          );
+                          return (
+                            <div className="space-y-0.5">
+                              <div>{described.text}</div>
+                              <div className="text-[11px] text-muted-foreground/70">
+                                {row.errorCode ? `Meta ${row.errorCode}` : null}
+                                {row.retryCount > 0 ? `${row.errorCode ? " · " : ""}${row.retryCount} retr${row.retryCount === 1 ? "y" : "ies"}` : null}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

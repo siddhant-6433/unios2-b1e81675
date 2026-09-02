@@ -183,6 +183,31 @@ Deno.serve(async (req) => {
       }
       const verifiedName: string | null = nameBody?.verified_name || null;
 
+      // Sending headroom: quality rating (GREEN/YELLOW/RED) and the 24h tier.
+      // Requested separately from verified_name because these two fields 400 on
+      // some numbers, and a health miss must not cost us the identity sync.
+      // `messaging_limit_tier` is deprecated in favour of
+      // `whatsapp_business_manager_messaging_limit`; ask for both and take
+      // whichever the account still returns.
+      let qualityRating: string | null = null;
+      let messagingTier: string | null = null;
+      try {
+        const healthRes = await fetchWithTimeout(
+          `https://graph.facebook.com/v21.0/${pnid}?fields=quality_rating,whatsapp_business_manager_messaging_limit,messaging_limit_tier`,
+          { headers: authHdr },
+          15000,
+        );
+        const healthBody = await healthRes.json().catch(() => ({}));
+        if (healthRes.ok) {
+          qualityRating = healthBody?.quality_rating || null;
+          const limit = healthBody?.whatsapp_business_manager_messaging_limit;
+          messagingTier = (typeof limit === "string" ? limit : limit?.max_daily_conversation_per_phone)
+            || healthBody?.messaging_limit_tier
+            || null;
+          if (messagingTier != null) messagingTier = String(messagingTier);
+        }
+      } catch { /* health is best-effort */ }
+
       // Business profile picture (may be absent).
       let avatarUrl: string | null = null;
       const profRes = await fetchWithTimeout(
@@ -262,6 +287,11 @@ Deno.serve(async (req) => {
 
       const patch: Record<string, unknown> = { profile_synced_at: new Date().toISOString() };
       if (verifiedName) patch.verified_name = verifiedName;
+      if (qualityRating || messagingTier) {
+        patch.quality_rating = qualityRating;
+        patch.messaging_limit_tier = messagingTier;
+        patch.health_synced_at = new Date().toISOString();
+      }
       if (avatarUrl) patch.profile_picture_url = avatarUrl;
       if (templateNames) {
         patch.available_templates = templateNames;
@@ -270,7 +300,7 @@ Deno.serve(async (req) => {
       }
       await admin.from("whatsapp_channels").update(patch).eq("id", ch.id);
 
-      results.push({ id: ch.id, phone_number_id: pnid, ok: true, verified_name: verifiedName, avatar: !!avatarUrl, templates: templateNames?.length ?? null });
+      results.push({ id: ch.id, phone_number_id: pnid, ok: true, verified_name: verifiedName, avatar: !!avatarUrl, templates: templateNames?.length ?? null, quality_rating: qualityRating, messaging_limit_tier: messagingTier });
     } catch (err: any) {
       results.push({ id: ch.id, phone_number_id: pnid, ok: false, reason: err?.message || "fetch error" });
     }
