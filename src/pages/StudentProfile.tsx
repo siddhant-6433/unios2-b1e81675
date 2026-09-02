@@ -544,7 +544,9 @@ const StudentProfile = () => {
         _section: pInstType === "school" ? (pSection.trim() || null) : null,
         _reason: reason,
       } as never);
-      if (error) throw error;
+      // PostgrestError is a plain object, not an Error — String() on it yields
+      // "[object Object]". Carry its message (and hint) into a real Error.
+      if (error) throw new Error([error.message, error.hint].filter(Boolean).join(" — ") || "Placement RPC failed");
       if (!changedId) throw new Error("Placement change did not apply.");
 
       // Re-provision fees for the new placement (carries paid amounts onto the
