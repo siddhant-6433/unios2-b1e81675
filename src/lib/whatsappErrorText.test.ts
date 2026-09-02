@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { describeWhatsAppError, whatsAppErrorText } from "./whatsappErrorText";
+import { describeWhatsAppError, whatsAppErrorText,
+  whatsAppErrorTextForCode,
+} from "./whatsappErrorText";
 
 describe("describeWhatsAppError", () => {
   it("reads Meta's webhook array shape", () => {
@@ -46,5 +48,36 @@ describe("describeWhatsAppError", () => {
     });
     expect(detail?.ourFault).toBe(true);
     expect(detail?.text).toMatch(/auto-reply/i);
+  });
+});
+
+describe("campaign failure breakdown wording", () => {
+  // Regression: the campaigns table rendered a wall of raw Meta JSON because the
+  // caller re-serialised an already-known code into Meta's array shape and fed it
+  // back in as a *string*. describeWhatsAppError only handled parsed values, so
+  // it fell through to the raw branch and echoed the blob into the table cell.
+  it("resolves a known code without a serialisation round-trip", () => {
+    expect(whatsAppErrorTextForCode("131049")).toContain("capped marketing messages");
+    expect(whatsAppErrorTextForCode(131042)).toContain("billing isn't set up");
+    expect(whatsAppErrorTextForCode("131026")).toContain("can't receive WhatsApp");
+  });
+
+  it("degrades sanely for unknown or missing codes", () => {
+    expect(whatsAppErrorTextForCode("999999")).toBe("WhatsApp error 999999");
+    expect(whatsAppErrorTextForCode(null)).toBe("Unknown error");
+    expect(whatsAppErrorTextForCode("unknown")).toBe("Unknown error");
+  });
+
+  it("parses a JSON string, not only a parsed object", () => {
+    // whatsapp_campaign_recipients.error_message stores Meta's array as text.
+    const raw = '[{"code": 131049, "title": "This message was not delivered to maintain healthy ecosystem engagement."}]';
+    const described = describeWhatsAppError(raw);
+    expect(described?.code).toBe("131049");
+    expect(described?.text).toContain("capped marketing messages");
+    expect(described?.text).not.toContain('{"code"');
+  });
+
+  it("still handles a plain non-JSON string", () => {
+    expect(describeWhatsAppError("something went wrong")?.text).toBe("something went wrong");
   });
 });

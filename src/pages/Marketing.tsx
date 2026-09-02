@@ -37,7 +37,7 @@ import {
 } from "@/lib/campaignEligibility";
 import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
-import { describeWhatsAppError } from "@/lib/whatsappErrorText";
+import { describeWhatsAppError, whatsAppErrorTextForCode } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -625,14 +625,15 @@ export default function Marketing() {
     const failuresById = new Map<string, Array<{ code: string; count: number; text: string }>>();
     for (const row of ((failureRes?.data as FailureBreakdownRow[] | null) || [])) {
       const code = String(row.error_code || "unknown");
-      const described = describeWhatsAppError(
-        code === "unknown" ? row.sample_message : JSON.stringify([{ code, title: row.sample_message }]),
-      );
       const list = failuresById.get(row.campaign_id) || [];
       list.push({
         code,
         count: Number(row.failures || 0),
-        text: described.text,
+        // We already have the code — look it up directly. Re-serialising it into
+        // Meta's array shape just to parse it back rendered the raw JSON instead.
+        text: code === "unknown"
+          ? (describeWhatsAppError(row.sample_message)?.text ?? "Unknown error")
+          : whatsAppErrorTextForCode(code),
       });
       failuresById.set(row.campaign_id, list);
     }
@@ -762,11 +763,14 @@ export default function Marketing() {
     const failuresById = new Map<string, Array<{ code: string; count: number; text: string }>>();
     for (const row of ((failureRes?.data as FailureBreakdownRow[] | null) || [])) {
       const code = String(row.error_code || "unknown");
-      const described = describeWhatsAppError(
-        code === "unknown" ? row.sample_message : JSON.stringify([{ code, title: row.sample_message }]),
-      );
       const list = failuresById.get(row.campaign_id) || [];
-      list.push({ code, count: Number(row.failures || 0), text: described.text });
+      list.push({
+        code,
+        count: Number(row.failures || 0),
+        text: code === "unknown"
+          ? (describeWhatsAppError(row.sample_message)?.text ?? "Unknown error")
+          : whatsAppErrorTextForCode(code),
+      });
       failuresById.set(row.campaign_id, list);
     }
     for (const list of failuresById.values()) list.sort((a, b) => b.count - a.count);
@@ -2602,14 +2606,12 @@ export default function Marketing() {
                           // Was the raw Meta JSON. Route it through the same
                           // plain-English map the inbox uses.
                           if (!row.error && !row.errorCode) return "-";
-                          const described = describeWhatsAppError(
-                            row.errorCode
-                              ? JSON.stringify([{ code: row.errorCode, title: row.error }])
-                              : row.error,
-                          );
+                          const described = row.errorCode
+                            ? { text: whatsAppErrorTextForCode(row.errorCode) }
+                            : describeWhatsAppError(row.error);
                           return (
                             <div className="space-y-0.5">
-                              <div>{described.text}</div>
+                              <div>{described?.text ?? row.error ?? "-"}</div>
                               <div className="text-[11px] text-muted-foreground/70">
                                 {row.errorCode ? `Meta ${row.errorCode}` : null}
                                 {row.retryCount > 0 ? `${row.errorCode ? " · " : ""}${row.retryCount} retr${row.retryCount === 1 ? "y" : "ies"}` : null}
