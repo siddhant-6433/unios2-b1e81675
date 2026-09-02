@@ -15,7 +15,13 @@ SELECT cron.schedule('flush-scheduled-wa-sends', '*/30 * * * *', $$
 $$);
 
 -- 2. Widen notifications_type_check to include finance_orphan_alert
-ALTER TABLE public.notifications DROP CONSTRAINT notifications_type_check;
+--
+-- IF EXISTS matters: this migration is already applied in production, and a bare
+-- DROP aborts the whole transaction if the constraint is missing (e.g. a partial
+-- apply, or a re-run after the ledger drifted). Adding a notifications.type
+-- without widening this CHECK silently rolls back the inserting transaction, so
+-- the file has to stay safely re-runnable.
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
 ALTER TABLE public.notifications ADD CONSTRAINT notifications_type_check CHECK (type = ANY (ARRAY[
   'lead_assigned','sla_warning','lead_reclaimed','followup_due','followup_overdue',
   'visit_confirmation_due','visit_followup_due','lead_transferred','deletion_request',
