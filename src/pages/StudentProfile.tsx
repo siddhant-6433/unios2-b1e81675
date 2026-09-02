@@ -2,7 +2,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
@@ -354,6 +354,7 @@ const fileToDataUrl = (file: File) =>
 const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { can } = usePermissions();
   const { role, user } = useAuth();
   const [student, setStudent] = useState<StudentRecord | null>(null);
@@ -437,6 +438,10 @@ const StudentProfile = () => {
       return;
     }
     toast({ title: removalAction === "archive" ? "Student archived" : "Student deleted" });
+    if (removalAction === "delete") {
+      navigate("/students");
+      return;
+    }
     setRemovalAction(null);
     setRemovalReason("");
     fetchStudent();
