@@ -12,12 +12,12 @@ import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
+import { HeaderActiveUsers } from "@/components/layout/HeaderActiveUsers";
 import { useLocation } from "react-router-dom";
 import { Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { isPortalRole } from "@/lib/accessPolicy";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
-import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useEffect, useState, lazy } from "react";
 import { Footprints } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -138,6 +138,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [deferredShellReady, setDeferredShellReady] = useState(false);
   const [showWalkIn, setShowWalkIn] = useState(false);
   const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || role === "principal";
+  // Active-users widget: super_admin sees everyone; campus_admin/principal/
+  // admission_head see only members of teams they lead (scoped in the RPC).
+  const showActiveUsers = role === "super_admin" || role === "campus_admin" || role === "principal" || role === "admission_head";
   // Console routes own their own scrolling and want the full viewport: the
   // shell stops growing and <main> stops padding, so a three-column layout can
   // just use h-full instead of guessing the chrome height with calc(100vh-Npx).
@@ -147,7 +150,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // action bar, live-call bar — would otherwise leak into their view. Gate the
   // whole cluster in one place; each pill's own poll never mounts for portals.
   const isPortal = isPortalRole(role);
-  usePresenceHeartbeat();
+  // Presence heartbeat is mounted once under AuthProvider (App.tsx) so it covers
+  // portal users too — not here.
 
   useEffect(() => {
     setDeferredShellReady(false);
@@ -184,6 +188,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 {deferredShellReady && <HeaderFeedbackWidget />}
                 {deferredShellReady && !isPortal && <WhatsAppPanel />}
                 {deferredShellReady && <NotificationPanel />}
+                {deferredShellReady && showActiveUsers && <HeaderActiveUsers />}
                 <div className="w-px h-6 bg-border/60 mx-0.5" />
                 <HeaderProfile />
               </div>
