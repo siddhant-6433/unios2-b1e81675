@@ -26,6 +26,8 @@ import { CustomFeeHeadsPanel } from "@/components/finance/CustomFeeHeadsPanel";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import { matchesCampus } from "@/lib/campusFilter";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { DATE_PRESETS, getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -70,6 +72,11 @@ const Finance = () => {
   const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
   const [dayClosed, setDayClosed] = useState(false);
+  // Date range scopes the "Total Collected" card only (collections are a flow);
+  // Due/Overdue/Concession stay current snapshots. Defaults to today.
+  const [preset, setPreset] = useState<DatePreset>("today");
+  const [fromDate, setFromDate] = useState(getDatePresetRange("today").from);
+  const [toDate, setToDate] = useState(getDatePresetRange("today").to);
 
   const tabs = useMemo(() => {
     const all: { id: TabId; label: string; icon: typeof FileText; badge: number; show: boolean }[] = [
@@ -97,6 +104,18 @@ const Finance = () => {
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
+  // Card totals are date-scoped, so fetch them separately from the heavy
+  // ledger/payments/structures load — only this re-runs on a range change.
+  useEffect(() => {
+    (supabase.rpc as any)("finance_summary", {
+      _campus_ids: selectedCampusId === "all" ? null : [selectedCampusId],
+      _from: fromDate || null,   // "" (All time) -> null -> cumulative source
+      _to: toDate || null,
+    }).then(({ data }: { data: Record<string, number> | null }) => {
+      if (data) setSummary(data);
+    });
+  }, [selectedCampusId, fromDate, toDate]);
+
   const fetchAll = async () => {
     setLoading(true);
     // Cash-desk closed state for the current campus scope, so the header can
@@ -104,7 +123,7 @@ const Finance = () => {
     // close (onClosed=fetchAll) and on campus change.
     (supabase.rpc as any)("is_day_closed", { _campus_id: selectedCampusId ?? null })
       .then(({ data }: { data: boolean | null }) => setDayClosed(!!data));
-    const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes, summaryRes] = await Promise.all([
+    const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id, course_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       // v_all_payments unifies pre-admission lead_payments (token / application
       // fees confirmed before AN issuance) with post-admission payments. Without
@@ -122,12 +141,6 @@ const Finance = () => {
       // lists, which is where the precision has to be.
       supabase.from("offer_waivers").select("id", { count: "planned", head: true }).eq("status", "pending"),
       supabase.from("concessions").select("id", { count: "planned", head: true }).in("status", ["pending_principal", "pending_super_admin"]),
-      // Header totals come from the server. Summing the .limit(200) ledger slice
-      // below reported whatever the first 200 rows by due date happened to add
-      // up to, which is not "Total Due".
-      (supabase.rpc as any)("finance_summary", {
-        _campus_ids: selectedCampusId === "all" ? null : [selectedCampusId],
-      }),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
     if (paymentsRes.data) {
@@ -151,7 +164,6 @@ const Finance = () => {
     if (structRes.data) setStructures(structRes.data);
     setPendingWaiverCount(waiverRes.count ?? 0);
     setPendingConcessionCount(concessionRes.count ?? 0);
-    if (summaryRes?.data) setSummary(summaryRes.data as Record<string, number>);
     setLoading(false);
   };
 
@@ -171,6 +183,11 @@ const Finance = () => {
   const totalDue = Number(summary?.due ?? 0);
   const totalOverdue = Number(summary?.overdue ?? 0);
   const paidCount = Number(summary?.paid_items ?? 0);
+  const isDateScoped = !!(fromDate || toDate);
+  const rangeLabel = !isDateScoped
+    ? "all time"
+    : DATE_PRESETS.find((p) => p.key === preset)?.label
+      ?? (fromDate === toDate ? fromDate : `${fromDate} → ${toDate}`);
 
   // CSV of whatever table is on screen — the old Export button did nothing.
   const exportCsv = () => {
@@ -236,12 +253,27 @@ const Finance = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          Collections for <span className="font-medium text-foreground">{rangeLabel}</span> · balances shown as of now
+        </p>
+        <DateRangeFilter
+          preset={preset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setPreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          ariaPrefix="Collection date"
+        />
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
-          { label: "Total Due", value: `₹${(totalDue / 100000).toFixed(1)}L`, sub: "Pending balance", icon: Clock, iconBg: "bg-pastel-yellow" },
-          { label: "Overdue", value: `₹${(totalOverdue / 100000).toFixed(1)}L`, sub: "Action required", icon: AlertTriangle, iconBg: "bg-pastel-red" },
-          { label: "Concession", value: `₹${(Number(summary?.concession ?? 0) / 100000).toFixed(1)}L`, sub: `${Number(summary?.total_items ?? 0)} fee items`, icon: Receipt, iconBg: "bg-pastel-blue" },
+          { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: isDateScoped ? `${paidCount} payments` : `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
+          { label: "Total Due", value: `₹${(totalDue / 100000).toFixed(1)}L`, sub: "Pending balance · as of now", icon: Clock, iconBg: "bg-pastel-yellow" },
+          { label: "Overdue", value: `₹${(totalOverdue / 100000).toFixed(1)}L`, sub: "Action required · as of now", icon: AlertTriangle, iconBg: "bg-pastel-red" },
+          { label: "Concession", value: `₹${(Number(summary?.concession ?? 0) / 100000).toFixed(1)}L`, sub: `${Number(summary?.total_items ?? 0)} fee items · as of now`, icon: Receipt, iconBg: "bg-pastel-blue" },
         ].map((stat) => (
           <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
             <CardContent className="p-5">
