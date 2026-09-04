@@ -30,9 +30,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const getErrorMessage = (error: unknown, fallback = "Something went wrong") => {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  return fallback;
+  let message = fallback;
+  if (error instanceof Error) message = error.message;
+  else if (typeof error === "string") message = error;
+  // A disabled account surfaces Supabase's raw "User is banned"; show a softer,
+  // support-coded message instead. (UB = user banned.)
+  if (/banned/i.test(message)) return "Try again after sometime (UB)";
+  return message;
 };
 
 const readFunctionErrorMessage = async (error: unknown) => {
@@ -52,6 +56,7 @@ const readFunctionErrorMessage = async (error: unknown) => {
     msg = text.slice(0, 200);
   }
 
+  if (/banned/i.test(msg)) return "Try again after sometime (UB)";
   return msg;
 };
 
