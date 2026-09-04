@@ -22,6 +22,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_DAILY_UNIQUE_CAP = 2000;
 
 /**
+ * A Meta messaging tier → the number of unique recipients that number may
+ * message in a rolling 24h. `TIER_2K` → 2000, `TIER_100K` → 100000,
+ * `TIER_250` → 250. UNLIMITED and unknown/untiered return null (no finite cap
+ * we can enforce — don't block on a value we can't trust).
+ */
+export function messagingTierDailyCap(tier: string | null | undefined): number | null {
+  const t = String(tier || "").toUpperCase().trim();
+  const match = t.match(/^TIER_(\d+)(K)?$/);
+  if (!match) return null;
+  return Number(match[1]) * (match[2] ? 1000 : 1);
+}
+
+/**
  * Build eligible_at timestamps: first `dailyCap` recipients at startAt,
  * next wave startAt+1d, etc. Immediate non-paced → all startAt.
  */

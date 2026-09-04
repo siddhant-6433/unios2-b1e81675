@@ -47,7 +47,7 @@ const META_ERROR_TEXT: Record<string, { text: string; ourFault?: boolean }> = {
   "131053": { text: "Meta couldn't fetch the template's media. The image URL must be publicly reachable." },
   // Ours: the parameters we sent don't match the approved template.
   "132000": { text: "Template parameters don't match the approved template — report this.", ourFault: true },
-  "132001": { text: "This template doesn't exist or isn't approved for our number.", ourFault: true },
+  "132001": { text: "This template isn't on the selected number's WhatsApp account. Pick the number the template was approved on.", ourFault: true },
   "132005": { text: "Template text is too long for one of the parameters.", ourFault: true },
   "132012": { text: "A template parameter is in the wrong format — report this.", ourFault: true },
   "132015": { text: "This template is paused by Meta for poor quality." },
@@ -96,7 +96,13 @@ export function describeWhatsAppError(statusError: unknown): WhatsAppErrorDetail
   const source: any = Array.isArray(parsed) ? parsed[0] : parsed;
   if (!source || typeof source !== "object") {
     const raw = typeof parsed === "string" ? parsed : null;
-    return raw ? { code: null, text: raw, raw, ourFault: false } : null;
+    if (!raw) return null;
+    // Meta's plain-text errors embed the code as "(#132001) …" — map it so the
+    // toast shows the actionable line instead of Meta's wording.
+    const embedded = raw.match(/\(#(\d+)\)/)?.[1];
+    const known = embedded ? META_ERROR_TEXT[embedded] : undefined;
+    if (known) return { code: embedded!, text: known.text, raw, ourFault: known.ourFault ?? false };
+    return { code: embedded ?? null, text: raw, raw, ourFault: false };
   }
 
   // `{ error: {...} }` (whatsapp-send) unwraps one level; everything else is flat.
@@ -124,6 +130,25 @@ export function describeWhatsAppError(statusError: unknown): WhatsAppErrorDetail
 /** Convenience for surfaces that only want the one-line string. */
 export function whatsAppErrorText(statusError: unknown): string | null {
   return describeWhatsAppError(statusError)?.text ?? null;
+}
+
+// Recipient-specific failures: the send is fine, THIS number can't receive it
+// right now, so a different test number will work.
+const RECIPIENT_SPECIFIC_CODES = new Set(["131026", "131047", "131049", "131056", "130472"]);
+
+/**
+ * Next-step hint for a failed WhatsApp send, keyed on the Meta code. Tells the
+ * user whether to retry, switch test number, or fix config — instead of leaving
+ * a raw Meta error with no action.
+ */
+export function whatsAppErrorHint(code: string | number | null | undefined): string | null {
+  const key = code == null ? "" : String(code).trim();
+  if (!key) return null;
+  if (RECIPIENT_SPECIFIC_CODES.has(key)) return "Try a different test number — this one can't receive the message right now.";
+  if (key === "131053") return "Media fetch failed — usually temporary. Tap Send test again.";
+  if (key === "131042") return "This number has no payment method — set up WhatsApp billing.";
+  if (key === "132001") return "Pick a number that has this template approved.";
+  return null;
 }
 
 /**

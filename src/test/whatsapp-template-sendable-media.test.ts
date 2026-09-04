@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   resolveSendableTemplateMediaUrl,
   templateMediaUrlFromComponents,
@@ -6,6 +7,12 @@ import {
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
 import { classifyHeaderMediaUrl } from "@/lib/publicMediaUrl";
 import { interpretWhatsAppMessageStatus } from "@/lib/whatsappTestDelivery";
+import {
+  headerMediaIsSendable,
+  headerMediaSendFields,
+  nextHeaderMediaParams,
+} from "@/lib/headerMediaPrefill";
+import { ensureMediaHeaderParam } from "@/config/waBulkTemplates";
 
 // Regression: a media-header template whose only example is Meta's scontent
 // sample handle used to report a usable "default" media URL. The bulk-send UI
@@ -86,5 +93,66 @@ describe("interpretWhatsAppMessageStatus", () => {
     expect(interpretWhatsAppMessageStatus({ status: "delivered", status_error: null, read_at: null })).toEqual({ status: "delivered" });
     expect(interpretWhatsAppMessageStatus({ status: "read", status_error: null, read_at: "2026-09-02T00:00:00Z" })).toEqual({ status: "read" });
     expect(interpretWhatsAppMessageStatus({ status: "failed", status_error: [{ code: 131026, message: "not on whatsapp" }], read_at: null }).status).toBe("failed");
+  });
+});
+
+describe("header media prefill and send payload", () => {
+  it("fills a blank field when the Template Manager URL loads after the template pick", () => {
+    const first = nextHeaderMediaParams({}, "", "img_tpl", "", "");
+    const later = nextHeaderMediaParams(first.params, "https://cdn.example.com/header.jpg", "img_tpl", first.lastAutoKey, first.lastAutoUrl);
+    expect(later.params.template_header_media_url).toBe("https://cdn.example.com/header.jpg");
+  });
+
+  it("keeps a typed override and does not blank a filled URL when the default disappears", () => {
+    const filled = nextHeaderMediaParams({}, "https://cdn.example.com/a.jpg", "img_tpl", "", "");
+    const typed = nextHeaderMediaParams(
+      { ...filled.params, template_header_media_url: "https://cdn.example.com/custom.jpg" },
+      "https://cdn.example.com/a.jpg",
+      "img_tpl",
+      filled.lastAutoKey,
+      filled.lastAutoUrl,
+    );
+    expect(typed.params.template_header_media_url).toBe("https://cdn.example.com/custom.jpg");
+    const dropped = nextHeaderMediaParams(typed.params, "", "img_tpl", typed.lastAutoKey, typed.lastAutoUrl);
+    expect(dropped.params.template_header_media_url).toBe("https://cdn.example.com/custom.jpg");
+  });
+
+  it("treats a saved default as sendable even when the input is still blank", () => {
+    expect(headerMediaIsSendable("", "https://cdn.example.com/header.jpg")).toBe(true);
+    expect(headerMediaIsSendable("", "")).toBe(false);
+  });
+
+  it("sends document and video headers on the matching Meta field", () => {
+    expect(headerMediaSendFields("DOCUMENT", "https://cdn.example.com/a.pdf")).toEqual({
+      header_document_url: "https://cdn.example.com/a.pdf",
+    });
+    expect(headerMediaSendFields("VIDEO", "https://cdn.example.com/a.mp4")).toEqual({
+      header_video_url: "https://cdn.example.com/a.mp4",
+    });
+    expect(headerMediaSendFields("IMAGE", "https://cdn.example.com/a.jpg")).toEqual({
+      header_image_url: "https://cdn.example.com/a.jpg",
+    });
+  });
+
+  it("puts the header file slot back when param_specs omitted it", () => {
+    const params = ensureMediaHeaderParam(
+      [{ name: "template_value_1", source: "static" }],
+      [{ type: "HEADER", format: "IMAGE" }],
+    );
+    expect(params[0].name).toBe("template_header_media_url");
+  });
+});
+
+describe("Marketing Hub test send", () => {
+  const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
+
+  it("prefills the header URL and does not lock Send test on the live probe or waiting phase", () => {
+    expect(marketingPage).toContain("nextHeaderMediaParams");
+    expect(marketingPage).toContain("headerMediaIsSendable");
+    expect(marketingPage).toContain("headerMediaSendFields");
+    expect(marketingPage).not.toContain("waTestSending || waTestPhase === \"waiting\"");
+    expect(marketingPage).not.toContain("mediaProbe.status !== \"ok\"");
+    expect(marketingPage).toContain("I received it");
+    expect(marketingPage).toContain("testSendSignature");
   });
 });

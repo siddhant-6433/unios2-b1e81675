@@ -40,6 +40,13 @@ import {
   invalidateWhatsAppReplyStateCounts,
 } from "@/lib/actionBadgeCounts";
 import {
+  campaignPhoneLookupValues,
+  chunkValues,
+  conversationMatchesEngagedPhones,
+  engagedPhoneDigitSet,
+  fetchEngagedCampaignPhones,
+} from "@/lib/campaignEngaged";
+import {
   buildTemplateParams,
   loadWhatsAppTemplateCatalog,
   resolveCourseTemplateFields,
@@ -791,6 +798,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const phoneParam = searchParams.get("phone");
   const scope = searchParams.get("scope") === "hr" ? "hr" : "admissions";
   const isHrScope = scope === "hr";
+  const engagedCampaignParam = searchParams.get("campaign");
+  const isCampaignEngagedInbox =
+    searchParams.get("engaged") === "1" && Boolean(engagedCampaignParam);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationCursor, setConversationCursor] = useState<{ last_message_at: string; phone: string } | null>(null);
@@ -892,6 +902,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     Record<string, { conversations: number; unread: number }> | null
   >(null);
   const [replyStateFilter, setReplyStateFilter] = useState<"needs_reply" | "awaiting" | "all">("needs_reply");
+  const [engagedPhones, setEngagedPhones] = useState<Set<string> | null>(null);
+  const [engagedCampaignName, setEngagedCampaignName] = useState<string | null>(null);
   const [aiHealthDismissed, setAiHealthDismissed] = useState(false);
   const [aiModeSaving, setAiModeSaving] = useState(false);
   const [showCopilotPanel, setShowCopilotPanel] = useState(false);
@@ -1477,16 +1489,97 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     }
   };
 
+  const fetchConversationsForPhones = async (phones: string[]): Promise<Conversation[]> => {
+    const lookup = [...new Set(phones.flatMap(campaignPhoneLookupValues))];
+    const collected: Conversation[] = [];
+    for (const chunk of chunkValues(lookup)) {
+      if (chunk.length === 0) continue;
+      // Phone-scoped RPC, not the whatsapp_conversations view: the view's
+      // backing function builds every conversation (41k+, ~9.5s) before any
+      // .in("phone") filter can apply, blowing the 8s statement timeout. This
+      // variant pushes the phone list into the base scan.
+      let q = (supabase as any)
+        .rpc("get_whatsapp_conversations_by_phones", { _phones: chunk })
+        .order("last_message_at", { ascending: false });
+      if (role === "counsellor" && profile?.id) {
+        q = q.contains("lead_counsellor_ids", [profile.id]);
+      } else if (isAdminRole(role)) {
+        if (counsellorFilter === "unassigned") {
+          q = q.is("counsellor_id", null);
+        } else if (counsellorFilter !== "all") {
+          q = q.eq("counsellor_id", counsellorFilter);
+        }
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      collected.push(...((data || []) as any[]).map(withConversationDefaults));
+    }
+    const seen = new Set<string>();
+    return collected.filter((conversation) => {
+      const key = conversationIdentityKey(conversation);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   // Fetch the first conversation page only. Additional pages load on scroll so
   // the inbox can paint quickly even when thousands of outbound rows exist.
   useEffect(() => {
     if (demoMode) return;
+    if (isCampaignEngagedInbox) return;
     if (role === "counsellor" && !profile?.id) return;
     setConversations([]);
     setConversationCursor(null);
     setHasMoreConversations(true);
     void fetchConversationPage(true, null);
-  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter]);
+  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter, isCampaignEngagedInbox]);
+
+  useEffect(() => {
+    if (demoMode) return;
+    if (!isCampaignEngagedInbox || !engagedCampaignParam) {
+      setEngagedPhones(null);
+      setEngagedCampaignName(null);
+      return;
+    }
+    if (role === "counsellor" && !profile?.id) return;
+    let cancelled = false;
+    setConversations([]);
+    setConversationCursor(null);
+    setHasMoreConversations(false);
+    setReplyStateFilter("all");
+    setBusinessNumber("all");
+    setOpsFilter("all");
+    setInboxTab("all");
+    void (async () => {
+      loadingConversationsRef.current = true;
+      setLoading(true);
+      try {
+        const { phones, campaignName } = await fetchEngagedCampaignPhones(supabase, engagedCampaignParam);
+        if (cancelled) return;
+        setEngagedCampaignName(campaignName);
+        setEngagedPhones(engagedPhoneDigitSet(phones));
+        const rows = phones.length === 0 ? [] : await fetchConversationsForPhones(phones);
+        if (cancelled) return;
+        setConversations(rows);
+        setHasMoreConversations(false);
+        setConversationCursor(null);
+      } catch (error: any) {
+        if (cancelled) return;
+        toast({
+          title: "Engaged leads could not load",
+          description: error?.message || "Try again.",
+          variant: "destructive",
+        });
+        setConversations([]);
+        setHasMoreConversations(false);
+      } finally {
+        if (!cancelled) setLoading(false);
+        loadingConversationsRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [role, profile?.id, counsellorFilter, isCampaignEngagedInbox, engagedCampaignParam]);
 
   // Server-side reply-state totals. The list only holds the first 120 rows, so
   // any count derived from it is a count of page one — which is how the inbox
@@ -2839,6 +2932,12 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
   // Apply mode filter (inbox vs outbound) to get the working set
   const modeFiltered = allConvs.filter(c => {
+    if (isCampaignEngagedInbox) {
+      if (engagedPhones && engagedPhones.size > 0) {
+        return conversationMatchesEngagedPhones(c.phone, engagedPhones);
+      }
+      return true;
+    }
     if (isOutboundMode) return c.has_inbound === false;
     // Inbox: only conversations with at least one inbound message
     // Synthetic staff entries (no real messages yet, has_inbound undefined) are excluded
@@ -2851,6 +2950,17 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     c.last_direction === "inbound" && c.lead_stage !== "dnc";
 
   const filtered = modeFiltered.filter(c => {
+    if (isCampaignEngagedInbox) {
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          getDisplayName(c).toLowerCase().includes(q) ||
+          c.phone.includes(q) ||
+          (c.counsellor_name?.toLowerCase().includes(q) ?? false)
+        );
+      }
+      return true;
+    }
     if (!isOutboundMode) {
       if (replyStateFilter === "needs_reply" && !isNeedsReply(c)) return false;
       if (replyStateFilter === "awaiting" && c.last_direction !== "outbound") return false;
@@ -3013,7 +3123,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 version could read "All caught up" purely because page one was clean. */}
             {isOutboundMode
               ? `${filtered.length} outbound-only conversation${filtered.length !== 1 ? "s" : ""} (no reply received)`
-              : replyStateCounts
+              : isCampaignEngagedInbox
+                ? `Engaged from ${engagedCampaignName || "campaign"} · ${filtered.length} chat${filtered.length !== 1 ? "s" : ""}`
+                : replyStateCounts
                 ? replyStateCounts.needsReply > 0
                   ? `${replyStateCounts.needsReply} conversation${replyStateCounts.needsReply !== 1 ? "s" : ""} waiting on you · ${replyStateCounts.unreadMessages} unread message${replyStateCounts.unreadMessages !== 1 ? "s" : ""}`
                   : "All caught up"
@@ -3080,9 +3192,23 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         <div className="flex h-screen min-h-[620px] sm:h-[calc(100vh-168px)]">
           {/* Conversation list */}
           <div className={`w-full bg-white sm:w-80 lg:w-96 border-r border-slate-200 flex flex-col ${selectedPhone ? "hidden sm:flex" : "flex"}`}>
+            {isCampaignEngagedInbox && (
+              <div className="flex items-center justify-between gap-2 border-b border-success/30 bg-success/5 px-3 py-2">
+                <span className="text-[11px] font-medium text-foreground">
+                  Showing engaged leads{engagedCampaignName ? ` from ${engagedCampaignName}` : ""} · {filtered.length}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 text-[11px] font-semibold text-success hover:underline"
+                  onClick={() => navigate("/whatsapp-inbox?inbox=all")}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
             {/* Reply state — the primary split. Counts come from the server RPC
                 so they match the header pill instead of only the loaded page. */}
-            {!isOutboundMode && (
+            {!isOutboundMode && !isCampaignEngagedInbox && (
               <div className="flex gap-1 px-3 py-2 border-b border-border">
                 {([
                   { key: "needs_reply" as const, label: "Needs Reply", count: replyStateCounts?.needsReply },
@@ -3108,6 +3234,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             )}
 
             {/* Category pills */}
+            {!isCampaignEngagedInbox && (
             <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
                 // Counts come from whatsapp_inbox_category_counts (full population),
@@ -3133,8 +3260,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 </button>
               ))}
             </div>
+            )}
 
-            {isAdminRole(role) && (
+            {isAdminRole(role) && !isCampaignEngagedInbox && (
               <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border/70 bg-muted/20">
                 {opsFilters.map((f) => (
                   <button
@@ -3250,7 +3378,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
               }}
             >
               {filtered.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No conversations yet</p>
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  {isCampaignEngagedInbox
+                    ? "No WhatsApp threads for these engaged leads yet"
+                    : "No conversations yet"}
+                </p>
               ) : (
                 <>
                   {groupedConvs.map((group) => (

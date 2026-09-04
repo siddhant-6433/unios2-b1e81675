@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
-import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
+import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP, messagingTierDailyCap } from "@/lib/campaignPacing";
 
 const migration = readFileSync(
   "supabase/migrations/20260714180000_whatsapp_campaign_pacing.sql",
@@ -9,6 +9,21 @@ const migration = readFileSync(
 const sender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const marketing = readFileSync("src/pages/Marketing.tsx", "utf8");
+
+describe("messagingTierDailyCap", () => {
+  it("parses Meta tier strings into a daily unique-recipient cap", () => {
+    expect(messagingTierDailyCap("TIER_2K")).toBe(2000);
+    expect(messagingTierDailyCap("TIER_100K")).toBe(100000);
+    expect(messagingTierDailyCap("TIER_250")).toBe(250);
+    expect(messagingTierDailyCap("tier_1k")).toBe(1000);
+  });
+  it("returns null for unbounded or unknown tiers (nothing to enforce)", () => {
+    expect(messagingTierDailyCap("UNLIMITED")).toBeNull();
+    expect(messagingTierDailyCap("UNTIERED")).toBeNull();
+    expect(messagingTierDailyCap(null)).toBeNull();
+    expect(messagingTierDailyCap("")).toBeNull();
+  });
+});
 
 describe("campaign pacing (Meta unique-user waves)", () => {
   it("builds waves of daily_unique_cap spaced ~24h apart", () => {

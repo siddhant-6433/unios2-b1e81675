@@ -58,24 +58,10 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
 });
 
 export const knownBulkSenderOptions = (): WaSenderOption[] => [
-  {
-    value: "meta:919667641872",
-    label: "Admissions Meta sender 9667641872",
-    provider: "meta",
-    phoneNumberId: null,
-    wabaId: null,
-    businessNumber: "919667641872",
-    total: null,
-    failed: null,
-    failedPct: null,
-    readPct: null,
-    qualityRiskLevel: "normal",
-    qualityRating: null,
-    messagingLimitTier: null,
-    verifiedName: null,
-    profilePictureUrl: null,
-    availableTemplates: null,
-  },
+  // 9667641872 is the OTP / transactional number — deliberately NOT a bulk
+  // marketing sender, to keep its quality clean. It also had a null
+  // phone_number_id here, so picking it silently routed sends to the default
+  // number anyway. OTP dispatch uses its own env config, not this picker.
   {
     value: "meta:1075269918995469",
     label: "Bulk campaign Meta sender 7428499849",
@@ -94,24 +80,9 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     profilePictureUrl: null,
     availableTemplates: null,
   },
-  {
-    value: "plivo:919555192192",
-    label: "Admissions Plivo sender 9555192192",
-    provider: "plivo",
-    phoneNumberId: null,
-    wabaId: null,
-    businessNumber: "919555192192",
-    total: null,
-    failed: null,
-    failedPct: null,
-    readPct: null,
-    qualityRiskLevel: "normal",
-    qualityRating: null,
-    messagingLimitTier: null,
-    verifiedName: null,
-    profilePictureUrl: null,
-    availableTemplates: null,
-  },
+  // 9555192192 (ex-Plivo coexistence number) is NOT a bulk marketing sender —
+  // its WABA has 0 templates. Its channel is allow_bulk=false and the health
+  // loop only enriches existing senders, so nothing re-adds it to the picker.
 ];
 
 export const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
@@ -271,6 +242,10 @@ export async function loadWaSenders(
       ? [...options.values()].find((option) =>
           option.provider === "meta" && digitsOnly(option.businessNumber) === digitsOnly(businessNumber))
       : null;
+    // Health rows exist for every number that ever sent (OTP, coexistence, …).
+    // Only ENRICH senders already in the picker (bulk channels + known senders);
+    // never CREATE one here, or non-bulk numbers leak in as campaign senders.
+    if (!existing && !existingByNumber) continue;
     const targetValue = existingByNumber?.value || value;
     options.set(targetValue, {
       value: targetValue,

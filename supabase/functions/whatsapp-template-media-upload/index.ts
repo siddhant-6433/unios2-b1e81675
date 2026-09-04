@@ -141,13 +141,44 @@ Deno.serve(async (req) => {
       return json({ error: `File exceeds the ${mb}MB limit for ${format} headers` }, 400);
     }
 
+    // ── Per-WABA app + token resolution ──────────────────────────────────────
+    // A Meta header_handle is scoped to the APP that uploaded it. Templates on a
+    // non-default WABA (e.g. Seralis, a different Meta app) need the sample media
+    // uploaded under THAT app. Resolve the WABA's token from its channel, then
+    // derive its app id via /debug_token — so no per-WABA app id has to be
+    // hardcoded. Falls back to the default app when no waba_id is given.
+    let uploadAppId = appId;
+    let uploadToken = waToken;
+    const wabaId = String(form.get("waba_id") || "").trim();
+    if (wabaId) {
+      const { data: ch } = await adminClient
+        .from("whatsapp_channels")
+        .select("secret_token_name")
+        .eq("waba_id", wabaId)
+        .eq("is_active", true)
+        .limit(1)
+        .single();
+      const wabaToken = ch?.secret_token_name ? Deno.env.get(ch.secret_token_name) : null;
+      if (wabaToken && wabaToken !== waToken) {
+        const dbg = await readMetaResponse(
+          await fetch(`https://graph.facebook.com/v21.0/debug_token?input_token=${wabaToken}&access_token=${wabaToken}`),
+        );
+        const resolvedAppId = dbg?.data?.app_id ? String(dbg.data.app_id) : null;
+        if (!resolvedAppId) {
+          return json({ error: `Could not resolve the Meta app for WABA ${wabaId} — its media can't be uploaded from here.` }, 400);
+        }
+        uploadAppId = resolvedAppId;
+        uploadToken = wabaToken;
+      }
+    }
+
     // ── Step 1: create an upload session ──
     const sessionUrl =
-      `https://graph.facebook.com/v21.0/${appId}/uploads` +
+      `https://graph.facebook.com/v21.0/${uploadAppId}/uploads` +
       `?file_name=${encodeURIComponent(fileName)}` +
       `&file_length=${bytes.length}` +
       `&file_type=${encodeURIComponent(mime)}` +
-      `&access_token=${waToken}`;
+      `&access_token=${uploadToken}`;
 
     const sessionRes = await fetch(sessionUrl, { method: "POST" });
     const sessionData = await readMetaResponse(sessionRes);
@@ -160,7 +191,7 @@ Deno.serve(async (req) => {
     const uploadRes = await fetch(`https://graph.facebook.com/v21.0/${sessionData.id}`, {
       method: "POST",
       headers: {
-        Authorization: `OAuth ${waToken}`,
+        Authorization: `OAuth ${uploadToken}`,
         file_offset: "0",
         "Content-Type": "application/octet-stream",
       },

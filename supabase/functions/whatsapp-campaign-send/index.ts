@@ -575,7 +575,7 @@ Deno.serve(async (req) => {
     // eligible_at defaults to now() for legacy campaigns.
     const nowIso = new Date().toISOString();
     const recipientSelect =
-      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, contact_id, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, contact_id, business_phone_number_id, business_number, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
     let recipients: any[] | null = null;
     {
       const paced = await adminClient
@@ -994,8 +994,10 @@ Deno.serve(async (req) => {
         const sendResult = await (sendWhatsAppTemplate as any)(adminClient, {
           route: "bulk",
           requireBulk: true,
-          businessPhoneNumberId: campaignBusinessPhoneNumberId,
-          businessNumber: campaignBusinessNumber,
+          // Per-recipient sender when the campaign rotates across numbers;
+          // falls back to the campaign's single sender otherwise.
+          businessPhoneNumberId: recipient.business_phone_number_id || campaignBusinessPhoneNumberId,
+          businessNumber: recipient.business_number || campaignBusinessNumber,
         }, waPhone, {
           name: templateDef.name,
           language: "en",
