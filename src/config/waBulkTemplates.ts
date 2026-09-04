@@ -101,6 +101,36 @@ export function dynamicWaTemplateParams(
   return params;
 }
 
+export function templateNeedsMediaHeader(
+  components?: WaTemplateComponentLike[] | null,
+  headerFormat?: string | null,
+): boolean {
+  if (MEDIA_HEADER_FORMATS.has(String(headerFormat || "").toUpperCase())) return true;
+  const header = components?.find((component) => String(component.type || "").toUpperCase() === "HEADER");
+  return MEDIA_HEADER_FORMATS.has(String(header?.format || "").toUpperCase());
+}
+
+/** param_specs from Template Manager can omit the header file slot — still required at send. */
+export function ensureMediaHeaderParam(
+  params: WaBulkTemplate["params"],
+  components?: WaTemplateComponentLike[] | null,
+  headerFormat?: string | null,
+): WaBulkTemplate["params"] {
+  if (!templateNeedsMediaHeader(components, headerFormat)) return params;
+  if (params.some((param) => param.name === "template_header_media_url")) return params;
+  const format = String(headerFormat || components?.find((component) => String(component.type || "").toUpperCase() === "HEADER")?.format || "IMAGE").toUpperCase();
+  const label = `${format.charAt(0)}${format.slice(1).toLowerCase()} URL`;
+  return [
+    {
+      name: "template_header_media_url",
+      source: "static",
+      placeholder: label,
+      help: "Public media URL used for the template header in every send.",
+    },
+    ...params,
+  ];
+}
+
 const cnetNotQualifiedBptBmritPreview =
   "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667641872, 9555192192";
 const cuet2026CounsellingOpenPreview =

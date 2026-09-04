@@ -37,7 +37,7 @@ export async function waitForWhatsAppDelivery(
   waMessageId: string,
   options: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
 ): Promise<WhatsAppDeliveryOutcome> {
-  const timeoutMs = options.timeoutMs ?? 45_000;
+  const timeoutMs = options.timeoutMs ?? 90_000;
   const intervalMs = options.intervalMs ?? 2_000;
   const started = Date.now();
 

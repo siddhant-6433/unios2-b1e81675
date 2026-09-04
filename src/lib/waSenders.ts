@@ -58,24 +58,10 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
 });
 
 export const knownBulkSenderOptions = (): WaSenderOption[] => [
-  {
-    value: "meta:919667641872",
-    label: "Admissions Meta sender 9667641872",
-    provider: "meta",
-    phoneNumberId: null,
-    wabaId: null,
-    businessNumber: "919667641872",
-    total: null,
-    failed: null,
-    failedPct: null,
-    readPct: null,
-    qualityRiskLevel: "normal",
-    qualityRating: null,
-    messagingLimitTier: null,
-    verifiedName: null,
-    profilePictureUrl: null,
-    availableTemplates: null,
-  },
+  // 9667641872 is the OTP / transactional number — deliberately NOT a bulk
+  // marketing sender, to keep its quality clean. It also had a null
+  // phone_number_id here, so picking it silently routed sends to the default
+  // number anyway. OTP dispatch uses its own env config, not this picker.
   {
     value: "meta:1075269918995469",
     label: "Bulk campaign Meta sender 7428499849",

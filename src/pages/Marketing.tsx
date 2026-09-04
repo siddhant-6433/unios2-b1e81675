@@ -30,7 +30,7 @@ import {
 import { WhatsAppBusinessIdentity } from "@/components/whatsapp/WhatsAppBusinessIdentity";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
-import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP } from "@/lib/campaignPacing";
+import { buildCampaignPacePlan, DEFAULT_DAILY_UNIQUE_CAP, messagingTierDailyCap } from "@/lib/campaignPacing";
 import {
   campaignMemberToLead,
   DEFAULT_QUIET_DAYS,
@@ -38,18 +38,33 @@ import {
 } from "@/lib/campaignEligibility";
 import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
+import {
+  campaignEngagedInboxPath,
+  campaignHasEngaged,
+  campaignRecipientQuery,
+  fetchCampaignRecipientsByEngagement,
+  type RecipientEngagementFilter,
+} from "@/lib/campaignEngaged";
 import { describeWhatsAppError, whatsAppErrorTextForCode } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { classifyHeaderMediaUrl, probePublicMediaUrl } from "@/lib/publicMediaUrl";
 import { waitForWhatsAppDelivery } from "@/lib/whatsappTestDelivery";
-import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
+import { invokeEdge } from "@/integrations/supabase/edge";
+import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, ensureMediaHeaderParam, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
   resolveSendableTemplateMediaUrl,
   sendableHeaderMediaUrl,
+  templateHeaderFromComponents,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import {
+  headerMediaIsSendable,
+  headerMediaSendFields,
+  nextHeaderMediaParams,
+  resolvedHeaderMediaUrl,
+} from "@/lib/headerMediaPrefill";
 import {
   enrichApprovedWhatsAppTemplateMetadata,
   type ApprovedWhatsAppTemplateMetadata,
@@ -155,6 +170,69 @@ interface RecipientRow {
   errorCode: string | null;
   retryCount: number;
 }
+
+const RECIPIENT_CSV_HEADERS = [
+  "Lead",
+  "Destination",
+  "Status",
+  "Sent at",
+  "Delivered at",
+  "Read at",
+  "Responded at",
+  "Called at",
+  "Call disposition",
+  "Clicked link at",
+  "Clicked URL",
+  "Clicked button at",
+  "Button",
+  "Provider/message id",
+  "Error",
+];
+
+const mapDbRecipient = (
+  row: any,
+  destinationColumn: string,
+  providerColumn: string,
+): RecipientRow => ({
+  id: row.id,
+  destination: row[destinationColumn] || "-",
+  leadName: row.leads?.name || null,
+  status: row.status,
+  error: row.error_message || null,
+  sentAt: row.sent_at || null,
+  providerId: row[providerColumn] || null,
+  respondedAt: row.responded_at || null,
+  calledAt: row.called_at || null,
+  callDisposition: row.call_disposition || null,
+  clickedLinkAt: row.clicked_link_at || null,
+  clickedUrl: row.clicked_url || null,
+  clickedButtonAt: row.clicked_button_at || null,
+  clickedButtonTitle: row.clicked_button_title || null,
+  errorCode: row.last_error_code ?? null,
+  retryCount: Number(row.retry_count || 0),
+  deliveredAt: row.delivered_at ?? null,
+  readAt: row.read_at ?? null,
+  failedAt: row.failed_at ?? null,
+});
+
+const recipientCsvRows = (recipients: RecipientRow[]) =>
+  recipients.map((recipient) => [
+    recipient.leadName || "",
+    recipient.destination,
+    recipient.status,
+    recipient.sentAt || "",
+    recipient.deliveredAt || "",
+    recipient.readAt || "",
+    recipient.respondedAt || "",
+    recipient.calledAt || "",
+    recipient.callDisposition || "",
+    recipient.clickedLinkAt || "",
+    recipient.clickedUrl || "",
+    recipient.clickedButtonAt || "",
+    recipient.clickedButtonTitle || "",
+    recipient.providerId || "",
+    recipient.error || "",
+  ]);
 
 function scheduledDatePart(value: string) {
   return value.match(/^(\d{4}-\d{2}-\d{2})T/)?.[1] || "";
@@ -339,6 +417,8 @@ export default function Marketing() {
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [recipients, setRecipients] = useState<RecipientRow[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(false);
+  const [recipientFilter, setRecipientFilter] = useState<RecipientEngagementFilter>("all");
+  const [exportingEngagedId, setExportingEngagedId] = useState<string | null>(null);
   const [queueingId, setQueueingId] = useState<string | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [selectedListId, setSelectedListId] = useState("");
@@ -368,12 +448,16 @@ export default function Marketing() {
   // has 3 body placeholders in Meta but 2 in config; kb_placements isn't a Meta
   // template at all), which broke test-sends. These come from whatsapp_templates.
   const [placeholderCountByKey, setPlaceholderCountByKey] = useState<Record<string, number>>({});
+  const [headerFormatByKey, setHeaderFormatByKey] = useState<Record<string, string>>({});
   const [approvedTemplateKeys, setApprovedTemplateKeys] = useState<Set<string>>(new Set());
   // Which WABA each template belongs to (whatsapp_templates.waba_id, null = main NIMT WABA).
   const [templateWabaByKey, setTemplateWabaByKey] = useState<Record<string, string | null>>({});
   // No sender is selected by default — the user picks a template first, then the
   // number list narrows to the ones whose WABA can send it.
   const [waSenderValue, setWaSenderValue] = useState("");
+  // Extra numbers to round-robin across for throughput (besides the primary
+  // sender). Only numbers that can send the same template appear as candidates.
+  const [waRotationValues, setWaRotationValues] = useState<string[]>([]);
   const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
   const [waTestPhone, setWaTestPhone] = useState("");
   const [waTestSending, setWaTestSending] = useState(false);
@@ -387,6 +471,10 @@ export default function Marketing() {
     reason: null,
   });
   const [builderOpen, setBuilderOpen] = useState(false);
+  // Bumped after an on-open Meta sync so the template + sender loaders re-run
+  // against freshly-synced data (status, waba_id, header media, available_templates).
+  const [metaRefreshKey, setMetaRefreshKey] = useState(0);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [senderPickerOpen, setSenderPickerOpen] = useState(false);
   const [listPickerOpen, setListPickerOpen] = useState(false);
@@ -421,6 +509,19 @@ export default function Marketing() {
     () => !!waSelectedSender && senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba),
     [waSelectedSender, waTemplate, selectedTemplateWaba]
   );
+  // Never leave a number selected that can't send the chosen template. The
+  // template picker's onSelect narrows the sender, but a sender persisted from a
+  // previous template (or restored after the on-open Meta sync) bypasses that —
+  // which showed an incompatible number under a template it can't send. Clear it
+  // (or auto-pick when exactly one number matches) so the guard can't be dodged.
+  useEffect(() => {
+    if (!waTemplate || !waSenderValue) return;
+    if (senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)) return;
+    const compatible = waSenderOptions.filter(
+      (s) => s.value !== DEFAULT_WA_SENDER && senderCanSendTemplate(s, "", selectedTemplateWaba),
+    );
+    setWaSenderValue(compatible.length === 1 ? compatible[0].value : "");
+  }, [waTemplate, selectedTemplateWaba, waSenderOptions, waSelectedSender, waSenderValue]);
   // Org label per waba, sourced from synced senders' verified_name (e.g. "Seralis Lab").
   const orgByWaba = useMemo(() => {
     const m: Record<string, string> = {};
@@ -467,15 +568,24 @@ export default function Marketing() {
           ...template,
           ...(waMetaTemplateOverrides[template.key] || {}),
           // DB param_specs (Meta-aligned) win over the hardcoded params list.
-          ...(paramSpecsByKey[template.key] ? { params: paramSpecsByKey[template.key] } : {}),
+          params: ensureMediaHeaderParam(
+            paramSpecsByKey[template.key] || template.params,
+            waTemplateComponentsByKey[template.key],
+            headerFormatByKey[template.key],
+          ),
           wabaId: templateWabaByKey[template.key] ?? null,
         })),
       ...dynamicWaBulkTemplates.map((template) => ({
-        ...(paramSpecsByKey[template.key] ? { ...template, params: paramSpecsByKey[template.key] } : template),
+        ...template,
+        params: ensureMediaHeaderParam(
+          paramSpecsByKey[template.key] || template.params,
+          waTemplateComponentsByKey[template.key],
+          headerFormatByKey[template.key],
+        ),
         wabaId: templateWabaByKey[template.key] ?? null,
       })),
     ] as (WaBulkTemplate & { wabaId?: string | null })[],
-    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys, paramSpecsByKey, templateWabaByKey],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides, approvedTemplateKeys, paramSpecsByKey, templateWabaByKey, waTemplateComponentsByKey, headerFormatByKey],
   );
   const selectedWaTemplate = useMemo(
     () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
@@ -505,7 +615,11 @@ export default function Marketing() {
   );
   const headerMediaFieldValue = effectiveWaParamValue(waStaticParams, "template_header_media_url").trim();
   const hasMediaHeader = (selectedWaTemplate?.params || []).some((param) => isWaMediaTemplateParam(param.name));
-  const headerMediaReady = !hasMediaHeader || mediaProbe.status === "ok";
+  const selectedHeaderFormat = headerFormatByKey[selectedWaTemplate?.key || ""]
+    || String(templateHeaderFromComponents(waTemplateComponentsByKey[selectedWaTemplate?.key || ""])?.format || "");
+  const resolvedHeaderUrl = resolvedHeaderMediaUrl(headerMediaFieldValue, selectedWaTemplateDefaultMediaUrl);
+  // Probe is advisory (CORS often blocks HEAD). Classify + a sendable default is enough to send.
+  const headerMediaReady = !hasMediaHeader || headerMediaIsSendable(headerMediaFieldValue, selectedWaTemplateDefaultMediaUrl);
 
   // Existing approved templates: prefill the saved public URL so the counsellor
   // can see it and edit it. Switching templates replaces the field with that
@@ -516,17 +630,17 @@ export default function Marketing() {
   useEffect(() => {
     const key = selectedWaTemplate?.key || "";
     const def = selectedWaTemplateDefaultMediaUrl || "";
-    const templateChanged = autoFilledMediaKey.current !== key;
-    autoFilledMediaKey.current = key;
     setWaStaticParams((current) => {
-      const existing = current.template_header_media_url || "";
-      if (!templateChanged && existing && existing !== autoFilledMediaUrl.current) {
-        autoFilledMediaUrl.current = def;
-        return current;
-      }
-      autoFilledMediaUrl.current = def;
-      if (existing === def) return current;
-      return { ...current, template_header_media_url: def };
+      const next = nextHeaderMediaParams(
+        current,
+        def,
+        key,
+        autoFilledMediaKey.current,
+        autoFilledMediaUrl.current,
+      );
+      autoFilledMediaKey.current = next.lastAutoKey;
+      autoFilledMediaUrl.current = next.lastAutoUrl;
+      return next.params;
     });
   }, [selectedWaTemplate?.key, selectedWaTemplateDefaultMediaUrl]);
 
@@ -535,9 +649,10 @@ export default function Marketing() {
       setMediaProbe({ status: "idle", reason: null });
       return;
     }
-    const classified = classifyHeaderMediaUrl(headerMediaFieldValue);
+    const toProbe = headerMediaFieldValue || selectedWaTemplateDefaultMediaUrl || "";
+    const classified = classifyHeaderMediaUrl(toProbe);
     if (!classified.ok) {
-      setMediaProbe({ status: headerMediaFieldValue ? "bad" : "idle", reason: classified.reason });
+      setMediaProbe({ status: toProbe ? "bad" : "idle", reason: classified.reason });
       return;
     }
     let cancelled = false;
@@ -552,7 +667,7 @@ export default function Marketing() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [hasMediaHeader, headerMediaFieldValue]);
+  }, [hasMediaHeader, headerMediaFieldValue, selectedWaTemplateDefaultMediaUrl]);
   const rememberTemplateHeaderMedia = useCallback(async (templateKey: string, url: string) => {
     const sendable = sendableHeaderMediaUrl(url);
     if (!sendable || sendableHeaderMediaUrl(waTemplateMediaUrlByKey[templateKey])) return;
@@ -576,8 +691,8 @@ export default function Marketing() {
       toast({ title: "Invalid number", description: "Enter a valid phone number with its country code.", variant: "destructive" });
       return;
     }
-    if (hasMediaHeader && mediaProbe.status !== "ok") {
-      toast({ title: "Header file not public", description: mediaProbe.reason || "Check the header media URL first.", variant: "destructive" });
+    if (hasMediaHeader && !headerMediaReady) {
+      toast({ title: "Header file required", description: "This template needs a public HTTPS header URL. Save one in Template Manager or paste it here.", variant: "destructive" });
       return;
     }
     setWaTestSending(true);
@@ -622,8 +737,9 @@ export default function Marketing() {
 
       const hasMediaHeader = (selectedWaTemplate?.params || []).some((p) => isWaMediaTemplateParam(p.name));
       const headerImageUrl = hasMediaHeader
-        ? (effectiveWaParamValue(waStaticParams, "template_header_media_url").trim() || selectedWaTemplateDefaultMediaUrl || undefined)
+        ? (resolvedHeaderUrl || undefined)
         : undefined;
+      const headerFields = headerMediaSendFields(selectedHeaderFormat, headerImageUrl);
 
       const { data, error } = await supabase.functions.invoke("whatsapp-send", {
         body: {
@@ -633,7 +749,7 @@ export default function Marketing() {
           provider: "meta",
           business_phone_number_id: waSelectedSender?.phoneNumberId || null,
           business_number: waSelectedSender?.businessNumber || null,
-          ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+          ...headerFields,
           ...(button_urls.length ? { button_urls } : {}),
         },
       });
@@ -652,16 +768,15 @@ export default function Marketing() {
       const messageId = String(data?.message_id || "").trim();
       setWaTestSent(true);
       setWaTestPhase("waiting");
-      toast({ title: "Test sent", description: "Waiting for delivery confirmation…" });
+      setWaTestCanConfirm(true);
+      toast({ title: "Test sent", description: "Check your phone. Confirm below once it arrives." });
       if (headerImageUrl) void rememberTemplateHeaderMedia(waTemplate, headerImageUrl);
 
       if (!messageId) {
-        setWaTestCanConfirm(true);
         setWaTestError("Sent, but no message id came back. Confirm on the phone that it arrived.");
         return;
       }
 
-      const confirmTimer = window.setTimeout(() => setWaTestCanConfirm(true), 15_000);
       try {
         const outcome = await waitForWhatsAppDelivery(
           async (waMessageId) => {
@@ -673,6 +788,7 @@ export default function Marketing() {
             return (row as { status: string | null; status_error: unknown; read_at: string | null } | null) ?? null;
           },
           messageId,
+          { timeoutMs: 90_000 },
         );
         if (outcome.status === "failed") {
           setWaTestPhase("failed");
@@ -680,7 +796,6 @@ export default function Marketing() {
           setWaTestError(outcome.errorText);
           toast({ title: "Test not delivered", description: outcome.errorText, variant: "destructive" });
         } else if (outcome.status === "timeout") {
-          setWaTestCanConfirm(true);
           setWaTestError("No delivery receipt yet. If the message arrived on the phone, confirm it below.");
         } else {
           setWaTestPhase("delivered");
@@ -688,35 +803,35 @@ export default function Marketing() {
           setWaTestError(null);
           toast({ title: "Test received", description: `Delivered to ${phone}` });
         }
-      } finally {
-        window.clearTimeout(confirmTimer);
+      } catch (waitErr) {
+        setWaTestError(waitErr instanceof Error ? waitErr.message : "Could not check delivery. Confirm on the phone.");
       }
     } catch (err) {
       setWaTestPhase("failed");
       setWaTestDelivered(false);
       setWaTestSent(false);
-      toast({
-        title: "Test failed",
-        description: err instanceof Error ? err.message : "Could not send test message.",
-        variant: "destructive",
-      });
+      const rawMsg = err instanceof Error ? err.message : "Could not send test message.";
+      const friendly = describeWhatsAppError(rawMsg)?.text || rawMsg;
+      setWaTestError(friendly);
+      toast({ title: "Test failed", description: friendly, variant: "destructive" });
     } finally {
       setWaTestSending(false);
     }
-  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, rememberTemplateHeaderMedia, hasMediaHeader, mediaProbe, toast]);
+  }, [waTemplate, waTestPhone, selectedWaTemplate, waStaticParams, waSelectedSender, selectedTemplateWaba, selectedWaTemplateDefaultMediaUrl, placeholderCountByKey, rememberTemplateHeaderMedia, hasMediaHeader, headerMediaReady, resolvedHeaderUrl, selectedHeaderFormat, toast]);
 
+  const testSendSignature = `${waTemplate}|${waSenderValue}|${waTestPhone}|${resolvedHeaderUrl || ""}`;
   useEffect(() => {
     setWaTestSent(false);
     setWaTestDelivered(false);
     setWaTestPhase("idle");
     setWaTestError(null);
     setWaTestCanConfirm(false);
-  }, [waTemplate, waSenderValue, waStaticParams, waTestPhone]);
+  }, [testSendSignature]);
 
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
     if (isWaMediaTemplateParam(param.name)) {
-      return classifyHeaderMediaUrl(value).ok === false;
+      return !headerMediaIsSendable(value, selectedWaTemplateDefaultMediaUrl);
     }
     return !decodeWaParamFieldMapping(value) && !value.trim();
   });
@@ -1004,7 +1119,25 @@ export default function Marketing() {
         setWaSenderValue((c) => (c && options.some((o) => o.value === c)) ? c : "");
       })
       .catch(() => {});
-  }, []);
+  }, [metaRefreshKey]);
+
+  // Sync the template mirror from Meta when the campaign builder opens, so a
+  // just-approved template's status/header/waba mapping is fresh at campaign
+  // start (the nightly/hourly cron may not have run since Meta approved it).
+  // Best-effort: needs a template-manager role; a 403 for others is swallowed
+  // and the refresh still re-reads current DB. See whatsapp-templates `sync`.
+  const syncTemplatesFromMeta = useCallback(async () => {
+    if (!["super_admin", "admission_head"].includes(String(role))) return;
+    setSyncingTemplates(true);
+    try {
+      await invokeEdge("whatsapp-templates", { body: { action: "sync" } });
+    } catch {
+      /* best-effort — the picker still works off the last sync */
+    } finally {
+      setSyncingTemplates(false);
+      setMetaRefreshKey((key) => key + 1);
+    }
+  }, [role]);
 
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
@@ -1058,14 +1191,17 @@ export default function Marketing() {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, display_name, description, category, visibility, param_specs, media_url")
-        .in("visibility", ["marketing_only", "all"]);
+        .select("template_key, display_name, description, category, visibility, param_specs, media_url");
       const settingsRows = ((settings || []) as Array<{
         template_key: string;
         display_name?: string | null;
         description?: string | null;
+        visibility?: string | null;
         media_url?: string | null;
       }>);
+      const visibleSettings = settingsRows.filter((setting) =>
+        ["marketing_only", "all"].includes(String(setting.visibility || "all")),
+      );
       const mediaUrlByKey: Record<string, string> = {};
       for (const setting of settingsRows) {
         const url = sendableHeaderMediaUrl(setting.media_url);
@@ -1092,7 +1228,7 @@ export default function Marketing() {
         if (row.name) wabaByKey[row.name] = row.waba_id ?? null;
       }
       setTemplateWabaByKey(wabaByKey);
-      const dynamicTemplateKeys = settingsRows
+      const dynamicTemplateKeys = visibleSettings
         .map((setting) => setting.template_key)
         .filter((templateKey) => templateKey && !knownKeys.has(templateKey));
       const approvedTemplateRows = await enrichApprovedWhatsAppTemplateMetadata(
@@ -1105,11 +1241,15 @@ export default function Marketing() {
       const qualityByKey: Record<string, string | null> = {};
       const countByKey: Record<string, number> = {};
       const approvedKeys = new Set<string>();
-      (approvedRows || []).forEach((row: { name?: string; quality_score?: string | null; placeholder_count?: number | null }) => {
+      const formatByKey: Record<string, string> = {};
+      (approvedRows || []).forEach((row: { name?: string; quality_score?: string | null; placeholder_count?: number | null; header_format?: string | null; has_media?: boolean | null }) => {
         if (row.name) {
           qualityByKey[row.name] = row.quality_score ?? null;
           countByKey[row.name] = Number(row.placeholder_count || 0);
           approvedKeys.add(row.name);
+          const format = String(row.header_format || "").toUpperCase();
+          if (["IMAGE", "VIDEO", "DOCUMENT"].includes(format)) formatByKey[row.name] = format;
+          else if (row.has_media) formatByKey[row.name] = "IMAGE";
         }
       });
       approvedTemplateRows.forEach((row) => {
@@ -1120,7 +1260,7 @@ export default function Marketing() {
       });
 
       const approvedTemplateByName = new Map(approvedTemplateRows.map((row) => [row.name, row] as const));
-      const dynamic = settingsRows
+      const dynamic = visibleSettings
         .filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))
         .map((setting) => {
           const row = approvedTemplateByName.get(setting.template_key);
@@ -1139,10 +1279,11 @@ export default function Marketing() {
       setWaTemplateComponentsByKey(componentsByKey);
       setWaTemplateQualityByKey(qualityByKey);
       setPlaceholderCountByKey(countByKey);
+      setHeaderFormatByKey(formatByKey);
       setApprovedTemplateKeys(approvedKeys);
       setDynamicWaBulkTemplates(dynamic);
     })();
-  }, [role]);
+  }, [role, metaRefreshKey]);
 
   const totals = useMemo(() => {
     return campaigns.reduce(
@@ -1254,6 +1395,66 @@ export default function Marketing() {
     }
   }, [selectedList, resolveWhatsAppAudience, toast]);
 
+  // Tier-aware pacing: the selected number's Meta rolling-24h unique-recipient
+  // cap. A campaign whose audience exceeds it must be split across days, or Meta
+  // rejects the overflow (131056 / quality hit). Use the checked eligible count
+  // when available, else the raw list size.
+  // Round-robin: numbers that can send the same template (same WABA → same org),
+  // besides the primary sender. sendWhatsAppTemplate resolves each number's token.
+  const rotationCandidates = useMemo(
+    () => waSenderOptions.filter((s) =>
+      s.value !== DEFAULT_WA_SENDER
+      && s.value !== waSenderValue
+      && !!s.phoneNumberId
+      && senderCanSendTemplate(s, waTemplate, selectedTemplateWaba),
+    ),
+    [waSenderOptions, waSenderValue, waTemplate, selectedTemplateWaba],
+  );
+  const rotationSenders = useMemo(
+    () => rotationCandidates.filter((s) => waRotationValues.includes(s.value)),
+    [rotationCandidates, waRotationValues],
+  );
+  // Primary + rotation numbers, deduped by phone_number_id.
+  const effectiveSenders = useMemo(() => {
+    const out: WaSenderOption[] = [];
+    if (waSelectedSender?.phoneNumberId) out.push(waSelectedSender);
+    for (const s of rotationSenders) {
+      if (!out.some((x) => x.phoneNumberId === s.phoneNumberId)) out.push(s);
+    }
+    return out;
+  }, [waSelectedSender, rotationSenders]);
+  const isRotating = effectiveSenders.length > 1;
+  // Combined daily cap when rotating = sum of each number's Meta tier (one
+  // unlimited/unknown → no finite cap to enforce).
+  const combinedTierCap = useMemo(() => {
+    if (effectiveSenders.length <= 1) return messagingTierDailyCap(waSelectedSender?.messagingLimitTier);
+    let sum = 0;
+    for (const s of effectiveSenders) {
+      const cap = messagingTierDailyCap(s.messagingLimitTier);
+      if (cap == null) return null;
+      sum += cap;
+    }
+    return sum;
+  }, [effectiveSenders, waSelectedSender?.messagingLimitTier]);
+  const senderTierCap = combinedTierCap;
+  // Drop rotation picks that stop being valid when the template/sender changes.
+  useEffect(() => {
+    setWaRotationValues((cur) => cur.filter((v) => rotationCandidates.some((s) => s.value === v)));
+  }, [rotationCandidates]);
+  const plannedRecipients = audiencePreview?.eligible ?? selectedList?.member_count ?? 0;
+  const exceedsTier = campaignChannel === "whatsapp" && !!senderTierCap && plannedRecipients > senderTierCap;
+  // Over tier → force pacing and cap the daily wave at the tier (keep a stricter
+  // cap the user already chose). This is the "don't allow a send above the tier,
+  // split it across days" behaviour, shown in the pacing box below.
+  useEffect(() => {
+    if (!exceedsTier || !senderTierCap) return;
+    setWaSendMode("paced");
+    setWaDailyCap((current) => {
+      const cur = Number(current) || 0;
+      return cur > 0 && cur <= senderTierCap ? current : String(senderTierCap);
+    });
+  }, [exceedsTier, senderTierCap]);
+
   const launchCampaign = async () => {
     if (!selectedList) {
       setLaunchError("Pick a lead list first.");
@@ -1293,8 +1494,8 @@ export default function Marketing() {
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
-        if (hasMediaHeader && mediaProbe.status !== "ok") {
-          throw new Error(mediaProbe.reason || "Header media URL must be a public HTTPS file.");
+        if (hasMediaHeader && !headerMediaReady) {
+          throw new Error("This template needs a public HTTPS header URL. Save one in Template Manager or paste it here.");
         }
         if (!waTestDelivered) throw new Error("Send a test and confirm it was received before queueing.");
         if (!waTemplateQuality.allowBulk) throw new Error(waTemplateQuality.detail);
@@ -1308,6 +1509,21 @@ export default function Marketing() {
         const valid = eligibility.eligible as any[];
         if (!valid.length) {
           throw new Error(eligibility.preview || "No reachable WhatsApp recipients after DNC/quality filters.");
+        }
+
+        // No single day's wave may exceed the number's Meta tier. Paced → the
+        // daily cap is the wave size; immediate → the whole audience is one wave.
+        if (senderTierCap) {
+          const perWave = waSendMode === "paced"
+            ? (Number(waDailyCap) || DEFAULT_DAILY_UNIQUE_CAP)
+            : valid.length;
+          if (perWave > senderTierCap) {
+            throw new Error(
+              `This number's Meta limit is ${senderTierCap.toLocaleString("en-IN")} recipients/day, but ` +
+              `${perWave.toLocaleString("en-IN")} would go out in one day. Enable "Pace over days" (or lower the ` +
+              `daily cap to ${senderTierCap.toLocaleString("en-IN")}) so the ${valid.length.toLocaleString("en-IN")} recipients split across days.`,
+            );
+          }
         }
 
         const staticParamsToSend: Record<string, string> = {};
@@ -1337,6 +1553,9 @@ export default function Marketing() {
             static_params: staticParamsToSend,
             business_phone_number_id: waSelectedSender?.phoneNumberId || null,
             business_phone_number: waSelectedSender?.businessNumber || null,
+            sender_phone_number_ids: isRotating
+              ? effectiveSenders.map((s) => s.phoneNumberId).filter(Boolean)
+              : null,
             created_by: profile?.id || null,
             next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
@@ -1350,15 +1569,24 @@ export default function Marketing() {
         if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
         if (headerMediaToRemember) void rememberTemplateHeaderMedia(waTemplate, headerMediaToRemember);
 
-        const rows = valid.map((lead, index) => ({
-          campaign_id: (campaign as any).id,
-          // Exactly one of these is set — whatsapp_campaign_recipients_one_target
-          // enforces it at the DB level.
-          lead_id: (lead as any).isContact ? null : lead.id,
-          contact_id: (lead as any).isContact ? lead.id : null,
-          phone: lead.phone,
-          eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
-        }));
+        const rows = valid.map((lead, index) => {
+          // Round-robin: recipient i sends from sender i%N, assigned now so it's
+          // stable across retries and evenly split across the numbers.
+          const rotSender = isRotating ? effectiveSenders[index % effectiveSenders.length] : null;
+          return {
+            campaign_id: (campaign as any).id,
+            // Exactly one of these is set — whatsapp_campaign_recipients_one_target
+            // enforces it at the DB level.
+            lead_id: (lead as any).isContact ? null : lead.id,
+            contact_id: (lead as any).isContact ? lead.id : null,
+            phone: lead.phone,
+            eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
+            ...(rotSender ? {
+              business_phone_number_id: rotSender.phoneNumberId,
+              business_number: rotSender.businessNumber,
+            } : {}),
+          };
+        });
         for (let i = 0; i < rows.length; i += 500) {
           const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(rows.slice(i, i + 500));
           if (error) throw error;
@@ -1467,42 +1695,39 @@ export default function Marketing() {
     toast({ title: "List deleted" });
   };
 
-  const openRecipients = async (campaign: CampaignRow) => {
+  const openRecipients = async (
+    campaign: CampaignRow,
+    filter: RecipientEngagementFilter = "all",
+  ) => {
     setDetailCampaign(campaign);
+    setRecipientFilter(filter);
     setRecipientsLoading(true);
-    const table = campaign.channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients";
-    const destinationColumn = campaign.channel === "whatsapp" ? "phone" : "to_email";
-    const providerColumn = campaign.channel === "whatsapp" ? "message_id" : "provider_id";
-    const funnelColumns = campaign.channel === "whatsapp" ? ",delivered_at,read_at,failed_at" : "";
-    const { data } = await supabase
-      .from(table as any)
-      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title${funnelColumns}${campaign.channel === "whatsapp" ? ",last_error_code,retry_count" : ""},leads(name)`)
-      .eq("campaign_id", campaign.id)
-      .order("created_at", { ascending: false })
-      .limit(500);
-
-    setRecipients(((data as any[]) || []).map((row) => ({
-      id: row.id,
-      destination: row[destinationColumn] || "-",
-      leadName: row.leads?.name || null,
-      status: row.status,
-      error: row.error_message || null,
-      sentAt: row.sent_at || null,
-      providerId: row[providerColumn] || null,
-      respondedAt: row.responded_at || null,
-      calledAt: row.called_at || null,
-      callDisposition: row.call_disposition || null,
-      clickedLinkAt: row.clicked_link_at || null,
-      clickedUrl: row.clicked_url || null,
-      clickedButtonAt: row.clicked_button_at || null,
-      clickedButtonTitle: row.clicked_button_title || null,
-      errorCode: row.last_error_code ?? null,
-      retryCount: Number(row.retry_count || 0),
-      deliveredAt: row.delivered_at ?? null,
-      readAt: row.read_at ?? null,
-      failedAt: row.failed_at ?? null,
-    })));
-    setRecipientsLoading(false);
+    const { table, destinationColumn, providerColumn, select } = campaignRecipientQuery(campaign.channel);
+    try {
+      let rows: any[] = [];
+      if (filter === "all") {
+        const { data, error } = await supabase
+          .from(table as any)
+          .select(select)
+          .eq("campaign_id", campaign.id)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        if (error) throw error;
+        rows = (data as any[]) || [];
+      } else {
+        rows = await fetchCampaignRecipientsByEngagement(supabase, campaign.channel, campaign.id, filter);
+      }
+      setRecipients(rows.map((row) => mapDbRecipient(row, destinationColumn, providerColumn)));
+    } catch (error: any) {
+      toast({
+        title: "Could not load recipients",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+      setRecipients([]);
+    } finally {
+      setRecipientsLoading(false);
+    }
   };
 
   const resumeCampaign = async (campaign: CampaignRow) => {
@@ -1725,31 +1950,49 @@ export default function Marketing() {
     );
   };
 
+  const downloadRecipientCsv = (
+    campaign: CampaignRow,
+    rows: RecipientRow[],
+    suffix = "recipients",
+  ) => {
+    downloadCsv(
+      `${campaign.channel}-campaign-${suffix}-${campaign.id}.csv`,
+      RECIPIENT_CSV_HEADERS,
+      maskMatrix(RECIPIENT_CSV_HEADERS, recipientCsvRows(rows), realRole === "super_admin"),
+    );
+  };
+
   const downloadRecipientReport = () => {
     if (!detailCampaign) return;
-    const headers = ["Lead", "Destination", "Status", "Sent at", "Delivered at", "Read at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"];
-    const rows = recipients.map((recipient) => [
-      recipient.leadName || "",
-      recipient.destination,
-      recipient.status,
-      recipient.sentAt || "",
-      recipient.deliveredAt || "",
-      recipient.readAt || "",
-      recipient.respondedAt || "",
-      recipient.calledAt || "",
-      recipient.callDisposition || "",
-      recipient.clickedLinkAt || "",
-      recipient.clickedUrl || "",
-      recipient.clickedButtonAt || "",
-      recipient.clickedButtonTitle || "",
-      recipient.providerId || "",
-      recipient.error || "",
-    ]);
-    downloadCsv(
-      `${detailCampaign.channel}-campaign-recipients-${detailCampaign.id}.csv`,
-      headers,
-      maskMatrix(headers, rows, realRole === "super_admin"),
-    );
+    const suffix = recipientFilter === "all" ? "recipients" : recipientFilter;
+    downloadRecipientCsv(detailCampaign, recipients, suffix);
+  };
+
+  const downloadEngagedLeads = async (campaign: CampaignRow) => {
+    setExportingEngagedId(campaign.id);
+    try {
+      const { destinationColumn, providerColumn } = campaignRecipientQuery(campaign.channel);
+      const rows = await fetchCampaignRecipientsByEngagement(
+        supabase,
+        campaign.channel,
+        campaign.id,
+        "engaged",
+      );
+      const mapped = rows.map((row) => mapDbRecipient(row, destinationColumn, providerColumn));
+      if (mapped.length === 0) {
+        toast({ title: "No engaged leads to export" });
+        return;
+      }
+      downloadRecipientCsv(campaign, mapped, "engaged");
+    } catch (error: any) {
+      toast({
+        title: "Could not export engaged leads",
+        description: error?.message || "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingEngagedId(null);
+    }
   };
 
   const accessDecision = decideBlockedRoleAccess({
@@ -1798,7 +2041,7 @@ export default function Marketing() {
       </div>
 
       {!builderOpen ? (
-        <Button onClick={() => setBuilderOpen(true)} size="lg" className="gap-2">
+        <Button onClick={() => { setBuilderOpen(true); void syncTemplatesFromMeta(); }} size="lg" className="gap-2">
           <Megaphone className="h-4 w-4" /> New Campaign
         </Button>
       ) : (
@@ -1963,6 +2206,19 @@ export default function Marketing() {
                     </span>
                   </span>
                 </label>
+                {senderTierCap && (
+                  <p className="pl-6 text-[11px] text-muted-foreground">
+                    This number&apos;s Meta tier: <span className="font-medium text-foreground">{senderTierCap.toLocaleString("en-IN")}/day</span>
+                    {plannedRecipients > 0 && <> · audience {plannedRecipients.toLocaleString("en-IN")}</>}
+                  </p>
+                )}
+                {exceedsTier && senderTierCap && (
+                  <p className="pl-6 rounded-md bg-warning/10 px-2 py-1.5 text-[11px] font-medium text-warning-foreground">
+                    Audience ({plannedRecipients.toLocaleString("en-IN")}) exceeds this number&apos;s Meta tier
+                    ({senderTierCap.toLocaleString("en-IN")}/day). Pacing was enabled automatically to split it over
+                    {" "}{Math.ceil(plannedRecipients / senderTierCap)} days — sending more in one day would be rejected by Meta.
+                  </p>
+                )}
                 {waSendMode === "paced" && (
                   <div className="pl-6 space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">Max recipients per day</label>
@@ -2001,7 +2257,14 @@ export default function Marketing() {
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">WhatsApp template</label>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    WhatsApp template
+                    {syncingTemplates && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <RefreshCw className="h-3 w-3 animate-spin" /> Syncing from Meta…
+                      </span>
+                    )}
+                  </label>
                   <Popover open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
                     <PopoverTrigger asChild>
                       <Button
@@ -2140,6 +2403,34 @@ export default function Marketing() {
                       This number can't send "{waTemplate}" — its WhatsApp account doesn't have that template approved. Pick another sender or template.
                     </p>
                   )}
+                  {selectedSenderCanSend && rotationCandidates.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-border bg-muted/30 p-2.5 space-y-1.5">
+                      <p className="text-xs font-medium text-foreground">
+                        Rotate across more numbers <span className="font-normal text-muted-foreground">— throughput, same template</span>
+                      </p>
+                      {rotationCandidates.map((s) => (
+                        <label key={s.value} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 rounded border-input accent-primary"
+                            checked={waRotationValues.includes(s.value)}
+                            onChange={(e) => setWaRotationValues((cur) =>
+                              e.target.checked ? [...cur, s.value] : cur.filter((v) => v !== s.value))}
+                          />
+                          <span className="text-foreground">{formatSenderNumber(s.businessNumber) || s.label}</span>
+                          {s.messagingLimitTier && (
+                            <span className="text-muted-foreground">· {formatMessagingTier(s.messagingLimitTier)}</span>
+                          )}
+                        </label>
+                      ))}
+                      {isRotating && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Sending round-robin across {effectiveSenders.length} numbers
+                          {combinedTierCap ? ` · combined ${combinedTierCap.toLocaleString("en-IN")}/day` : ""}. Recipients are split evenly; each always sends from the same number.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
@@ -2156,15 +2447,22 @@ export default function Marketing() {
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || waTestPhase === "waiting" || !selectedSenderCanSend || !headerMediaReady}
+                    disabled={!waTemplate || !waTestPhone.trim() || waTestSending || !selectedSenderCanSend || !headerMediaReady}
                     onClick={handleSendTest}
                   >
-                    {waTestSending || waTestPhase === "waiting" ? "Sending…" : "Send test"}
+                    {waTestSending ? "Sending…" : "Send test"}
                   </Button>
                 </div>
+                {!!waTemplate && !!waTestPhone.trim() && !waTestSending && (!selectedSenderCanSend || !headerMediaReady) && (
+                  <p className="text-xs font-medium text-destructive">
+                    {!selectedSenderCanSend
+                      ? "Pick a sender that can send this template before testing."
+                      : "This template needs a public header image URL (saved in Template Manager or pasted below)."}
+                  </p>
+                )}
                 {waTestPhase === "waiting" && (
                   <p className="text-xs font-medium text-info-foreground">
-                    Test sent — waiting for delivery confirmation on the phone…
+                    Test sent — check the phone. Delivery receipts can take a minute.
                   </p>
                 )}
                 {waTestPhase === "delivered" && (
@@ -2175,10 +2473,10 @@ export default function Marketing() {
                 {waTestPhase === "failed" && waTestError && (
                   <p className="text-xs font-medium text-destructive">{waTestError}</p>
                 )}
-                {waTestPhase === "waiting" && waTestCanConfirm && (
+                {(waTestPhase === "waiting" || (waTestPhase === "failed" && waTestCanConfirm)) && waTestCanConfirm && (
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs text-muted-foreground">
-                      {waTestError || "No delivery receipt yet. If you received the message, confirm it."}
+                      {waTestError || "If you received the message, confirm it so you can queue the campaign."}
                     </p>
                     <Button
                       type="button"
@@ -2233,9 +2531,11 @@ export default function Marketing() {
                           )}
                           {(!canMap || !mappedToken) && (
                             <Input
-                              value={canMap ? (waStaticParams[field.name] || "") : value}
+                              value={isMediaParam
+                                ? (headerMediaFieldValue || selectedWaTemplateDefaultMediaUrl || "")
+                                : (canMap ? (waStaticParams[field.name] || "") : value)}
                               onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                              placeholder={isMediaParam ? "Public https:// image URL" : field.placeholder || field.name}
+                              placeholder={isMediaParam ? "Public https:// image URL from Template Manager" : field.placeholder || field.name}
                               className={`mt-1 ${isMediaParam && mediaProbe.status === "bad" ? "border-destructive/50" : ""}`}
                             />
                           )}
@@ -2255,7 +2555,7 @@ export default function Marketing() {
                           )}
                           {isMediaParam && mediaProbe.status === "idle" && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Existing templates fill this from Template Manager when a header file is saved. Edit it here if you need a different image.{" "}
+                              Filled from Template Manager when a header file is saved. Edit it if you need a different image.{" "}
                               <Link to="/template-manager" className="underline underline-offset-2">Open Template Manager</Link>
                             </p>
                           )}
@@ -2426,10 +2726,53 @@ export default function Marketing() {
           )}
 
           {launchError && <p className="text-sm text-destructive">{launchError}</p>}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
-              DNC leads and members without the selected channel destination are skipped at queue time.
-            </p>
+          <p className="text-xs text-muted-foreground">
+            DNC leads and members without the selected channel destination are skipped at queue time.
+          </p>
+          {/* Send-time choice sits WITH the launch button: pick now/schedule,
+              then the button reads "Queue"/"Schedule" to match. */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="grid gap-3 md:grid-cols-[180px_260px]">
+              <SelectField
+                label="Send time"
+                value={campaignScheduleMode}
+                onValueChange={(value) => {
+                  const nextMode = value as "now" | "scheduled";
+                  setCampaignScheduleMode(nextMode);
+                  if (nextMode === "scheduled" && !campaignScheduledAt) {
+                    setCampaignScheduledAt(defaultFutureDateTime());
+                  }
+                }}
+                options={[
+                  { value: "now", label: "Send now" },
+                  { value: "scheduled", label: "Schedule for later" },
+                ]}
+                allowEmpty={false}
+                triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
+              {campaignScheduleMode === "scheduled" && (
+                <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
+                  <DatePickerField
+                    label="Scheduled date"
+                    value={scheduledDateValue}
+                    onValueChange={setScheduledDate}
+                    placeholder="Pick date"
+                    minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                    triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    ariaLabel="Scheduled campaign date"
+                  />
+                  <FieldShell label="Time">
+                    <Input
+                      type="time"
+                      value={scheduledTimeValue || defaultFutureTime()}
+                      onChange={(event) => setScheduledTime(event.target.value)}
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      aria-label="Scheduled campaign time"
+                    />
+                  </FieldShell>
+                </div>
+              )}
+            </div>
             <div className="flex flex-col items-end gap-1">
               <Button
                 onClick={launchCampaign}
@@ -2442,56 +2785,14 @@ export default function Marketing() {
                 }
               >
                 {launching ? <ButtonOrb state="connecting" onFilled /> : <Send className="mr-2 h-4 w-4" />}
-                Queue Campaign
+                {campaignScheduleMode === "scheduled" ? "Schedule Campaign" : "Queue Campaign"}
               </Button>
               {campaignChannel === "whatsapp" && !waTestDelivered && (
                 <p className="text-xs text-muted-foreground">
-                  Send a test and wait until it is received before queueing.
+                  Send a test, then confirm it arrived (or wait for the delivery receipt) before queueing.
                 </p>
               )}
             </div>
-          </div>
-
-          <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
-            <SelectField
-              label="Send time"
-              value={campaignScheduleMode}
-              onValueChange={(value) => {
-                const nextMode = value as "now" | "scheduled";
-                setCampaignScheduleMode(nextMode);
-                if (nextMode === "scheduled" && !campaignScheduledAt) {
-                  setCampaignScheduledAt(defaultFutureDateTime());
-                }
-              }}
-              options={[
-                { value: "now", label: "Send now" },
-                { value: "scheduled", label: "Schedule for later" },
-              ]}
-              allowEmpty={false}
-              triggerClassName="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            />
-            {campaignScheduleMode === "scheduled" && (
-              <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_120px]">
-                <DatePickerField
-                  label="Scheduled date"
-                  value={scheduledDateValue}
-                  onValueChange={setScheduledDate}
-                  placeholder="Pick date"
-                  minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                  triggerClassName="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  ariaLabel="Scheduled campaign date"
-                />
-                <FieldShell label="Time">
-                  <Input
-                    type="time"
-                    value={scheduledTimeValue || defaultFutureTime()}
-                    onChange={(event) => setScheduledTime(event.target.value)}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    aria-label="Scheduled campaign time"
-                  />
-                </FieldShell>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -2625,12 +2926,12 @@ export default function Marketing() {
                         <div className="flex items-center justify-end gap-1.5">
                           {/* Disclosure sits with the number it discloses, and to its
                               left so the numeral stays flush with the column edge. */}
-                          {campaign.failureBreakdown.length > 0 && (
+                          { (campaign.failureBreakdown.length > 0 || campaignHasEngaged(campaign)) && (
                             <button
                               type="button"
                               onClick={() => setExpandedCampaignId((c) => (c === campaign.id ? null : campaign.id))}
                               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label={expandedCampaignId === campaign.id ? "Hide failure reasons" : "Show failure reasons"}
+                              aria-label={expandedCampaignId === campaign.id ? "Hide campaign details" : "Show campaign details"}
                               aria-expanded={expandedCampaignId === campaign.id}
                             >
                               <ChevronDown className={`h-4 w-4 transition-transform duration-160 ease-standard ${expandedCampaignId === campaign.id ? "rotate-180" : ""}`} />
@@ -2726,6 +3027,7 @@ export default function Marketing() {
                               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Why {campaign.failed.toLocaleString("en-IN")} failed
                               </p>
+                              {campaign.failureBreakdown.length > 0 ? (
                               <ul className="space-y-1">
                                 {campaign.failureBreakdown.map((f) => (
                                   <li key={f.code} className="flex items-baseline gap-2 text-xs">
@@ -2739,6 +3041,9 @@ export default function Marketing() {
                                   </li>
                                 ))}
                               </ul>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">No send failures recorded.</p>
+                              )}
                             </div>
                             <div>
                               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2756,6 +3061,38 @@ export default function Marketing() {
                                 <dt className="text-muted-foreground">Success rate</dt>
                                 <dd className="tabular-nums">{pct(campaign.sent, campaign.sent + campaign.failed)}</dd>
                               </dl>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void downloadEngagedLeads(campaign)}
+                                  disabled={!campaignHasEngaged(campaign) || exportingEngagedId === campaign.id}
+                                >
+                                  <Download className="mr-1 h-3.5 w-3.5" />
+                                  {exportingEngagedId === campaign.id ? "Exporting…" : "Export engaged"}
+                                </Button>
+                                {campaign.channel === "whatsapp" && campaignHasEngaged(campaign) ? (
+                                  <Button variant="outline" size="sm" asChild>
+                                    <Link to={campaignEngagedInboxPath(campaign.id)} target="_blank" rel="noopener noreferrer">
+                                      <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                                      Open in inbox
+                                    </Link>
+                                  </Button>
+                                ) : campaign.channel === "whatsapp" ? (
+                                  <Button variant="outline" size="sm" disabled>
+                                    <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                                    Open in inbox
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void openRecipients(campaign, "engaged")}
+                                  disabled={!campaignHasEngaged(campaign)}
+                                >
+                                  View engaged
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -2777,7 +3114,7 @@ export default function Marketing() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!detailCampaign} onOpenChange={(open) => { if (!open) setDetailCampaign(null); }}>
+      <Dialog open={!!detailCampaign} onOpenChange={(open) => { if (!open) { setDetailCampaign(null); setRecipientFilter("all"); } }}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2785,18 +3122,54 @@ export default function Marketing() {
                 <AlertTriangle className="h-4 w-4 text-warning-foreground" />
                 Campaign recipients
               </DialogTitle>
-              <Button variant="outline" size="sm" onClick={downloadRecipientReport} disabled={recipients.length === 0}>
-                <Download className="mr-2 h-4 w-4" />
-                Download CSV
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {detailCampaign?.channel === "whatsapp" && campaignHasEngaged(detailCampaign) && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={campaignEngagedInboxPath(detailCampaign.id)} target="_blank" rel="noopener noreferrer">
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      Open in inbox
+                    </Link>
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={downloadRecipientReport} disabled={recipients.length === 0}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download CSV
+                </Button>
+              </div>
             </div>
           </DialogHeader>
+          {detailCampaign && (
+            <div className="flex flex-wrap gap-1">
+              {([
+                { key: "all" as const, label: "All" },
+                { key: "engaged" as const, label: "Engaged" },
+                { key: "responded" as const, label: "Responded" },
+                { key: "called" as const, label: "Called" },
+                { key: "clicked" as const, label: "Clicked" },
+              ]).map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => void openRecipients(detailCampaign, f.key)}
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium border transition-colors ${
+                    recipientFilter === f.key
+                      ? "bg-primary/10 text-primary border-primary/30 ring-1 ring-current"
+                      : "bg-muted/50 text-muted-foreground border-transparent hover:bg-muted"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
           {recipientsLoading ? (
             <div className="flex items-center justify-center py-10">
               <OrbLoader state="connecting" />
             </div>
           ) : recipients.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">No recipients found.</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              {recipientFilter === "all" ? "No recipients found." : `No ${recipientFilter} leads in this campaign.`}
+            </div>
           ) : (
             <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
               <table className="w-full text-sm">

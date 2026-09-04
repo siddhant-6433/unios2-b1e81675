@@ -63,7 +63,7 @@ async function readErrorBody(response: Response) {
   }
 }
 
-async function uploadTemplateMedia(file: File): Promise<MediaUploadResult> {
+async function uploadTemplateMedia(file: File, wabaId?: string): Promise<MediaUploadResult> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -78,6 +78,7 @@ async function uploadTemplateMedia(file: File): Promise<MediaUploadResult> {
 
   const form = new FormData();
   form.append("file", file);
+  if (wabaId) form.append("waba_id", wabaId);
 
   const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-template-media-upload`, {
     method: "POST",
@@ -129,24 +130,44 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
   const [footer, setFooter] = useState("");
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
 
-  const [mediaHandle, setMediaHandle] = useState<string | null>(null);
+  // The picked file is kept so media can be re-uploaded per target WABA — a Meta
+  // header_handle is app-scoped, so each WABA (app) needs its own upload. Handles
+  // are cached per WABA once obtained.
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaFileName, setMediaFileName] = useState<string | null>(null);
+  const [mediaHandleByWaba, setMediaHandleByWaba] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // WABA picker. Sourced from the edge function's `wabas` action rather than
-  // whatsapp_channels directly, so this list and the sync picker can't drift —
-  // it reports exactly the accounts a usable token was resolved for.
+  // WABA picker (multi-select). Sourced from the edge function's `wabas` action
+  // rather than whatsapp_channels directly, so this list and the sync picker
+  // can't drift — it reports exactly the accounts a usable token was resolved for.
   const [wabaOptions, setWabaOptions] = useState<{ value: string; label: string }[]>([]);
-  const [wabaId, setWabaId] = useState("");
+  const [wabaIds, setWabaIds] = useState<string[]>([]);
+  // WABA → the active bulk numbers it will enable the template on (the "enable
+  // on" display, so submission shows exactly which numbers can then send it).
+  const [numbersByWaba, setNumbersByWaba] = useState<Record<string, string[]>>({});
   useEffect(() => {
     invokeEdge<{ wabas?: Array<{ waba_id: string; label: string; is_default: boolean }> }>(
       "whatsapp-templates", { body: { action: "wabas" } },
     ).then(({ data }) => {
       const opts = (data?.wabas ?? []).map((w) => ({ value: w.waba_id, label: w.label }));
       setWabaOptions(opts);
-      setWabaId((cur) => cur || (data?.wabas ?? []).find((w) => w.is_default)?.waba_id || opts[0]?.value || "");
+      const def = (data?.wabas ?? []).find((w) => w.is_default)?.waba_id || opts[0]?.value || "";
+      setWabaIds((cur) => (cur.length ? cur : def ? [def] : []));
     }).catch(() => {});
+    supabase
+      .from("whatsapp_channels" as any)
+      .select("waba_id, business_number, allow_bulk, is_active")
+      .eq("is_active", true)
+      .then(({ data }) => {
+        const map: Record<string, string[]> = {};
+        for (const c of ((data || []) as Array<{ waba_id?: string | null; business_number?: string | null; allow_bulk?: boolean }>)) {
+          if (!c.waba_id || !c.business_number || c.allow_bulk === false) continue;
+          (map[c.waba_id] ||= []).push(c.business_number.replace(/^91/, ""));
+        }
+        setNumbersByWaba(map);
+      });
   }, []);
 
   // Placeholder count drives the sample-value inputs.
@@ -171,20 +192,25 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
   const reset = () => {
     setName(""); setCategory("UTILITY"); setHeaderType("NONE"); setHeaderText("");
     setHeaderExample(""); setBody(""); setBodyExamples([]); setFooter(""); setButtons([]);
-    setMediaHandle(null); setMediaFileName(null);
+    setMediaFile(null); setMediaFileName(null); setMediaHandleByWaba({});
   };
 
   const handleMediaSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    setMediaHandle(null);
+    setMediaHandleByWaba({});
+    setMediaFile(file);
+    setMediaFileName(file.name);
+    // Validate + pre-upload for the first target WABA now; other WABAs upload at
+    // submit. Meta handles are app-scoped, so each WABA gets its own.
     try {
-      const data = await uploadTemplateMedia(file);
-      setMediaHandle(data.handle);
-      setMediaFileName(file.name);
+      const firstWaba = wabaIds[0];
+      const data = await uploadTemplateMedia(file, firstWaba);
+      if (firstWaba) setMediaHandleByWaba({ [firstWaba]: data.handle });
       toast({ title: "Media uploaded", description: file.name });
     } catch (err: unknown) {
+      setMediaFile(null); setMediaFileName(null);
       toast({ title: "Upload failed", description: err instanceof Error ? err.message : "Unexpected error", variant: "destructive" });
     }
     setUploading(false);
@@ -215,30 +241,25 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
   const canSubmit =
     name.trim().length > 0 &&
     body.trim().length > 0 &&
+    wabaIds.length > 0 &&
     !submitting &&
     !uploading &&
-    (!isMediaHeader || !!mediaHandle) &&
+    (!isMediaHeader || !!mediaFile) &&
     (headerType !== "TEXT" || !!headerText.trim()) &&
     !invalidButtons;
 
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
+  /** Shared payload minus the per-WABA waba_id/header_handle. */
+  const buildBasePayload = (): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       action: "create",
       name: name.trim(),
       category,
       body_text: body,
-      ...(wabaId ? { waba_id: wabaId } : {}),
     };
     if (headerType === "TEXT") {
       payload.header_format = "TEXT";
       payload.header_text = headerText;
       if (headerHasVar) payload.header_example = headerExample || "example";
-    }
-    if (isMediaHeader && mediaHandle) {
-      payload.header_format = headerType;
-      payload.header_handle = mediaHandle;
     }
     if (placeholderCount > 0) payload.body_examples = bodyExamples.slice(0, placeholderCount);
     if (footer.trim()) payload.footer_text = footer.trim();
@@ -253,19 +274,56 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
               : { type: "QUICK_REPLY", text: b.text },
         );
     }
+    return payload;
+  };
 
-    const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", { body: payload });
-    if (error || data?.error) {
-      toast({
-        title: "Submission failed",
-        description: await edgeErrorMessage(error, data, "Template submission failed"),
-        variant: "destructive",
-      });
-    } else {
-      toast({ title: "Template submitted", description: "Sent to Meta for approval." });
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    const base = buildBasePayload();
+    const handles = { ...mediaHandleByWaba };
+    const ok: string[] = [];
+    const failed: string[] = [];
+
+    // Submit to each selected WABA independently — Meta approves per WABA, and a
+    // media handle from one app can't be reused on another, so upload per WABA.
+    for (const waba of wabaIds) {
+      try {
+        const payload: Record<string, unknown> = { ...base, waba_id: waba };
+        if (isMediaHeader) {
+          let handle = handles[waba];
+          if (!handle && mediaFile) {
+            handle = (await uploadTemplateMedia(mediaFile, waba)).handle;
+            handles[waba] = handle;
+          }
+          if (!handle) throw new Error("no media handle");
+          payload.header_format = headerType;
+          payload.header_handle = handle;
+        }
+        const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", { body: payload });
+        if (error || data?.error) throw new Error(await edgeErrorMessage(error, data, "submit failed"));
+        ok.push(waba);
+      } catch (err) {
+        const label = wabaOptions.find((w) => w.value === waba)?.label || waba;
+        failed.push(`${label}: ${err instanceof Error ? err.message : "failed"}`);
+      }
+    }
+    setMediaHandleByWaba(handles);
+
+    if (ok.length && !failed.length) {
+      toast({ title: `Submitted to ${ok.length} account${ok.length > 1 ? "s" : ""}`, description: "Sent to Meta for approval." });
       reset();
       onOpenChange(false);
       onSubmitted();
+    } else if (ok.length) {
+      toast({
+        title: `Submitted to ${ok.length}, ${failed.length} failed`,
+        description: failed.join(" · "),
+        variant: "destructive",
+      });
+      onSubmitted();
+    } else {
+      toast({ title: "Submission failed", description: failed.join(" · ") || "No account submitted.", variant: "destructive" });
     }
     setSubmitting(false);
   };
@@ -291,14 +349,37 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
           {/* ── Form ── */}
           <div className="space-y-4">
             {wabaOptions.length > 1 && (
-              <SelectField
-                label="Submit to"
-                value={wabaId}
-                onValueChange={setWabaId}
-                options={wabaOptions}
-                allowEmpty={false}
-                triggerClassName={inputCls}
-              />
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Submit to {wabaIds.length > 1 && <span className="text-foreground">· {wabaIds.length} accounts</span>}
+                </label>
+                <div className="space-y-1.5 rounded-xl border border-input bg-background p-2">
+                  {wabaOptions.map((w) => {
+                    const checked = wabaIds.includes(w.value);
+                    const numbers = numbersByWaba[w.value] || [];
+                    return (
+                      <label key={w.value} className="flex items-start gap-2 rounded-lg px-1.5 py-1 cursor-pointer hover:bg-muted/40">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-input accent-primary"
+                          checked={checked}
+                          onChange={(e) => {
+                            setWabaIds((cur) => e.target.checked ? [...cur, w.value] : cur.filter((v) => v !== w.value));
+                            // Media handle for a WABA is only valid on its own app.
+                            setMediaHandleByWaba((cur) => { const n = { ...cur }; delete n[w.value]; return n; });
+                          }}
+                        />
+                        <span className="text-sm">
+                          <span className="font-medium text-foreground">{w.label}</span>
+                          <span className="block text-[11px] text-muted-foreground">
+                            {numbers.length ? `Sends from: ${numbers.join(", ")}` : "No bulk-enabled number on this account"}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             <div className="grid grid-cols-2 gap-3">
               <TextField
@@ -329,8 +410,9 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
               value={headerType}
               onValueChange={(value) => {
                 setHeaderType(value as HeaderType);
-                setMediaHandle(null);
+                setMediaFile(null);
                 setMediaFileName(null);
+                setMediaHandleByWaba({});
               }}
               options={[
                 { value: "NONE", label: "None" },
@@ -371,11 +453,11 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
                   className="hidden"
                   onChange={handleMediaSelect}
                 />
-                {mediaHandle ? (
+                {mediaFile ? (
                   <div className="flex items-center gap-2 text-xs">
                     <ImageIcon className="h-4 w-4 text-success" />
                     <span className="flex-1 truncate text-foreground">{mediaFileName}</span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setMediaHandle(null); setMediaFileName(null); }}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setMediaFile(null); setMediaFileName(null); setMediaHandleByWaba({}); }}>
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
