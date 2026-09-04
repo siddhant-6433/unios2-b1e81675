@@ -5,6 +5,7 @@ import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
@@ -15,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon } from "lucide-react";
+import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon, Archive } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -173,6 +174,8 @@ interface Conversation {
   last_confidence: number | null;
   last_bot_action: string | null;
   lead_counsellor_ids: string[] | null;
+  archived_at?: string | null;
+  archived_effective?: boolean;
 }
 
 interface Message {
@@ -588,7 +591,7 @@ const CONVERSATION_SELECT_RICH = `
   provider, business_phone_number_id, business_phone_number,
   conversation_mode, conversation_state, owner_user_id, escalation_role,
   handoff_reason, priority, sla_due_at, last_intent, last_confidence, last_bot_action,
-  lead_counsellor_ids
+  lead_counsellor_ids, archived_at, archived_effective
 `;
 
 const CONVERSATION_SELECT_PROVIDER = `
@@ -619,6 +622,8 @@ const withConversationDefaults = (row: any): Conversation => ({
   last_intent: row.last_intent || null,
   last_confidence: row.last_confidence ?? null,
   last_bot_action: row.last_bot_action || null,
+  archived_at: row.archived_at ?? null,
+  archived_effective: row.archived_effective ?? false,
 });
 
 const createDemoConversation = (row: Partial<Conversation> & Pick<Conversation, "phone" | "last_message" | "last_message_at">): Conversation =>
@@ -865,7 +870,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
-  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned" | "marketing_outbound">("all");
+  const [opsFilter, setOpsFilter] = useState<"all" | "reply_window" | "handoff" | "sla" | "knowledge" | "unassigned" | "marketing_outbound" | "archived">("all");
 
   // Quick-action followup dialog
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -1055,6 +1060,46 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       : c
     ));
     toast({ title: next === "human" ? "AI paused for this chat" : "AI re-enabled for this chat" });
+  };
+
+  const archiveConversation = async (next: boolean) => {
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
+      || conversations.find(c => c.phone === selectedPhone);
+    const channel = conversationBusinessKey(conv);
+    if (!selectedPhone || !channel) return;
+    const { error } = await (supabase as any).rpc("set_whatsapp_conversation_archived", {
+      p_phone: selectedPhone.replace(/[^0-9]/g, ""),
+      p_business_number: channel,
+      p_provider: conv?.provider || "meta",
+      p_archived: next,
+    });
+    if (error) {
+      toast({ title: next ? "Couldn't archive conversation" : "Couldn't unarchive conversation", description: error.message, variant: "destructive" });
+      return;
+    }
+    if (next) {
+      // In a non-archived view this row no longer matches the server filter — drop it.
+      setConversations(prev => opsFilter === "archived"
+        ? prev.map(c => c.phone === selectedPhone && conversationBusinessKey(c) === channel
+          ? { ...c, archived_at: new Date().toISOString(), archived_effective: true }
+          : c)
+        : prev.filter(c => !(c.phone === selectedPhone && conversationBusinessKey(c) === channel)));
+      if (selectedPhone === selectedConv?.phone) setSelectedPhone(null);
+    } else {
+      setConversations(prev => opsFilter === "archived"
+        ? prev.filter(c => !(c.phone === selectedPhone && conversationBusinessKey(c) === channel))
+        : prev.map(c => c.phone === selectedPhone && conversationBusinessKey(c) === channel
+          ? { ...c, archived_at: null, archived_effective: false }
+          : c));
+    }
+    toast({
+      title: next ? "Conversation archived" : "Conversation unarchived",
+      action: (
+        <ToastAction altText="Undo" onClick={() => { void archiveConversation(!next); }}>
+          Undo
+        </ToastAction>
+      ),
+    });
   };
 
   // Multi-inbox: keep phone-number channels (Plivo/coexistence DIDs) out of
@@ -1393,6 +1438,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
           q = q.or(`last_message_at.lt.${explicitCursor.last_message_at},and(last_message_at.eq.${explicitCursor.last_message_at},phone.lt.${explicitCursor.phone})`);
         }
 
+        // Archived is filtered server-side (real view column) — client-side
+        // exclusion would reproduce the count/list divergence the reply-state
+        // comment above warns about.
+        q = q.eq("archived_effective", opsFilter === "archived");
+
         if (!isHrScope && businessNumber !== "primary") {
           const variants = businessChannelVariants(businessNumber);
           if (variants.length > 0) {
@@ -1533,7 +1583,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     setConversationCursor(null);
     setHasMoreConversations(true);
     void fetchConversationPage(true, null);
-  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter, isCampaignEngagedInbox]);
+  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter, isCampaignEngagedInbox, opsFilter === "archived"]);
 
   useEffect(() => {
     if (demoMode) return;
@@ -1935,6 +1985,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             .from("whatsapp_conversations" as any)
             .select(selectFields)
             .eq("phone", normalized)
+            .eq("archived_effective", opsFilter === "archived")
             .order("last_message_at", { ascending: false })
             .limit(1);
           if (!error) {
@@ -2961,6 +3012,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
       return true;
     }
+    // Archived is filtered server-side (archived_effective) in the fetch
+    // query above — the loaded page already matches the current chip.
     if (!isOutboundMode) {
       if (replyStateFilter === "needs_reply" && !isNeedsReply(c)) return false;
       if (replyStateFilter === "awaiting" && c.last_direction !== "outbound") return false;
@@ -3023,6 +3076,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     count: categoryCounts ? (categoryCounts[cat]?.conversations ?? 0) : fallbackConv,
     unreplied: categoryCounts ? (categoryCounts[cat]?.unread ?? 0) : fallbackUnread,
   });
+  // Server already excludes (or, for the Archived chip, exclusively includes)
+  // archived_effective rows via the fetch query, so these counts run over
+  // modeFiltered as-is — no client-side archived filtering needed.
   const opsFilters = [
     { key: "all" as const, label: "All ops", count: modeFiltered.length },
     { key: "reply_window" as const, label: "Reply now", count: modeFiltered.filter(isReplyWindowConversation).length },
@@ -3031,6 +3087,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
     { key: "unassigned" as const, label: "Unassigned", count: modeFiltered.filter(isUnassignedOps).length },
     { key: "marketing_outbound" as const, label: "Marketing Outbound", count: modeFiltered.filter(isMarketingOutbound).length },
+    { key: "archived" as const, label: "Archived", count: opsFilter === "archived" ? modeFiltered.length : 0 },
   ];
 
   const formatTime = (iso: string) => {
@@ -3605,6 +3662,14 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       {copilotLoading ? <ButtonOrb state="connecting" onFilled /> : <Bot className="h-3 w-3" />}
                       Copilot
                     </button>
+                    {selectedConv && (
+                      <button
+                        onClick={() => { void archiveConversation(!selectedConv.archived_effective); }}
+                        className="flex shrink-0 items-center gap-1 rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors whitespace-nowrap"
+                      >
+                        <Archive className="h-3 w-3" /> {selectedConv.archived_effective ? "Unarchive" : "Archive"}
+                      </button>
+                    )}
                     {selectedConv?.lead_id && (
                       <button
                         onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
