@@ -42,8 +42,10 @@ import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } 
 import {
   campaignEngagedInboxPath,
   campaignHasEngaged,
+  campaignPhoneDigits,
   campaignRecipientQuery,
   fetchCampaignRecipientsByEngagement,
+  fetchHandledPhoneDigits,
   type RecipientEngagementFilter,
 } from "@/lib/campaignEngaged";
 import { describeWhatsAppError, whatsAppErrorTextForCode, whatsAppErrorHint } from "@/lib/whatsappErrorText";
@@ -1726,6 +1728,15 @@ export default function Marketing() {
           .limit(500);
         if (error) throw error;
         rows = (data as any[]) || [];
+      } else if (filter === "needs_attention") {
+        // ponytail: fetch engaged, then exclude AI-handled/dismissed via conversation state
+        rows = await fetchCampaignRecipientsByEngagement(supabase, campaign.channel, campaign.id, "engaged");
+        const phones = rows.map((r) => String(r[destinationColumn] || "")).filter(Boolean);
+        const handled = await fetchHandledPhoneDigits(supabase, phones);
+        rows = rows.filter((r) => {
+          const digits = campaignPhoneDigits(String(r[destinationColumn] || ""));
+          return digits && !handled.has(digits);
+        });
       } else {
         rows = await fetchCampaignRecipientsByEngagement(supabase, campaign.channel, campaign.id, filter);
       }
@@ -3104,6 +3115,14 @@ export default function Marketing() {
                                 >
                                   View engaged
                                 </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void openRecipients(campaign, "needs_attention")}
+                                  disabled={!campaignHasEngaged(campaign)}
+                                >
+                                  ⚡ Needs attention
+                                </Button>
                               </div>
                             </div>
                           </div>
@@ -3155,6 +3174,7 @@ export default function Marketing() {
               {([
                 { key: "all" as const, label: "All" },
                 { key: "engaged" as const, label: "Engaged" },
+                { key: "needs_attention" as const, label: "⚡ Needs attention" },
                 { key: "responded" as const, label: "Responded" },
                 { key: "called" as const, label: "Called" },
                 { key: "clicked" as const, label: "Clicked" },
@@ -3180,7 +3200,7 @@ export default function Marketing() {
             </div>
           ) : recipients.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              {recipientFilter === "all" ? "No recipients found." : `No ${recipientFilter} leads in this campaign.`}
+              {recipientFilter === "all" ? "No recipients found." : recipientFilter === "needs_attention" ? "No leads needing attention — all responses handled by AI or opted out." : `No ${recipientFilter} leads in this campaign.`}
             </div>
           ) : (
             <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">

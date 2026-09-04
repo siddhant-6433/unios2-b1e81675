@@ -7,7 +7,7 @@
 export const CAMPAIGN_ENGAGED_OR =
   "responded_at.not.is.null,called_at.not.is.null,clicked_link_at.not.is.null,clicked_button_at.not.is.null";
 
-export type RecipientEngagementFilter = "all" | "engaged" | "responded" | "called" | "clicked";
+export type RecipientEngagementFilter = "all" | "engaged" | "responded" | "called" | "clicked" | "needs_attention";
 
 export type CampaignEngagedSignals = {
   respondedAt?: string | null;
@@ -157,4 +157,40 @@ export function chunkValues<T>(values: T[], size = PHONE_IN_CHUNK): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < values.length; i += size) chunks.push(values.slice(i, i + size));
   return chunks;
+}
+
+// ---------- "Needs attention" filter ----------
+// ponytail: AI-handled/dismissed states — everything NOT in this set is
+//           potentially interesting (including phones with no state at all).
+const AI_HANDLED_STATES = new Set(["answered_by_ai", "not_interested", "dnc"]);
+
+/**
+ * Given a list of engaged-recipient phones, returns the digit-set of those
+ * whose conversation state says the AI already handled / dismissed them.
+ * Phones absent from `whatsapp_conversation_state` are NOT in the returned
+ * set — they count as "needs attention" (no AI is watching).
+ */
+export async function fetchHandledPhoneDigits(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: { from: (t: string) => any },
+  phones: string[],
+): Promise<Set<string>> {
+  const allVariants: string[] = [];
+  for (const p of phones) allVariants.push(...campaignPhoneLookupValues(p));
+  const handled = new Set<string>();
+  for (const chunk of chunkValues(allVariants)) {
+    const { data } = await client
+      .from("whatsapp_conversation_state")
+      .select("phone,mode,state")
+      .in("phone", chunk);
+    if (!data) continue;
+    for (const row of data as { phone: string; mode: string; state: string }[]) {
+      if (row.mode === "ai" && AI_HANDLED_STATES.has(row.state)) {
+        for (const v of campaignPhoneLookupValues(row.phone)) {
+          handled.add(campaignPhoneDigits(v));
+        }
+      }
+    }
+  }
+  return handled;
 }
