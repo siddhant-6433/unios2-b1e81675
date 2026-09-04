@@ -24,6 +24,7 @@ import {
   WHATSAPP_BUSINESS_NAME,
   defaultWaSenderOption,
   formatMessagingTier,
+  formatSenderNumber,
   loadWaSenders,
   senderCanSendTemplate,
 } from "@/lib/waSenders";
