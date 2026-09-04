@@ -6,14 +6,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw } from "lucide-react";
+import { Phone, Mail, MapPin, FileText, Link2, Search, Pencil, IndianRupee, Check, X, Download, CheckCircle2, RotateCcw, Lock, Unlock } from "lucide-react";
 import { PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, modeLabel, CAN_MANAGE_PAYOUT_ROLES, ZohoSyncButton } from "@/components/consultant/payoutActions";
 
 type ConsultantLite = {
   id: string; name: string; organization: string | null; phone: string | null;
   email: string | null; city: string | null; stage: string; payout_model: string | null;
   bank_account_number: string | null; bank_account_name: string | null; bank_ifsc: string | null;
-  bank_name: string | null; bank_upi: string | null;
+  bank_name: string | null; bank_upi: string | null; user_id: string | null;
 };
 type DocLite = { id: string; document_type: string; title: string; file_name: string; file_path: string };
 
@@ -41,6 +41,9 @@ export function ConsultantDetailDialog({
   const { toast } = useToast();
   const { role } = useAuth();
   const canManagePayout = CAN_MANAGE_PAYOUT_ROLES.includes(role || "");
+  const canToggleLogin = role === "super_admin";
+  const [loginDisabled, setLoginDisabled] = useState<boolean>(false);
+  const [loginBusy, setLoginBusy] = useState(false);
   const [markPaid, setMarkPaid] = useState<PayoutRow | null>(null);
   const [payoutBusyId, setPayoutBusyId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -100,6 +103,38 @@ export function ConsultantDetailDialog({
   };
 
   useEffect(() => { if (cId) { setTab("overview"); setPreviewDoc(null); setPreviewUrl(null); load(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [cId]);
+
+  // Current login state of the linked auth account (profiles.login_disabled).
+  useEffect(() => {
+    const uid = consultant?.user_id;
+    if (!uid) { setLoginDisabled(false); return; }
+    supabase.from("profiles").select("login_disabled").eq("user_id", uid).maybeSingle()
+      .then(({ data }) => setLoginDisabled(!!data?.login_disabled));
+  }, [consultant?.user_id]);
+
+  const toggleConsultantLogin = async () => {
+    const uid = consultant?.user_id;
+    if (!uid) return;
+    const nextDisabled = !loginDisabled;
+    setLoginBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("toggle-user-login", {
+        body: { user_id: uid, disabled: nextDisabled },
+      });
+      if (error) {
+        let message = error.message;
+        try { const text = await (error as any)?.context?.text?.(); if (text) { try { const b = JSON.parse(text); if (b?.error) message = b.error; } catch { message = text.slice(0, 200); } } } catch {}
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      setLoginDisabled(nextDisabled);
+      toast({ title: nextDisabled ? "Login disabled" : "Login enabled", description: nextDisabled ? `${consultant?.name} can no longer sign in. Active sessions revoked.` : `${consultant?.name} can sign in again.` });
+    } catch (err: any) {
+      toast({ title: "Action failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   // Auto-open the first document when the Documents tab is first shown.
   useEffect(() => {
@@ -185,6 +220,7 @@ export function ConsultantDetailDialog({
           <DialogTitle className="flex items-center gap-2">
             {consultant.name}
             <Badge className={`text-[10px] border-0 ${stageColor(consultant.stage)}`}>{consultant.stage}</Badge>
+            {loginDisabled && <Badge className="text-[10px] border-0 bg-destructive/10 text-destructive gap-1"><Lock className="h-3 w-3" />Login disabled</Badge>}
           </DialogTitle>
         </DialogHeader>
 
@@ -195,6 +231,17 @@ export function ConsultantDetailDialog({
           {consultant.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{consultant.email}</span>}
           <div className="ml-auto flex gap-2">
             {canLink && <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setShowLink(v => !v)}><Link2 className="h-3.5 w-3.5" />Link lead / applicant / student</Button>}
+            {canToggleLogin && consultant.user_id && (
+              loginDisabled ? (
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={toggleConsultantLogin} disabled={loginBusy}>
+                  {loginBusy ? <ButtonOrb state="working" /> : <Unlock className="h-3.5 w-3.5" />}Enable login
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive" onClick={toggleConsultantLogin} disabled={loginBusy}>
+                  {loginBusy ? <ButtonOrb state="working" /> : <Lock className="h-3.5 w-3.5" />}Disable login
+                </Button>
+              )
+            )}
             <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={onEdit}><Pencil className="h-3.5 w-3.5" />Edit</Button>
           </div>
         </div>

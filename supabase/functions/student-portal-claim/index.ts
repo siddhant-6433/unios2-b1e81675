@@ -130,10 +130,11 @@ Deno.serve(async (req) => {
 
   const { data: student, error: studentErr } = await db
     .from("students")
-    .select("id, name, phone, whatsapp_no, email, user_id, admission_no")
+    .select("id, name, phone, whatsapp_no, email, user_id, admission_no, login_disabled")
     .eq("id", row.student_id)
     .single();
   if (studentErr || !student) return json({ error: "Student record not found" }, 404);
+  if (student.login_disabled) return json({ error: "This account's login has been disabled. Please contact the office." }, 403);
 
   const phone = normalizePhone(student.phone || student.whatsapp_no || row.phone);
   const email = studentEmail(student.id, phone, student.email || row.email);

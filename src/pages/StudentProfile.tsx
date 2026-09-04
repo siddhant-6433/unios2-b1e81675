@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2, ArrowRightLeft, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -420,8 +420,27 @@ const StudentProfile = () => {
   const canArchive = role === "office_assistant" || role === "school_coordinator" || role === "principal" || role === "super_admin";
   const canDelete = role === "super_admin";
   const canChangePlacement = role === "super_admin";
+  const canToggleLogin = role === "super_admin";
+  const [loginBusy, setLoginBusy] = useState(false);
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
+
+  const toggleStudentLogin = async () => {
+    if (!student) return;
+    const nextDisabled = !(student as { login_disabled?: boolean }).login_disabled;
+    setLoginBusy(true);
+    const { error } = await supabase.rpc("admin_set_student_login_disabled" as never, {
+      _student_id: student.id,
+      _disabled: nextDisabled,
+    } as never);
+    setLoginBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Could not update login access", description: error.message });
+      return;
+    }
+    toast({ title: nextDisabled ? "Login disabled" : "Login enabled" });
+    fetchStudent();
+  };
 
   const submitRemoval = async () => {
     if (!student || !removalAction) return;
@@ -1201,6 +1220,11 @@ const StudentProfile = () => {
                   <Archive className="h-3 w-3" /> Archived
                 </span>
               )}
+              {(student as { login_disabled?: boolean }).login_disabled && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
+                  <Lock className="h-3 w-3" /> Login disabled
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {headerAcademicItems.map((item, index) => (
@@ -1238,6 +1262,17 @@ const StudentProfile = () => {
             <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openPlacementDialog}>
               <ArrowRightLeft className="h-3.5 w-3.5" /> Change Course / Batch
             </Button>
+          )}
+          {canToggleLogin && (
+            (student as { login_disabled?: boolean }).login_disabled ? (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={toggleStudentLogin} disabled={loginBusy}>
+                {loginBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlock className="h-3.5 w-3.5" />} Enable Login
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={toggleStudentLogin} disabled={loginBusy}>
+                {loginBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />} Disable Login
+              </Button>
+            )
           )}
           {canDelete && (
             <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}>
