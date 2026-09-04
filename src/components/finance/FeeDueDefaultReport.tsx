@@ -3,7 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { exportRowsXlsx, type ExportRow } from "@/lib/xlsxExport";
-import { IndianRupee, AlertTriangle, Wallet, Search, Download, Users } from "lucide-react";
+import { exportRowsPdf } from "@/lib/pdfExport";
+import { maskPhone } from "@/lib/maskContact";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
+import { useAuth } from "@/contexts/AuthContext";
+import { IndianRupee, AlertTriangle, Wallet, Search, Download, FileText, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +26,7 @@ type StudentRow = {
   student_id: string;
   name: string | null;
   admission_no: string | null;
+  phone: string | null;
   campus_name: string | null;
   course_id: string | null;
   course_name: string | null;
@@ -72,6 +77,8 @@ const thRight = thClass.replace("text-left", "text-right");
 
 export function FeeDueDefaultReport() {
   const { selectedCampusId } = useCampus();
+  const { role } = useAuth();
+  const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [lines, setLines] = useState<LineRow[]>([]);
@@ -87,6 +94,7 @@ export function FeeDueDefaultReport() {
   const [scope, setScope] = useState<Scope>("all");
   const [search, setSearch] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [campusF, setCampusF] = useState("all");
   const [courseF, setCourseF] = useState("all");
   const [batchF, setBatchF] = useState("all");
@@ -212,48 +220,75 @@ export function FeeDueDefaultReport() {
     );
   }, [granularity, filteredStudents, filteredLines]);
 
-  const handleExport = async () => {
-    const rows: ExportRow[] =
-      granularity === "student"
-        ? filteredStudents.map((s) => ({
-            Student: s.name || "",
-            "Admission No": s.admission_no || "",
-            Course: s.course_name || "",
-            Batch: s.batch_name || "",
-            Session: s.session_name || "",
-            Campus: s.campus_name || "",
-            "Total Charged": Number(s.total_charged || 0),
-            Paid: Number(s.total_paid || 0),
-            Balance: Number(s.balance || 0),
-            "Next Due Date": s.next_due_date || "",
-            "Overdue Amount": Number(s.overdue_amount || 0),
-            "Days Overdue": s.days_overdue,
-            Status: s.fully_paid ? "Paid" : s.days_overdue > 0 ? "Overdue" : "Due",
-          }))
-        : filteredLines.map((l) => ({
-            Student: l.name || "",
-            "Admission No": l.admission_no || "",
-            Course: l.course_name || "",
-            Batch: l.batch_name || "",
-            Session: l.session_name || "",
-            Campus: l.campus_name || "",
-            "Fee Head": l.fee_name || l.fee_code || "",
-            Term: termLabel(l),
-            Total: Number(l.total_amount || 0),
-            Concession: Number(l.concession || 0),
-            Paid: Number(l.paid_amount || 0),
-            Balance: Number(l.balance || 0),
-            "Due Date": l.due_date || "",
-            "Days Overdue": l.days_overdue,
-            Status: l.is_overdue ? "Overdue" : Number(l.balance) <= 0 ? "Paid" : "Due",
-          }));
+  // Mobile is shown/exported only to super_admins in the clear; everyone else
+  // sees the masked form (mirrors the maskContact export policy).
+  const showPhone = (p: string | null) => (p ? (isSuperAdmin ? p : maskPhone(p)) : "—");
+
+  const buildExportRows = (): ExportRow[] =>
+    granularity === "student"
+      ? filteredStudents.map((s) => ({
+          Student: s.name || "",
+          "Admission No": s.admission_no || "",
+          Mobile: s.phone || "",
+          Course: s.course_name || "",
+          Batch: s.batch_name || "",
+          Session: s.session_name || "",
+          Campus: s.campus_name || "",
+          "Next Due Date": s.next_due_date || "",
+          "Overdue Amount": Number(s.overdue_amount || 0),
+          "Days Overdue": s.days_overdue,
+          Status: s.fully_paid ? "Paid" : s.days_overdue > 0 ? "Overdue" : "Due",
+        }))
+      : filteredLines.map((l) => ({
+          Student: l.name || "",
+          "Admission No": l.admission_no || "",
+          Course: l.course_name || "",
+          Batch: l.batch_name || "",
+          Session: l.session_name || "",
+          Campus: l.campus_name || "",
+          "Fee Head": l.fee_name || l.fee_code || "",
+          Term: termLabel(l),
+          Total: Number(l.total_amount || 0),
+          Concession: Number(l.concession || 0),
+          Paid: Number(l.paid_amount || 0),
+          Balance: Number(l.balance || 0),
+          "Due Date": l.due_date || "",
+          "Days Overdue": l.days_overdue,
+          Status: l.is_overdue ? "Overdue" : Number(l.balance) <= 0 ? "Paid" : "Due",
+        }));
+
+  const handleExport = async (fmt: "xlsx" | "pdf") => {
+    const rows = buildExportRows();
     if (rows.length === 0) {
       toast({ title: "Nothing to export" });
       return;
     }
-    setExporting(true);
-    await exportRowsXlsx(rows, "Fee Dues", `fee-${granularity}-${scope}`);
-    setExporting(false);
+    const setBusy = fmt === "pdf" ? setExportingPdf : setExporting;
+    setBusy(true);
+    const prefix = `fee-${granularity}-${scope}`;
+    if (fmt === "pdf") {
+      // Filter context shown under the title so a printed sheet is self-describing.
+      const subtitle = [
+        granularity === "student" ? "By Student" : "By Fee Head",
+        scope === "overdue" ? "Overdue only" : "All Dues",
+        campusF === "all" ? "All Campuses" : campusF,
+        courseF !== "all" ? courseF : null,
+        batchF !== "all" ? batchF : null,
+        sessionF !== "all" ? sessionF : null,
+      ].filter(Boolean).join(" · ");
+      await exportRowsPdf(rows, "Fee Dues Report", prefix, {
+        unmask: isSuperAdmin,
+        brand: {
+          logoSrc: nimtLogo,
+          org: "NIMT Educational Institutions",
+          contactLine: "9555192192 · admissions@nimt.ac.in · www.nimt.ac.in",
+          subtitle,
+        },
+      });
+    } else {
+      await exportRowsXlsx(rows, "Fee Dues", prefix, { unmask: isSuperAdmin });
+    }
+    setBusy(false);
     toast({ title: `Exported ${rows.length} rows` });
   };
 
@@ -382,10 +417,19 @@ export function FeeDueDefaultReport() {
           size="sm"
           variant="outline"
           className={`gap-1.5 h-9 text-xs ${granularity === "student" && selectedVisible.length > 0 ? "" : "ml-auto"}`}
-          disabled={exporting || rowCount === 0}
-          onClick={handleExport}
+          disabled={exporting || exportingPdf || rowCount === 0}
+          onClick={() => handleExport("xlsx")}
         >
           {exporting ? <ButtonOrb state="composing" /> : <Download className="h-3.5 w-3.5" />} Export to Excel
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 h-9 text-xs"
+          disabled={exporting || exportingPdf || rowCount === 0}
+          onClick={() => handleExport("pdf")}
+        >
+          {exportingPdf ? <ButtonOrb state="composing" /> : <FileText className="h-3.5 w-3.5" />} Export to PDF
         </Button>
       </div>
 
@@ -414,11 +458,9 @@ export function FeeDueDefaultReport() {
                   </th>
                   <th className={thClass}>Student</th>
                   <th className={thClass}>Adm. No</th>
+                  <th className={thClass}>Mobile</th>
                   <th className={thClass}>Course</th>
                   <th className={thClass}>Batch</th>
-                  <th className={thRight}>Total Charged</th>
-                  <th className={thRight}>Paid</th>
-                  <th className={thRight}>Balance</th>
                   <th className={thClass}>Next Due</th>
                   <th className={thRight}>Overdue</th>
                   <th className={thRight}>Days</th>
@@ -428,7 +470,7 @@ export function FeeDueDefaultReport() {
               <tbody>
                 {filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                       No records
                     </td>
                   </tr>
@@ -449,11 +491,9 @@ export function FeeDueDefaultReport() {
                       </td>
                       <td className="px-4 py-3 font-medium text-foreground">{s.name || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.admission_no || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{showPhone(s.phone)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{s.course_name || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{s.batch_name || "—"}</td>
-                      <td className="px-4 py-3 text-right text-foreground">{inr(s.total_charged)}</td>
-                      <td className="px-4 py-3 text-right text-foreground">{inr(s.total_paid)}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-foreground">{inr(s.balance)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(s.next_due_date)}</td>
                       <td className="px-4 py-3 text-right font-semibold text-foreground">{inr(s.overdue_amount)}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">{s.days_overdue || "—"}</td>
