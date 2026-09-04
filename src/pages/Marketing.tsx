@@ -1400,16 +1400,22 @@ export default function Marketing() {
   // cap. A campaign whose audience exceeds it must be split across days, or Meta
   // rejects the overflow (131056 / quality hit). Use the checked eligible count
   // when available, else the raw list size.
-  // Round-robin: numbers that can send the same template (same WABA → same org),
-  // besides the primary sender. sendWhatsAppTemplate resolves each number's token.
+  // Round-robin: only numbers that have THIS template approved on their own
+  // WhatsApp account, besides the primary sender. The authority is each number's
+  // synced `available_templates` (Meta approves per WABA) — NOT the WABA-id
+  // heuristic, which treats an unmapped null waba_id as "main" and wrongly
+  // matched Mirai/Beacon numbers. A number with no synced list can't be
+  // confirmed, so it's excluded (conservative — never offer a number that would
+  // 132001 at send).
   const rotationCandidates = useMemo(
     () => waSenderOptions.filter((s) =>
       s.value !== DEFAULT_WA_SENDER
       && s.value !== waSenderValue
       && !!s.phoneNumberId
-      && senderCanSendTemplate(s, waTemplate, selectedTemplateWaba),
+      && Array.isArray(s.availableTemplates)
+      && s.availableTemplates.includes(waTemplate),
     ),
-    [waSenderOptions, waSenderValue, waTemplate, selectedTemplateWaba],
+    [waSenderOptions, waSenderValue, waTemplate],
   );
   const rotationSenders = useMemo(
     () => rotationCandidates.filter((s) => waRotationValues.includes(s.value)),
