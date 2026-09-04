@@ -318,6 +318,14 @@ Deno.serve(async (req) => {
       if (ledgerError) return json({ error: ledgerError.message }, 500);
     }
 
+    const { data: disabledCheck } = await db
+      .from("students")
+      .select("id")
+      .eq("id", studentId)
+      .eq("login_disabled", true)
+      .maybeSingle();
+    if (disabledCheck) return json({ error: "This account's login has been disabled. Please contact the office." }, 403);
+
     const session = await createSession(db, userId);
     if (!session) return json({ error: "Could not create student session" }, 500);
 

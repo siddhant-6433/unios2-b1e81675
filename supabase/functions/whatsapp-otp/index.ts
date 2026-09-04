@@ -104,6 +104,21 @@ async function createSession(admin: SupabaseClient, userId: string) {
   };
 }
 
+// True when this auth user's login has been disabled by an admin.
+// Keyed on user_id, so it catches staff/consultant (profiles.login_disabled)
+// and a student's own account (students.login_disabled). A parent's id lives in
+// students.father_user_id / mother_user_id, never in students.user_id or
+// profiles, so parents are deliberately NOT blocked by a student being disabled.
+async function isLoginDisabled(admin: SupabaseClient, userId: string): Promise<boolean> {
+  const { data: prof } = await admin
+    .from("profiles").select("login_disabled").eq("user_id", userId).maybeSingle();
+  if (prof?.login_disabled) return true;
+
+  const { data: stu } = await admin
+    .from("students").select("id").eq("user_id", userId).eq("login_disabled", true).maybeSingle();
+  return !!stu;
+}
+
 // Indexed, uncapped lookup of an existing auth user by email.
 //
 // This used to be auth.admin.listUsers({ page: 1, perPage: 1000 }) scanned in
@@ -401,6 +416,19 @@ Deno.serve(async (req) => {
           .eq("id", intent.id);
       }
 
+      if (await isLoginDisabled(adminClient, userId)) {
+        const error = "This account's login has been disabled. Please contact the office.";
+        await adminClient
+          .from("whatsapp_login_intents")
+          .update({ status: "failed", error })
+          .eq("id", intent.id)
+          .eq("status", "verified");
+        return new Response(
+          JSON.stringify({ success: true, status: "failed", error }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const token = await createSession(adminClient, userId);
       if (!token) {
         return new Response(
@@ -612,6 +640,9 @@ Deno.serve(async (req) => {
         .single();
 
       if (profile?.user_id) {
+        if (await isLoginDisabled(adminClient, profile.user_id)) {
+          return new Response(JSON.stringify({ error: "This account's login has been disabled. Please contact the office." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
         const token = await createSession(adminClient, profile.user_id);
         if (!token) {
           return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -623,12 +654,15 @@ Deno.serve(async (req) => {
       // ── 2. Student login: check students.phone / whatsapp_no ──────────────
       const { data: studentSelf } = await adminClient
         .from("students")
-        .select("id, user_id")
+        .select("id, user_id, login_disabled")
         .or(`phone.eq.${normalizedPhone},whatsapp_no.eq.${normalizedPhone}`)
         .limit(1)
         .single();
 
       if (studentSelf) {
+        if (studentSelf.login_disabled) {
+          return new Response(JSON.stringify({ error: "This account's login has been disabled. Please contact the office." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
         let userId = studentSelf.user_id;
 
         if (!userId) {
