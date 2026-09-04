@@ -639,20 +639,35 @@ Deno.serve(async (req) => {
     }
 
     // One lookup per batch rather than per recipient.
+    const phones = (recipients || [])
+      .map((r: any) => String(r.phone || "").replace(/[^0-9]/g, ""))
+      .filter(Boolean);
+
     const suppressedPhones = new Set<string>();
+    if (phones.length) {
+      const { data: sup, error: supErr } = await adminClient
+        .rpc("wa_suppressed_phones", { _phones: phones });
+      if (supErr) {
+        // Fail open: a suppression-lookup outage must not halt the campaign.
+        console.error("wa_suppressed_phones failed:", supErr.message);
+      } else {
+        for (const row of (sup as Array<{ phone: string }> | null) || []) {
+          if (row?.phone) suppressedPhones.add(row.phone);
+        }
+      }
+    }
+
+    // ponytail: proactive 24h cross-campaign dedup — skip phones already sent today
+    const recentlySentPhones = new Set<string>();
     {
-      const phones = (recipients || [])
-        .map((r: any) => String(r.phone || "").replace(/[^0-9]/g, ""))
-        .filter(Boolean);
       if (phones.length) {
-        const { data: sup, error: supErr } = await adminClient
-          .rpc("wa_suppressed_phones", { _phones: phones });
-        if (supErr) {
-          // Fail open: a suppression-lookup outage must not halt the campaign.
-          console.error("wa_suppressed_phones failed:", supErr.message);
+        const { data: recent, error: recentErr } = await adminClient
+          .rpc("wa_recently_sent_phones", { _phones: phones });
+        if (recentErr) {
+          console.error("wa_recently_sent_phones failed:", recentErr.message);
         } else {
-          for (const row of (sup as Array<{ phone: string }> | null) || []) {
-            if (row?.phone) suppressedPhones.add(row.phone);
+          for (const row of (recent as Array<{ phone: string }> | null) || []) {
+            if (row?.phone) recentlySentPhones.add(row.phone);
           }
         }
       }
@@ -879,6 +894,14 @@ Deno.serve(async (req) => {
         await adminClient
           .from("whatsapp_campaign_recipients")
           .update({ status: "skipped", error_message: "Skipped: suppressed after repeated Meta marketing-cap rejections" })
+          .eq("id", recipient.id);
+        return;
+      }
+
+      if (recentlySentPhones.has(waPhone)) {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({ status: "skipped", error_message: "Skipped: already received a marketing message in the last 24h" })
           .eq("id", recipient.id);
         return;
       }
