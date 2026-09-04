@@ -7,7 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X } from "lucide-react";
+import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X, Pencil } from "lucide-react";
+import { PaymentEditDialog } from "./PaymentEditDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -73,8 +74,10 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [payLink, setPayLink] = useState<string | null>(null);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
+  const [editPayment, setEditPayment] = useState<any | null>(null);
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
 
+  const isSuperAdmin = role === "super_admin";
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
@@ -932,6 +935,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                       <th className="px-4 py-3 font-medium text-muted-foreground">Mode</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">PDF</th>
+                      {isSuperAdmin && <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -953,6 +957,18 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                             <span className="text-xs text-muted-foreground">Generating…</span>
                           )}
                         </td>
+                        {isSuperAdmin && (
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setEditPayment(p)}
+                              className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                              title="Edit / delete receipt (audited)"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -1009,6 +1025,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </>
         );
       })()}
+
+      {isSuperAdmin && (
+        <PaymentEditDialog
+          open={!!editPayment}
+          onOpenChange={(v) => { if (!v) setEditPayment(null); }}
+          payment={editPayment}
+          onSaved={() => { fetchPayments(); fetchFees(); }}
+        />
+      )}
 
       {student?.id && (
         <OfflinePaymentDialog
