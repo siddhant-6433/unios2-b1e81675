@@ -2,7 +2,7 @@ import { describeWhatsAppError } from "@/lib/whatsappErrorText";
 
 export type WhatsAppDeliveryOutcome =
   | { status: "delivered" | "read" }
-  | { status: "failed"; errorText: string }
+  | { status: "failed"; errorText: string; code: string | null }
   | { status: "timeout" };
 
 type MessageRow = {
@@ -17,9 +17,11 @@ export function interpretWhatsAppMessageStatus(row: MessageRow | null): WhatsApp
   if (!row) return "pending";
   const status = String(row.status || "").toLowerCase();
   if (status === "failed") {
+    const detail = describeWhatsAppError(row.status_error);
     return {
       status: "failed",
-      errorText: describeWhatsAppError(row.status_error)?.text || "Meta reported the test as failed.",
+      errorText: detail?.text || "Meta reported the test as failed.",
+      code: detail?.code ?? null,
     };
   }
   if (SUCCESS.has(status) || row.read_at) {

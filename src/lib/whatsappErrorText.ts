@@ -132,6 +132,25 @@ export function whatsAppErrorText(statusError: unknown): string | null {
   return describeWhatsAppError(statusError)?.text ?? null;
 }
 
+// Recipient-specific failures: the send is fine, THIS number can't receive it
+// right now, so a different test number will work.
+const RECIPIENT_SPECIFIC_CODES = new Set(["131026", "131047", "131049", "131056", "130472"]);
+
+/**
+ * Next-step hint for a failed WhatsApp send, keyed on the Meta code. Tells the
+ * user whether to retry, switch test number, or fix config — instead of leaving
+ * a raw Meta error with no action.
+ */
+export function whatsAppErrorHint(code: string | number | null | undefined): string | null {
+  const key = code == null ? "" : String(code).trim();
+  if (!key) return null;
+  if (RECIPIENT_SPECIFIC_CODES.has(key)) return "Try a different test number — this one can't receive the message right now.";
+  if (key === "131053") return "Media fetch failed — usually temporary. Tap Send test again.";
+  if (key === "131042") return "This number has no payment method — set up WhatsApp billing.";
+  if (key === "132001") return "Pick a number that has this template approved.";
+  return null;
+}
+
 /**
  * Friendly text when the Meta code is already known (e.g. from
  * `whatsapp_campaign_recipients.last_error_code`), without re-serialising an

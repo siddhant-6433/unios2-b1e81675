@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeWhatsAppError } from "@/lib/whatsappErrorText";
+import { describeWhatsAppError, whatsAppErrorHint } from "@/lib/whatsappErrorText";
 
 describe("describeWhatsAppError", () => {
   it("maps a Meta code embedded in a raw '(#code)' string to the actionable line", () => {
@@ -18,5 +18,22 @@ describe("describeWhatsAppError", () => {
 
   it("still parses the object/array shapes", () => {
     expect(describeWhatsAppError([{ code: 131026 }])?.text).toMatch(/can't receive WhatsApp/i);
+  });
+});
+
+describe("whatsAppErrorHint", () => {
+  it("suggests another test number for recipient-specific failures", () => {
+    expect(whatsAppErrorHint("131026")).toMatch(/different test number/i);
+    expect(whatsAppErrorHint("131047")).toMatch(/different test number/i);
+    expect(whatsAppErrorHint(131049)).toMatch(/different test number/i);
+  });
+  it("suggests a retry for a transient media fetch error", () => {
+    expect(whatsAppErrorHint("131053")).toMatch(/again/i);
+  });
+  it("gives config hints for billing/template errors and nothing for unknown", () => {
+    expect(whatsAppErrorHint("131042")).toMatch(/billing/i);
+    expect(whatsAppErrorHint("132001")).toMatch(/approved/i);
+    expect(whatsAppErrorHint(null)).toBeNull();
+    expect(whatsAppErrorHint("999999")).toBeNull();
   });
 });

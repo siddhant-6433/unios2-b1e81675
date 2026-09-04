@@ -46,7 +46,7 @@ import {
   fetchCampaignRecipientsByEngagement,
   type RecipientEngagementFilter,
 } from "@/lib/campaignEngaged";
-import { describeWhatsAppError, whatsAppErrorTextForCode } from "@/lib/whatsappErrorText";
+import { describeWhatsAppError, whatsAppErrorTextForCode, whatsAppErrorHint } from "@/lib/whatsappErrorText";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { classifyHeaderMediaUrl, probePublicMediaUrl } from "@/lib/publicMediaUrl";
 import { waitForWhatsAppDelivery } from "@/lib/whatsappTestDelivery";
@@ -794,8 +794,10 @@ export default function Marketing() {
         if (outcome.status === "failed") {
           setWaTestPhase("failed");
           setWaTestDelivered(false);
-          setWaTestError(outcome.errorText);
-          toast({ title: "Test not delivered", description: outcome.errorText, variant: "destructive" });
+          const hint = whatsAppErrorHint(outcome.code);
+          const msg = hint ? `${outcome.errorText} ${hint}` : outcome.errorText;
+          setWaTestError(msg);
+          toast({ title: "Test not delivered", description: msg, variant: "destructive" });
         } else if (outcome.status === "timeout") {
           setWaTestError("No delivery receipt yet. If the message arrived on the phone, confirm it below.");
         } else {
@@ -812,9 +814,12 @@ export default function Marketing() {
       setWaTestDelivered(false);
       setWaTestSent(false);
       const rawMsg = err instanceof Error ? err.message : "Could not send test message.";
-      const friendly = describeWhatsAppError(rawMsg)?.text || rawMsg;
-      setWaTestError(friendly);
-      toast({ title: "Test failed", description: friendly, variant: "destructive" });
+      const detail = describeWhatsAppError(rawMsg);
+      const friendly = detail?.text || rawMsg;
+      const hint = whatsAppErrorHint(detail?.code);
+      const msg = hint ? `${friendly} ${hint}` : friendly;
+      setWaTestError(msg);
+      toast({ title: "Test failed", description: msg, variant: "destructive" });
     } finally {
       setWaTestSending(false);
     }
