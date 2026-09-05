@@ -51,6 +51,10 @@ const SCHOOL_CHANNELS: Record<string, { schoolName: string; systemPrompt: string
   },
 };
 
+// Seralis WhatsApp numbers (Lab + Diagnostics): human-handled, Navya must NOT
+// auto-reply. Keyed by Meta phone_number_id (business_phone_number_id).
+const SERALIS_PNIDS = new Set(["762544046936970", "836776566178513"]);
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -704,6 +708,13 @@ Deno.serve(async (req) => {
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Seralis numbers are human-handled — never let Navya auto-reply.
+    if (typeof business_phone_number_id === "string" && SERALIS_PNIDS.has(business_phone_number_id)) {
+      return new Response(JSON.stringify({ skipped: true, reason: "seralis_channel_ai_disabled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
