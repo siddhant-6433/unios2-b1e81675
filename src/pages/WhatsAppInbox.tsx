@@ -55,6 +55,7 @@ import {
   type CatalogTemplate,
 } from "@/lib/whatsappTemplateCatalog";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
+import { loadWaChannelIdentities, type WaChannelIdentity } from "@/lib/waSenders";
 
 const CONVERSATION_PAGE_SIZE = 120;
 
@@ -518,6 +519,8 @@ type InboxPickerOption = {
   provider: string | null;
   businessNumber: string | null;
   count?: number;
+  name?: string | null;
+  photoUrl?: string | null;
 };
 
 const WhatsAppInboxIdentity = ({
@@ -535,7 +538,7 @@ const WhatsAppInboxIdentity = ({
   return (
     <div className={`flex w-full items-center gap-3 ${compact ? "py-0.5" : "rounded-md p-2"}`}>
       <Avatar className={compact ? "h-8 w-8 border bg-white" : "h-10 w-10 border bg-white"}>
-        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
+        <AvatarImage src={option.photoUrl || nimtLogo} alt={option.name || WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
         <AvatarFallback className="bg-success/5 text-[10px] font-semibold text-success">NIMT</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
@@ -550,7 +553,7 @@ const WhatsAppInboxIdentity = ({
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           <span>{displayNumber ? "🇮🇳 India" : "Inbox route"}</span>
           <span className="hidden sm:inline">•</span>
-          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
+          <span className="truncate">{option.name || WHATSAPP_BUSINESS_NAME}</span>
           {!compact && <span>Name visible to customers</span>}
           {!compact && typeof option.count === "number" && <span>{option.count.toLocaleString("en-IN")} chats</span>}
         </div>
@@ -946,6 +949,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (data) setQuickReplies(data as QuickReply[]);
   };
   useEffect(() => { fetchQuickReplies(); }, []);
+  // Meta-synced per-number identity (name + logo), refreshed daily by
+  // whatsapp-channel-profiles-sync. One canonical source for the number list.
+  const [channelIdentities, setChannelIdentities] = useState<Map<string, WaChannelIdentity>>(new Map());
+  useEffect(() => { loadWaChannelIdentities(supabase).then(setChannelIdentities); }, []);
 
   const saveQuickReply = async () => {
     if (!qrEditLabel.trim() || !qrEditText.trim()) return;
@@ -1149,6 +1156,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     };
   })();
   const hasOtherInbox = otherInboxes.length > 0;
+  // Resolve a number's Meta-synced name/logo from the canonical channel identity
+  // map (keyed by both normalized number and pnid). The aggregate "all" row has
+  // no number, so it keeps the NIMT fallback in WhatsAppInboxIdentity.
+  const resolveInboxIdentity = (businessNumber: string | null, id?: string) =>
+    (businessNumber ? channelIdentities.get(digitsOnly(businessNumber)) : null)
+    || (id ? channelIdentities.get(id) : null)
+    || null;
   const inboxPickerOptions: InboxPickerOption[] = [
     {
       id: "all",
@@ -1157,20 +1171,29 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       businessNumber: null,
       count: conversations.length,
     },
-    {
-      id: "primary",
-      label: primaryInboxLabel,
-      provider: "meta",
-      businessNumber: PRIMARY_META_WHATSAPP_NUMBER,
-    },
+    (() => {
+      const identity = resolveInboxIdentity(PRIMARY_META_WHATSAPP_NUMBER);
+      return {
+        id: "primary",
+        label: primaryInboxLabel,
+        provider: "meta" as const,
+        businessNumber: PRIMARY_META_WHATSAPP_NUMBER,
+        name: identity?.verifiedName ?? null,
+        photoUrl: identity?.profilePictureUrl ?? null,
+      };
+    })(),
     ...otherInboxes.map((inbox) => {
       const known = findKnownAdmissionsChannel(inbox.id, inbox.label);
+      const businessNumber = resolveInboxBusinessNumber(inbox.id, inbox.label);
+      const identity = resolveInboxIdentity(businessNumber, inbox.id);
       return {
         id: inbox.id,
         label: inbox.label,
         provider: known?.provider || "meta",
-        businessNumber: resolveInboxBusinessNumber(inbox.id, inbox.label),
+        businessNumber,
         count: inbox.n,
+        name: identity?.verifiedName ?? null,
+        photoUrl: identity?.profilePictureUrl ?? null,
       };
     }),
   ];
