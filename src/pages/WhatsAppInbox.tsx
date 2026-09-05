@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon, Archive } from "lucide-react";
+import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, ListPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon, Archive } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -35,6 +35,7 @@ import {
   type WhatsAppTemplateDefinition,
 } from "@/lib/whatsappTemplateRender";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import { AddToListDialog } from "@/components/admissions/AddToListDialog";
 import { describeWhatsAppError } from "@/lib/whatsappErrorText";
 import {
   fetchWhatsAppReplyStateCounts,
@@ -890,6 +891,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   // Assign / reassign dialog
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferLeadIds, setTransferLeadIds] = useState<string[]>([]);
+  const [addToListOpen, setAddToListOpen] = useState(false);
+  const [addToListLeadIds, setAddToListLeadIds] = useState<string[]>([]);
   const [transferLeadNames, setTransferLeadNames] = useState<string[]>([]);
 
   // Per-conversation AI/human guard. 'human' means the bot stays silent and a
@@ -3368,6 +3371,21 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 >
                   <UserPlus className="h-3 w-3" /> Bulk Assign
                 </button>
+                <button
+                  onClick={() => {
+                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    if (ids.length === 0) {
+                      toast({ title: "No leads", description: "No leads in the current view to add to a list.", variant: "destructive" });
+                      return;
+                    }
+                    setAddToListLeadIds(ids);
+                    setAddToListOpen(true);
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-primary/25 bg-primary/5 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                  title="Group all leads in the current filtered view into a named list (does not change assignment)"
+                >
+                  <ListPlus className="h-3 w-3" /> Create List
+                </button>
               </div>
             )}
 
@@ -4636,6 +4654,15 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         onOpenChange={setTransferOpen}
         leadIds={transferLeadIds}
         leadNames={transferLeadNames}
+        onSuccess={() => {
+          void fetchConversationPage(true, null);
+        }}
+      />
+
+      <AddToListDialog
+        open={addToListOpen}
+        onOpenChange={setAddToListOpen}
+        leadIds={addToListLeadIds}
         onSuccess={() => {
           void fetchConversationPage(true, null);
         }}
