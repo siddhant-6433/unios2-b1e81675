@@ -16,6 +16,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { settlePaymentLink } from "../_shared/gateway-settlement.ts";
 import { easebuzzRetrieveHosts, easebuzzRetrieveTxn, isEasebuzzSuccess } from "../_shared/easebuzz.ts";
+import { pickCapturedPaymentId } from "./razorpay.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,17 +130,23 @@ async function razorpayPaidRef(
   errors: string[],
 ): Promise<string | null> {
   if (!authHeader) return null;
+  // expand[]=payments so payments.items is populated — otherwise Razorpay returns
+  // payments:null and we'd fall back to the LINK id (plink_…), which is NOT idempotent
+  // against the webhook/manual path that records the real payment id (pay_…) →
+  // duplicate lead_payments / double-counted revenue.
   const res = await fetch(
-    `https://api.razorpay.com/v1/payment_links/${encodeURIComponent(link.gateway_link_id!)}`,
+    `https://api.razorpay.com/v1/payment_links/${encodeURIComponent(link.gateway_link_id!)}?expand[]=payments`,
     { headers: { Authorization: authHeader } },
   );
   if (!res.ok) { errors.push(`${link.id}: razorpay ${res.status}`); return null; }
   const rpLink = await res.json();
   if (rpLink.status !== "paid") return null;
-  const items = rpLink.payments?.items || [];
-  const captured = items.find((p: any) => p?.status === "captured") ||
-    items.find((p: any) => p?.status === "authorized");
-  return String(captured?.id || rpLink.id || `plink_${link.id}`);
+  // Settle ONLY under the real captured payment id (pay_…). If we can't resolve it,
+  // skip this pass rather than booking under the link id — the unique transaction_ref
+  // index dedups pay_… against the webhook/manual record; a link id would not.
+  const payId = pickCapturedPaymentId(rpLink);
+  if (!payId) { errors.push(`${link.id}: razorpay paid but no captured payment id`); return null; }
+  return payId;
 }
 
 /** Returns the easepayid if EaseBuzz reports the txn successful, else null. */
