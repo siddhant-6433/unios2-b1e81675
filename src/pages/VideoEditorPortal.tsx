@@ -431,11 +431,40 @@ export default function VideoEditorPortal() {
       });
       setSavingSocial(false); return;
     }
+    // System-authoritative posting dates: overwrite Instagram/YouTube/LinkedIn
+    // posted_on with the real platform timestamps, then require each one to be
+    // at or after approved_at. Instagram draft / preview permalinks are not in
+    // the brand's published media list and get dropped.
+    try {
+      const { data: fetchResult, error: fetchErr } = await supabase.functions.invoke(
+        "video-fetch-post-dates",
+        { body: { video_id: selected.id, force: true } },
+      );
+      if (fetchErr) throw fetchErr;
+      if (!fetchResult) throw new Error("empty response");
+      const rejected = (fetchResult as any)?.rejected as { message: string }[] | undefined;
+      if (rejected?.length) {
+        toast({
+          title: "Some links were rejected",
+          description: rejected.map(r => r.message).join(" "),
+          variant: "destructive",
+        });
+        setSavingSocial(false);
+        setSelected(null);
+        if (editor) fetchVideos(editor.id);
+        return;
+      }
+    } catch {
+      toast({
+        title: "Could not verify posting dates",
+        description: "Links were saved, but we could not read the live post times. Try saving again — unpublished drafts will not count.",
+        variant: "destructive",
+      });
+      setSavingSocial(false);
+      if (editor) fetchVideos(editor.id);
+      return;
+    }
     toast({ title: "Social links saved" });
-    // System-authoritative posting dates: overwrite Instagram/YouTube posted_on
-    // with the real platform timestamps from the links (fraud-proof). LinkedIn
-    // has no public API, so its date stays as entered. Best-effort.
-    try { await supabase.functions.invoke("video-fetch-post-dates", { body: { video_id: selected.id, force: true } }); } catch { /* non-fatal */ }
     setSavingSocial(false);
     setSelected(null);
     if (editor) fetchVideos(editor.id);
@@ -694,7 +723,7 @@ export default function VideoEditorPortal() {
           <DialogHeader><DialogTitle>{selected?.title}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Paste the post URL for each platform — all three required for billing. Posting dates are read automatically from the links; you don't enter them.
+              Paste the live public URL for each platform — all three required for billing. Draft / preview Instagram links are not accepted. Each post must go live after this video was approved; we read the real posting time from the platform, not the calendar day.
             </p>
             <div className="space-y-3">
               <div className="space-y-1.5">
