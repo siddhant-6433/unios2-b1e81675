@@ -87,6 +87,37 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
 
 export const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
 
+export type WaChannelIdentity = { verifiedName: string | null; profilePictureUrl: string | null };
+
+/**
+ * Loads the Meta-synced identity (verified_name + rehosted profile_picture_url)
+ * for every ACTIVE channel — not just allow_bulk ones — so surfaces like the
+ * inbox number list can show each number's real name/logo instead of a hardcoded
+ * NIMT fallback. Keyed by both the normalized business number and the
+ * meta_phone_number_id so callers can resolve by whichever they hold.
+ */
+export async function loadWaChannelIdentities(
+  supabase: SupabaseClient
+): Promise<Map<string, WaChannelIdentity>> {
+  const map = new Map<string, WaChannelIdentity>();
+  const { data, error } = await supabase
+    .from("whatsapp_channels" as any)
+    .select("meta_phone_number_id,business_number,verified_name,profile_picture_url")
+    .eq("is_active", true);
+  if (error || !data) return map;
+  for (const ch of data as any[]) {
+    const identity: WaChannelIdentity = {
+      verifiedName: ch.verified_name || null,
+      profilePictureUrl: ch.profile_picture_url || null,
+    };
+    if (!identity.verifiedName && !identity.profilePictureUrl) continue;
+    const numKey = digitsOnly(ch.business_number);
+    if (numKey) map.set(numKey, identity);
+    if (ch.meta_phone_number_id) map.set(String(ch.meta_phone_number_id), identity);
+  }
+  return map;
+}
+
 export const mergeKnownBulkSenders = (options: Map<string, WaSenderOption>) => {
   for (const sender of knownBulkSenderOptions()) {
     const byValue = options.get(sender.value);
