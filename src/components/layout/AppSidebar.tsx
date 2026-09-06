@@ -189,6 +189,7 @@ const managementMenu: MenuItem[] = [
   { title: "Student Services", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
   { title: "Video Approvals", url: "/video-approvals", icon: Video, permission: "video_approval:view" },
   { title: "Video Bills", url: "/video-bills", icon: Receipt, permission: "video_bills:view" },
+  { title: "Refunds", url: "/refunds", icon: IndianRupee, permission: "finance:refund", roles: ["super_admin", "accountant"] },
 ];
 
 export function AppSidebar() {

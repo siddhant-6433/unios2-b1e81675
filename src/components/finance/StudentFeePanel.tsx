@@ -7,8 +7,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X, Pencil } from "lucide-react";
+import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X, Pencil, Undo2 } from "lucide-react";
 import { PaymentEditDialog } from "./PaymentEditDialog";
+import { RefundDialog } from "./RefundDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -76,6 +77,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [consultantManaged, setConsultantManaged] = useState<string | null>(null); // consultant name when flagged
   const [editPayment, setEditPayment] = useState<any | null>(null);
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refunds, setRefunds] = useState<any[]>([]);
 
   const isSuperAdmin = role === "super_admin";
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
@@ -86,6 +89,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // Works for both lead-based candidates and lead-less (school) students — the
   // receipt books against lead_id or student_id respectively.
   const canCollect = ["super_admin", "accountant", "office_admin"].includes(role || "") && !!student?.id;
+  const canRefund = hasPermission("finance:refund") || ["super_admin", "accountant"].includes(role || "");
   // Counsellors can ask their own candidate to pay — a payment link or a portal
   // login — but never take money. RLS scopes what they can even see here to
   // students on their assigned leads (can_view_student_via_lead).
@@ -112,8 +116,19 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchConsultantFlag();
       fetchCredit();
       fetchPendingWaivers();
+      if (canRefund) fetchRefunds();
     }
   }, [student?.id, student?.lead_id]);
+
+  // Refund history — shown to finance roles regardless of whether they can
+  // create a new one, same as the Reallocation History dialog.
+  const fetchRefunds = async () => {
+    const { data } = await (supabase.from as any)("fee_refunds")
+      .select("*")
+      .eq("student_id", student.id)
+      .order("created_at", { ascending: false });
+    setRefunds(data || []);
+  };
 
   // Per-head waiver/concession requests still awaiting approval, so the ledger
   // can badge a head as "waiver pending". Sum pending flat value per fee row.
@@ -532,6 +547,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           <Button size="sm" variant="outline" onClick={handleIssueLoginLink} disabled={issuingLink} className="gap-1.5">
             {issuingLink ? <ButtonOrb state="working" /> : <LogIn className="h-3.5 w-3.5" />}
             Generate Login Link
+          </Button>
+        )}
+        {canRefund && student?.id && (
+          <Button size="sm" variant="outline" onClick={() => setRefundOpen(true)} className="gap-1.5">
+            <Undo2 className="h-3.5 w-3.5" /> Refund
           </Button>
         )}
 
@@ -1026,6 +1046,43 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         );
       })()}
 
+      {/* Refund history — visible to anyone who can see the Refund button. */}
+      {canRefund && refunds.length > 0 && (
+        <div className="rounded-xl bg-card card-shadow overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+            <Undo2 className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Refunds</span>
+            <span className="text-xs text-muted-foreground">{refunds.length} record{refunds.length === 1 ? "" : "s"}</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left">
+                <th className="px-4 py-3 font-medium text-muted-foreground">Reason</th>
+                <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
+                <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                <th className="px-4 py-3 font-medium text-muted-foreground">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {refunds.map((r: any) => (
+                <tr key={r.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 max-w-[260px] truncate text-foreground" title={r.reason}>{r.reason}</td>
+                  <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(r.total_amount).toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize bg-muted text-foreground/70">
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.created_at ? new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {isSuperAdmin && (
         <PaymentEditDialog
           open={!!editPayment}
@@ -1105,6 +1162,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         studentId={student.id}
         feeMeta={feeMeta}
       />
+
+      {canRefund && student?.id && (
+        <RefundDialog
+          studentId={student.id}
+          studentName={student.name}
+          open={refundOpen}
+          onOpenChange={setRefundOpen}
+          onDone={() => { fetchRefunds(); fetchFees(); onRefresh?.(); }}
+        />
+      )}
     </div>
   );
 }
