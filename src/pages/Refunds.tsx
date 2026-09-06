@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle, XCircle, IndianRupee, Building2, Wallet } from "lucide-react";
+import { CheckCircle, XCircle, IndianRupee, Building2, Wallet, Copy } from "lucide-react";
 
 type RefundRow = {
   id: string;
@@ -16,6 +16,11 @@ type RefundRow = {
   total_amount: number;
   reason: string;
   status: "draft" | "approved" | "paid" | "rejected";
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  bank_ifsc: string | null;
+  bank_name: string | null;
+  bank_upi: string | null;
   created_at: string;
   approved_at: string | null;
   paid_at: string | null;
@@ -92,6 +97,25 @@ export default function Refunds() {
     if (error) toast({ title: "Mark paid failed", description: error.message, variant: "destructive" });
     else { toast({ title: "Refund marked paid" }); fetchAll(); }
     setActing(null);
+  };
+
+  // Zoho has no API to set a vendor's bank account, so give finance a one-click
+  // copy to paste into Zoho → Vendor → Add Bank Account.
+  const copyBank = async (r: RefundRow) => {
+    const lines = [
+      r.bank_account_name && `Account Holder: ${r.bank_account_name}`,
+      r.bank_account_number && `Account Number: ${r.bank_account_number}`,
+      r.bank_ifsc && `IFSC: ${r.bank_ifsc}`,
+      r.bank_name && `Bank: ${r.bank_name}`,
+      r.bank_upi && `UPI: ${r.bank_upi}`,
+    ].filter(Boolean).join("\n");
+    if (!lines) { toast({ title: "No bank details on this refund" }); return; }
+    try {
+      await navigator.clipboard.writeText(lines);
+      toast({ title: "Bank details copied", description: "Paste into Zoho → Vendor → Add Bank Account." });
+    } catch {
+      toast({ title: "Copy failed", description: lines, variant: "destructive" });
+    }
   };
 
   const handleZoho = async (r: RefundRow, action: "create_bill" | "record_payment") => {
@@ -183,6 +207,11 @@ export default function Refunds() {
                       </td>
                       <td className="px-3 py-3 text-center">
                         <div className="flex items-center gap-1 justify-center">
+                          {r.bank_account_number && (
+                            <Button size="sm" variant="ghost" className="gap-1 h-7 px-2 text-xs" title="Copy payee bank details for Zoho" onClick={() => copyBank(r)}>
+                              <Copy className="h-3 w-3" /> Bank
+                            </Button>
+                          )}
                           {r.status === "draft" && (
                             <>
                               <Button size="sm" className="gap-1 h-7 text-xs bg-info hover:bg-info/60" disabled={acting === r.id} onClick={() => handleApprove(r)}>
