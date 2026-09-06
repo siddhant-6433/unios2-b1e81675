@@ -230,20 +230,25 @@ export default function Refunds() {
                               <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive hover:text-destructive" disabled={acting === r.id} onClick={() => handleReject(r)}>
                                 <XCircle className="h-3 w-3" />
                               </Button>
-                              {!r.zoho_bill_id && (
-                                <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === r.id} onClick={() => handleZoho(r, "create_bill")}>
-                                  {syncing === r.id ? <ButtonOrb state="composing" /> : <Building2 className="h-3 w-3" />} Zoho: Create Bill
-                                </Button>
-                              )}
+                              <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === r.id} onClick={() => handleZoho(r, "create_bill")} title={r.zoho_bill_id ? "Re-sync bill + vendor in Zoho" : "Create the bill in Zoho"}>
+                                {syncing === r.id ? <ButtonOrb state="composing" /> : <Building2 className="h-3 w-3" />} {r.zoho_bill_id ? "Zoho: Resync" : "Zoho: Create Bill"}
+                              </Button>
                             </>
                           )}
-                          {r.status === "paid" && !r.zoho_payment_id && r.zoho_bill_id && (
-                            <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === r.id} onClick={() => handleZoho(r, "record_payment")}>
-                              {syncing === r.id ? <ButtonOrb state="composing" /> : <Wallet className="h-3 w-3" />} Zoho: Record Payment
-                            </Button>
-                          )}
-                          {r.status === "paid" && r.zoho_payment_id && (
-                            <span className="text-[10px] text-muted-foreground">Zoho settled</span>
+                          {r.status === "paid" && (
+                            <>
+                              <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === r.id} onClick={() => handleZoho(r, "create_bill")} title={r.zoho_bill_id ? "Re-sync bill + vendor in Zoho" : "Create the bill in Zoho"}>
+                                {syncing === r.id ? <ButtonOrb state="composing" /> : <Building2 className="h-3 w-3" />} {r.zoho_bill_id ? "Zoho: Resync" : "Zoho: Create Bill"}
+                              </Button>
+                              {r.zoho_bill_id && !r.zoho_payment_id && (
+                                <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" disabled={syncing === r.id} onClick={() => handleZoho(r, "record_payment")}>
+                                  {syncing === r.id ? <ButtonOrb state="composing" /> : <Wallet className="h-3 w-3" />} Zoho: Record Payment
+                                </Button>
+                              )}
+                              {r.zoho_payment_id && (
+                                <span className="text-[10px] text-muted-foreground">Zoho settled</span>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
