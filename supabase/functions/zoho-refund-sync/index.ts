@@ -19,7 +19,7 @@
 //      account; falls back to the shared video-bill payout account).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoResolveExpenseAccount, zohoSearchVendors, zohoAddVendorBankAccount, zohoVendorHasBank } from "../_shared/zoho.ts";
+import { zohoConfigured, zohoAccessToken, zohoApi, zohoAttach, zohoResolveExpenseAccount, zohoSearchVendors } from "../_shared/zoho.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +74,16 @@ Deno.serve(async (req) => {
     // Vendor display name: "Name - Father Name - Adm No" (skip empty parts).
     const vendorName = [studentName, student?.father_name, admissionNo].map((s) => (s || "").trim()).filter(Boolean).join(" - ");
 
+    // Payee bank details as a single line — carried on the vendor's remarks and
+    // the bill notes (the reliable, always-visible place for finance to pay from).
+    const bankRemarks = (): string => [
+      refund.bank_account_name ? `A/C Holder: ${refund.bank_account_name}` : null,
+      refund.bank_account_number ? `A/C No: ${refund.bank_account_number}` : null,
+      refund.bank_ifsc ? `IFSC: ${refund.bank_ifsc}` : null,
+      refund.bank_name ? `Bank: ${refund.bank_name}` : null,
+      refund.bank_upi ? `UPI: ${refund.bank_upi}` : null,
+    ].filter(Boolean).join(" | ");
+
     // Ensure a per-student Zoho vendor, cached on the student + refund. Reuse an
     // existing phone match before creating (avoids duplicate vendors); map the
     // refund's bank details onto the vendor once.
@@ -86,24 +96,23 @@ Deno.serve(async (req) => {
         }
       }
       if (!vId) {
+        // Payee bank details go in the contact's remarks so they're visible on
+        // the vendor. Zoho Books' /contacts/{id}/bankaccount endpoint is the
+        // connected-banking gateway registration (requires a `gateway` value),
+        // not a plain vendor bank field, so it can't be used for display.
         const res = await zohoApi(token, "POST", "/contacts", {
           contact_name: vendorName,
           contact_type: "vendor",
           phone: student?.phone || undefined,
           email: student?.email || undefined,
+          notes: bankRemarks(),
         });
         if (!res.ok) throw new Error(`vendor create failed: ${JSON.stringify(res.data)}`);
         vId = res.data.contact.contact_id as string;
-      }
-      // Map the refund's payee bank details onto the vendor (best-effort, once).
-      if (refund.bank_account_number && refund.bank_ifsc && !(await zohoVendorHasBank(token, vId))) {
-        const att = await zohoAddVendorBankAccount(token, vId, {
-          bank_name: refund.bank_name,
-          account_number: refund.bank_account_number,
-          ifsc: refund.bank_ifsc,
-          account_holder: refund.bank_account_name || vendorName,
-        });
-        if (!att.ok) console.error("vendor bank map failed", att.data);
+      } else {
+        // Existing vendor — keep its remarks in sync with this refund's payee bank.
+        const rem = bankRemarks();
+        if (rem) await zohoApi(token, "PUT", `/contacts/${vId}`, { notes: rem });
       }
       // Cache for dedup + record_payment.
       if (vId !== student?.zoho_vendor_id) await admin.from("students").update({ zoho_vendor_id: vId }).eq("id", refund.student_id);
@@ -116,6 +125,9 @@ Deno.serve(async (req) => {
 
     if (action === "create_bill") {
       try {
+        // Always ensure the vendor (creates it + syncs its bank remarks), even
+        // when the bill already exists so a Resync repairs vendor details.
+        const vendorId = await ensureVendor();
         let zohoBillId = refund.zoho_bill_id;
         let zohoBillNumber = refund.zoho_bill_number;
 
@@ -127,7 +139,6 @@ Deno.serve(async (req) => {
         }
 
         if (!zohoBillId) {
-          const vendorId = await ensureVendor();
           // Refund expense account. Reuse the video-bill payout account by
           // default (ZOHO_PAYOUT_ACCOUNT_ID/NAME); ZOHO_REFUND_ACCOUNT_* override
           // it if refunds should book to a distinct Refund category.
@@ -151,10 +162,12 @@ Deno.serve(async (req) => {
             return `${head}${term}: ₹${Number(it.amount).toLocaleString("en-IN")}`;
           }).join("; ");
 
+          const bank = bankRemarks();
           const notes = [
             `Refund · ${studentName} · Admission No ${admissionNo}`,
             refund.reason ? `Reason: ${refund.reason}` : null,
             breakup ? `Breakup — ${breakup}` : null,
+            bank ? `Payee Bank — ${bank}` : null,
             refund.notes || null,
           ].filter(Boolean).join("\n");
 
