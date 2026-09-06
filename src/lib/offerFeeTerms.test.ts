@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectOfferFeeTermTotals, isBaseOfferProgrammeFeeItem } from "./offerFeeTerms";
+import { collectOfferFeeTermTotals, collectOfferFeeTermComponentTotals, isBaseOfferProgrammeFeeItem } from "./offerFeeTerms";
 
 describe("offer programme fee — base vs optional items", () => {
   // Real Grade V (Beacon) new_admission structure: each quarter lists tuition +
@@ -87,5 +87,24 @@ describe("offer programme fee — base vs optional items", () => {
       { term: "security_deposit", total: 20000 }, // refundable deposit, separate line
       { term: "q1", total: 14001 + 78000 + 5400 },
     ]);
+  });
+
+  it("component breakdown splits a boarder quarter into tuition / boarding / transport", () => {
+    const breakdown = collectOfferFeeTermComponentTotals(q1, {
+      studentType: "boarder",
+      hostelType: "ac_individual",
+      transportZone: "zone_1",
+    });
+    const q1Row = breakdown.find(b => b.term === "q1")!;
+    expect(q1Row.total).toBe(14001 + 78000 + 5400);
+    // Components labelled and summing to the term total (sorted by amount desc).
+    expect(q1Row.components).toEqual([
+      { category: "hostel", label: "Boarding", amount: 78000 },
+      { category: "tuition", label: "Tuition", amount: 14001 },
+      { category: "transport", label: "Transport", amount: 5400 },
+    ]);
+    // Security deposit stays a single self-labelled component on its own term.
+    const dep = breakdown.find(b => b.term === "security_deposit")!;
+    expect(dep.components).toEqual([{ category: "security_deposit", label: "Security Deposit", amount: 20000 }]);
   });
 });

@@ -145,3 +145,77 @@ export function collectOfferFeeTermTotals(
 export function firstOfferFeeTerm(totals: OfferFeeTermTotal[]): string {
   return totals.find((item) => item.term === "year_1")?.term || totals[0]?.term || "year_1";
 }
+
+// ── Per-component breakdown ───────────────────────────────────────────────────
+// Each quarter (q1..q4) is really the sum of separate fee_structure_items sharing
+// a term: tuition, hostel (boarding), transport, etc. This exposes that split so
+// the offer breakdown can show — and a waiver can target — one component of a
+// period. Component = fee_codes.category; a waiver's fee_category maps 1:1 to it.
+
+export interface OfferFeeComponent {
+  category: string; // fee_codes.category (tuition/hostel/transport/enrollment/other/…)
+  label: string; // friendly label for the offer UI/PDF
+  amount: number;
+}
+
+export interface OfferFeeTermBreakdown {
+  term: string;
+  total: number;
+  components: OfferFeeComponent[];
+}
+
+const FEE_CATEGORY_LABELS: Record<string, string> = {
+  tuition: "Tuition",
+  hostel: "Boarding",
+  transport: "Transport",
+  enrollment: "Registration",
+  lab: "Lab",
+  library: "Library",
+  exam: "Exam",
+  other: "Other",
+};
+
+/** Friendly label for a fee component (waiver target / breakdown line). */
+export function offerFeeComponentLabel(category: string): string {
+  const key = String(category || "").trim().toLowerCase();
+  return FEE_CATEGORY_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : "Other");
+}
+
+// Per-term component breakdown. Mirrors collectOfferFeeTermTotals' include rules,
+// but groups each term's included items by category so the offer can show and
+// waive a single component. The security-deposit line is its own term with a
+// single "Security Deposit" component.
+export function collectOfferFeeTermComponentTotals(
+  items: OfferFeeItemLike[] | null | undefined,
+  selection?: SchoolFeeSelection | null,
+): OfferFeeTermBreakdown[] {
+  // term -> (category -> amount)
+  const byTerm = new Map<string, Map<string, number>>();
+  for (const item of items || []) {
+    const term = String(item?.term || "").trim().toLowerCase();
+    const amount = Number(item?.amount || 0);
+    if (!isOfferProgrammeFeeTerm(term) || !Number.isFinite(amount) || amount <= 0) continue;
+    if (!includeOfferFeeItem(item, selection)) continue;
+    const isDeposit = isSecurityDepositItem(item);
+    const displayTerm = isDeposit ? SECURITY_DEPOSIT_TERM : term;
+    // Deposit shares the enrollment category but reads as its own line.
+    const category = isDeposit ? "security_deposit" : itemCategory(item) || "other";
+    const catMap = byTerm.get(displayTerm) ?? new Map<string, number>();
+    catMap.set(category, (catMap.get(category) || 0) + amount);
+    byTerm.set(displayTerm, catMap);
+  }
+
+  return Array.from(byTerm.entries())
+    .sort(([a], [b]) => offerFeeTermRank(a) - offerFeeTermRank(b) || a.localeCompare(b))
+    .map(([term, catMap]) => {
+      const components = Array.from(catMap.entries())
+        .map(([category, amount]) => ({
+          category,
+          label: category === "security_deposit" ? "Security Deposit" : offerFeeComponentLabel(category),
+          amount,
+        }))
+        .sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
+      const total = components.reduce((sum, c) => sum + c.amount, 0);
+      return { term, total, components };
+    });
+}

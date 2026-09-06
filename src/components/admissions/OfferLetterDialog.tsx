@@ -7,7 +7,10 @@ import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle, CalendarDays } from "lucide-react";
+import { format } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import { UpdeledRegistrationDetails } from "@/components/leads/UpdeledRegistrationDetails";
 import {
@@ -37,7 +40,7 @@ import {
   proposalFeeSnapshotDiff,
   type FeeProposalChildLike,
 } from "@/lib/feeProposalOfferMapping";
-import { collectOfferFeeTermTotals, firstOfferFeeTerm, hasSchoolFeeOptions, SECURITY_DEPOSIT_TERM, type OfferFeeItemLike, type SchoolFeeSelection, type SchoolStudentType, type SchoolHostelType, type SchoolTransportZone } from "@/lib/offerFeeTerms";
+import { collectOfferFeeTermTotals, collectOfferFeeTermComponentTotals, offerFeeComponentLabel, firstOfferFeeTerm, hasSchoolFeeOptions, SECURITY_DEPOSIT_TERM, type OfferFeeItemLike, type OfferFeeComponent, type SchoolFeeSelection, type SchoolStudentType, type SchoolHostelType, type SchoolTransportZone } from "@/lib/offerFeeTerms";
 import { AbvmuDepositPanel } from "@/components/finance/AbvmuDepositPanel";
 
 interface OfferLetterDialogProps {
@@ -105,6 +108,7 @@ interface OfferWaiver {
   id: string;
   offer_letter_id: string;
   term: string;
+  fee_category?: string | null;
   amount: number;
   reason: string | null;
   status: "pending" | "approved" | "rejected";
@@ -217,16 +221,23 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
   // Which offer's add-waiver inline form is currently visible.
   const [addingWaiverFor, setAddingWaiverFor] = useState<string | null>(null);
-  const [waiverForm, setWaiverForm] = useState<{ term: string; amount: string; reason: string }>({
-    term: "year_1", amount: "", reason: "",
+  // `component` is a fee_codes.category ("" = the whole period, all heads).
+  const [waiverForm, setWaiverForm] = useState<{ term: string; component: string; amount: string; reason: string }>({
+    term: "year_1", component: "", amount: "", reason: "",
   });
   const [waiverSaving, setWaiverSaving] = useState(false);
   const [waiverDecidingId, setWaiverDecidingId] = useState<string | null>(null);
   // Pre-issuance waivers — collected in the new-offer form and bulk-inserted
   // right after the offer row is created, so staff don't have to add them post-hoc.
-  const [preWaivers, setPreWaivers] = useState<{ term: string; amount: number; reason: string }[]>([]);
-  const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
-  const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
+  const [preWaivers, setPreWaivers] = useState<{ term: string; component: string; amount: number; reason: string }[]>([]);
+  // Inline per-head waiver editor: which fee head is open (`component: ""` = the
+  // whole period / single-head term), plus its draft input.
+  const [waiverEdit, setWaiverEdit] = useState<{ term: string; component: string } | null>(null);
+  // Waiver editor input. `mode` = how the operator specifies the discount:
+  //   "off" → rupees off, "net" → final payable for the head, "pct" → percent.
+  // All three resolve to a rupee waiver at Apply time.
+  const [waiverInput, setWaiverInput] = useState<{ mode: "off" | "net" | "pct"; value: string; reason: string }>({ mode: "off", value: "", reason: "" });
+  const [deadlineOpen, setDeadlineOpen] = useState(false);
   const [approvedFeeProposals, setApprovedFeeProposals] = useState<ApprovedFeeProposal[]>([]);
   const [selectedFeeProposalId, setSelectedFeeProposalId] = useState("");
   const [selectedProposalChildKey, setSelectedProposalChildKey] = useState("");
@@ -278,7 +289,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       if (offerIds.length > 0) {
         const { data: waiverRows } = await supabase
           .from("offer_waivers")
-          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at, source_type, source_fee_proposal_id, source_fee_proposal_child_key, metadata")
+          .select("id, offer_letter_id, term, fee_category, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at, source_type, source_fee_proposal_id, source_fee_proposal_child_key, metadata")
           .in("offer_letter_id", offerIds)
           .order("created_at", { ascending: true });
         const grouped: Record<string, OfferWaiver[]> = {};
@@ -547,6 +558,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     return totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, feeMetadata) }));
   }, [rawFeeItems, hasSchoolOptions, schoolSelection, feeMetadata]);
 
+  // Per-term component split (tuition / boarding / transport …). Drives the
+  // breakdown display and lets a waiver target a single component of a period.
+  const yearBreakdown = useMemo(
+    () => collectOfferFeeTermComponentTotals(rawFeeItems, hasSchoolOptions ? schoolSelection : undefined),
+    [rawFeeItems, hasSchoolOptions, schoolSelection],
+  );
+
   // Term keys present (drives the Add-Waiver year picker). Includes the synthetic
   // security-deposit line so the refundable boarding deposit can be waived too;
   // waivers keyed on 'security_deposit' render on the deposit line and are netted
@@ -623,6 +641,22 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const feeForTerm = (term: string): number =>
     yearTotals.find(y => y.term === term)?.total ?? 0;
 
+  /** Component sub-lines for a term (tuition / boarding / transport …). */
+  const componentsForTerm = (term: string): OfferFeeComponent[] =>
+    yearBreakdown.find(b => b.term === term)?.components ?? [];
+
+  /** Fee for a term restricted to one component ('' / null = whole period). */
+  const feeForTermComponent = (term: string, category: string | null | undefined): number => {
+    if (!category) return feeForTerm(term);
+    return componentsForTerm(term).find(c => c.category === category)?.amount ?? 0;
+  };
+
+  const componentLabelFor = (term: string, category: string | null | undefined): string | null => {
+    if (!category) return null;
+    return componentsForTerm(term).find(c => c.category === category)?.label
+      ?? offerFeeComponentLabel(category);
+  };
+
   const labelForTerm = (term: string): string =>
     yearTotals.find(y => y.term === term)?.label ?? feeTermLabel(term);
   const firstOfferTerm = firstOfferFeeTerm(yearTotals);
@@ -640,6 +674,204 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     (waiversByOffer[offerId] || [])
       .filter(w => w.term === term && (w.status === "approved" || w.status === "pending"))
       .reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  // Component-aware caps: match the same (term, component) so tuition and boarding
+  // waivers on the same quarter cap independently. '' / null = the whole-period line.
+  const preWaiverTotalForTermComp = (term: string, category: string): number =>
+    preWaivers.filter(w => w.term === term && (w.component || "") === category)
+      .reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  const offerWaiverTotalForTermComp = (offerId: string, term: string, category: string): number =>
+    (waiversByOffer[offerId] || [])
+      .filter(w => w.term === term && (w.fee_category || "") === category && (w.status === "approved" || w.status === "pending"))
+      .reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  // Resolve the typed value + mode into a rupee waiver for a head of size `gross`.
+  // "off" = rupees off; "net" = final payable (waiver = gross − net); "pct" = % of gross.
+  const resolveWaiverAmount = (gross: number, mode: "off" | "net" | "pct", value: string): number => {
+    const v = Number(value);
+    if (!Number.isFinite(v) || v < 0) return NaN;
+    if (mode === "net") return Math.round(Math.max(0, gross - v));
+    if (mode === "pct") return Math.round((gross * Math.min(v, 100)) / 100);
+    return Math.round(v);
+  };
+
+  // Stage a per-head waiver from the inline editor. `category` is a
+  // fee_codes.category, or "" for a single-head term / whole period.
+  const commitPreWaiver = (term: string, category: string) => {
+    const gross = feeForTermComponent(term, category);
+    const amt = resolveWaiverAmount(gross, waiverInput.mode, waiverInput.value);
+    if (!amt || Number.isNaN(amt) || amt <= 0) {
+      toast({ title: "Enter a valid waiver", description: "Nothing to discount for this head.", variant: "destructive" });
+      return;
+    }
+    const existing = preWaiverTotalForTermComp(term, category);
+    const available = Math.max(0, gross - existing);
+    const compLabel = componentLabelFor(term, category);
+    const targetLabel = `${labelForTerm(term)}${compLabel ? ` · ${compLabel}` : ""}`;
+    if (gross <= 0) {
+      toast({ title: "No fee published for this line", description: `The active fee structure has no "${targetLabel}" line.`, variant: "destructive" });
+      return;
+    }
+    if (amt > available) {
+      toast({
+        title: "Waiver exceeds the fee",
+        description: existing > 0
+          ? `${targetLabel} is ₹${gross.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived here. At most ₹${available.toLocaleString("en-IN")} more can be applied.`
+          : `${targetLabel} is ₹${gross.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setPreWaivers(prev => [...prev, { term, component: category, amount: amt, reason: waiverInput.reason }]);
+    setWaiverEdit(null);
+    setWaiverInput({ mode: "off", value: "", reason: "" });
+  };
+
+  const openWaiverEditor = (term: string, category: string) => {
+    setWaiverEdit({ term, component: category });
+    setWaiverInput({ mode: "off", value: "", reason: "" });
+  };
+
+  // Reason shortcut chips for the waiver editor (label-only presets).
+  const WAIVER_REASON_PRESETS = ["Sibling", "Single parent", "Merit scholarship", "Alumni", "Staff ward"];
+
+  // One waivable fee line in the Programme Fee table. `category` is a
+  // fee_codes.category, or "" for a single-head term (whole period).
+  const renderWaiverLeafRow = (opts: { term: string; category: string; label: string; gross: number; indent?: boolean }) => {
+    const { term, category, label, gross, indent } = opts;
+    const staged = preWaivers.filter(w => w.term === term && (w.component || "") === category);
+    const stagedTotal = staged.reduce((s, w) => s + w.amount, 0);
+    const net = gross - stagedTotal;
+    const remaining = Math.max(0, net);
+    const isEditing = !!waiverEdit && waiverEdit.term === term && waiverEdit.component === category;
+    return (
+      <div
+        key={`${term}|${category}`}
+        className={`group rounded-md px-1.5 -mx-1.5 transition-colors ${isEditing ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted/60"}`}
+      >
+        <div className="flex items-center gap-2 py-0.5">
+          <span className={`flex-1 truncate ${indent ? "text-[11px] text-muted-foreground/70" : "text-muted-foreground"}`}>{label}</span>
+          {stagedTotal > 0 ? (
+            <span className="tabular-nums text-right">
+              <span className="text-muted-foreground/40 line-through mr-1.5">₹{gross.toLocaleString("en-IN")}</span>
+              <span className="text-success">₹{net.toLocaleString("en-IN")}</span>
+            </span>
+          ) : (
+            <span className={`tabular-nums text-right ${indent ? "" : "text-foreground"}`}>₹{gross.toLocaleString("en-IN")}</span>
+          )}
+          {/* Fixed-width action slot keeps the ₹ column from shifting. */}
+          <span className="w-14 shrink-0 text-right">
+            {remaining > 0 && (
+              <Popover open={isEditing} onOpenChange={(o) => (o ? openWaiverEditor(term, category) : setWaiverEdit(null))}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={`text-[10px] text-primary hover:underline transition-opacity ${isEditing ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"}`}
+                  >
+                    Waive
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" side="right" sideOffset={8} className="w-64 p-3 space-y-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-xs font-semibold text-foreground truncate">{label}</p>
+                    <p className="text-[11px] text-muted-foreground tabular-nums shrink-0">₹{gross.toLocaleString("en-IN")}</p>
+                  </div>
+                  {/* How to specify the discount. All resolve to a rupee waiver. */}
+                  <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5">
+                    {([["off", "₹ off"], ["net", "Net ₹"], ["pct", "%"]] as const).map(([m, lbl]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setWaiverInput(p => ({ ...p, mode: m }))}
+                        className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${waiverInput.mode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        autoFocus
+                        min={0}
+                        max={waiverInput.mode === "pct" ? 100 : waiverInput.mode === "net" ? gross : remaining}
+                        value={waiverInput.value}
+                        onChange={e => setWaiverInput(p => ({ ...p, value: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitPreWaiver(term, category); } }}
+                        placeholder={waiverInput.mode === "pct" ? "e.g. 40" : waiverInput.mode === "net" ? "Final payable" : "Amount off"}
+                        className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 pr-7 text-xs tabular-nums"
+                      />
+                      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">{waiverInput.mode === "pct" ? "%" : "₹"}</span>
+                    </div>
+                    {(() => {
+                      const w = resolveWaiverAmount(gross, waiverInput.mode, waiverInput.value);
+                      if (Number.isFinite(w) && w > 0) {
+                        return <p className="text-[10px] text-success">Waiver ₹{w.toLocaleString("en-IN")} · net ₹{Math.max(0, gross - w).toLocaleString("en-IN")}</p>;
+                      }
+                      return <p className="text-[10px] text-muted-foreground">Up to ₹{remaining.toLocaleString("en-IN")} · discounts this head only</p>;
+                    })()}
+                  </div>
+                  <input
+                    value={waiverInput.reason}
+                    onChange={e => setWaiverInput(p => ({ ...p, reason: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitPreWaiver(term, category); } }}
+                    placeholder="Reason (optional)"
+                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs"
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    {WAIVER_REASON_PRESETS.map(r => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setWaiverInput(p => ({ ...p, reason: r }))}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${waiverInput.reason === r ? "border-primary/30 bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setWaiverEdit(null)}
+                      className="rounded-md px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => commitPreWaiver(term, category)}
+                      className="rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </span>
+        </div>
+
+        {/* Staged waiver tags for this head. */}
+        {staged.map((w, i) => (
+          <div key={i} className="flex items-center justify-end gap-1.5 pr-14 text-[10px] text-success">
+            <span className="tabular-nums">−₹{w.amount.toLocaleString("en-IN")}</span>
+            {w.reason && <span className="text-muted-foreground/70 truncate max-w-[120px]">· {w.reason}</span>}
+            <button
+              type="button"
+              onClick={() => setPreWaivers(prev => prev.filter(x => x !== w))}
+              className="text-muted-foreground/50 hover:text-destructive"
+              aria-label="Remove waiver"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const courseNameForId = (id: string | null | undefined) =>
     id ? (courseOptions.find(c => c.id === id)?.name || (id === courseId ? courseName : null) || "Selected course") : (courseName || "Course not set");
@@ -876,6 +1108,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           preWaivers.map(w => ({
             offer_letter_id: insertedOffer.id,
             term: w.term,
+            fee_category: w.component || null,
             amount: w.amount,
             reason: w.reason || null,
           })) as any
@@ -954,8 +1187,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       });
       setTokenFeeEdited(false);
       setPreWaivers([]);
-      setShowPreWaiverForm(false);
-      setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+      setWaiverEdit(null);
+      setWaiverInput({ mode: "off", value: "", reason: "" });
       setSelectedFeeProposalId("");
       setSelectedProposalChildKey("");
       fetchOffers();
@@ -1040,16 +1273,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       toast({ title: "Pick a period for this waiver", variant: "destructive" });
       return;
     }
-    // Cap: a single year's waivers (approved + pending + this one) cannot
-    // exceed that year's published fee. Otherwise the offer goes negative
-    // and the candidate ends up "owing" zero or negative money for that year.
-    const yearFee = feeForTerm(waiverForm.term);
-    const existing = offerWaiverTotalForTerm(offerId, waiverForm.term);
+    // Cap: a single period+component's waivers (approved + pending + this one)
+    // cannot exceed that component's published fee. Otherwise the offer goes
+    // negative and the candidate ends up "owing" zero or negative money.
+    const compLabel = componentLabelFor(waiverForm.term, waiverForm.component);
+    const targetLabel = `${labelForTerm(waiverForm.term)}${compLabel ? ` · ${compLabel}` : ""}`;
+    const yearFee = feeForTermComponent(waiverForm.term, waiverForm.component);
+    const existing = offerWaiverTotalForTermComp(offerId, waiverForm.term, waiverForm.component);
     const available = Math.max(0, yearFee - existing);
     if (yearFee <= 0) {
       toast({
         title: "No fee published for this period",
-        description: `The active fee structure has no "${labelForTerm(waiverForm.term)}" line — can't apply a waiver against it.`,
+        description: `The active fee structure has no "${targetLabel}" line — can't apply a waiver against it.`,
         variant: "destructive",
       });
       return;
@@ -1058,8 +1293,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       toast({
         title: "Waiver exceeds available fee",
         description: existing > 0
-          ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-          : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+          ? `${targetLabel} fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+          : `${targetLabel} fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
         variant: "destructive",
       });
       return;
@@ -1069,6 +1304,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       const { error } = await supabase.from("offer_waivers").insert({
         offer_letter_id: offerId,
         term: waiverForm.term,
+        fee_category: waiverForm.component || null,
         amount: amt,
         reason: waiverForm.reason || null,
       } as any);
@@ -1080,7 +1316,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           : "Sent to super admin for approval.",
       });
       setAddingWaiverFor(null);
-      setWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+      setWaiverForm({ term: availableTerms[0] || "year_1", component: "", amount: "", reason: "" });
       await fetchOffers();
       // If super admin auto-approved, regenerate the PDF so the new waiver
       // shows up in the preview immediately.
@@ -1381,40 +1617,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                     <p>{registrationOfferBlockMessage}</p>
                   </div>
                 )}
-                {/* Programme fee summary — read-only, sourced directly from the
-                    published fee_structure for the selected course + session.
-                    The offer's total_fee is stamped from this on submit; the
-                    user no longer types it. */}
-                <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Programme Fee</label>
-                  {yearTotals.length > 0 ? (
-                    <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
-                      {yearTotals.map(y => (
-                        <div key={y.term} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{y.label}</span>
-                          <span className="text-foreground tabular-nums">₹{y.total.toLocaleString("en-IN")}</span>
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between pt-1 border-t border-border/40 font-semibold">
-                        <span>Total Programme Fee</span>
-                        <span className="tabular-nums">₹{programmeTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 text-xs text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
-                      No active programme fee structure published for this course + session. Publish one in Course & Campus master before issuing.
-                    </div>
-                  )}
-                  <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">
-                    Sourced from the published fee structure for the selected session. Add period-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
-                  </p>
-                </div>
-
                 {hasSchoolOptions && (
                   <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3">
                     <p className="text-[11px] font-semibold text-foreground">School Mode & Add-ons</p>
                     <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                      Boarding & transport vary the fee. Prefilled from the applicant's choice — adjust if needed. The programme fee above updates live.
+                      Boarding & transport vary the fee. Prefilled from the applicant's choice — adjust if needed. The programme fee below updates live.
                     </p>
                     <div>
                       <label className="block text-[11px] font-medium text-muted-foreground mb-1">Attendance mode</label>
@@ -1468,6 +1675,61 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                     )}
                   </div>
                 )}
+
+                {/* Programme fee summary — read-only, sourced directly from the
+                    published fee_structure for the selected course + session.
+                    The offer's total_fee is stamped from this on submit; the
+                    user no longer types it. */}
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Programme Fee</label>
+                  {yearTotals.length > 0 ? (
+                    <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
+                      {yearTotals.map(y => {
+                        const components = componentsForTerm(y.term);
+                        // Split term: the total is a subtotal (not waivable) and each
+                        // component is a waivable leaf. Single-head term: the row itself
+                        // is the waivable leaf (whole period, component "").
+                        if (components.length > 1) {
+                          return (
+                            <div key={y.term}>
+                              <div className="flex items-center gap-2 py-px">
+                                <span className="flex-1 truncate text-muted-foreground">{y.label}</span>
+                                <span className="text-foreground tabular-nums text-right">₹{y.total.toLocaleString("en-IN")}</span>
+                                <span className="w-14 shrink-0" />
+                              </div>
+                              <div className="mt-0.5 ml-2 border-l border-border/40 pl-2">
+                                {components.map(c => renderWaiverLeafRow({
+                                  term: y.term, category: c.category, label: c.label, gross: c.amount, indent: true,
+                                }))}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return renderWaiverLeafRow({ term: y.term, category: "", label: y.label, gross: y.total });
+                      })}
+                      <div className="flex items-center gap-2 pt-1.5 mt-0.5 border-t border-border/40 font-semibold">
+                        <span className="flex-1">Total Programme Fee</span>
+                        <span className="tabular-nums text-right">₹{programmeTotal.toLocaleString("en-IN")}</span>
+                        <span className="w-14 shrink-0" />
+                      </div>
+                      {previewWaiverTotal > 0 && (
+                        <div className="flex items-center gap-2 font-semibold">
+                          <span className="flex-1">Net Programme Fee</span>
+                          <span className="tabular-nums text-right text-success">₹{previewNetFee.toLocaleString("en-IN")}</span>
+                          <span className="w-14 shrink-0" />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-warning/20 bg-warning/5 p-3 text-xs text-warning-foreground dark:border-warning/60/40 dark:bg-warning/90/20 dark:text-warning/40">
+                      No active programme fee structure published for this course + session. Publish one in Course & Campus master before issuing.
+                    </div>
+                  )}
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">
+                    Hover any fee line and click <span className="text-primary">Waive</span> to discount that head (scholarship, sibling, alumni, hardship…).
+                    {!isSuperAdmin && " Waivers need super-admin approval before they appear on the letter."}
+                  </p>
+                </div>
 
                 {approvedFeeProposals.length > 0 && (
                   <div className="rounded-xl border border-success/20 bg-success/5/70 p-3 text-xs space-y-2 dark:border-success/60/40 dark:bg-success/90/20">
@@ -1566,160 +1828,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                   </div>
                 )}
 
-                {/* Pre-issuance waivers — staged locally, inserted after offer creation */}
-                {yearTotals.length > 0 && (
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-[11px] font-medium text-muted-foreground">Waivers / Discounts</label>
-                      {!showPreWaiverForm && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPreWaiverForm(true);
-                            const usedTerms = new Set(preWaivers.map(w => w.term));
-                            const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
-                            setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
-                          }}
-                          className="text-[11px] text-primary hover:underline"
-                        >
-                          + Add Waiver
-                        </button>
-                      )}
-                    </div>
-
-                    {preWaivers.length > 0 && (
-                      <div className="space-y-1 mb-2">
-                        {preWaivers.map((w, i) => (
-                          <div key={i} className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-2 py-1.5 text-xs">
-                            <span className="text-muted-foreground">{labelForTerm(w.term)}</span>
-                            <span className="font-medium">−₹{w.amount.toLocaleString("en-IN")}</span>
-                            {w.reason && <span className="text-muted-foreground truncate max-w-[80px]">{w.reason}</span>}
-                            <button
-                              type="button"
-                              onClick={() => setPreWaivers(prev => prev.filter((_, j) => j !== i))}
-                              className="text-destructive hover:text-destructive/70 text-[10px] font-medium"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                        {(() => {
-                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0) + importedProposalWaiverTotal;
-                          const netFee = programmeTotal - totalWaiver;
-                          return (
-                            <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold border-t border-border/40 pt-1.5 mt-1">
-                              <span>Net Programme Fee</span>
-                              <span className="tabular-nums text-success">₹{netFee.toLocaleString("en-IN")}</span>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-
-                    {showPreWaiverForm && (
-                      <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
-                            <select
-                              value={preWaiverForm.term}
-                              onChange={e => setPreWaiverForm(p => ({ ...p, term: e.target.value }))}
-                              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-                            >
-                              {availableTerms.map(t => (
-                                <option key={t} value={t}>{labelForTerm(t)}</option>
-                              ))}
-                            </select>
-                          </div>
-                          {(() => {
-                            const yearFee = feeForTerm(preWaiverForm.term);
-                            const existing = preWaiverTotalForTerm(preWaiverForm.term);
-                            const available = Math.max(0, yearFee - existing);
-                            return (
-                              <div>
-                                <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
-                                  Amount (₹) <span className="text-muted-foreground/60">— max ₹{available.toLocaleString("en-IN")}</span>
-                                </label>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={available || undefined}
-                                  value={preWaiverForm.amount}
-                                  onChange={e => setPreWaiverForm(p => ({ ...p, amount: e.target.value }))}
-                                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-                                  placeholder="10000"
-                                />
-                              </div>
-                            );
-                          })()}
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>
-                          <input
-                            value={preWaiverForm.reason}
-                            onChange={e => setPreWaiverForm(p => ({ ...p, reason: e.target.value }))}
-                            className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-                            placeholder="Sibling discount, alumni, etc."
-                          />
-                        </div>
-                        {!isSuperAdmin && (
-                          <p className="text-[10px] text-warning-foreground">
-                            This waiver will need super admin approval before it reflects on the offer letter.
-                          </p>
-                        )}
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="text-xs h-7"
-                            onClick={() => {
-                              const amt = Number(preWaiverForm.amount);
-                              if (!amt || amt <= 0) {
-                                toast({ title: "Enter a valid waiver amount", variant: "destructive" });
-                                return;
-                              }
-                              // Cap against the year's published fee minus any waivers already
-                              // queued for the same term in this form.
-                              const yearFee = feeForTerm(preWaiverForm.term);
-                              const existing = preWaiverTotalForTerm(preWaiverForm.term);
-                              const available = Math.max(0, yearFee - existing);
-                              if (yearFee <= 0) {
-                                toast({
-                                  title: "No fee published for this period",
-                                  description: `The active fee structure has no "${labelForTerm(preWaiverForm.term)}" line.`,
-                                  variant: "destructive",
-                                });
-                                return;
-                              }
-                              if (amt > available) {
-                                toast({
-                                  title: "Waiver exceeds available fee",
-                                  description: existing > 0
-                                    ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-                                    : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
-                                  variant: "destructive",
-                                });
-                                return;
-                              }
-                              const newPreWaivers = [...preWaivers, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }];
-                              setPreWaivers(newPreWaivers);
-                              setShowPreWaiverForm(false);
-                              const usedTerms = new Set(newPreWaivers.map(w => w.term));
-                              const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
-                              setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
-                            }}
-                          >
-                            Add
-                          </Button>
-                          <Button type="button" size="sm" variant="outline" className="text-xs h-7" onClick={() => setShowPreWaiverForm(false)}>
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
+                <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
+                  <p className="text-[11px] font-semibold text-foreground">Offer Terms</p>
                 <div>
                   <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                     Admission Route
@@ -1844,14 +1954,30 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                   <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                     Acceptance Deadline <span className="text-destructive">*</span>
                   </label>
-                  <input
-                    type="date"
-                    value={form.acceptance_deadline}
-                    onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))}
-                    className={`${inputCls} ${!form.acceptance_deadline ? "border-destructive/40" : ""}`}
-                    min={new Date().toISOString().slice(0, 10)}
-                  />
-                  <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
+                  <Popover open={deadlineOpen} onOpenChange={setDeadlineOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`${inputCls} flex items-center justify-between text-left ${!form.acceptance_deadline ? "border-destructive/40" : ""}`}
+                      >
+                        <span className={form.acceptance_deadline ? "text-foreground" : "text-muted-foreground"}>
+                          {form.acceptance_deadline ? format(new Date(`${form.acceptance_deadline}T00:00:00`), "dd/MM/yy") : "dd/mm/yy"}
+                        </span>
+                        <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={form.acceptance_deadline ? new Date(`${form.acceptance_deadline}T00:00:00`) : undefined}
+                        onSelect={(d) => { if (d) { setForm(p => ({ ...p, acceptance_deadline: format(d, "yyyy-MM-dd") })); setDeadlineOpen(false); } }}
+                        disabled={(d) => d < new Date(new Date().toDateString())}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee (dd/mm/yy).</p>
+                </div>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || registrationOfferBlocked} size="sm" className="gap-1.5"
@@ -1869,8 +1995,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                       entrance_exam_other: "",
                     });
                     setPreWaivers([]);
-                    setShowPreWaiverForm(false);
-                    setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+                    setWaiverEdit(null);
+                    setWaiverInput({ mode: "off", value: "", reason: "" });
                     setSelectedFeeProposalId("");
                     setSelectedProposalChildKey("");
                   }}>Cancel</Button>
@@ -1965,7 +2091,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     setAddingWaiverFor(offer.id);
                                     const existingTerms = new Set((waiversByOffer[offer.id] || []).map(w => w.term));
                                     const nextTerm = availableTerms.find(t => !existingTerms.has(t)) ?? availableTerms[0] ?? "year_1";
-                                    setWaiverForm({ term: nextTerm, amount: "", reason: "" });
+                                    setWaiverForm({ term: nextTerm, component: "", amount: "", reason: "" });
                                   }}
                                   className="text-[11px] text-primary hover:underline"
                                 >
@@ -1979,7 +2105,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                             )}
 
                             {offerWaivers.map(w => {
-                              const yearLabel = labelForTerm(w.term);
+                              const compLabel = componentLabelFor(w.term, w.fee_category);
+                              const yearLabel = `${labelForTerm(w.term)}${compLabel ? ` · ${compLabel}` : ""}`;
                               const statusCls =
                                 w.status === "approved"  ? "bg-success/10 text-success border-success/20" :
                                 w.status === "rejected"  ? "bg-destructive/10 text-destructive border-destructive/20" :
@@ -2042,7 +2169,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
                                     <select
                                       value={waiverForm.term}
-                                      onChange={e => setWaiverForm(p => ({ ...p, term: e.target.value }))}
+                                      onChange={e => setWaiverForm(p => ({ ...p, term: e.target.value, component: "" }))}
                                       className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                                     >
                                       {availableTerms.map(t => (
@@ -2051,8 +2178,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     </select>
                                   </div>
                                   {(() => {
-                                    const yearFee = feeForTerm(waiverForm.term);
-                                    const existing = offerWaiverTotalForTerm(offer.id, waiverForm.term);
+                                    const yearFee = feeForTermComponent(waiverForm.term, waiverForm.component);
+                                    const existing = offerWaiverTotalForTermComp(offer.id, waiverForm.term, waiverForm.component);
                                     const available = Math.max(0, yearFee - existing);
                                     return (
                                       <div>
@@ -2072,6 +2199,21 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                                     );
                                   })()}
                                 </div>
+                                {componentsForTerm(waiverForm.term).length > 1 && (
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Applies to</label>
+                                    <select
+                                      value={waiverForm.component}
+                                      onChange={e => setWaiverForm(p => ({ ...p, component: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    >
+                                      <option value="">Entire period (all components)</option>
+                                      {componentsForTerm(waiverForm.term).map(c => (
+                                        <option key={c.category} value={c.category}>{c.label} — ₹{c.amount.toLocaleString("en-IN")}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>
                                   <input
@@ -2371,7 +2513,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
                           ["Waivers / Discounts", previewWaiverTotal > 0 ? `₹${previewWaiverTotal.toLocaleString("en-IN")}` : "None"],
                           ["Net Programme Fee", previewNetFee > 0 ? `₹${previewNetFee.toLocaleString("en-IN")}` : "-"],
                           ["Token Fee Payable", Number(form.token_fee_amount || tokenDefault || 0) > 0 ? `₹${Number(form.token_fee_amount || tokenDefault || 0).toLocaleString("en-IN")}` : "-"],
-                          ["Acceptance Deadline", form.acceptance_deadline ? new Date(form.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-"],
+                          ["Acceptance Deadline", form.acceptance_deadline ? format(new Date(`${form.acceptance_deadline}T00:00:00`), "dd/MM/yy") : "-"],
                         ].map(([label, value]) => (
                           <div key={label} className="rounded-md border border-border/70 p-3">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
