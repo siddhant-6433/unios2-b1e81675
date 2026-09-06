@@ -65,11 +65,11 @@ Deno.serve(async (req) => {
     const orParts: string[] = [];
     if (billIds.length) orParts.push(`zoho_bill_id.in.(${billIds.join(",")})`);
     if (refs.length) orParts.push(`id.in.(${refs.join(",")})`);
+    const pay = extractPayment(payload);
+
     const { data: payouts } = await admin.from("consultant_payouts").select("id, status").or(orParts.join(","));
     const toPay = (payouts || []).filter((p: { status: string }) => p.status !== "paid").map((p: { id: string }) => p.id);
-
     if (toPay.length) {
-      const pay = extractPayment(payload);
       await admin.from("consultant_payouts").update({
         status: "paid",
         paid_at: new Date().toISOString(),
@@ -79,7 +79,21 @@ Deno.serve(async (req) => {
         zoho_payment_id: pay.payment_id,
       }).in("id", toPay);
     }
-    return json({ ok: true, marked_paid: toPay.length });
+
+    // Student fee refunds share the Bill/vendor-payment lifecycle. Setting
+    // status='paid' fires trg_apply_fee_refund_on_paid, which reverses the ledger.
+    const { data: refunds } = await admin.from("fee_refunds").select("id, status").or(orParts.join(","));
+    const toRefund = (refunds || []).filter((r: { status: string }) => r.status === "approved").map((r: { id: string }) => r.id);
+    if (toRefund.length) {
+      await admin.from("fee_refunds").update({
+        status: "paid",
+        paid_at: new Date().toISOString(),
+        zoho_payment_id: pay.payment_id,
+        zoho_synced_at: new Date().toISOString(),
+      }).in("id", toRefund);
+    }
+
+    return json({ ok: true, marked_paid: toPay.length, refunds_paid: toRefund.length });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

@@ -130,6 +130,7 @@ const InterdisciplinaryUnits = lazy(() => import("./pages/ib/InterdisciplinaryUn
 const VideoEditorPortal      = lazy(() => import("./pages/VideoEditorPortal"));
 const VideoApprovals         = lazy(() => import("./pages/VideoApprovals"));
 const VideoBills             = lazy(() => import("./pages/VideoBills"));
+const Refunds                = lazy(() => import("./pages/Refunds"));
 
 // Shared cache so navigation between pages reuses recent results.
 // TanStack defaults are too aggressive about refetching for a CRM where
@@ -363,6 +364,8 @@ const App = () => (
                       <Route path="/consultant-credit-notes" element={<RequireRole roles={["super_admin"]}><ConsultantCreditNotes /></RequireRole>} />
                       <Route path="/fee-structures" element={<RequirePermission module="courses_fees" action="view"><FeeStructures /></RequirePermission>} />
                       <Route path="/fee-notifications" element={<RequirePermission module="finance" action="view"><FeeNotifications /></RequirePermission>} />
+                      {/* Refunds — self-gated inside the page (finance:refund permission, or super_admin/accountant) */}
+                      <Route path="/refunds" element={<Refunds />} />
 
                       {/* HR — campus_admin / principal / office_admin only */}
                       <Route path="/hr" element={<RequirePermission module="hr" action="view"><HrDashboard /></RequirePermission>} />
