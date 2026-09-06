@@ -10,7 +10,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { TextAreaField } from "@/components/ui/state-fields";
 import { BankDetailsFields, type BankVerification } from "@/components/bank/BankDetailsFields";
-import type { BankDetails } from "@/lib/bankDetails";
+import { type BankDetails, isValidIfsc } from "@/lib/bankDetails";
 import { IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 type Allocation = {
@@ -92,9 +92,14 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
 
   const total = Object.values(picked).reduce((s, v) => s + (Number(v) || 0), 0);
 
+  // Payee bank details are mandatory — the refund can't be paid without them.
+  const bankComplete =
+    !!bank.holderName.trim() && !!bank.accountNumber.trim() && isValidIfsc(bank.ifsc) && !!bank.bankName.trim();
+
   const handleSubmit = async () => {
     if (total <= 0) { toast({ title: "Select at least one head with an amount" }); return; }
     if (!reason.trim()) { toast({ title: "Reason is required", variant: "destructive" }); return; }
+    if (!bankComplete) { toast({ title: "Payee bank details are required", description: "Account holder name, account number, a valid IFSC and bank name are mandatory.", variant: "destructive" }); return; }
 
     setSubmitting(true);
 
@@ -229,7 +234,7 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
           />
 
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-1.5">Payee Bank Details</p>
+            <p className="text-xs font-medium text-muted-foreground mb-1.5">Payee Bank Details <span className="text-destructive">*</span></p>
             <BankDetailsFields
               value={bank}
               onChange={setBank}
@@ -277,7 +282,7 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || total <= 0 || !reason.trim()}>
+          <Button onClick={handleSubmit} disabled={submitting || total <= 0 || !reason.trim() || !bankComplete}>
             {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
             {submitting ? "Creating…" : `Create Refund ${total > 0 ? money(total) : ""}`}
           </Button>
