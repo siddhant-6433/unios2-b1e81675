@@ -11,6 +11,7 @@ import { Receipt, CheckCircle, IndianRupee, Building2, ChevronRight, ChevronDown
 import {
   VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, type VideoBrand, type VideoContentType,
 } from "@/lib/videoBrands";
+import { BankCopyPopover } from "@/components/bank/BankCopyPopover";
 import { videoBillSlipBase64 } from "@/components/video/videoBillSlip";
 import { VendorMatchDialog, type VendorCandidate } from "@/components/video/VendorMatchDialog";
 import { exportRowsXlsx, formatExportDateTime, type ExportRow } from "@/lib/xlsxExport";
@@ -396,7 +397,15 @@ export default function VideoBills() {
                               {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </button>
                           </td>
-                          <td className="px-4 py-3 font-medium">{d.editor.name}</td>
+                          <td className="px-4 py-3 font-medium">
+                            <div className="flex items-center gap-1">
+                              {d.editor.name}
+                              <BankCopyPopover align="start" bank={{
+                                accountName: d.editor.bank_account_name, accountNumber: d.editor.bank_account_number,
+                                ifsc: d.editor.bank_ifsc, bankName: d.editor.bank_name, upi: d.editor.bank_upi,
+                              }} />
+                            </div>
+                          </td>
                           <td className="px-3 py-3 text-xs text-muted-foreground">{VIDEO_BRAND_LABEL[d.brand]}</td>
                           <td className="px-3 py-3 text-right font-medium">{count}</td>
                           <td className="px-3 py-3 text-right">₹{rate.toLocaleString("en-IN")}</td>

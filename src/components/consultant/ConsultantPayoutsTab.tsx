@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BankCopyPopover } from "@/components/bank/BankCopyPopover";
 import { Printer, AlertTriangle, Download, CheckCircle2, RotateCcw } from "lucide-react";
 import {
   PayoutSheetRow, MarkPaidDialog, downloadPayoutSlip, inr, modeLabel, CAN_MANAGE_PAYOUT_ROLES, ZohoSyncButton,
@@ -153,10 +154,15 @@ export const ConsultantPayoutsTab = () => {
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-semibold text-foreground">{c.consultant_name}</h3>
-                  {missingBank && (
+                  {missingBank ? (
                     <Badge className="gap-1 border-0 bg-warning/15 text-warning text-[10px]">
                       <AlertTriangle className="h-3 w-3" />No bank details
                     </Badge>
+                  ) : (
+                    <BankCopyPopover align="start" bank={{
+                      accountName: c.bank_account_name, accountNumber: c.bank_account_number,
+                      ifsc: c.bank_ifsc, bankName: c.bank_name, upi: c.bank_upi,
+                    }} />
                   )}
                 </div>
                 <span className="text-sm font-medium tabular-nums">{inr(subtotal)}</span>

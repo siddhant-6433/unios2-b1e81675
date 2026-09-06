@@ -8,8 +8,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CheckCircle, XCircle, IndianRupee, Building2, Wallet, Copy } from "lucide-react";
+import { BankCopyPopover } from "@/components/bank/BankCopyPopover";
+import { CheckCircle, XCircle, IndianRupee, Building2, Wallet } from "lucide-react";
 
 type RefundRow = {
   id: string;
@@ -98,22 +98,6 @@ export default function Refunds() {
     if (error) toast({ title: "Mark paid failed", description: error.message, variant: "destructive" });
     else { toast({ title: "Refund marked paid" }); fetchAll(); }
     setActing(null);
-  };
-
-  // Zoho's "Add Bank Account" form has separate fields, so offer per-field copy
-  // (Zoho has no API to set a vendor's bank account programmatically).
-  const bankFields = (r: RefundRow): [string, string][] =>
-    ([
-      ["Account Holder", r.bank_account_name],
-      ["Bank Name", r.bank_name],
-      ["Account Number", r.bank_account_number],
-      ["IFSC", r.bank_ifsc],
-      ["UPI", r.bank_upi],
-    ] as [string, string | null][]).filter((f): f is [string, string] => !!f[1]);
-
-  const copyField = async (label: string, value: string) => {
-    try { await navigator.clipboard.writeText(value); toast({ title: `${label} copied` }); }
-    catch { toast({ title: "Copy failed", description: value, variant: "destructive" }); }
   };
 
   const handleZoho = async (r: RefundRow, action: "create_bill" | "record_payment") => {
@@ -205,33 +189,10 @@ export default function Refunds() {
                       </td>
                       <td className="px-3 py-3 text-center">
                         <div className="flex items-center gap-1 justify-center">
-                          {r.bank_account_number && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button size="sm" variant="ghost" className="gap-1 h-7 px-2 text-xs" title="Copy payee bank details, field by field, for Zoho">
-                                  <Copy className="h-3 w-3" /> Bank
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent align="end" className="w-64 p-2">
-                                <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">Copy for Zoho · Add Bank Account</p>
-                                <div className="space-y-0.5">
-                                  {bankFields(r).map(([label, value]) => (
-                                    <button
-                                      key={label}
-                                      type="button"
-                                      onClick={() => copyField(label, value)}
-                                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/60"
-                                      title={`Copy ${label}`}
-                                    >
-                                      <Copy className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                      <span className="w-24 shrink-0 text-[10px] text-muted-foreground">{label}</span>
-                                      <span className="flex-1 truncate font-medium text-foreground">{value}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
+                          <BankCopyPopover bank={{
+                            accountName: r.bank_account_name, accountNumber: r.bank_account_number,
+                            ifsc: r.bank_ifsc, bankName: r.bank_name, upi: r.bank_upi,
+                          }} />
                           {r.status === "draft" && (
                             <>
                               <Button size="sm" className="gap-1 h-7 text-xs bg-info hover:bg-info/60" disabled={acting === r.id} onClick={() => handleApprove(r)}>
