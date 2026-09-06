@@ -131,6 +131,13 @@ Deno.serve(async (req) => {
         let zohoBillId = refund.zoho_bill_id;
         let zohoBillNumber = refund.zoho_bill_number;
 
+        // A stored bill id may point at a bill that was deleted in Zoho —
+        // verify it still exists, else drop it so we recreate below.
+        if (zohoBillId) {
+          const check = await zohoApi(token, "GET", `/bills/${zohoBillId}`);
+          if (!check.ok) { zohoBillId = null; zohoBillNumber = null; }
+        }
+
         // Idempotency: reuse an existing Zoho bill for this refund.
         if (!zohoBillId) {
           const existing = await zohoApi(token, "GET", "/bills", undefined, { reference_number: refundId });
