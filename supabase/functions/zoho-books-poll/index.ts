@@ -159,6 +159,32 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ---- Fee refunds (same pattern; paid flips the ledger via DB trigger) -----
+    if (!onlyPayoutId) {
+      const { data: refunds } = await admin.from("fee_refunds")
+        .select("id, zoho_bill_id, total_amount, status")
+        .not("zoho_bill_id", "is", null)
+        .eq("status", "approved")
+        .limit(200);
+      for (const fr of (refunds || [])) {
+        checked++;
+        const billRes = await zohoApi(token, "GET", `/bills/${fr.zoho_bill_id}`);
+        const bill = billRes.data?.bill;
+        if (!bill) continue;
+        const isPaid = bill.status === "paid" || (Number(bill.total) > 0 && Number(bill.balance) === 0);
+        if (!isPaid) continue;
+
+        const pay = extractPayment(bill);
+        await admin.from("fee_refunds").update({
+          status: "paid",
+          paid_at: new Date().toISOString(),
+          zoho_payment_id: pay.payment_id,
+          zoho_synced_at: new Date().toISOString(),
+        }).eq("id", fr.id);
+        marked++;
+      }
+    }
+
     return json({ ok: true, checked, marked });
   } catch (e) {
     return json({ error: String(e) }, 500);
