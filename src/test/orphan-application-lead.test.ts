@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const adminApplicationView = readFileSync("src/pages/AdminApplicationView.tsx", "utf8");
 const migration = readFileSync(
-  "supabase/migrations/20260907114543_relink_orphan_application_leads.sql",
+  "supabase/migrations/20260907115839_relink_orphan_application_leads.sql",
   "utf8",
 );
 
