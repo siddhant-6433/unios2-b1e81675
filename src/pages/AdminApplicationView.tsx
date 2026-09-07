@@ -107,6 +107,84 @@ async function fetchCourseDetails(courseId: string): Promise<LeadCourse | null> 
   return (data as LeadCourse | null) || null;
 }
 
+function phoneLookupCandidates(phone: string | null | undefined): string[] {
+  const raw = (phone || "").trim();
+  const digits = raw.replace(/\D/g, "").slice(-10);
+  const candidates = [raw];
+  if (digits.length === 10) {
+    candidates.push(`+91${digits}`, digits);
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+async function fetchApplicationLeadRpc(applicationId: string): Promise<any | null> {
+  const { data } = await (supabase as unknown as {
+    rpc: (fn: "get_application_lead", args: { _application_id: string }) => Promise<{ data: any }>;
+  }).rpc("get_application_lead", { _application_id: applicationId });
+  return data || null;
+}
+
+/** When applications.lead_id is null the lead often still exists (RPC failed to
+ *  write the FK, or an older ON DELETE SET NULL). Find it before treating the
+ *  application as a genuine orphan — creating a second lead hits the unique
+ *  phone index and blocks offer issuance. */
+async function resolveMissingApplicationLead(appRow: {
+  application_id: string;
+  lead_id?: string | null;
+  phone?: string | null;
+}): Promise<string | null> {
+  if (appRow.lead_id) return appRow.lead_id;
+
+  const { data: byAppId } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("application_id", appRow.application_id)
+    .limit(1);
+  if (byAppId?.[0]?.id) return byAppId[0].id as string;
+
+  const phones = phoneLookupCandidates(appRow.phone);
+  if (phones.length > 0) {
+    const { data: byPhone } = await supabase
+      .from("leads")
+      .select("id")
+      .in("phone", phones)
+      .limit(1);
+    if (byPhone?.[0]?.id) return byPhone[0].id as string;
+  }
+
+  const rpcLead = await fetchApplicationLeadRpc(appRow.application_id);
+  return rpcLead?.id || null;
+}
+
+async function upsertLeadForApplication(appRow: {
+  application_id: string;
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  course_selections?: ApplicationCourseSelection[] | null;
+}): Promise<string | null> {
+  if (!appRow.phone) return null;
+  const firstCourse = ((appRow.course_selections || [])[0] as ApplicationCourseSelection) || {};
+  const resolvedSelection = await resolvePrimaryCourseSelection(firstCourse);
+  const { data: upsertedLeadId, error } = await supabase.rpc(
+    "upsert_application_lead" as any,
+    {
+      _name: appRow.full_name || "Applicant",
+      _phone: appRow.phone,
+      _email: appRow.email || null,
+      _course_id: resolvedSelection?.course_id || null,
+      _campus_id: resolvedSelection?.campus_id || null,
+      _application_id: appRow.application_id,
+      _source: "website",
+    },
+  );
+  if (error) {
+    console.warn("[AdminApplicationView] upsert_application_lead failed:", error);
+    return null;
+  }
+  return (upsertedLeadId as unknown as string) || null;
+}
+
 async function resolvePrimaryCourseSelection(selection: ApplicationCourseSelection | null | undefined) {
   if (!selection) return null;
   if (selection.course_id) {
@@ -304,24 +382,42 @@ export default function AdminApplicationView() {
       // Pull lead's course/campus IDs — needed by OfferLetterDialog. course_selections
       // on the application only has names, so we read them from the linked lead.
       // Also pulls PAN/AN for the lifecycle stepper.
-      if (appRow?.lead_id) {
+      let resolvedLeadId = appRow ? await resolveMissingApplicationLead(appRow) : null;
+      // Genuine orphan (lead row gone, or never created): recreate via the
+      // definer upsert so the page does not stay stuck on "Lead has been deleted".
+      if (!resolvedLeadId && appRow?.phone) {
+        resolvedLeadId = await upsertLeadForApplication(appRow);
+      }
+      if (resolvedLeadId && appRow && resolvedLeadId !== appRow.lead_id) {
+        const { error: relinkErr } = await supabase
+          .from("applications")
+          .update({ lead_id: resolvedLeadId })
+          .eq("id", appRow.id);
+        if (relinkErr) {
+          console.warn("[AdminApplicationView] orphan lead relink failed:", relinkErr);
+        } else {
+          appRow.lead_id = resolvedLeadId;
+          setApp({ ...appRow, lead_id: resolvedLeadId });
+        }
+      }
+      if (resolvedLeadId && appRow) {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
         const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, { data: allPmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, phone, course_id, campus_id, pre_admission_no, admission_no, consultant_id, academic_partner_id, lead_consultant:consultant_id(name), course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
-            .eq("id", appRow.lead_id).maybeSingle(),
-          supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
+            .eq("id", resolvedLeadId).maybeSingle(),
+          supabase.from("offer_letters").select("id").eq("lead_id", resolvedLeadId).limit(1),
           supabase.from("lead_payments")
             .select("amount,type,status")
-            .eq("lead_id", appRow.lead_id)
+            .eq("lead_id", resolvedLeadId)
             .eq("type", "application_fee")
             .eq("status", "confirmed"),
           supabase.from("lead_payments")
             .select("id,type,amount,payment_mode,gateway,transaction_ref,receipt_no,receipt_url,proof_url,status,payment_date,notes,created_at,recorded_by")
-            .eq("lead_id", appRow.lead_id)
+            .eq("lead_id", resolvedLeadId)
             .order("created_at", { ascending: false }),
-          fetchCahetRegistration(supabase, appRow.lead_id),
-          fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, appRow.lead_id),
+          fetchCahetRegistration(supabase, resolvedLeadId),
+          fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, resolvedLeadId),
         ]);
         // Academic-partner PRIVATE leads (shared_with_nimt=false) are hidden from
         // non-super_admin staff by RLS, so the direct read above returns null even
@@ -329,11 +425,10 @@ export default function AdminApplicationView() {
         // admission staff can process the application (writes already allow them)
         // instead of seeing a false "lead deleted" — and, critically, so
         // "issue offer" does not create a duplicate lead.
+        // Also used when applications.lead_id is null but the lead still exists.
         let baseLeadRow: any = leadRow;
-        if (!baseLeadRow && appRow.lead_id) {
-          const { data: rpcLead } = await (supabase as unknown as {
-            rpc: (fn: "get_application_lead", args: { _application_id: string }) => Promise<{ data: any }>;
-          }).rpc("get_application_lead", { _application_id: appRow.application_id });
+        if (!baseLeadRow && resolvedLeadId) {
+          const rpcLead = await fetchApplicationLeadRpc(appRow.application_id);
           if (rpcLead) baseLeadRow = rpcLead;
         }
         const resolvedSelection = await resolvePrimaryCourseSelection(primarySelection);
@@ -349,7 +444,7 @@ export default function AdminApplicationView() {
             const { error: repairError } = await supabase
               .from("leads")
               .update(repairPayload as any)
-              .eq("id", appRow.lead_id);
+              .eq("id", resolvedLeadId);
             if (repairError) console.warn("[AdminApplicationView] lead course repair failed:", repairError);
 
             effectiveLeadRow = {
@@ -396,8 +491,8 @@ export default function AdminApplicationView() {
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = effectiveLeadRow?.course?.name || primarySelection?.course_name || null;
-        const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
-        const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
+        const applicationCahet = cahetRegistrationFromApplication(appRow, resolvedLeadId);
+        const applicationUpdeled = updeledRegistrationFromApplication(appRow, resolvedLeadId);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
         if (isBptOrBmritCourseName(courseName) && effectiveLeadRow?.id) {
           const referralMap = await fetchReferralsByLead([effectiveLeadRow.id]);
@@ -627,44 +722,48 @@ export default function AdminApplicationView() {
     try {
       const firstCourse = ((app.course_selections || [])[0] as ApplicationCourseSelection) || {};
       const resolvedSelection = await resolvePrimaryCourseSelection(firstCourse);
-      const { data: existingLead } = await supabase
+      const { data: existingByApp } = await supabase
         .from("leads")
         .select("id, course_id, campus_id")
         .eq("application_id", app.application_id)
-        .maybeSingle();
+        .limit(1);
+      let existingLead = existingByApp?.[0] as { id: string; course_id: string | null; campus_id: string | null } | undefined;
+
+      if (!existingLead) {
+        const phones = phoneLookupCandidates(app.phone);
+        if (phones.length > 0) {
+          const { data: existingByPhone } = await supabase
+            .from("leads")
+            .select("id, course_id, campus_id")
+            .in("phone", phones)
+            .limit(1);
+          existingLead = existingByPhone?.[0] as typeof existingLead;
+        }
+      }
 
       let leadId = existingLead?.id as string | undefined;
-      const stage = app.status === "approved"
-        ? "application_approved"
-        : app.status === "submitted" || app.status === "under_review"
-        ? "application_submitted"
-        : app.payment_status === "paid"
-        ? "application_fee_paid"
-        : "application_in_progress";
 
       if (!leadId) {
-        const guardianName = app.guardian?.name || app.father?.name || app.mother?.name || null;
-        const guardianPhone = app.guardian?.phone || app.father?.phone || app.father?.phone_mobile || app.mother?.phone || app.mother?.phone_mobile || null;
-        const { data: inserted, error: insertErr } = await supabase
-          .from("leads")
-          .insert({
-            name: app.full_name || "Applicant",
-            phone: app.phone,
-            email: app.email || null,
-            guardian_name: guardianName,
-            guardian_phone: guardianPhone,
-            course_id: resolvedSelection?.course_id || null,
-            campus_id: resolvedSelection?.campus_id || null,
-            source: "website",
-            stage,
-            person_role: "applicant",
-            application_id: app.application_id,
-          } as any)
-          .select("id")
-          .single();
-        if (insertErr) throw insertErr;
-        leadId = inserted.id;
+        // SECURITY DEFINER: matches existing phone (avoids unique-index failure)
+        // or creates the lead when it is genuinely gone. Raw insert used to 500
+        // on idx_leads_phone_unique and leave the application stuck.
+        const { data: upsertedLeadId, error: upsertErr } = await supabase.rpc(
+          "upsert_application_lead" as any,
+          {
+            _name: app.full_name || "Applicant",
+            _phone: app.phone,
+            _email: app.email || null,
+            _course_id: resolvedSelection?.course_id || null,
+            _campus_id: resolvedSelection?.campus_id || null,
+            _application_id: app.application_id,
+            _source: "website",
+          },
+        );
+        if (upsertErr) throw upsertErr;
+        leadId = upsertedLeadId as unknown as string;
+        if (!leadId) throw new Error("Lead upsert returned no id");
       } else if (
+        existingLead &&
         resolvedSelection?.course_id &&
         (existingLead.course_id !== resolvedSelection.course_id ||
           (!!resolvedSelection.campus_id && existingLead.campus_id !== resolvedSelection.campus_id))
@@ -1253,7 +1352,7 @@ export default function AdminApplicationView() {
         <AdmissionLifecycleStepper
           app={app}
           lead={lead}
-          hasLead={!!app.lead_id && !!lead}
+          hasLead={!!lead?.id}
           appFeePaid={appFeePaid}
           hasOffer={hasOffer}
           docs={counts}
