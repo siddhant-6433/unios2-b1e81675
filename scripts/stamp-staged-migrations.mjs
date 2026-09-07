@@ -13,7 +13,7 @@
 // Only ADDED files under supabase/migrations are touched; edits to existing
 // migrations keep their version. Run `node scripts/stamp-staged-migrations.mjs
 // --selftest` to exercise the timestamp logic.
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join, basename, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -126,11 +126,29 @@ const staged = git(["diff", "--cached", "--name-only", "--diff-filter=A", "--", 
 
 if (staged.length === 0) process.exit(0);
 
+// Production-history backfills must keep the remote schema_migrations version.
+// Restamping them re-opens drift (the original failure mode this hook exists to
+// avoid when merging already-applied files). Marker is the first lines of the file.
+const KEEP_MARKER = "keep-migration-version";
+function shouldKeepProductionVersion(relPath) {
+  const abs = join(repoRoot, relPath);
+  if (!existsSync(abs)) return false;
+  const head = readFileSync(abs, "utf8").slice(0, 1200);
+  return head.includes(KEEP_MARKER);
+}
+
+const toStamp = staged.filter((f) => !shouldKeepProductionVersion(f));
+const kept = staged.length - toStamp.length;
+if (kept > 0) {
+  console.log(`migration stamper: kept production version on ${kept} backfill file(s)`);
+}
+if (toStamp.length === 0) process.exit(0);
+
 const existing = readdirSync(migrationsDir)
   .map((f) => f.match(/^(\d{14})_/)?.[1])
   .filter(Boolean);
 
-const plan = assignStamps(staged, new Date(), existing);
+const plan = assignStamps(toStamp, new Date(), existing);
 
 let renamed = 0;
 for (const { from, to, version } of plan) {
