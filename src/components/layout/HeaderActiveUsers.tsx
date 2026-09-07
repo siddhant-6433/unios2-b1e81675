@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Users, GraduationCap, Briefcase, Handshake, BookOpen, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { StudentAvatar } from "@/components/ui/student-avatar";
 import { roleLabel } from "@/lib/accessPolicy";
 import type { AppRole } from "@/lib/accessPolicy";
 import { fetchActiveOverview } from "@/lib/actionBadgeCounts";
@@ -12,6 +13,8 @@ interface PresenceUser {
   role: AppRole | null;
   campus: string | null;
   last_seen_at: string;
+  photo_url?: string | null;
+  course_name?: string | null;
 }
 interface ActiveLead {
   lead_id: string;
@@ -74,6 +77,22 @@ function activeAgo(dateStr: string): string {
 }
 function initials(name: string): string {
   return name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "?";
+}
+
+function presenceSubtitle(u: PresenceUser): string {
+  if (u.role === "student") {
+    const parts = [u.course_name, u.campus].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : roleLabel(u.role);
+  }
+  if (u.role === "parent") {
+    const parts = [roleLabel(u.role), u.course_name, u.campus].filter(Boolean);
+    return parts.join(" · ");
+  }
+  return `${roleLabel(u.role)}${u.campus ? ` · ${u.campus}` : ""}`;
+}
+
+function isFamilyPresence(role: AppRole | null): boolean {
+  return role === "student" || role === "parent";
 }
 
 export function HeaderActiveUsers() {
@@ -150,15 +169,23 @@ export function HeaderActiveUsers() {
                     {users.map((u) => (
                       <div key={u.user_id} className="flex items-center gap-3 border-b border-border/30 px-4 py-2 last:border-0">
                         <div className="relative shrink-0">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                            {initials(u.display_name)}
-                          </div>
+                          {isFamilyPresence(u.role) ? (
+                            <StudentAvatar
+                              src={u.photo_url}
+                              name={u.display_name}
+                              className="h-7 w-7 rounded-full text-[10px]"
+                            />
+                          ) : (
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                              {initials(u.display_name)}
+                            </div>
+                          )}
                           <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-success ring-2 ring-card" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-foreground">{u.display_name}</p>
                           <p className="truncate text-[11px] text-muted-foreground">
-                            {roleLabel(u.role)}{u.campus ? ` · ${u.campus}` : ""}
+                            {presenceSubtitle(u)}
                           </p>
                         </div>
                         <span className="shrink-0 text-[10px] text-muted-foreground/70">{activeAgo(u.last_seen_at)}</span>
