@@ -92,6 +92,7 @@ interface AbvmuDepositItem {
   id: string;
   lead_id: string;
   lead_name: string;
+  course_name: string | null;
   amount: number;
   status: string;
   challan_number: string | null;
@@ -608,25 +609,35 @@ export default function Inbox() {
         const rows = (data || []) as any[];
         const leadIds = Array.from(new Set(rows.map((r) => r.lead_id).filter(Boolean)));
         const leadsById = new Map<string, any>();
+        const coursesById = new Map<string, string>();
         if (leadIds.length) {
-          const { data: leads } = await supabase.from("leads").select("id, name").in("id", leadIds);
+          const { data: leads } = await supabase.from("leads").select("id, name, course_id").in("id", leadIds);
           for (const l of (leads || []) as any[]) leadsById.set(l.id, l);
+          const courseIds = Array.from(new Set((leads || []).map((l: any) => l.course_id).filter(Boolean)));
+          if (courseIds.length) {
+            const { data: courses } = await supabase.from("courses").select("id, name").in("id", courseIds);
+            for (const c of (courses || []) as any[]) coursesById.set(c.id, c.name);
+          }
         }
         commitItems(
           cat,
-          rows.map((r) => ({
-            id: r.id,
-            lead_id: r.lead_id,
-            lead_name: leadsById.get(r.lead_id)?.name || "Candidate",
-            amount: Number(r.amount),
-            status: r.status,
-            challan_number: r.challan_number,
-            challan_date: r.challan_date,
-            proof_path: r.proof_path,
-            proof_file_name: r.proof_file_name,
-            notes: r.notes,
-            submitted_at: r.submitted_at,
-          })) as AbvmuDepositItem[],
+          rows.map((r) => {
+            const lead = leadsById.get(r.lead_id);
+            return {
+              id: r.id,
+              lead_id: r.lead_id,
+              lead_name: lead?.name || "Candidate",
+              course_name: lead?.course_id ? coursesById.get(lead.course_id) || null : null,
+              amount: Number(r.amount),
+              status: r.status,
+              challan_number: r.challan_number,
+              challan_date: r.challan_date,
+              proof_path: r.proof_path,
+              proof_file_name: r.proof_file_name,
+              notes: r.notes,
+              submitted_at: r.submitted_at,
+            };
+          }) as AbvmuDepositItem[],
         );
       } else if (cat === "offer_waivers") {
         // Keep the pending waiver row as the source of truth for this inbox.
@@ -1522,6 +1533,7 @@ export default function Inbox() {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.lead_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{c.course_name || "—"}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 ABVMU deposit · ₹{Number(c.amount).toLocaleString("en-IN")}
               </p>
@@ -1800,6 +1812,7 @@ export default function Inbox() {
         <div className="p-5 space-y-5">
           <div>
             <h3 className="text-base font-semibold text-foreground">{c.lead_name}</h3>
+            {c.course_name && <p className="text-sm text-muted-foreground">{c.course_name}</p>}
             <p className="text-sm text-muted-foreground">ABVMU deposit challan claim</p>
           </div>
           <div className="rounded-xl border border-border bg-card divide-y divide-border">
