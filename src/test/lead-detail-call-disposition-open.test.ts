@@ -13,7 +13,7 @@ describe("LeadDetail Cloud Call disposition startup", () => {
     expect(fn).toContain("setDispositionCallStatus(\"calling\")");
     expect(fn).toContain("setShowCallDisposition(true)");
     expect(fn.indexOf("setShowCallDisposition(true)")).toBeLessThan(
-      fn.indexOf("supabase.functions.invoke(\"manual-call\""),
+      fn.indexOf("startCloudCall(id)"),
     );
   });
 

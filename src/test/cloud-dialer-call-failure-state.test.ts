@@ -10,16 +10,22 @@ describe("CloudDialer call setup failure state", () => {
       cloudDialerSource.indexOf("// ── Pre-select disposition"),
     );
 
+    expect(placeCall).toContain("startCloudCall(lead.id)");
+
     const providerFailureBlock = placeCall.slice(
-      placeCall.indexOf("if (error || data?.error)"),
+      placeCall.indexOf("if (!result.ok)"),
       placeCall.indexOf("// Stay in \"calling\" state"),
     );
     expect(providerFailureBlock).toContain("setDialerActive(false)");
+    expect(providerFailureBlock).toContain('status: "idle"');
+    expect(providerFailureBlock).not.toContain('status: "ended"');
+    expect(providerFailureBlock).not.toContain('disposition: "failed"');
 
     const thrownFailureBlock = placeCall.slice(
       placeCall.indexOf("} catch (e: any)"),
       placeCall.indexOf("  };", placeCall.indexOf("} catch (e: any)")),
     );
     expect(thrownFailureBlock).toContain("setDialerActive(false)");
+    expect(thrownFailureBlock).toContain('status: "idle"');
   });
 });

@@ -24,6 +24,7 @@ import { recordCallDisposition } from "@/lib/callDisposition";
 import { useCampuses } from "@/hooks/useAdmissionsData";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { startCloudCall } from "@/lib/startCloudCall";
 
 type Tab = "overdue" | "today" | "upcoming" | "cold" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -270,26 +271,13 @@ const PendingFollowups = () => {
         });
       })();
 
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: item.lead_id, caller_user_id: user?.id },
-      });
-      if (error) {
-        let detail = error.message;
-        try {
-          const ctx = (error as any).context as Response | undefined;
-          if (ctx) {
-            const raw = await ctx.text().catch(() => "");
-            try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; }
-          }
-        } catch {}
-        toast({ title: "Call Failed", description: detail, variant: "destructive" });
-        resetInlineCall();
-      } else if (data?.error) {
-        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+      const result = await startCloudCall(item.lead_id);
+      if (!result.ok) {
+        toast({ title: "Call Failed", description: result.error, variant: "destructive" });
         resetInlineCall();
       } else {
-        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
-        setInlineCallUuid(data?.call_id || null);
+        toast({ title: "Calling You", description: result.message });
+        setInlineCallUuid(result.callId);
       }
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
@@ -450,21 +438,11 @@ const PendingFollowups = () => {
     e.stopPropagation();
     setCloudCallingId(leadId);
     try {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: leadId, caller_user_id: currentUser?.id },
-      });
-      if (error) {
-        let detail = error.message;
-        try {
-          const ctx = (error as any).context as Response | undefined;
-          if (ctx) { const raw = await ctx.text().catch(() => ""); try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; } }
-        } catch {}
-        toast({ title: "Call Failed", description: detail, variant: "destructive" });
-      } else if (data?.error) {
-        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+      const result = await startCloudCall(leadId);
+      if (!result.ok) {
+        toast({ title: "Call Failed", description: result.error, variant: "destructive" });
       } else {
-        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+        toast({ title: "Calling You", description: result.message });
       }
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });

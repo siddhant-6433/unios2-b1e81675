@@ -3,6 +3,8 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
+import { startCloudCall } from "@/lib/startCloudCall";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
@@ -784,23 +786,12 @@ const LeadDetail = () => {
   const triggerAiCall = async () => {
     setAiCalling(true);
     try {
-      // Supabase edge function gateway rejects ES256 user JWTs — send anon key instead.
-      // The function receives the caller's user_id in the body for audit purposes.
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      const { data, error } = await supabase.functions.invoke("voice-call", {
-        body: { action: "outbound", lead_id: id, caller_user_id: currentUser?.id },
+      const { data, error } = await invokeEdge<{ error?: string; message?: string }>("voice-call", {
+        body: { action: "outbound", lead_id: id, caller_user_id: user?.id },
       });
 
       if (error) {
-        let detail = error.message;
-        try {
-          const ctx = (error as any).context as Response | undefined;
-          if (ctx) {
-            const rawText = await ctx.text().catch(() => "");
-            try { detail = JSON.parse(rawText)?.error || rawText || error.message; } catch { detail = rawText || error.message; }
-          }
-        } catch { /* ignore */ }
-        toast({ title: "AI Call Error", description: detail, variant: "destructive" });
+        toast({ title: "AI Call Error", description: error.message, variant: "destructive" });
       } else if (data?.error) {
         toast({ title: "AI Call Error", description: data.error, variant: "destructive" });
       } else {
@@ -847,30 +838,17 @@ const LeadDetail = () => {
     setDispositionCallStatus("calling");
     setShowCallDisposition(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: id, caller_user_id: user?.id },
-      });
-      if (error) {
-        let detail = error.message;
-        try {
-          const ctx = (error as any).context as Response | undefined;
-          if (ctx) { const raw = await ctx.text().catch(() => ""); try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; } }
-        } catch {}
-        toast({ title: "Call Failed", description: detail, variant: "destructive" });
-        setShowCallDisposition(false);
-        setActiveCallUuid(null);
-        setDispositionCallStatus(undefined);
-        setDispositionCallEnded(false);
-      } else if (data?.error) {
-        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+      const result = await startCloudCall(id);
+      if (!result.ok) {
+        toast({ title: "Call Failed", description: result.error, variant: "destructive" });
         setShowCallDisposition(false);
         setActiveCallUuid(null);
         setDispositionCallStatus(undefined);
         setDispositionCallEnded(false);
       } else {
-        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+        toast({ title: "Calling You", description: result.message });
         // The panel is already visible; the UUID arms polling + cancellation.
-        setActiveCallUuid(data?.call_id || null);
+        setActiveCallUuid(result.callId);
         fetchAll(true);
       }
     } catch (e: any) {

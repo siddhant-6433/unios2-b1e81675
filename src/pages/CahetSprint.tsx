@@ -24,6 +24,7 @@ import {
 } from "@/lib/deadlineRollover";
 import { isLeadCallDisposition, resolveCallDispositionTransition } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { startCloudCall } from "@/lib/startCloudCall";
 
 // Mirrors CloudDialer.CONNECTED_DISPOSITIONS — kept in sync deliberately so
 // counsellors see the same options. If you add/rename a disposition there,
@@ -449,19 +450,15 @@ const CahetSprint = () => {
     setCallElapsed(0);
 
     try {
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: row.lead_id, caller_user_id: user.id },
-      });
-      if (error || data?.error) {
-        toast({ title: "Call failed", description: data?.error || error?.message || "Try again", variant: "destructive" });
+      const result = await startCloudCall(row.lead_id);
+      if (!result.ok) {
+        toast({ title: "Call failed", description: result.error, variant: "destructive" });
         setActiveCall(null);
         return;
       }
       toast({ title: "Calling you", description: "Pick up your phone to connect." });
-      if (data?.call_id) {
-        setActiveCall(prev => prev ? { ...prev, callUuid: data.call_id } : prev);
-        startPolling(data.call_id, row);
-      }
+      setActiveCall(prev => prev ? { ...prev, callUuid: result.callId } : prev);
+      startPolling(result.callId, row);
     } catch (e: any) {
       toast({ title: "Call failed", description: e.message, variant: "destructive" });
       setActiveCall(null);
