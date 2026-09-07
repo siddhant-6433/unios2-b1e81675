@@ -15,9 +15,10 @@ const migration = readFileSync(
 describe("admission view resolves RLS-hidden private partner leads", () => {
   it("falls back to the definer RPC when the direct lead read is blocked", () => {
     expect(adminApplicationView).toContain('rpc("get_application_lead"');
-    // Only when the direct read came back empty but a lead is actually linked —
-    // so genuinely-orphan applications still take the create-lead path.
-    expect(adminApplicationView).toContain("if (!baseLeadRow && appRow.lead_id)");
+    // Resolve even when applications.lead_id is null (desynced FK) — a direct
+    // SELECT by lead id isn't possible until we reverse-lookup. Genuine orphans
+    // still take the create-lead path when this comes back empty.
+    expect(adminApplicationView).toContain("if (!baseLeadRow && resolvedLeadId)");
   });
 
   it("gates the definer RPC to admission-processing staff and never invents a lead", () => {
