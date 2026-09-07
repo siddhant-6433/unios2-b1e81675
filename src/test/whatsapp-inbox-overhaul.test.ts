@@ -258,6 +258,28 @@ describe("reply-state counts", () => {
   });
 });
 
+describe("inbox list pagination", () => {
+  it("loads the conversation list through a bounded RPC instead of the view", () => {
+    // get_whatsapp_conversations() materialises 41k threads with four LATERALs
+    // before PostgREST .limit(120) applies, which is the
+    // "canceling statement due to statement timeout" toast on /whatsapp-inbox.
+    const pageMigration = readMigration("whatsapp_conversations_page");
+    expect(inbox).toContain('rpc("whatsapp_conversations_page"');
+    expect(inbox).not.toContain('.from("whatsapp_conversations" as any)');
+    expect(pageMigration).toContain("CREATE OR REPLACE FUNCTION public.whatsapp_conversations_page");
+    expect(pageMigration).toContain("LIMIT LEAST(GREATEST(COALESCE(p_limit, 120), 1), 250)");
+    expect(pageMigration).toContain("FROM public.whatsapp_messages wm");
+    expect(pageMigration).not.toContain("FROM public.whatsapp_conversations");
+    expect(pageMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
+  });
+
+  it("opens a phone deep-link without waiting for the list page", () => {
+    expect(inbox).toContain('if (!phoneFromUrl) return;');
+    expect(inbox).not.toContain("if (!phoneFromUrl || conversations.length === 0) return");
+    expect(inbox).toContain("fetchConversationsForPhones(campaignPhoneLookupValues(phoneFromUrl))");
+  });
+});
+
 describe("no fabricated template values", () => {
   it("stops pre-filling placeholder sentences as if they were real context", () => {
     expect(inbox).not.toMatch(/^\s*amount: "the pending amount"/m);
