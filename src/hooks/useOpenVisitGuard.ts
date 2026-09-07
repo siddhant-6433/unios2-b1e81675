@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 
 const EXEMPT_ROLES = ["super_admin", "admission_head", "campus_admin", "accountant"];
 
@@ -36,7 +36,7 @@ export function useOpenVisitGuard(currentLeadId: string | undefined) {
 
       const checkedInLeadIds = new Set((open as { lead_id: string }[]).map(v => v.lead_id));
       if (!checkedInLeadIds.has(currentLeadId)) {
-        toast.warning("You have a visitor on campus — check them out first.");
+        toast({ title: "You have a visitor on campus — check them out first." });
         navigate("/visit-center", { replace: true });
       }
     })();

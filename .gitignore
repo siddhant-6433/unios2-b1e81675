@@ -34,3 +34,8 @@ supabase/.temp/
 
 # Local import ETL output
 scripts/.out/
+
+# Generated / one-off working files
+tmp/
+test-results/
+playwright-report/

@@ -7,7 +7,7 @@ const VENDOR_GROUPS: Array<{ chunk: string; matchers: string[] }> = [
   { chunk: "vendor-runtime", matchers: ["/tslib/", "/@babel/runtime/"] },
   { chunk: "vendor-react", matchers: ["/node_modules/react/", "/node_modules/react-dom/", "/node_modules/scheduler/"] },
   { chunk: "vendor-router", matchers: ["/react-router/", "/react-router-dom/", "/@remix-run/router/", "/history/"] },
-  { chunk: "vendor-query-supabase", matchers: ["/@tanstack/react-query/", "/@tanstack/query-core/", "/@supabase/", "/iceberg-js/", "/@lovable.dev/cloud-auth-js/"] },
+  { chunk: "vendor-query-supabase", matchers: ["/@tanstack/react-query/", "/@tanstack/query-core/", "/@supabase/", "/iceberg-js/"] },
   {
     chunk: "vendor-ui",
     matchers: [
@@ -25,15 +25,9 @@ const VENDOR_GROUPS: Array<{ chunk: string; matchers: string[] }> = [
       "/clsx/",
       "/tailwind-merge/",
       "/cmdk/",
-      "/sonner/",
-      "/vaul/",
     ],
   },
-  { chunk: "vendor-forms", matchers: ["/react-hook-form/", "/@hookform/resolvers/", "/zod/", "/input-otp/"] },
   { chunk: "vendor-date", matchers: ["/date-fns/", "/react-day-picker/"] },
-  { chunk: "vendor-theme", matchers: ["/next-themes/"] },
-  { chunk: "vendor-carousel", matchers: ["/embla-carousel-react/"] },
-  { chunk: "vendor-panels", matchers: ["/react-resizable-panels/"] },
   { chunk: "vendor-scholarship", matchers: ["/@nimt/scholarship-slabs/"] },
   {
     chunk: "vendor-charts",
