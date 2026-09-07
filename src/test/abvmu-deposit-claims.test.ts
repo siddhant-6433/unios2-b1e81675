@@ -35,4 +35,28 @@ describe("ABVMU deposit challan claims", () => {
     expect(inbox).toContain("decide_abvmu_deposit_claim");
     expect(inbox).toContain("ABVMU Deposits");
   });
+
+  it("shows course name with the student name in the ABVMU inbox", () => {
+    const depositBranch = inbox.slice(
+      inbox.indexOf('cat === "abvmu_deposits"'),
+      inbox.indexOf('cat === "offer_waivers"'),
+    );
+    expect(depositBranch).toContain('.select("id, name, course_id")');
+    expect(depositBranch).toContain('.from("courses").select("id, name")');
+    expect(depositBranch).toContain("course_name:");
+
+    const listBranch = inbox.slice(
+      inbox.indexOf('selected === "abvmu_deposits"'),
+      inbox.indexOf('selected === "offer_waivers"'),
+    );
+    expect(listBranch).toContain("{c.course_name || \"—\"}");
+
+    const detailBranch = inbox.slice(
+      inbox.indexOf('selected === "abvmu_deposits"') === -1
+        ? 0
+        : inbox.lastIndexOf('selected === "abvmu_deposits"'),
+      inbox.lastIndexOf('selected === "offer_waivers"'),
+    );
+    expect(detailBranch).toContain("{c.course_name && <p className=\"text-sm text-muted-foreground\">{c.course_name}</p>}");
+  });
 });
