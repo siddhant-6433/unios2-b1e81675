@@ -6,7 +6,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import {
   Search, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
-  Receipt, HandCoins, Settings2, Lock,
+  Receipt, HandCoins, Settings2, Lock, FileMinus2,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +30,7 @@ import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { DATE_PRESETS, getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
+import Refunds from "./Refunds";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -43,7 +44,7 @@ const categoryBadge: Record<string, string> = {
   token: "bg-primary/15 text-primary", hostel: "bg-pastel-mint text-foreground/70",
   transport: "bg-pastel-yellow text-foreground/70", other: "bg-muted text-foreground/70",
 };
-type TabId = "collect" | "ledger" | "receipts" | "approvals" | "setup" | "reports";
+type TabId = "collect" | "ledger" | "receipts" | "approvals" | "refunds" | "setup" | "reports";
 
 const Finance = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -68,6 +69,7 @@ const Finance = () => {
   const { role, hasPermission } = useAuth();
   const canCreateFinance = can("finance", "create");
   const isSuperAdmin = role === "super_admin";
+  const canManageRefunds = isSuperAdmin || role === "accountant" || hasPermission("finance:refund");
   const canManageSetup = isSuperAdmin || hasPermission("fee_structure:manage");
   const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
@@ -84,11 +86,12 @@ const Finance = () => {
       { id: "receipts",  label: "Receipts",  icon: CreditCard,  badge: 0, show: true },
       { id: "ledger",    label: "Ledger",    icon: FileText,    badge: 0, show: true },
       { id: "approvals", label: "Approvals", icon: HandCoins,   badge: pendingWaiverCount + pendingConcessionCount, show: true },
+      { id: "refunds",   label: "Refunds",   icon: FileMinus2,  badge: 0, show: canManageRefunds },
       { id: "setup",     label: "Setup",     icon: Settings2,   badge: 0, show: canManageSetup },
       { id: "reports",   label: "Reports",   icon: BarChart3,   badge: 0, show: true },
     ];
     return all.filter(t => t.show);
-  }, [pendingWaiverCount, pendingConcessionCount, canManageSetup]);
+  }, [pendingWaiverCount, pendingConcessionCount, canManageSetup, canManageRefunds]);
 
   // The cashier lives in Collect; everyone else opens on Receipts.
   const defaultTab: TabId = role === "accountant" || role === "office_admin" ? "collect" : "receipts";
@@ -224,7 +227,7 @@ const Finance = () => {
           <p className="text-sm text-muted-foreground mt-1">Fee structures, ledger, payments & financial reports</p>
         </div>
         <div className="flex items-center gap-2">
-          {(tab === "ledger" || tab === "receipts") && (
+          {tab !== "refunds" && (tab === "ledger" || tab === "receipts") && (
             <Button variant="outline" className="gap-2" onClick={exportCsv}>
               <Download className="h-4 w-4" /> Export
             </Button>
@@ -245,7 +248,7 @@ const Finance = () => {
               </Button>
             )
           )}
-          {canCreateFinance && (
+          {tab !== "refunds" && canCreateFinance && (
             <Button className="gap-2" onClick={() => setTab("collect")}>
               <Plus className="h-4 w-4" /> Record Payment
             </Button>
@@ -253,6 +256,7 @@ const Finance = () => {
         </div>
       </div>
 
+      {tab !== "refunds" && (
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           Collections for <span className="font-medium text-foreground">{rangeLabel}</span> · balances shown as of now
@@ -267,7 +271,9 @@ const Finance = () => {
           ariaPrefix="Collection date"
         />
       </div>
+      )}
 
+      {tab !== "refunds" && (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: isDateScoped ? `${paidCount} payments` : `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
@@ -288,6 +294,7 @@ const Finance = () => {
           </Card>
         ))}
       </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-1 rounded-xl border border-input bg-card p-1 w-fit">
         {tabs.map((t) => (
@@ -386,6 +393,8 @@ const Finance = () => {
           <OfferWaiverApprovalPanel />
         </div>
       )}
+
+      {tab === "refunds" && <Refunds embedded />}
 
       {tab === "setup" && (
         <>

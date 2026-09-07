@@ -9,13 +9,18 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2, ArrowRightLeft, Lock, Unlock } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History, Archive, ArchiveRestore, Trash2, ArrowRightLeft, Lock, Unlock, Banknote, Undo2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+import { RefundDialog } from "@/components/finance/RefundDialog";
 import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { isSchoolSessionYear } from "@/lib/sessionYears";
@@ -356,7 +361,7 @@ const StudentProfile = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const { role, user } = useAuth();
+  const { role, user, hasPermission } = useAuth();
   const [student, setStudent] = useState<StudentRecord | null>(null);
   const [fees, setFees] = useState<FeeLedgerRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
@@ -421,13 +426,16 @@ const StudentProfile = () => {
   const canDelete = role === "super_admin";
   const canChangePlacement = role === "super_admin";
   const canToggleLogin = role === "super_admin";
+  const canRefund = hasPermission("finance:refund") || ["super_admin", "accountant"].includes(role || "");
   const [loginBusy, setLoginBusy] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
 
   const toggleStudentLogin = async () => {
     if (!student) return;
     const nextDisabled = !(student as { login_disabled?: boolean }).login_disabled;
+    const wasRefunded = !!(student as { refunded_at?: string | null }).refunded_at;
     setLoginBusy(true);
     const { error } = await supabase.rpc("admin_set_student_login_disabled" as never, {
       _student_id: student.id,
@@ -438,7 +446,10 @@ const StudentProfile = () => {
       toast({ variant: "destructive", title: "Could not update login access", description: error.message });
       return;
     }
-    toast({ title: nextDisabled ? "Login disabled" : "Login enabled" });
+    toast({
+      title: nextDisabled ? "Login disabled" : "Login enabled",
+      description: !nextDisabled && wasRefunded ? "Refunded badge cleared." : undefined,
+    });
     fetchStudent();
   };
 
@@ -643,14 +654,26 @@ const StudentProfile = () => {
     // so a student whose photo lives only in their application shows initials.
     // ponytail: photo_url/lead_id are non-sensitive, not the masked-PII fields the RPC guards.
     const LOOKUPS =
-      "id, lead_id, photo_url, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+      "id, lead_id, photo_url, archived_at, refunded_at, login_disabled, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
+    const LOOKUPS_NO_REFUNDED =
+      "id, lead_id, photo_url, archived_at, login_disabled, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
 
-    let { data: found } = await supabase.from("students")
-      .select(LOOKUPS).eq("admission_no", admissionNo).maybeSingle();
-    if (!found) {
-      const res = await supabase.from("students")
-        .select(LOOKUPS).eq("pre_admission_no", admissionNo).maybeSingle();
-      found = res.data;
+    const loadBy = async (fields: string) => {
+      let { data: found, error } = await supabase.from("students")
+        .select(fields).eq("admission_no", admissionNo).maybeSingle();
+      if (!found && !error) {
+        const res = await supabase.from("students")
+          .select(fields).eq("pre_admission_no", admissionNo).maybeSingle();
+        found = res.data;
+        error = res.error;
+      }
+      return { found, error };
+    };
+    let { found, error: lookupErr } = await loadBy(LOOKUPS);
+    if (lookupErr && /refunded_at/i.test(lookupErr.message || "")) {
+      const retry = await loadBy(LOOKUPS_NO_REFUNDED);
+      found = retry.found;
+      lookupErr = retry.error;
     }
 
     let data: StudentRecord | null = null;
@@ -1212,10 +1235,16 @@ const StudentProfile = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-foreground">{student.name}</h1>
-              <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.status === "active" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-                {student.status.replace("_", " ")}
-              </span>
-              {(student as { archived_at?: string | null }).archived_at && (
+              {(student as { refunded_at?: string | null }).refunded_at ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
+                  <Banknote className="h-3 w-3" /> Refunded
+                </span>
+              ) : (
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.status === "active" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                  {student.status.replace("_", " ")}
+                </span>
+              )}
+              {!(student as { refunded_at?: string | null }).refunded_at && (student as { archived_at?: string | null }).archived_at && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
                   <Archive className="h-3 w-3" /> Archived
                 </span>
@@ -1236,49 +1265,82 @@ const StudentProfile = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {syncMsg && <span className="text-xs text-muted-foreground">{syncMsg}</span>}
-          <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={syncFromApplication} disabled={syncing}>
-            {syncing ? <ButtonOrb state="working" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Sync from Application
-          </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {syncMsg && <span className="text-xs text-muted-foreground max-w-[140px] truncate" title={syncMsg}>{syncMsg}</span>}
           {canCorrectProfile && (
             <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openEditDialog}>
-              <Edit3 className="h-3.5 w-3.5" /> Correct Information
+              <Edit3 className="h-3.5 w-3.5" /> Edit
             </Button>
           )}
-          {canArchive && (
-            (student as { archived_at?: string | null }).archived_at ? (
-              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={unarchiveStudent} disabled={removalBusy}>
-                <ArchiveRestore className="h-3.5 w-3.5" /> Unarchive
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 rounded-lg" aria-label="More student actions">
+                Actions <ChevronDown className="h-3.5 w-3.5" />
               </Button>
-            ) : (
-              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={() => { setRemovalReason(""); setRemovalAction("archive"); }}>
-                <Archive className="h-3.5 w-3.5" /> Archive
-              </Button>
-            )
-          )}
-          {canChangePlacement && (
-            <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openPlacementDialog}>
-              <ArrowRightLeft className="h-3.5 w-3.5" /> Change Course / Batch
-            </Button>
-          )}
-          {canToggleLogin && (
-            (student as { login_disabled?: boolean }).login_disabled ? (
-              <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={toggleStudentLogin} disabled={loginBusy}>
-                {loginBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlock className="h-3.5 w-3.5" />} Enable Login
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={toggleStudentLogin} disabled={loginBusy}>
-                {loginBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />} Disable Login
-              </Button>
-            )
-          )}
-          {canDelete && (
-            <Button variant="outline" size="sm" className="gap-2 rounded-lg text-destructive hover:text-destructive" onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}>
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </Button>
-          )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {canRefund && (
+                <>
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Finance</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setRefundOpen(true)}>
+                    <Undo2 className="h-3.5 w-3.5" /> Initiate Refund
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Record</DropdownMenuLabel>
+              <DropdownMenuItem onClick={syncFromApplication} disabled={syncing}>
+                {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Sync from Application
+              </DropdownMenuItem>
+              {canChangePlacement && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Placement</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={openPlacementDialog}>
+                    <ArrowRightLeft className="h-3.5 w-3.5" /> Change Course / Batch
+                  </DropdownMenuItem>
+                </>
+              )}
+              {canToggleLogin && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Access</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={toggleStudentLogin} disabled={loginBusy}>
+                    {(student as { login_disabled?: boolean }).login_disabled
+                      ? <Unlock className="h-3.5 w-3.5" />
+                      : <Lock className="h-3.5 w-3.5" />}
+                    {(student as { login_disabled?: boolean }).login_disabled ? "Enable Login" : "Disable Login"}
+                  </DropdownMenuItem>
+                </>
+              )}
+              {(canArchive || canDelete) && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Status</DropdownMenuLabel>
+                  {canArchive && (
+                    (student as { archived_at?: string | null }).archived_at ? (
+                      <DropdownMenuItem onClick={unarchiveStudent} disabled={removalBusy}>
+                        <ArchiveRestore className="h-3.5 w-3.5" /> Unarchive
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onClick={() => { setRemovalReason(""); setRemovalAction("archive"); }}>
+                        <Archive className="h-3.5 w-3.5" /> Archive
+                      </DropdownMenuItem>
+                    )
+                  )}
+                  {canDelete && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => { setRemovalReason(""); setRemovalAction("delete"); }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete student
+                    </DropdownMenuItem>
+                  )}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -2106,6 +2168,16 @@ const StudentProfile = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {canRefund && student?.id && (
+        <RefundDialog
+          studentId={student.id}
+          studentName={student.name}
+          open={refundOpen}
+          onOpenChange={setRefundOpen}
+          onDone={() => { fetchStudent(true); }}
+        />
+      )}
     </div>
   );
 };
