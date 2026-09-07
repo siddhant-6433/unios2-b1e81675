@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readMigration } from "./readMigration";
 
 const workStateMigration = readFileSync(
   "supabase/migrations/20260802082638_call_list_work_state.sql",
@@ -373,5 +374,29 @@ describe("assigned call lists", () => {
     expect(leadLists).toContain("const canAssignLists = ");
     expect(leadLists).toContain('canAssignLists ? "Assign" : "Call this"');
     expect(leadLists).toContain("canAssignLists && (");
+  });
+
+  it("resolves assigned_count to the batch column, not the OUT variable", () => {
+    // RETURNS TABLE(assigned_count, failed_count) plus
+    // UPDATE lead_list_assignment_batches SET assigned_count = ... made every
+    // Assign Round Robin fail with "column reference assigned_count is ambiguous".
+    const fix = readMigration("fix_assign_lead_list_assigned_count_ambiguity");
+    expect(fix).toContain("#variable_conflict use_column");
+    expect(fix).toContain("pg_get_functiondef");
+    expect(fix).toContain("proname = 'assign_lead_list_round_robin'");
+    expect(fix).toContain("LIKE '%_limit%'");
+    expect(fix).toContain(
+      "DROP FUNCTION IF EXISTS public.assign_lead_list_round_robin(uuid, uuid[], boolean, text, date, boolean)"
+    );
+  });
+
+  it("does not fire per-lead assignment automations during list hand-off", () => {
+    // 51 http_post + vault reads inside one RPC is what timed out Assign
+    // Round Robin after the assigned_count fix. Same flag notify already uses.
+    const skip = readMigration("skip_bulk_assign_lead_assigned_automation");
+    expect(skip).toContain("CREATE OR REPLACE FUNCTION public.fn_automation_on_lead_assigned");
+    expect(skip).toContain("current_setting('app.bulk_assign', true) = 'on'");
+    expect(skip).toContain("SET statement_timeout = %L");
+    expect(skip).toContain("assign_lead_list_round_robin");
   });
 });
