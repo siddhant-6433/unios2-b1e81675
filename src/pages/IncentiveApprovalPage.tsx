@@ -6,7 +6,7 @@ import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 import { IndianRupee, ChevronDown, ChevronUp, Download, RefreshCw, CheckCircle2, XCircle, CircleDashed, AlertTriangle, BadgeCheck, Banknote } from "lucide-react";
 
 interface Statement {
@@ -118,7 +118,7 @@ export default function IncentiveApprovalPage() {
       db.from("incentive_flags").select("*").eq("status", "open"),
       db.from("incentive_month_inputs").select("counsellor_id, attendance_pct, disciplinary_action").eq("month", month),
     ]);
-    if (st.error) toast.error(`Failed to load statements: ${st.error.message}`);
+    if (st.error) toast({ title: `Failed to load statements: ${st.error.message}`, variant: "destructive" });
     setStatements((st.data as Statement[]) || []);
     setFlags((fl.data as Flag[]) || []);
     const map: Record<string, MonthInput> = {};
@@ -138,7 +138,7 @@ export default function IncentiveApprovalPage() {
         .eq("counsellor_id", s.counsellor_id)
         .eq("month", s.month)
         .order("created_at", { ascending: true });
-      if (error) toast.error(`Failed to load ledger: ${error.message}`);
+      if (error) toast({ title: `Failed to load ledger: ${error.message}`, variant: "destructive" });
       setLedger(prev => ({ ...prev, [s.id]: (data as LedgerRow[]) || [] }));
     }
   };
@@ -147,8 +147,8 @@ export default function IncentiveApprovalPage() {
     setBusy(true);
     // fn_incentive_month_close does its own admin-role check via auth.uid()
     const { error } = await db.rpc("fn_incentive_month_close", { p_month: month });
-    if (error) toast.error(`Recompute failed: ${error.message}`);
-    else { toast.success("Statements recomputed"); await load(); }
+    if (error) toast({ title: `Recompute failed: ${error.message}`, variant: "destructive" });
+    else { toast({ title: "Statements recomputed" }); await load(); }
     setBusy(false);
   };
 
@@ -162,14 +162,14 @@ export default function IncentiveApprovalPage() {
       patch.paid_at = new Date().toISOString();
     }
     const { error } = await db.from("incentive_statements").update(patch).eq("id", s.id);
-    if (error) toast.error(`Update failed: ${error.message}`);
-    else { toast.success(status === "approved" ? "Statement approved" : "Marked paid"); await load(); }
+    if (error) toast({ title: `Update failed: ${error.message}`, variant: "destructive" });
+    else { toast({ title: status === "approved" ? "Statement approved" : "Marked paid" }); await load(); }
   };
 
   const saveInput = async (counsellorId: string, attendance: string, disciplinary: boolean) => {
     const attendance_pct = attendance === "" ? null : Number(attendance);
     if (attendance_pct != null && (Number.isNaN(attendance_pct) || attendance_pct < 0 || attendance_pct > 100)) {
-      toast.error("Attendance must be 0–100");
+      toast({ title: "Attendance must be 0–100", variant: "destructive" });
       return;
     }
     const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", user?.id ?? "").maybeSingle();
@@ -177,14 +177,14 @@ export default function IncentiveApprovalPage() {
       { counsellor_id: counsellorId, month, attendance_pct, disciplinary_action: disciplinary, entered_by: prof?.id ?? null },
       { onConflict: "counsellor_id,month" },
     );
-    if (error) toast.error(`Failed to save HR inputs: ${error.message}`);
-    else toast.success("HR inputs saved — recompute to apply");
+    if (error) toast({ title: `Failed to save HR inputs: ${error.message}`, variant: "destructive" });
+    else toast({ title: "HR inputs saved — recompute to apply" });
   };
 
   const resolveFlag = async (flag: Flag, status: "cleared" | "upheld") => {
     const { error } = await db.from("incentive_flags").update({ status, resolved_at: new Date().toISOString() }).eq("id", flag.id);
-    if (error) toast.error(`Failed to resolve flag: ${error.message}`);
-    else { toast.success(`Flag ${status}`); await load(); }
+    if (error) toast({ title: `Failed to resolve flag: ${error.message}`, variant: "destructive" });
+    else { toast({ title: `Flag ${status}` }); await load(); }
   };
 
   const exportCsv = () => {
