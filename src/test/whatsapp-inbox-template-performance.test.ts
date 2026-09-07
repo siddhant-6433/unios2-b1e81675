@@ -111,7 +111,8 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("primaryInboxLabel");
     expect(inbox).toContain("All WhatsApp numbers");
     expect(inbox).toContain('businessNumber === "all"');
-    expect(inbox).toContain('select("business_phone_number_id, business_phone_number, counsellor_id, lead_counsellor_ids")');
+    expect(inbox).toContain('select("business_phone_number_id, business_phone_number")');
+    expect(inbox).not.toContain('from("whatsapp_conversations" as any)');
     expect(inbox).toContain('from("whatsapp_messages" as any)');
     expect(inbox).toContain("isHrBusinessChannel");
     expect(inbox).toContain("isBusinessPhoneNumberChannel");
@@ -143,8 +144,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("render_metadata");
     expect(inbox).toContain('eq("direction", "inbound")');
     expect(inbox).toContain('if (businessNumber === "all") return query');
-    expect(inbox).toContain('businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)');
-    expect(inbox).toContain("mergeConversationRows(rows, messageBackedRows)");
+    expect(inbox).toContain('rows.length === 0 && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)');
   });
 
   it("learns from corrected/manual WhatsApp replies without blocking send", () => {
