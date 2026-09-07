@@ -15,9 +15,11 @@
 //
 // Importing this module patches the shared client so `functions.invoke`
 // always attaches the *current* session's real JWT when a session exists,
-// overriding the buggy fallback. Anon/public flows (no session) are untouched
-// — they keep sending the publishable key, which is correct for public
-// functions.
+// overriding the buggy fallback. It also rewrites the SDK's opaque
+// "Edge Function returned a non-2xx status code" with the function's JSON
+// `{ error }` body, so Cloud Dialer / WhatsApp / payments toasts show the
+// real reason. Anon/public flows (no session) are untouched — they keep
+// sending the publishable key, which is correct for public functions.
 
 import { supabase } from "@/integrations/supabase/client";
 
@@ -71,7 +73,7 @@ const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
       headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) },
     };
   }
-  return originalInvoke(name, options);
+  return rewriteFunctionsError(await originalInvoke(name, options));
 };
 
 export type EdgeError = {
@@ -81,26 +83,78 @@ export type EdgeError = {
   sessionExpired?: boolean;
 };
 
+function statusFromContext(ctx: unknown): number | undefined {
+  if (!ctx || typeof ctx !== "object") return undefined;
+  const status = (ctx as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function messageFromBody(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as { error?: unknown; message?: unknown };
+  if (typeof record.error === "string" && record.error.trim()) return record.error;
+  if (typeof record.message === "string" && record.message.trim()) return record.message;
+  return null;
+}
+
 export async function edgeErrorFromFunctionError(error: unknown): Promise<EdgeError> {
   const baseMessage = error instanceof Error ? error.message : String(error);
   let message = baseMessage;
-  let status: number | undefined;
-
-  // Pull the useful message out of the function's JSON body.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ctx = (error as any)?.context;
+  let status = statusFromContext(ctx);
+
+  // Pull the useful message out of the function's JSON body. Clone first so
+  // later callers can still read error.context.
   if (ctx && typeof ctx.json === "function") {
-    status = typeof ctx.status === "number" ? ctx.status : undefined;
     try {
       const cloned = typeof ctx.clone === "function" ? ctx.clone() : ctx;
-      const errBody = await cloned.json();
-      if (errBody?.error) message = errBody.error;
+      const fromBody = messageFromBody(await cloned.json());
+      if (fromBody) message = fromBody;
     } catch {
       // Body wasn't JSON — keep the original message.
     }
+  } else {
+    const fromBody = messageFromBody(ctx);
+    if (fromBody) message = fromBody;
   }
 
-  return { message, status, sessionExpired: status === 401 };
+  const sessionExpired = status === 401;
+  if (
+    sessionExpired &&
+    /non-2xx|unauthorized|bad_jwt|invalid jwt|jwt/i.test(message)
+  ) {
+    message = "Your session has expired. Please sign in again.";
+  }
+
+  return { message, status, sessionExpired };
+}
+
+function assignErrorMessage(error: { message: string }, message: string) {
+  try {
+    error.message = message;
+  } catch {
+    // Some SDK error classes freeze `message`. Fall through to defineProperty.
+  }
+  if (error.message === message) return;
+  Object.defineProperty(error, "message", { value: message, writable: true, configurable: true });
+}
+
+/**
+ * Rewrites supabase-js's opaque "non-2xx" FunctionsHttpError.message with the
+ * `{ error }` / `{ message }` body the edge function actually returned.
+ * Used by the patched `functions.invoke` so every CRM toast that shows
+ * `error.message` gets the real reason — not only callers of `invokeEdge`.
+ */
+export async function rewriteFunctionsError<T>(
+  result: { data: T; error: { message: string } | null },
+): Promise<{ data: T; error: { message: string } | null }> {
+  if (!result.error) return result;
+  const parsed = await edgeErrorFromFunctionError(result.error);
+  if (parsed.message && parsed.message !== result.error.message) {
+    assignErrorMessage(result.error, parsed.message);
+  }
+  return result;
 }
 
 /**

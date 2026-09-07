@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { startCloudCall } from "@/lib/startCloudCall";
 import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import {
   type FeeReceipt,
@@ -1324,21 +1325,19 @@ export default function AcademicPartnerPortal() {
     }
     setCallingLeadId(lead.id);
     try {
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: lead.id },
-      });
-      if (error || data?.error || !data?.call_id) {
+      const result = await startCloudCall(lead.id);
+      if (!result.ok) {
         toast({
           title: "Call failed",
-          description: data?.error || error?.message || "Unable to start cloud call.",
+          description: result.error,
           variant: "destructive",
         });
         return;
       }
-      setActiveCall({ leadId: lead.id, name: lead.name, callId: data.call_id });
+      setActiveCall({ leadId: lead.id, name: lead.name, callId: result.callId });
       toast({
         title: "Calling you",
-        description: data?.message || `Pick up your phone to connect to ${lead.name}.`,
+        description: result.message,
       });
     } catch (error: unknown) {
       toast({ title: "Call failed", description: errorMessage(error) || "Unable to start cloud call.", variant: "destructive" });

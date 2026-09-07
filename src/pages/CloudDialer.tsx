@@ -42,6 +42,7 @@ import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
+import { startCloudCall } from "@/lib/startCloudCall";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -899,29 +900,24 @@ export default function CloudDialer() {
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
     try {
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: lead.id, caller_user_id: user.id },
-      });
+      const result = await startCloudCall(lead.id);
 
-      if (error || data?.error) {
-        const msg = data?.error || error?.message || "Call failed";
-        toast({ title: "Call Failed", description: msg, variant: "destructive" });
+      if (!result.ok) {
+        toast({ title: "Call Failed", description: result.error, variant: "destructive" });
         setDialerActive(false);
-        setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
+        // Setup never reached the counsellor's phone — go back to idle so we
+        // don't show MARK DISPOSITION / auto-mark call_back on a 0:00 "ended" call.
+        setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
         return;
       }
 
       // Stay in "calling" state — polling will transition to "connected" when student answers
-      toast({ title: "Calling...", description: data?.message || "Pick up your phone" });
-
-      // Start polling for call end using the internal call_id
-      if (data?.call_id) {
-        startPolling(data.call_id);
-      }
+      toast({ title: "Calling...", description: result.message });
+      startPolling(result.callId);
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
       setDialerActive(false);
-      setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
+      setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
     }
   };
 

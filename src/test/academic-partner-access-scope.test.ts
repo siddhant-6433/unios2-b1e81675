@@ -146,7 +146,7 @@ describe("academic partner access scope", () => {
   });
 
   it("allows cloud calls from the portal only through scoped manual-call authorization", () => {
-    expect(portal).toContain('supabase.functions.invoke("manual-call"');
+    expect(portal).toContain('startCloudCall(lead.id)');
     expect(portal).toContain("placeCloudCall(lead)");
     expect(portal).toContain("Cloud Call");
     expect(manualCall).toContain('callerDb.auth.getUser()');

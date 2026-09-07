@@ -24,6 +24,7 @@ import { Phone, PhoneMissed, CheckCircle2, ExternalLink, Clock, MessageSquare, R
 import { SelectField } from "@/components/ui/state-fields";
 import { Checkbox } from "@/components/ui/checkbox";
 import { recordCallDisposition } from "@/lib/callDisposition";
+import { startCloudCall } from "@/lib/startCloudCall";
 import { type CallDispositionData, type DialogCallStatus } from "@/components/admissions/CallDispositionDialog";
 
 const CallDispositionDialog = lazy(() =>
@@ -290,27 +291,17 @@ export default function MissedCalls() {
     setShowDialog(true);
     setCallingNow(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: mc.lead_id, caller_user_id: user.id },
-      });
-      if (error || (data as any)?.error) {
-        let detail = (data as any)?.error || error?.message || "Try again";
-        try {
-          const ctx = (error as any)?.context as Response | undefined;
-          if (ctx) {
-            const raw = await ctx.text().catch(() => "");
-            try { detail = JSON.parse(raw)?.error || raw || detail; } catch { detail = raw || detail; }
-          }
-        } catch { /* ignore */ }
-        toast({ title: "Couldn't start call", description: detail, variant: "destructive" });
+      const result = await startCloudCall(mc.lead_id);
+      if (!result.ok) {
+        toast({ title: "Couldn't start call", description: result.error, variant: "destructive" });
         setShowDialog(false);
         setActiveMc(null);
         return;
       }
-      setActiveCallUuid((data as any)?.call_id || null);
+      setActiveCallUuid(result.callId);
       toast({
         title: "Calling you",
-        description: (data as any)?.message || "Pick up your phone to connect to the lead.",
+        description: result.message,
       });
     } catch (e: any) {
       toast({ title: "Couldn't start call", description: e?.message || "Try again", variant: "destructive" });
