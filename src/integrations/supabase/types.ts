@@ -27173,6 +27173,7 @@ export type Database = {
           lead_id: string | null
           legacy_admission_no: string | null
           legacy_pre_admission_no: string | null
+          login_disabled: boolean
           marksheet_submitted: boolean | null
           medical_ailments: string | null
           middle_name: string | null
@@ -27200,6 +27201,7 @@ export type Database = {
           previous_class: string | null
           previous_school: string | null
           religion: string | null
+          refunded_at: string | null
           rte_student: boolean | null
           school_admission_no: string | null
           school_email: string | null
@@ -27299,6 +27301,7 @@ export type Database = {
           lead_id?: string | null
           legacy_admission_no?: string | null
           legacy_pre_admission_no?: string | null
+          login_disabled?: boolean
           marksheet_submitted?: boolean | null
           medical_ailments?: string | null
           middle_name?: string | null
@@ -27326,6 +27329,7 @@ export type Database = {
           previous_class?: string | null
           previous_school?: string | null
           religion?: string | null
+          refunded_at?: string | null
           rte_student?: boolean | null
           school_admission_no?: string | null
           school_email?: string | null
@@ -27425,6 +27429,7 @@ export type Database = {
           lead_id?: string | null
           legacy_admission_no?: string | null
           legacy_pre_admission_no?: string | null
+          login_disabled?: boolean
           marksheet_submitted?: boolean | null
           medical_ailments?: string | null
           middle_name?: string | null
@@ -27452,6 +27457,7 @@ export type Database = {
           previous_class?: string | null
           previous_school?: string | null
           religion?: string | null
+          refunded_at?: string | null
           rte_student?: boolean | null
           school_admission_no?: string | null
           school_email?: string | null

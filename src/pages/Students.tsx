@@ -31,6 +31,7 @@ interface StudentRow {
   pre_admission_no: string | null;
   status: string;
   archived_at: string | null;
+  refunded_at: string | null;
   phone: string | null;
   photo_url: string | null;
   course_id: string | null;
@@ -283,12 +284,13 @@ const Students = () => {
     // Contact columns are requested only when the viewer may see them. The list
     // renders none of them, so a subject teacher has no reason to receive them —
     // and not fetching beats fetching-then-hiding.
-    const rosterFields = "id, lead_id, name, admission_no, pre_admission_no, status, archived_at, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender";
+    const rosterFields = "id, lead_id, name, admission_no, pre_admission_no, status, archived_at, refunded_at, photo_url, campus_id, course_id, batch_id, session_id, joining_class, joining_academic_year, section, semester, admission_date, dob, gender";
     const contactFields = "phone, student_email, email, father_name, father_phone, mother_name, mother_phone, guardian_name, guardian_phone, address, city, state, pincode";
     const joinFields = "courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
     const selectFields = [rosterFields, canSeeContact ? contactFields : null, joinFields]
       .filter(Boolean).join(", ");
     const fallbackSelectFields = selectFields.replace("section, semester,", "section,");
+    const noRefundedSelectFields = selectFields.replace("archived_at, refunded_at,", "archived_at,");
 
     const runQuery = (fields: string) => {
       let query = supabase
@@ -302,6 +304,11 @@ const Students = () => {
     };
 
     let { data, error } = await runQuery(selectFields);
+    if (error && /refunded_at/i.test(error.message || "")) {
+      const fallback = await runQuery(noRefundedSelectFields);
+      data = fallback.data;
+      error = fallback.error;
+    }
     if (error && /semester/i.test(error.message || "")) {
       const fallback = await runQuery(fallbackSelectFields);
       data = fallback.data;
@@ -725,8 +732,12 @@ const Students = () => {
                     <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{student.campus_name}</span>
                   </div>
                 </div>
-                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.archived_at ? "bg-amber-100 text-amber-800" : statusStyles[student.status] || "bg-muted text-foreground/80"}`}>
-                  {student.archived_at ? "Archived" : student.status.replace("_", " ")}
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${
+                  student.refunded_at ? "bg-destructive/10 text-destructive"
+                    : student.archived_at ? "bg-amber-100 text-amber-800"
+                    : statusStyles[student.status] || "bg-muted text-foreground/80"
+                }`}>
+                  {student.refunded_at ? "Refunded" : student.archived_at ? "Archived" : student.status.replace("_", " ")}
                 </span>
                 <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
               </Link>
