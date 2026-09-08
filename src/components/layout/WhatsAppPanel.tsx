@@ -66,13 +66,19 @@ export function WhatsAppPanel() {
     setNotifications(filtered);
     setLoading(false);
 
+    const unreadInPage = filtered.filter((n) => !n.is_read).length;
+    if (filtered.length < 50) {
+      setUnreadNotifCount(unreadInPage);
+      return;
+    }
+    // 50-row cap hit — pay for an exact unread count only in this rare case.
     const { count } = await supabase
       .from("notifications" as never)
       .select("*", { count: "exact", head: true })
       .eq("user_id", user.id)
       .in("type", ["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"] as never)
       .eq("is_read", false as never);
-    setUnreadNotifCount(count ?? filtered.filter((n) => !n.is_read).length);
+    setUnreadNotifCount(count ?? unreadInPage);
   }, [user?.id, role]);
 
   useEffect(() => {
@@ -95,14 +101,15 @@ export function WhatsAppPanel() {
       }, (payload: { new: Notification }) => {
         const n = payload.new as Notification;
         if (!["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"].includes(n.type)) return;
-        fetchNotifications();
+        setNotifications(prev => [n, ...prev].slice(0, 50));
+        if (!n.is_read) setUnreadNotifCount(prev => prev + 1);
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(notifChannel);
     };
-  }, [user?.id, fetchNotifications, role]);
+  }, [user?.id, role]);
 
   const handleClick = async (notif: Notification) => {
     if (!notif.is_read) {

@@ -11,6 +11,7 @@ describe("LiveCallBar lifecycle guards", () => {
   it("uses a short stale initiated-call display cutoff", () => {
     expect(liveCallBarSource).toContain("UNCONNECTED_RING_DISPLAY_MS = 75 * 1000");
     expect(liveCallBarSource).toContain("LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000");
+    expect(liveCallBarSource).toContain("LIVE_CALL_IDLE_POLL_MS = 30_000");
     expect(liveCallBarSource).not.toContain("7 * 60 * 1000");
   });
 

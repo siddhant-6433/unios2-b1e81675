@@ -293,21 +293,17 @@ export function AppSidebar() {
     // (whatsapp_messages, leads, followups, ai_call_records). Delivery-status
     // bursts were waking every CRM tab and re-running action_badge_counts.
     const tickBadges = () => {
-      if (document.visibilityState === "visible") fetchAdmissionBadges();
+      if (document.visibilityState === "visible") {
+        fetchAdmissionBadges();
+        fetchPendingApprovals();
+      }
     };
     const badgeInterval = setInterval(tickBadges, ACTION_BADGE_POLL_MS);
     document.addEventListener("visibilitychange", tickBadges);
 
-    const approvalsChannel = supabase
-      .channel("approvals-count-sidebar")
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "concessions" }, fetchPendingApprovals)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "offer_letters" }, fetchPendingApprovals)
-      .subscribe();
-
     return () => {
       clearInterval(badgeInterval);
       document.removeEventListener("visibilitychange", tickBadges);
-      supabase.removeChannel(approvalsChannel);
     };
   }, [fetchAdmissionBadges, fetchPendingApprovals]);
 

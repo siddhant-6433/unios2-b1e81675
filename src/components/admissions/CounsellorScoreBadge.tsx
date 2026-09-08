@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Trophy, TrendingUp, TrendingDown, Flame } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchCounsellorLeaderboard } from "@/lib/counsellorLeaderboard";
 
 interface ScoreData {
   total_score: number;
@@ -18,31 +18,21 @@ export function CounsellorScoreBadge() {
 
   useEffect(() => {
     if (!profile?.id || role !== "counsellor") return;
-    (async () => {
-      const { data: allData } = await supabase.rpc("get_counsellor_leaderboard" as any);
+
+    const fetchScore = async () => {
+      const { data: allData } = await fetchCounsellorLeaderboard();
       const data = (allData || []).find((r: any) => r.counsellor_id === profile.id);
       if (data) setScore(data as any);
-    })();
+    };
 
-    // Listen for score changes
-    const channel = supabase
-      .channel("score-badge")
-      .on("postgres_changes" as any, {
-        event: "INSERT",
-        schema: "public",
-        table: "counsellor_score_events",
-        filter: `counsellor_id=eq.${profile.id}`,
-      }, () => {
-        // Refetch score
-        supabase.rpc("get_counsellor_leaderboard" as any)
-          .then(({ data: allData }: any) => {
-            const found = (allData || []).find((r: any) => r.counsellor_id === profile.id);
-            if (found) setScore(found as any);
-          });
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    fetchScore();
+    const tick = () => { if (document.visibilityState === "visible") void fetchScore(); };
+    const interval = setInterval(tick, 5 * 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [profile?.id, role]);
 
   if (!score || role !== "counsellor") return null;

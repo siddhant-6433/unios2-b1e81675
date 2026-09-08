@@ -94,7 +94,7 @@ export function invalidateWhatsAppReplyStateCounts(): void {
 // visible once the popover is open. So the every-page background poll passes
 // includeLeads=false (presence only), and we pay for the leads list on demand.
 // Separate cache slots per flag; dedup + TTL absorb the mount triple-fire.
-const ACTIVE_OVERVIEW_TTL_MS = 60_000;
+const ACTIVE_OVERVIEW_TTL_MS = 5 * 60_000;
 const activeOverviewInflight = new Map<string, Promise<RpcResult>>();
 const activeOverviewCache = new Map<string, { at: number; res: RpcResult }>();
 

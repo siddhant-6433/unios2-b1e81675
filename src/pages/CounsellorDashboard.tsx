@@ -11,6 +11,7 @@ import { Phone, MessageSquare, CalendarCheck, MapPin, UserCheck, Trophy, AlertTr
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
 import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
 import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
+import { fetchCounsellorLeaderboard } from "@/lib/counsellorLeaderboard";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 import { MorningBrief } from "@/components/dashboard/MorningBrief";
 import { IncentiveWidget } from "@/components/dashboard/IncentiveWidget";
@@ -641,7 +642,7 @@ const CounsellorDashboard = () => {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
+      const { data } = await fetchCounsellorLeaderboard();
       if (data) setLeaderboard(data);
     })();
     (async () => {

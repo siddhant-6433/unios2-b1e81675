@@ -2153,8 +2153,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
     };
 
-    const newId = setInterval(tickNew, 8_000);
-    const statusId = setInterval(tickStatus, 15_000);
+    const newId = setInterval(tickNew, 20_000);
+    const statusId = setInterval(tickStatus, 30_000);
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
         void tickNew();

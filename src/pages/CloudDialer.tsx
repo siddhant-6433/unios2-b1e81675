@@ -24,6 +24,7 @@ import { DialerActionRow, type DialerAction } from "@/components/dialer/DialerAc
 import { DialerContextRail, type RailTab } from "@/components/dialer/DialerContextRail";
 import { type QueueLead } from "@/lib/dialerQueue";
 import { getCourseScript, getCourseHighlights, getCourseNudges } from "@/lib/dialerScript";
+import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import {
   Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -1579,19 +1580,23 @@ export default function CloudDialer() {
   useEffect(() => {
     let cancelled = false;
     const fetchMissedCount = async () => {
-      let q = (supabase.from("ai_call_records" as any) as any)
-        .select("id, lead_id, leads!inner(counsellor_id)", { count: "planned", head: true })
-        .eq("needs_followup", true)
-        .is("followup_done_at", null);
-      if (role === "counsellor" && profile?.id) {
-        q = q.eq("leads.counsellor_id", profile.id);
-      }
-      const { count } = await q;
-      if (!cancelled) setMissedCount(count || 0);
+      const { data } = await fetchActionBadgeCounts({
+        p_scope_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
+        p_include_unassigned: true,
+      });
+      if (!cancelled) setMissedCount(Number(data?.ai_needs_followup || 0));
     };
     fetchMissedCount();
-    const id = setInterval(fetchMissedCount, 60_000);
-    return () => { cancelled = true; clearInterval(id); };
+    const tick = () => {
+      if (document.visibilityState === "visible") void fetchMissedCount();
+    };
+    const id = setInterval(tick, ACTION_BADGE_POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [role, profile?.id]);
 
   // ── Render ────────────────────────────────────────────────────────────────

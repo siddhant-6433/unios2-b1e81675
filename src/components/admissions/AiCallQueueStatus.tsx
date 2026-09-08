@@ -73,9 +73,13 @@ export function AiCallQueueStatus() {
 
   useEffect(() => {
     fetchStatus();
-    // Refresh every 20s — cron fires every minute, so this catches state changes within ~1 tick.
-    const id = setInterval(fetchStatus, 20_000);
-    return () => clearInterval(id);
+    const tick = () => { if (document.visibilityState === "visible") void fetchStatus(); };
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   if (loading || !status) {

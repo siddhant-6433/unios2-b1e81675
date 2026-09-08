@@ -111,8 +111,13 @@ export function HotLeadsSidebar({ profileId, isSuperAdmin, isTeamLeader }: Props
 
   useEffect(() => {
     fetchLeads();
-    const id = setInterval(fetchLeads, 30_000);
-    return () => clearInterval(id);
+    const tick = () => { if (document.visibilityState === "visible") void fetchLeads(); };
+    const id = setInterval(tick, 90_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [fetchLeads]);
 
   // Count of "new since last open" — drives the FAB badge + pulse.
