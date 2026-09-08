@@ -8,6 +8,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+import {
+  combineReceiptNotes,
+  courseNameFromRelation,
+  receiptCourseMigrationNote,
+  resolveReceiptCourseName,
+} from "../_shared/receiptCourseMigration.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -507,12 +513,12 @@ Deno.serve(async (req) => {
         allocations, student_id,
         fee_codes:fee_code_id ( name ),
         leads:lead_id (
-          id, name, phone, email, application_id, pre_admission_no, admission_no,
+          id, name, phone, email, application_id, pre_admission_no, admission_no, course_id,
           courses:course_id ( name ),
           campuses:campus_id ( name )
         ),
         students:student_id (
-          id, name, phone, email, admission_no,
+          id, name, phone, email, admission_no, course_id,
           courses:course_id ( name ),
           campuses:campus_id ( name )
         )
@@ -532,7 +538,19 @@ Deno.serve(async (req) => {
     }
 
     const lead: any = lp.leads;
-    const stu: any = lp.students;
+    let stu: any = lp.students;
+    // College receipts are keyed on lead_id, so student_id is often null even
+    // after admission. Resolve the live student (current course) off the lead.
+    if (!stu?.id && lead?.id) {
+      const { data: linkedStu } = await admin
+        .from("students")
+        .select("id, name, phone, email, admission_no, course_id, courses:course_id ( name ), campuses:campus_id ( name )")
+        .eq("lead_id", lead.id)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      stu = Array.isArray(linkedStu) ? linkedStu[0] : linkedStu;
+    }
     // Lead-less (post-admission school) receipt: identity + branding come from
     // the student's own record and its course→institution chain, not a lead.
     const isStudentReceipt = !lead && !!stu;
@@ -552,17 +570,21 @@ Deno.serve(async (req) => {
       app = data || null;
     }
     const firstChoice = (app?.course_selections || [])[0] || {};
-    const courseName = isApp
-      ? firstChoice.course_name ?? lead?.courses?.name ?? null
-      : lead?.courses?.name ?? stu?.courses?.name ?? null;
+    const courseName = resolveReceiptCourseName({
+      studentCourseName: courseNameFromRelation(stu?.courses),
+      leadCourseName: courseNameFromRelation(lead?.courses),
+      applicationCourseName: firstChoice.course_name,
+    });
     const campusName = lead?.campuses?.name ?? stu?.campuses?.name ?? null;
 
     // Institution name (from the course → dept → institution) and the address
     // of that institution's campus. This is what the header prints, so a
     // Greater Noida nursing receipt shows its nursing institute + Greater Noida
     // address, etc. Falls back to campus name / branding address when absent.
-    // A lead-less student resolves the identical chain off its own course.
-    const { data: lh } = isStudentReceipt
+    // Prefer the student when we have one — after a course migration the lead
+    // still points at the enquiry course, but the receipt must follow the
+    // current placement.
+    const { data: lh } = (isStudentReceipt || stu?.id)
       ? await admin.rpc("student_letterhead" as any, { _student_id: stu.id })
       : await admin.rpc("lead_letterhead" as any, { _lead_id: lead?.id });
     const letterhead = Array.isArray(lh) ? lh[0] : lh;
@@ -572,7 +594,7 @@ Deno.serve(async (req) => {
     // student_branding returns a full institution_branding row (campus slug →
     // default fallback); lead_branding returns the receipt-scoped shape. Map
     // either onto the Branding the PDF expects.
-    const { data: branding } = isStudentReceipt
+    const { data: branding } = (isStudentReceipt || stu?.id)
       ? await admin.rpc("student_branding" as any, { _student_id: stu.id })
       : await admin.rpc("lead_branding" as any, { _lead_id: lead?.id, _doc_type: "receipt" });
     const brandingResolved: Branding = {
@@ -615,27 +637,28 @@ Deno.serve(async (req) => {
     if (!isApp) {
       if (lead?.admission_no || stu?.admission_no) rows.push(["Admission No", lead?.admission_no || stu?.admission_no]);
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
-      if (courseName) rows.push(["Course", courseName]);
-      // If this student was transferred/migrated to a new course/session, note
-      // it so the receipt reflects that the placement (and fees) changed.
-      if (stu?.id) {
-        const { data: xfer } = await admin
-          .from("student_audit_log")
-          .select("created_at, metadata")
-          .eq("student_id", stu.id)
-          .eq("event_type", "placement_change")
-          .eq("field_name", "course_id")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (xfer) {
-          const from = (xfer.metadata as { old_label?: string } | null)?.old_label;
-          const to = (xfer.metadata as { new_label?: string } | null)?.new_label;
-          rows.push(["Note",
-            `Student transferred${from && to ? ` from ${from} to ${to}` : ""} on ${fmtDateShort(xfer.created_at)} — fees re-provisioned for the current course/session.`]);
-        }
-      }
     }
+    if (courseName) rows.push(["Course", courseName]);
+    let courseChanges: { created_at: string; old_label?: string | null; new_label?: string | null }[] = [];
+    if (stu?.id) {
+      const { data: xfers } = await admin
+        .from("student_audit_log")
+        .select("created_at, metadata")
+        .eq("student_id", stu.id)
+        .eq("event_type", "placement_change")
+        .eq("field_name", "course_id")
+        .order("created_at", { ascending: true });
+      courseChanges = (xfers || []).map((row: { created_at: string; metadata?: { old_label?: string; new_label?: string } | null }) => ({
+        created_at: row.created_at,
+        old_label: row.metadata?.old_label,
+        new_label: row.metadata?.new_label,
+      }));
+    }
+    const migrationNote = receiptCourseMigrationNote(
+      lp.payment_date || lp.created_at,
+      courseName,
+      courseChanges,
+    );
     // An ad-hoc charge collected at the counter names its actual head
     // (Sports, Transfer Certificate…) instead of the generic "Other Charges".
     const feeHeadName = (lp as { fee_codes?: { name?: string } | null }).fee_codes?.name;
@@ -677,7 +700,8 @@ Deno.serve(async (req) => {
     }
     // Surface any free-form context the operator packed into notes (e.g.
     // "Bank: HDFC · Cheque #1234") so the receipt is self-explanatory.
-    if (lp.notes) rows.push(["Notes", String(lp.notes)]);
+    const notes = combineReceiptNotes(migrationNote, lp.notes ? String(lp.notes) : null);
+    if (notes) rows.push(["Notes", notes]);
 
     const pdfBytes = await buildPdf({
       receiptNo:     lp.receipt_no || "—",
@@ -701,7 +725,7 @@ Deno.serve(async (req) => {
     const path = `receipts/${lead?.id || stu?.id || "unassigned"}/${lp.receipt_no}.pdf`;
     const { error: upErr } = await admin.storage
       .from("application-documents")
-      .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true });
+      .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true, cacheControl: "0" });
     if (upErr) {
       console.error("[receipt] upload error:", upErr.message);
       return new Response(JSON.stringify({ error: upErr.message }), {
@@ -711,7 +735,11 @@ Deno.serve(async (req) => {
     const { data: urlData } = admin.storage.from("application-documents").getPublicUrl(path);
     const receiptUrl = urlData?.publicUrl || path;
 
-    await admin.from("lead_payments").update({ receipt_url: receiptUrl }).eq("id", lp.id);
+    const receiptCourseId = stu?.course_id || lead?.course_id || null;
+    await admin.from("lead_payments").update({
+      receipt_url: receiptUrl,
+      ...(receiptCourseId ? { receipt_course_id: receiptCourseId } : {}),
+    }).eq("id", lp.id);
     if (isApp && resolvedApplicationId) {
       await admin
         .from("applications")
