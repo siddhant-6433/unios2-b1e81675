@@ -13,7 +13,9 @@ import { ApplicationData, DEFAULT_APPLICATION, APPLICANT_EDITABLE_FIELDS, genera
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "@/components/apply/eligibilityRules";
 import { StepProgress } from "@/components/apply/StepProgress";
 import { CourseSelector } from "@/components/apply/CourseSelector";
+import { AbvmuCahetAllotmentStep } from "@/components/apply/AbvmuCahetAllotmentStep";
 import { PersonalDetails } from "@/components/apply/PersonalDetails";
+import { applicationNeedsAbvmuCahetAllotment } from "@/lib/abvmuCahetAllotment";
 import { ParentDetails } from "@/components/apply/ParentDetails";
 import { AcademicDetails } from "@/components/apply/AcademicDetails";
 import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetails";
@@ -2188,6 +2190,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     setApp({
       ...DEFAULT_APPLICATION,
       ...inserted,
+      lead_id: resolvedLeadId || inserted.lead_id || null,
       course_selections: selections,
       address: {},
       father: {},
@@ -2228,7 +2231,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       ? { ...app.completed_sections, [sectionKey]: true }
       : app.completed_sections;
 
-    const flags = [...(app.flags || [])];
+    const flags = [...((updates.flags as string[] | undefined) || app.flags || [])];
     const academic = (updates.academic_details || app.academic_details) as any;
     if (academic?.class_12?.result_status === 'not_declared' || academic?.graduation?.result_status === 'not_declared') {
       if (!flags.includes('result_awaited')) flags.push('result_awaited');
@@ -2242,8 +2245,9 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     const allowed = new Set<string>(APPLICANT_EDITABLE_FIELDS as readonly string[]);
     const saveData: any = { completed_sections: newSections, flags };
     for (const [k, v] of Object.entries(updates as Record<string, unknown>)) {
-      if (allowed.has(k)) saveData[k] = v;
+      if (allowed.has(k) && k !== "flags") saveData[k] = v;
     }
+    saveData.flags = flags;
 
     // Optimistic concurrency: only write if the row hasn't advanced since we
     // loaded it. Guards against a stale snapshot silently overwriting newer
@@ -2816,6 +2820,18 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           onEdit={app.payment_status === "paid" ? () => null : () => setShowCourseSelector(true)}
         />
 
+        {applicationNeedsAbvmuCahetAllotment(app) ? (
+          <Card className="border-border/60 shadow-none">
+            <CardContent className="p-6">
+              <AbvmuCahetAllotmentStep
+                data={app}
+                saving={saving}
+                onComplete={(flags) => saveSection({ flags })}
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <>
         {editUnlocked && editUnlockedUntil && (
           <div className="mb-6 rounded-xl border border-success/25 dark:border-success/60/40 bg-success/5 dark:bg-success/90/20 p-4">
             <div className="flex items-start gap-3">
@@ -2853,6 +2869,8 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
             </div>
           </CardContent>
         </Card>
+          </>
+        )}
 
         <p className="text-center text-[11px] text-muted-foreground/60 mt-6 pb-4">
           By submitting this application you agree to our{" "}

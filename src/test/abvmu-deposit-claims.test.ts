@@ -27,7 +27,7 @@ describe("ABVMU deposit challan claims", () => {
     expect(migration).toContain("settlement_payment_id");
   });
 
-  it("wires applicant upload UI and super-admin inbox", () => {
+  it("wires applicant upload UI, application-form gate, and super-admin inbox", () => {
     expect(tokenPanel).toContain("submit_abvmu_deposit_claim");
     expect(tokenPanel).toContain("Already paid ABVMU deposit");
     expect(tokenPanel).toContain("abvmu_deposit_amount");
