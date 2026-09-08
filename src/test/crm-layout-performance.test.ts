@@ -42,12 +42,11 @@ describe("CRM layout performance guardrails", () => {
 
   it("keeps mounted WhatsApp and TAT banners off heavyweight REST view/count paths", () => {
     // Header WhatsApp chrome is unread notifications only. The ~1.2s
-    // needs-reply aggregate stays on the inbox (and sidebar menu badge),
-    // never on every CRM page via WhatsAppPanel.
+    // needs-reply aggregate stays on the inbox page, never on layout chrome.
     expect(whatsAppPanel).not.toContain("fetchWhatsAppReplyStateCounts(");
     expect(whatsAppPanel).not.toContain("need reply");
     expect(whatsAppPanel).not.toContain('.from("whatsapp_conversations"');
-    expect(appSidebar).toContain("fetchWhatsAppReplyStateCounts(");
+    expect(appSidebar).not.toContain("fetchWhatsAppReplyStateCounts(");
     expect(actionBadgeCountsHelper).toContain('rpc("whatsapp_reply_state_counts"');
     expect(useTatDefaults).toContain('rpc("my_tat_defaults"');
     expect(myTatDefaults).toMatch(/\bSECURITY\s+INVOKER\b/i);
