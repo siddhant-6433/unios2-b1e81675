@@ -7,6 +7,7 @@ const migration = readFileSync(
 );
 const tokenPanel = readFileSync("src/components/applicant/TokenFeePanel.tsx", "utf8");
 const inbox = readFileSync("src/pages/Inbox.tsx", "utf8");
+const depositHook = readFileSync("src/components/finance/useAbvmuDeposit.ts", "utf8");
 
 describe("ABVMU deposit challan claims", () => {
   it("creates claims table and fee provisional credit hooks", () => {
@@ -58,5 +59,19 @@ describe("ABVMU deposit challan claims", () => {
       inbox.lastIndexOf('selected === "offer_waivers"'),
     );
     expect(detailBranch).toContain("{c.course_name && <p className=\"text-sm text-muted-foreground\">{c.course_name}</p>}");
+  });
+
+  it("opens the challan via a public URL link (not an async signed URL)", () => {
+    const start = inbox.lastIndexOf('selected === "abvmu_deposits"');
+    const end = inbox.lastIndexOf('selected === "offer_waivers"');
+    const detailBranch = inbox.slice(start, end);
+    expect(detailBranch).toContain("applicationDocumentUrl(c.proof_path)");
+    expect(detailBranch).toContain('target="_blank"');
+    expect(detailBranch).toContain("View proof");
+    expect(detailBranch).not.toContain("createSignedUrl");
+    expect(inbox).toContain("getPublicUrl");
+    expect(inbox).toContain("selectedRef.current !== cat");
+    expect(depositHook).toContain("getPublicUrl");
+    expect(depositHook).not.toContain("createSignedUrl");
   });
 });

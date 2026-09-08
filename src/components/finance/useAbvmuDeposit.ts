@@ -74,13 +74,14 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
   // approved, not-yet-remitted) claim reserves the deposit amount.
   const directCollectDeduction = openClaim ? depositAmount : 0;
 
-  // Open the uploaded ABVMU challan in a new tab via a short-lived signed URL.
-  const viewChallan = useCallback(async (path: string | null) => {
+  // Open the uploaded ABVMU challan in a new tab. The bucket is public, so a
+  // public URL opens on the click itself (signed URLs await and get popup-blocked).
+  const viewChallan = useCallback((path: string | null) => {
     if (!path) return;
-    const { data } = await supabase.storage
-      .from("application-documents")
-      .createSignedUrl(path, 60 * 30);
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+    const url = /^https?:\/\//i.test(path)
+      ? path
+      : supabase.storage.from("application-documents").getPublicUrl(path).data.publicUrl;
+    if (url) window.open(url, "_blank", "noopener");
   }, []);
 
   // Cashier/finance: settle the approved claim → creates the real receipt payment, then
