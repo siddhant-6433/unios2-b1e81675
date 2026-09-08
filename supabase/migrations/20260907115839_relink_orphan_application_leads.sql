@@ -187,15 +187,31 @@ BEGIN
       END;
     END IF;
 
-    v_lead_id := public.upsert_application_lead(
-      COALESCE(NULLIF(a.full_name, ''), 'Applicant'),
-      a.phone,
-      a.email,
-      v_first_course,
-      v_first_campus,
-      a.application_id,
-      'website'
-    );
+    BEGIN
+      v_lead_id := public.upsert_application_lead(
+        COALESCE(NULLIF(a.full_name, ''), 'Applicant'),
+        a.phone,
+        a.email,
+        v_first_course,
+        v_first_campus,
+        a.application_id,
+        'website'
+      );
+    EXCEPTION WHEN unique_violation THEN
+      -- leads.application_id is unique. APP-26-8041 already sits on another
+      -- lead row, so creating/updating would fail. Attach that existing lead.
+      SELECT id INTO v_lead_id
+      FROM public.leads
+      WHERE application_id = a.application_id
+      LIMIT 1;
+      IF v_lead_id IS NULL THEN
+        SELECT id INTO v_lead_id
+        FROM public.leads
+        WHERE right(regexp_replace(phone, '\D', '', 'g'), 10)
+            = right(regexp_replace(a.phone, '\D', '', 'g'), 10)
+        LIMIT 1;
+      END IF;
+    END;
 
     IF v_lead_id IS NOT NULL THEN
       UPDATE public.applications SET lead_id = v_lead_id WHERE id = a.id AND lead_id IS NULL;

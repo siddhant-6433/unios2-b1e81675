@@ -36,5 +36,7 @@ describe("orphan application lead relink", () => {
     expect(migration).toContain("trg_applications_ensure_lead");
     expect(migration).toContain("public.upsert_application_lead");
     expect(migration).toContain("WHERE lead_id IS NULL");
+    expect(migration).toContain("EXCEPTION WHEN unique_violation THEN");
+    expect(migration).toContain("WHERE application_id = a.application_id");
   });
 });
