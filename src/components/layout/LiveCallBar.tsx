@@ -41,8 +41,7 @@ const STAGE_COLORS: Record<string, string> = {
 
 const LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000;
 const UNCONNECTED_RING_DISPLAY_MS = 75 * 1000;
-const STALE_RECONCILE_SECONDS = 90;
-const STALE_RECONCILE_INTERVAL_MS = 15 * 1000;
+const LIVE_CALL_POLL_MS = 5000;
 
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
@@ -54,7 +53,6 @@ export function LiveCallBar() {
   const tickRef = useRef<number | null>(null);
   const seenInboundRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const lastReconcileRef = useRef(0);
 
   // Admins/TLs see all calls; counsellors see only their own inbound calls
   const isAdmin = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
@@ -66,17 +64,9 @@ export function LiveCallBar() {
     const fetchActiveCalls = async () => {
       const currentTime = Date.now();
 
-      // Best-effort DB cleanup for calls whose Plivo/voice-agent callback never
-      // landed. The UI also has a local display cutoff below, so a failed RPC
-      // cannot leave the navbar stuck.
-      if (currentTime - lastReconcileRef.current > STALE_RECONCILE_INTERVAL_MS) {
-        lastReconcileRef.current = currentTime;
-        void (supabase as any)
-          .rpc("reconcile_stale_live_calls", { p_stale_after_seconds: STALE_RECONCILE_SECONDS })
-          .then(({ error }: any) => {
-            if (error) console.warn("[LiveCallBar] stale call reconcile failed:", error.message);
-          });
-      }
+      // Stale initiated rows are closed by the reconcile-stale-live-calls cron
+      // (one writer), not by every open CRM tab. The UI still has a local
+      // display cutoff below so a delayed cron cannot leave the navbar stuck.
 
       // Pull recent initiated calls. Connected calls can legitimately remain
       // initiated until hangup, so use a wider DB lookback and apply a stricter
@@ -88,7 +78,8 @@ export function LiveCallBar() {
         .eq("status", "initiated")
         .in("call_type", ["manual", "inbound"])
         .gte("created_at", cutoff)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(50);
 
       // Counsellors only see their own calls (inbound routed to them)
       if (!isAdmin && user?.id) {
@@ -215,7 +206,7 @@ export function LiveCallBar() {
     // Skip the 5s poll while the tab is backgrounded; refresh on refocus so a
     // call that landed while hidden shows up immediately.
     const tick = () => { if (document.visibilityState === "visible") fetchActiveCalls(); };
-    const interval = setInterval(tick, 5000);
+    const interval = setInterval(tick, LIVE_CALL_POLL_MS);
     document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(interval);

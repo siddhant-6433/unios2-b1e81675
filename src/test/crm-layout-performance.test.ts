@@ -90,6 +90,20 @@ describe("CRM layout performance guardrails", () => {
     expect(globalActionBar).toContain('addEventListener("visibilitychange"');
     expect(liveCallBar).toContain('document.visibilityState === "visible"');
     expect(liveCallBar).toContain('addEventListener("visibilitychange"');
+    expect(appSidebar).toContain('document.visibilityState === "visible"');
+    expect(whatsAppPanel).toContain('document.visibilityState === "visible"');
+  });
+
+  it("does not subscribe layout chrome to unfiltered hot-table WAL", () => {
+    // Delivery-status updates on whatsapp_messages (up to 500/min) plus lead
+    // writes used to fan out to every CRM tab and re-run action_badge_counts.
+    // Inbox may still listen; the always-mounted shell must not.
+    expect(appSidebar).not.toContain('table: "whatsapp_messages"');
+    expect(appSidebar).not.toContain('table: "leads"');
+    expect(appSidebar).not.toContain('table: "lead_followups"');
+    expect(appSidebar).not.toContain('table: "ai_call_records"');
+    expect(whatsAppPanel).not.toContain("wa-conversations-header");
+    expect(whatsAppPanel).not.toMatch(/table:\s*"whatsapp_messages"/);
   });
 
   it("moves the Counsellor Dashboard activity log off client-side row scans", () => {

@@ -303,19 +303,14 @@ export function AppSidebar() {
     fetchAdmissionBadges();
     fetchPendingApprovals();
 
-    let badgeDebounce: ReturnType<typeof setTimeout> | null = null;
-    const scheduleBadgeRefresh = () => {
-      if (badgeDebounce) clearTimeout(badgeDebounce);
-      badgeDebounce = setTimeout(fetchAdmissionBadges, 1500);
+    // Poll badges instead of unfiltered postgres_changes on hot tables
+    // (whatsapp_messages, leads, followups, ai_call_records). Delivery-status
+    // bursts were waking every CRM tab and re-running action_badge_counts.
+    const tickBadges = () => {
+      if (document.visibilityState === "visible") fetchAdmissionBadges();
     };
-
-    const badgeChannel = supabase
-      .channel("admission-badges-sidebar")
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "whatsapp_messages" }, scheduleBadgeRefresh)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "leads" }, scheduleBadgeRefresh)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "lead_followups" }, scheduleBadgeRefresh)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "ai_call_records" }, scheduleBadgeRefresh)
-      .subscribe();
+    const badgeInterval = setInterval(tickBadges, 60_000);
+    document.addEventListener("visibilitychange", tickBadges);
 
     const approvalsChannel = supabase
       .channel("approvals-count-sidebar")
@@ -324,8 +319,8 @@ export function AppSidebar() {
       .subscribe();
 
     return () => {
-      if (badgeDebounce) clearTimeout(badgeDebounce);
-      supabase.removeChannel(badgeChannel);
+      clearInterval(badgeInterval);
+      document.removeEventListener("visibilitychange", tickBadges);
       supabase.removeChannel(approvalsChannel);
     };
   }, [fetchAdmissionBadges, fetchPendingApprovals]);

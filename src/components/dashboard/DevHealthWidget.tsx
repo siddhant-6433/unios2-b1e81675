@@ -98,8 +98,8 @@ export default function DevHealthWidget() {
       if (error) throw error;
       return data as DevHealth;
     },
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 5 * 60_000,
+    staleTime: 2 * 60_000,
     retry: false,
   });
 
