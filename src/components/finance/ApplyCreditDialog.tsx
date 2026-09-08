@@ -88,7 +88,7 @@ export function ApplyCreditDialog({ open, onOpenChange, studentId, leadId, fees,
             value={feeLedgerId}
             onValueChange={setFeeLedgerId}
             options={[
-              { value: AUTO, label: "Auto (earliest due first)" },
+              { value: AUTO, label: "Auto (earliest due, skips Uniform)" },
               ...payableFees.map(f => ({
                 value: f.id,
                 label: `${f.fee_codes?.code || "Fee"} — ${feeTermLabel(f.term, feeMeta)} — ₹${Number(f.balance).toLocaleString("en-IN")} due`,
