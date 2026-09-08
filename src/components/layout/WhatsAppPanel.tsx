@@ -140,23 +140,20 @@ export function WhatsAppPanel() {
       })
       .subscribe();
 
-    // Debounce realtime refetch — bursts of inbound messages would
-    // otherwise refire fetchUnreplied dozens of times per second across
-    // every open tab.
-    let waDebounce: ReturnType<typeof setTimeout> | null = null;
-    const waChannel = supabase
-      .channel("wa-conversations-header")
-      .on("postgres_changes", {
-        event: "*", schema: "public", table: "whatsapp_messages",
-      }, () => {
-        if (waDebounce) clearTimeout(waDebounce);
-        waDebounce = setTimeout(fetchUnreplied, 1500);
-      })
-      .subscribe();
+    // Needs-reply is a ~1.2s aggregate. Do not subscribe to every
+    // whatsapp_messages change (delivery status alone is hundreds of writes
+    // per minute). New inbound still refreshes via the filtered notification
+    // channel above; this poll covers outbound-only reply-state drift.
+    const tickUnreplied = () => {
+      if (document.visibilityState === "visible") fetchUnreplied();
+    };
+    const unrepliedInterval = setInterval(tickUnreplied, 60_000);
+    document.addEventListener("visibilitychange", tickUnreplied);
 
     return () => {
       supabase.removeChannel(notifChannel);
-      supabase.removeChannel(waChannel);
+      clearInterval(unrepliedInterval);
+      document.removeEventListener("visibilitychange", tickUnreplied);
     };
   }, [user?.id, fetchNotifications, fetchUnreplied, role]);
 

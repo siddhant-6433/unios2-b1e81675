@@ -6,9 +6,10 @@ import { supabase } from "@/integrations/supabase/client";
 // under load, blows past the 8s statement timeout (500 + 57014 in the DB logs).
 //
 // This wrapper collapses those bursts: identical concurrent calls share one
-// in-flight request, and a short TTL absorbs the mount-time triple-fire and
-// back-to-back realtime refetches. It does NOT change the RLS boundary or the
-// SQL — same params still hit the same function.
+// in-flight request, and a 20s TTL absorbs the mount-time triple-fire.
+// Layout chrome no longer refetches on every whatsapp_messages WAL event.
+// It does NOT change the RLS boundary or the SQL — same params still hit
+// the same function.
 //
 // ponytail: in-memory single-tab dedup. Cross-tab load is inherent (each open
 // CRM tab polls independently); upgrade to a shared worker only if that bites.
@@ -16,7 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 type BadgeArgs = { p_scope_counsellor_id: string | null; p_include_unassigned: boolean };
 type RpcResult = { data: any; error: any };
 
-const TTL_MS = 3000;
+const TTL_MS = 20_000;
 const inflight = new Map<string, Promise<RpcResult>>();
 const cache = new Map<string, { at: number; res: RpcResult }>();
 
