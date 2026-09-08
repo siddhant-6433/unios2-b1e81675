@@ -23,7 +23,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchActionBadgeCounts, fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
+import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { canSeePolicyItem, isAcademicPartnerPortalRole, isAdmissionPartnerPortalRole, isPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -228,8 +228,6 @@ export function AppSidebar() {
     permission: "user_management:view",
   });
 
-  // WhatsApp unread count
-  const [waUnread, setWaUnread] = useState(0);
   // New leads count (stage = new_lead)
   const [newLeadCount, setNewLeadCount] = useState(0);
   // Pending approvals for current user role
@@ -264,18 +262,6 @@ export function AppSidebar() {
     setPendingFollowupCount(Number(data?.overdue || 0) + Number(data?.today || 0));
     setMissedCallbackCount(Number(data?.ai_needs_followup || 0));
     setPriorityInterestedCount(Number(data?.priority_interested_total || 0));
-
-    // The WhatsApp badge counts CONVERSATIONS needing a reply — the same
-    // number, computed the same way, as the navbar pill and the inbox's
-    // "Needs Reply" chip. wa_unread counted unread MESSAGES (lead-joined, RLS),
-    // which is why the badge said 18 while the inbox said 40.
-    const { data: waData } = await fetchWhatsAppReplyStateCounts({
-      p_counsellor_id: role === "counsellor" ? profile?.id ?? null : null,
-      p_business_key: null,
-      p_include_outbound_only: false,
-    });
-    const waRow = Array.isArray(waData) ? waData[0] : waData;
-    setWaUnread(Number(waRow?.needs_reply || 0));
   }, [role, profile?.id]);
 
   const fetchPendingApprovals = useCallback(async () => {
@@ -290,7 +276,6 @@ export function AppSidebar() {
 
   useEffect(() => {
     if (isPortalRole(role)) {
-      setWaUnread(0);
       setNewLeadCount(0);
       setTatDefaults(0);
       setPendingFollowupCount(0);
@@ -325,7 +310,7 @@ export function AppSidebar() {
     };
   }, [fetchAdmissionBadges, fetchPendingApprovals]);
 
-  const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
+  const inboxBadge = pendingApprovals + pendingFollowupCount;
   const isAdmissionPortalRole = isAdmissionPartnerPortalRole(role);
   const isPartnerPortalRole = isAcademicPartnerPortalRole(role) || isAdmissionPortalRole;
   const visibleMainSource = isAdmissionPortalRole
@@ -339,7 +324,6 @@ export function AppSidebar() {
     return item;
   });
   const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter(canSee)).map(item => {
-    if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
     if (item.url === "/pending-followups" && pendingFollowupCount > 0) return { ...item, badge: pendingFollowupCount };

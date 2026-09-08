@@ -53,9 +53,9 @@ export async function fetchActionBadgeCounts(args: BadgeArgs): Promise<RpcResult
 }
 
 // whatsapp_reply_state_counts is the same shape of problem: a ~1.2s
-// conversation-level aggregate that the inbox and sidebar menu still call.
-// Header WhatsApp chrome no longer hits it. Same dedup, 60s TTL — reply
-// state moves on the scale of someone typing a reply, not milliseconds.
+// conversation-level aggregate that the inbox still calls. Layout chrome
+// no longer hits it. Same dedup, 60s TTL — reply state moves on the scale
+// of someone typing a reply, not milliseconds.
 type ReplyStateArgs = {
   p_counsellor_id: string | null;
   p_business_key: string | null;

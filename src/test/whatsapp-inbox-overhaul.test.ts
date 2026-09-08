@@ -17,6 +17,7 @@ import {
 
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
 const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "utf8");
+const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
 const sendDialog = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
 const leadTemplatesModule = readFileSync("src/components/leads/whatsappTemplates.ts", "utf8");
 const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
@@ -225,9 +226,10 @@ describe("reply-state counts", () => {
     );
   });
 
-  it("drives inbox chips from the reply-state RPC, not the header icon", () => {
+  it("drives inbox chips from the reply-state RPC, not layout chrome", () => {
     expect(whatsAppPanel).not.toContain("fetchWhatsAppReplyStateCounts");
     expect(whatsAppPanel).not.toContain("need reply");
+    expect(appSidebar).not.toContain("fetchWhatsAppReplyStateCounts");
     expect(inbox).toContain("fetchWhatsAppReplyStateCounts");
     expect(inbox).toContain("Needs Reply");
     expect(inbox).toContain("Awaiting Them");
@@ -243,8 +245,7 @@ describe("reply-state counts", () => {
   });
 
   it("dedups the RPC behind the shared TTL wrapper", () => {
-    // The header mounts on every page; three layout components calling an
-    // ~1.2s aggregate simultaneously is what blew the timeout last time.
+    // Inbox chips call the aggregate; layout chrome must not.
     expect(badgeCounts).toContain("fetchWhatsAppReplyStateCounts");
     expect(badgeCounts).toContain("replyStateInflight");
     expect(inbox).toContain("invalidateWhatsAppReplyStateCounts()");
