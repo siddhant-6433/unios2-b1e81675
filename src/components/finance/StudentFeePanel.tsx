@@ -27,6 +27,11 @@ import { useAbvmuDeposit } from "./useAbvmuDeposit";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { feeTermLabel, feeTermGroupLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
+import {
+  paymentsNeedingCourseRevision,
+  type CourseChange,
+} from "@/lib/receiptCourseMigration";
+import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
 
 interface StudentFeePanelProps {
   student: any;
@@ -54,6 +59,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
+  const [revisingReceipts, setRevisingReceipts] = useState(false);
+  const [courseChanges, setCourseChanges] = useState<CourseChange[]>([]);
   const [pendingWaivers, setPendingWaivers] = useState<Record<string, number>>({});
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
@@ -116,6 +123,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       fetchConsultantFlag();
       fetchCredit();
       fetchPendingWaivers();
+      fetchCourseChanges();
       if (canRefund) fetchRefunds();
     }
   }, [student?.id, student?.lead_id]);
@@ -185,12 +193,64 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     // receipts key on student_id — both live in lead_payments.
     const q = supabase
       .from("lead_payments")
-      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, status, payment_date, created_at, concession_amount")
+      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount")
       .order("created_at", { ascending: false });
     const { data } = student.lead_id
       ? await q.eq("lead_id", student.lead_id)
       : await q.eq("student_id", student.id);
     if (data) setPayments(data);
+  };
+
+  const fetchCourseChanges = async () => {
+    if (!student?.id) return;
+    const { data } = await supabase
+      .from("student_audit_log")
+      .select("created_at, metadata")
+      .eq("student_id", student.id)
+      .eq("event_type", "placement_change")
+      .eq("field_name", "course_id")
+      .order("created_at", { ascending: true });
+    setCourseChanges((data || []).map((row) => {
+      const meta = (row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata))
+        ? row.metadata as { old_label?: string; new_label?: string }
+        : {};
+      return {
+        created_at: row.created_at,
+        old_label: meta.old_label,
+        new_label: meta.new_label,
+      };
+    }));
+  };
+
+  const staleReceipts = useMemo(
+    () => paymentsNeedingCourseRevision(payments, student?.course_id, courseChanges),
+    [payments, student?.course_id, courseChanges],
+  );
+
+  const handleReviseReceipts = async () => {
+    if (!student?.id || staleReceipts.length === 0) return;
+    setRevisingReceipts(true);
+    try {
+      const result = await reviseStudentReceiptPdfs({
+        studentId: student.id,
+        leadId: student.lead_id,
+        paymentIds: staleReceipts.map((p) => p.id),
+      });
+      await fetchPayments();
+      if (result.failed && result.revised === 0) {
+        toast({ title: "Could not revise receipts", description: "The PDF generator did not update the earlier receipts. Try again.", variant: "destructive" });
+        return;
+      }
+      toast({
+        title: result.failed ? "Some receipts were revised" : "Receipts revised",
+        description: result.failed
+          ? `${result.revised} updated; ${result.failed} still need another try.`
+          : `${result.revised} receipt${result.revised === 1 ? "" : "s"} now show the current course.`,
+        variant: result.failed ? "destructive" : "default",
+      });
+    } finally {
+      setRevisingReceipts(false);
+    }
   };
 
   const handleProvision = async (force = false) => {
@@ -524,6 +584,28 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         </div>
       )}
 
+      {staleReceipts.length > 0 && (
+        <div className="rounded-xl border border-warning/20 bg-warning/5 dark:border-warning/60/50 dark:bg-warning/80/20 px-4 py-3 flex flex-wrap items-start gap-2.5">
+          <AlertTriangle className="h-4 w-4 text-warning-foreground shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-warning-foreground dark:text-warning/40">
+              {(() => {
+                const latest = courseChanges[courseChanges.length - 1];
+                const from = latest?.old_label || "the previous course";
+                const to = student?.courses?.name || latest?.new_label || "the current course";
+                return `${staleReceipts.length} receipt${staleReceipts.length === 1 ? "" : "s"} still show the previous course (${from}). Revise them to print ${to} and note that they were migrated.`;
+              })()}
+            </p>
+          </div>
+          {isFinanceRole && (
+            <Button size="sm" variant="outline" onClick={handleReviseReceipts} disabled={revisingReceipts} className="gap-1.5">
+              {revisingReceipts ? <ButtonOrb state="working" /> : <FileText className="h-3.5 w-3.5" />}
+              Revise receipts
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Counter actions. Everything a cashier reaches for stays visible; the
           rare admin operations (provisioning, transfers, migrations) sit behind
           Manage so they can't be hit by accident mid-transaction. */}
@@ -591,6 +673,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               {isFinanceRole && isDaott && !isStethoBatch && (
                 <DropdownMenuItem onClick={handleMigrateToStetho} disabled={migratingStetho} className="gap-2">
                   <RefreshCw className="h-3.5 w-3.5" /> Migrate to Stetho Batch
+                </DropdownMenuItem>
+              )}
+              {isFinanceRole && staleReceipts.length > 0 && (
+                <DropdownMenuItem onClick={handleReviseReceipts} disabled={revisingReceipts} className="gap-2">
+                  <FileText className="h-3.5 w-3.5" /> Revise receipts
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -970,7 +1057,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                         <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(p.amount).toLocaleString("en-IN")}</td>
                         <td className="px-4 py-3">
                           {p.receipt_url ? (
-                            <a href={p.receipt_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                            <a href={`${p.receipt_url}${p.receipt_url.includes("?") ? "&" : "?"}v=${encodeURIComponent(p.receipt_course_id || p.id)}`} target="_blank" rel="noopener" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
                               <FileText className="h-3.5 w-3.5" /> Open
                             </a>
                           ) : (

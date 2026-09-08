@@ -18469,6 +18469,7 @@ export type Database = {
           payment_date: string | null
           payment_mode: string
           proof_url: string | null
+          receipt_course_id: string | null
           receipt_no: string | null
           receipt_url: string | null
           recorded_by: string | null
@@ -18495,6 +18496,7 @@ export type Database = {
           payment_date?: string | null
           payment_mode: string
           proof_url?: string | null
+          receipt_course_id?: string | null
           receipt_no?: string | null
           receipt_url?: string | null
           recorded_by?: string | null
@@ -18521,6 +18523,7 @@ export type Database = {
           payment_date?: string | null
           payment_mode?: string
           proof_url?: string | null
+          receipt_course_id?: string | null
           receipt_no?: string | null
           receipt_url?: string | null
           recorded_by?: string | null
@@ -18536,6 +18539,13 @@ export type Database = {
             columns: ["fee_code_id"]
             isOneToOne: false
             referencedRelation: "fee_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_payments_receipt_course_id_fkey"
+            columns: ["receipt_course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
             referencedColumns: ["id"]
           },
           {

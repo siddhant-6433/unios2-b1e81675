@@ -28,6 +28,17 @@ function collectBillRefs(payload: any): { billIds: string[]; refs: string[] } {
   return { billIds: [...billIds], refs: [...refs] };
 }
 
+// Bank UTR / cheque / UPI ref — skip Zoho bill reference_number (our UUID)
+// and short Zoho payment_number ("1") which are not shareable with a payee.
+function bankTxnRef(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return null;
+  if (/^\d{1,4}$/.test(s)) return null;
+  return s;
+}
+
 // Best-effort extraction of the payment transaction details from an arbitrary
 // Zoho vendor-payment webhook payload (exact shape confirmed via a live test).
 function extractPayment(payload: any): { payment_id: string | null; reference: string | null; date: string | null; mode: string | null } {
@@ -36,7 +47,9 @@ function extractPayment(payload: any): { payment_id: string | null; reference: s
     if (!o || typeof o !== "object") return;
     if (Array.isArray(o)) return o.forEach(visit);
     if (o.payment_id && !out.payment_id) out.payment_id = String(o.payment_id);
-    if ((o.reference_number || o.payment_number) && !out.reference) out.reference = String(o.reference_number || o.payment_number);
+    if (!out.reference) {
+      out.reference = bankTxnRef(o.reference_number) || bankTxnRef(o.payment_number) || bankTxnRef(o.txn_reference);
+    }
     if (o.date && !out.date) out.date = String(o.date);
     if (o.payment_mode && !out.mode) out.mode = String(o.payment_mode);
     for (const v of Object.values(o)) if (v && typeof v === "object") visit(v);
@@ -82,7 +95,14 @@ Deno.serve(async (req) => {
 
     // Student fee refunds share the Bill/vendor-payment lifecycle. Setting
     // status='paid' fires trg_apply_fee_refund_on_paid, which reverses the ledger.
-    const { data: refunds } = await admin.from("fee_refunds").select("id, status").or(orParts.join(","));
+    // Persist the bank UTR so finance can share it with the candidate.
+    const { data: refunds } = await admin.from("fee_refunds").select("id, status, payment_reference").or(orParts.join(","));
+    const refundPayFields: Record<string, unknown> = {
+      payment_mode: pay.mode || "bank_transfer",
+      payment_date: pay.date || new Date().toISOString().slice(0, 10),
+    };
+    if (pay.reference) refundPayFields.payment_reference = pay.reference;
+
     const toRefund = (refunds || []).filter((r: { status: string }) => r.status === "approved").map((r: { id: string }) => r.id);
     if (toRefund.length) {
       await admin.from("fee_refunds").update({
@@ -90,7 +110,17 @@ Deno.serve(async (req) => {
         paid_at: new Date().toISOString(),
         zoho_payment_id: pay.payment_id,
         zoho_synced_at: new Date().toISOString(),
+        ...refundPayFields,
       }).in("id", toRefund);
+    }
+
+    const toBackfill = (refunds || [])
+      .filter((r: { status: string; payment_reference: string | null }) => r.status === "paid" && !r.payment_reference && pay.reference)
+      .map((r: { id: string }) => r.id);
+    if (toBackfill.length) {
+      await admin.from("fee_refunds").update({
+        payment_reference: pay.reference,
+      }).in("id", toBackfill);
     }
 
     return json({ ok: true, marked_paid: toPay.length, refunds_paid: toRefund.length });

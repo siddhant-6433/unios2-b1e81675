@@ -1,6 +1,8 @@
 // Moves already-paid money between fee heads (or head -> unallocated credit)
-// via the transfer_fee_allocation RPC. Reason is mandatory — the RPC itself
-// raises if it's empty, but we also gate the submit button client-side.
+// via the transfer_fee_allocation RPC, which also relocates fee_ledger_payments
+// so the source head does not stay "Paid" against a leftover link / no receipt.
+// Reason is mandatory — the RPC itself raises if it's empty, but we also gate
+// the submit button client-side.
 
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,10 +39,18 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess, feeMeta
 
   const fromOptions = fees.filter(f => Number(f.paid_amount || 0) > 0);
   const fromFee = fromOptions.find(f => f.id === fromId);
-  const toOptions = fees.filter(f => f.id !== fromId);
+  // A fully-paid dest has no room; the RPC would overflow the whole amount to
+  // credit and a later Apply Credit (auto) can put it straight back on the
+  // source — Uniform 2026 is often the next-earliest unpaid head. Destinations
+  // must have a due balance; unallocating is the explicit Credit option.
+  const toOptions = fees.filter(f => f.id !== fromId && Number(f.balance || 0) > 0);
+  const toFee = toOptions.find(f => f.id === toId);
+  const destRoom = toId && toId !== TO_CREDIT ? Number(toFee?.balance || 0) : 0;
+  const amt = Number(amount) || 0;
+  const overflow = toId && toId !== TO_CREDIT && amt > destRoom ? amt - destRoom : 0;
 
-  const canSubmit = fromId && toId && Number(amount) > 0 &&
-    (!fromFee || Number(amount) <= Number(fromFee.paid_amount)) && reason.trim().length > 0;
+  const canSubmit = fromId && toId && amt > 0 &&
+    (!fromFee || amt <= Number(fromFee.paid_amount)) && reason.trim().length > 0;
 
   const reset = () => { setFromId(""); setToId(""); setAmount(""); setReason(""); };
 
@@ -58,9 +68,16 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess, feeMeta
       toast({ title: "Transfer failed", description: error.message, variant: "destructive" });
       return;
     }
+    const moved = Number(data?.moved || amount);
+    const toHead = Number(data?.to_head || 0);
+    const toCredit = Number(data?.to_credit || 0);
     toast({
       title: "Transferred",
-      description: `₹${Number(data?.moved || amount).toLocaleString("en-IN")} moved${data?.to_credit ? " to unallocated credit" : ""}.`,
+      description: toCredit > 0 && toHead > 0
+        ? `₹${toHead.toLocaleString("en-IN")} applied to the destination, ₹${toCredit.toLocaleString("en-IN")} to credit.`
+        : toCredit > 0
+          ? `₹${moved.toLocaleString("en-IN")} moved to unallocated credit.`
+          : `₹${moved.toLocaleString("en-IN")} moved.`,
     });
     reset();
     onOpenChange(false);
@@ -112,6 +129,13 @@ export function TransferFeeDialog({ open, onOpenChange, fees, onSuccess, feeMeta
               disabled={!fromId}
             />
           </FieldShell>
+
+          {overflow > 0 && (
+            <p className="rounded-lg bg-muted/50 px-2.5 py-2 text-[11px] text-muted-foreground">
+              Destination only has ₹{destRoom.toLocaleString("en-IN")} due. ₹{overflow.toLocaleString("en-IN")} will
+              go to unallocated credit — pick Credit if that is the intent.
+            </p>
+          )}
 
           <TextAreaField
             value={reason}

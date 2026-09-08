@@ -99,7 +99,72 @@ describe("applicant fee breakdown", () => {
       fullCourseDiscount: 20_625,
       year1AmountDue: 33_750,
       fullCourseAmountDue: 241_875,
+      uniformFee: 0,
     });
+  });
+
+  it("adds uniform to one-time dues and does not apply the lump-sum waiver to it", () => {
+    const rows = buildApplicantFeeBreakdownRows({
+      yearFeesNet: { year_1: 92_000, year_2: 92_000 },
+      offerWaivers: [],
+      scholarshipAmount: 0,
+      feeStatus: { first_year_fee: 92_000, post_scholarship_year_1: 92_000 },
+    });
+
+    const options = buildApplicantOneTimePaymentOptions({
+      rows,
+      paidTowardCourse: 0,
+      lumpSumPct: 5,
+      multiYearPct: 0,
+      includeMultiYearWaiver: false,
+      uniformFee: 6_000,
+    });
+
+    expect(options.year1Discount).toBe(4_600);
+    expect(options.uniformFee).toBe(6_000);
+    expect(options.year1AmountDue).toBe(93_400);
+    expect(options.fullCourseAmountDue).toBe(180_800);
+  });
+
+  it("keeps an approved ABVMU credit off the 5% base and still adds uniform", () => {
+    const rows = buildApplicantFeeBreakdownRows({
+      yearFeesNet: { year_1: 92_000 },
+      offerWaivers: [],
+      scholarshipAmount: 0,
+      feeStatus: { first_year_fee: 92_000, post_scholarship_year_1: 92_000 },
+    });
+
+    const options = buildApplicantOneTimePaymentOptions({
+      rows,
+      paidTowardCourse: 40_000,
+      lumpSumPct: 5,
+      multiYearPct: 0,
+      includeMultiYearWaiver: false,
+      uniformFee: 6_000,
+    });
+
+    // 5% of 92,000 tuition = 4,600. Uniform 6,000 is added after, not discounted.
+    expect(options.year1Discount).toBe(4_600);
+    expect(options.year1AmountDue).toBe(53_400);
+  });
+
+  it("does not change one-time dues when there is no uniform fee", () => {
+    const rows = buildApplicantFeeBreakdownRows({
+      yearFeesNet: { year_1: 92_000 },
+      offerWaivers: [],
+      scholarshipAmount: 0,
+      feeStatus: { first_year_fee: 92_000, post_scholarship_year_1: 92_000 },
+    });
+
+    const withoutUniform = buildApplicantOneTimePaymentOptions({
+      rows,
+      paidTowardCourse: 0,
+      lumpSumPct: 5,
+      multiYearPct: 0,
+      includeMultiYearWaiver: false,
+    });
+    expect(withoutUniform.year1AmountDue).toBe(87_400);
+    expect(withoutUniform.uniformFee).toBe(0);
   });
 
   it("does not count application or registration fee as course-paid fallback", () => {

@@ -31,6 +31,15 @@ const json = (p: Record<string, unknown>, status = 200) =>
 
 const STAFF_ROLES = new Set(["super_admin", "accountant", "campus_admin"]);
 
+function bankTxnRef(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return null;
+  if (/^\d{1,4}$/.test(s)) return null;
+  return s;
+}
+
 async function fetchProofBytes(url: string): Promise<Uint8Array | null> {
   try {
     const res = await fetch(url);
@@ -192,6 +201,14 @@ Deno.serve(async (req) => {
           zoho_synced_at: new Date().toISOString(), zoho_sync_error: null,
         }).eq("id", refundId);
 
+        // Paid refunds settled in Zoho may already have a bank UTR on the
+        // vendor payment. Pull it so finance can share it with the candidate.
+        if (refund.zoho_payment_id && !refund.payment_reference) {
+          const pay = await zohoApi(token, "GET", `/vendorpayments/${refund.zoho_payment_id}`);
+          const ref = bankTxnRef(pay.data?.vendorpayment?.reference_number);
+          if (ref) await admin.from("fee_refunds").update({ payment_reference: ref }).eq("id", refundId);
+        }
+
         return json({ ok: true, zoho_bill_id: zohoBillId, zoho_bill_number: zohoBillNumber });
       } catch (e) {
         await admin.from("fee_refunds").update({ zoho_sync_error: String(e).slice(0, 500) }).eq("id", refundId);
@@ -208,14 +225,20 @@ Deno.serve(async (req) => {
           payment_mode: "banktransfer",
           amount: Number(refund.total_amount),
           date: refund.paid_at ? new Date(refund.paid_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          reference_number: refund.payment_reference || undefined,
           bills: [{ bill_id: refund.zoho_bill_id, amount_applied: Number(refund.total_amount) }],
         });
         if (!res.ok) throw new Error(`vendor payment failed: ${JSON.stringify(res.data)}`);
-        await admin.from("fee_refunds").update({
-          zoho_payment_id: res.data.vendorpayment?.payment_id,
-          zoho_synced_at: new Date().toISOString(), zoho_sync_error: null,
-        }).eq("id", refundId);
-        return json({ ok: true, zoho_payment_id: res.data.vendorpayment?.payment_id });
+        const vp = res.data.vendorpayment;
+        const ref = bankTxnRef(refund.payment_reference) || bankTxnRef(vp?.reference_number);
+        const patch: Record<string, unknown> = {
+          zoho_payment_id: vp?.payment_id,
+          zoho_synced_at: new Date().toISOString(),
+          zoho_sync_error: null,
+        };
+        if (ref && !refund.payment_reference) patch.payment_reference = ref;
+        await admin.from("fee_refunds").update(patch).eq("id", refundId);
+        return json({ ok: true, zoho_payment_id: vp?.payment_id, payment_reference: ref || refund.payment_reference || null });
       } catch (e) {
         await admin.from("fee_refunds").update({ zoho_sync_error: String(e).slice(0, 500) }).eq("id", refundId);
         return json({ error: String(e) }, 502);

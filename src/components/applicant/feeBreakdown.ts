@@ -31,6 +31,7 @@ export type OneTimePaymentOptions = {
   fullCourseAdditionalDiscount: number;
   year1AmountDue: number;
   fullCourseAmountDue: number;
+  uniformFee: number;
 };
 
 const clampMoney = (value: number) => Math.max(0, Number(value) || 0);
@@ -96,12 +97,15 @@ export function buildApplicantOneTimePaymentOptions({
   lumpSumPct,
   multiYearPct,
   includeMultiYearWaiver,
+  uniformFee = 0,
 }: {
   rows: FeeBreakdownRow[];
   paidTowardCourse: number;
   lumpSumPct: number;
   multiYearPct: number;
   includeMultiYearWaiver: boolean;
+  /** Payable with first-year / full-course one-time payment; excluded from the % waiver. */
+  uniformFee?: number;
 }): OneTimePaymentOptions {
   const year1NetFee = clampMoney(rows.find((row) => row.term === "year_1")?.net || 0);
   const additionalYearsNetFee = rows
@@ -111,6 +115,9 @@ export function buildApplicantOneTimePaymentOptions({
   const paid = clampMoney(paidTowardCourse);
   const lumpPct = clampMoney(lumpSumPct) / 100;
   const additionalPct = (clampMoney(lumpSumPct) + (includeMultiYearWaiver ? clampMoney(multiYearPct) : 0)) / 100;
+  const uniform = clampMoney(uniformFee);
+  // 5% (or configured) one-time waiver applies only to tuition / programme fee,
+  // never to uniform.
   const year1Discount = roundMoney(year1NetFee * lumpPct);
   const fullCourseAdditionalDiscount = roundMoney(additionalYearsNetFee * additionalPct);
   const fullCourseDiscount = year1Discount + fullCourseAdditionalDiscount;
@@ -123,8 +130,9 @@ export function buildApplicantOneTimePaymentOptions({
     year1Discount,
     fullCourseDiscount,
     fullCourseAdditionalDiscount,
-    year1AmountDue: Math.max(0, roundMoney(year1NetFee - paid - year1Discount)),
-    fullCourseAmountDue: Math.max(0, roundMoney(totalNetFee - paid - fullCourseDiscount)),
+    year1AmountDue: Math.max(0, roundMoney(year1NetFee - paid - year1Discount + uniform)),
+    fullCourseAmountDue: Math.max(0, roundMoney(totalNetFee - paid - fullCourseDiscount + uniform)),
+    uniformFee: uniform,
   };
 }
 
