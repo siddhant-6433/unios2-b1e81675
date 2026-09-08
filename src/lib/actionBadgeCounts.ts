@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 // under load, blows past the 8s statement timeout (500 + 57014 in the DB logs).
 //
 // This wrapper collapses those bursts: identical concurrent calls share one
-// in-flight request, and a 20s TTL absorbs the mount-time triple-fire.
+// in-flight request, and a 60s TTL absorbs the mount-time triple-fire.
 // Layout chrome no longer refetches on every whatsapp_messages WAL event.
 // It does NOT change the RLS boundary or the SQL — same params still hit
 // the same function.
@@ -17,12 +17,18 @@ import { supabase } from "@/integrations/supabase/client";
 type BadgeArgs = { p_scope_counsellor_id: string | null; p_include_unassigned: boolean };
 type RpcResult = { data: any; error: any };
 
-const TTL_MS = 20_000;
+const TTL_MS = 60_000;
 const inflight = new Map<string, Promise<RpcResult>>();
 const cache = new Map<string, { at: number; res: RpcResult }>();
 
+async function sessionUserId(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? "anon";
+}
+
 export async function fetchActionBadgeCounts(args: BadgeArgs): Promise<RpcResult> {
-  const key = `${args.p_scope_counsellor_id ?? "all"}|${args.p_include_unassigned}`;
+  const uid = await sessionUserId();
+  const key = `${uid}|${args.p_scope_counsellor_id ?? "all"}|${args.p_include_unassigned}`;
 
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.res;
@@ -47,21 +53,22 @@ export async function fetchActionBadgeCounts(args: BadgeArgs): Promise<RpcResult
 }
 
 // whatsapp_reply_state_counts is the same shape of problem: a ~1.2s
-// conversation-level aggregate that the header calls on every page and the
-// inbox calls on every refresh. Same dedup, longer TTL — reply state moves on
-// the scale of someone typing a reply, not milliseconds.
+// conversation-level aggregate that the inbox and sidebar menu still call.
+// Header WhatsApp chrome no longer hits it. Same dedup, 60s TTL — reply
+// state moves on the scale of someone typing a reply, not milliseconds.
 type ReplyStateArgs = {
   p_counsellor_id: string | null;
   p_business_key: string | null;
   p_include_outbound_only: boolean;
 };
 
-const REPLY_STATE_TTL_MS = 15000;
+const REPLY_STATE_TTL_MS = 60_000;
 const replyStateInflight = new Map<string, Promise<RpcResult>>();
 const replyStateCache = new Map<string, { at: number; res: RpcResult }>();
 
 export async function fetchWhatsAppReplyStateCounts(args: ReplyStateArgs): Promise<RpcResult> {
-  const key = `${args.p_counsellor_id ?? "all"}|${args.p_business_key ?? "all"}|${args.p_include_outbound_only}`;
+  const uid = await sessionUserId();
+  const key = `${uid}|${args.p_counsellor_id ?? "all"}|${args.p_business_key ?? "all"}|${args.p_include_outbound_only}`;
 
   const hit = replyStateCache.get(key);
   if (hit && Date.now() - hit.at < REPLY_STATE_TTL_MS) return hit.res;
@@ -96,12 +103,13 @@ export function invalidateWhatsAppReplyStateCounts(): void {
 // visible once the popover is open. So the every-page background poll passes
 // includeLeads=false (presence only), and we pay for the leads list on demand.
 // Separate cache slots per flag; dedup + TTL absorb the mount triple-fire.
-const ACTIVE_OVERVIEW_TTL_MS = 30000;
+const ACTIVE_OVERVIEW_TTL_MS = 60_000;
 const activeOverviewInflight = new Map<string, Promise<RpcResult>>();
 const activeOverviewCache = new Map<string, { at: number; res: RpcResult }>();
 
 export async function fetchActiveOverview(includeLeads = true): Promise<RpcResult> {
-  const key = includeLeads ? "full" : "presence";
+  const uid = await sessionUserId();
+  const key = `${uid}|${includeLeads ? "full" : "presence"}`;
 
   const hit = activeOverviewCache.get(key);
   if (hit && Date.now() - hit.at < ACTIVE_OVERVIEW_TTL_MS) return hit.res;

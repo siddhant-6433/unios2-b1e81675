@@ -2087,50 +2087,86 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Realtime subscription
+  // Poll instead of unfiltered postgres_changes on whatsapp_messages.
+  // Delivery-status UPDATEs (hundreds/min) were decoded into Realtime WAL for
+  // every open inbox. New inbound still arrives via this short insert window;
+  // ticks on the open thread are refreshed separately below.
   useEffect(() => {
     if (demoMode) return;
-    const channel = supabase
-      .channel("whatsapp-inbox")
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "whatsapp_messages",
-      }, (payload: any) => {
-        const msg = payload.new as Message & { phone: string; direction: string };
-        if (!msg?.id) return;
-        const isInsert = payload.eventType === "INSERT";
-        // Add/update current thread if matching. Meta status webhooks update
-        // existing rows as sent -> delivered -> read -> failed.
-        if (msg.phone === selectedPhone) {
-          setMessages(prev => mergeMessageByIdentity(prev, msg));
-        }
-        // Update conversation list
-        setConversations(prev => {
-          const existing = prev.find(c => c.phone === msg.phone);
-          if (existing) {
-            return prev.map(c =>
-              c.phone === msg.phone
-                ? {
-                    ...c,
-                    ...(isInsert ? {
-                      last_message: msg.content,
-                      last_direction: msg.direction,
-                      last_message_at: msg.created_at,
-                    } : {}),
-                    unread_count: isInsert && msg.direction === "inbound" && msg.phone !== selectedPhone
-                      ? c.unread_count + 1 : c.unread_count,
-                  }
-                : c
-            ).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
-          }
-          return prev;
-        });
-      })
-      .subscribe();
+    let cancelled = false;
+    let since = new Date(Date.now() - 20_000).toISOString();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedPhone]);
+    const applyIncoming = (msg: any, isInsert: boolean) => {
+      if (!msg?.id) return;
+      if (msg.phone === selectedPhone) {
+        setMessages(prev => mergeMessageByIdentity(prev, msg));
+      }
+      setConversations(prev => {
+        const existing = prev.find(c => c.phone === msg.phone);
+        if (existing) {
+          return prev.map(c =>
+            c.phone === msg.phone
+              ? {
+                  ...c,
+                  ...(isInsert ? {
+                    last_message: msg.content,
+                    last_direction: msg.direction,
+                    last_message_at: msg.created_at,
+                  } : {}),
+                  unread_count: isInsert && msg.direction === "inbound" && msg.phone !== selectedPhone
+                    ? c.unread_count + 1 : c.unread_count,
+                }
+              : c
+          ).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+        }
+        return prev;
+      });
+    };
+
+    const tickNew = async () => {
+      if (document.visibilityState !== "visible") return;
+      const from = since;
+      since = new Date().toISOString();
+      const { data } = await supabase
+        .from("whatsapp_messages" as any)
+        .select("id, phone, lead_id, direction, content, created_at, status, status_error, wa_message_id, message_type, template_key, media_url, provider, business_phone_number_id, sender_user_id")
+        .gte("created_at", from)
+        .order("created_at", { ascending: true })
+        .limit(80);
+      if (cancelled || !data?.length) return;
+      for (const msg of data as any[]) applyIncoming(msg, true);
+    };
+
+    const tickStatus = async () => {
+      if (document.visibilityState !== "visible" || !selectedPhone) return;
+      const { data } = await supabase
+        .from("whatsapp_messages" as any)
+        .select("id, phone, direction, content, created_at, status, status_error, wa_message_id, message_type, template_key, media_url")
+        .eq("phone", selectedPhone)
+        .order("created_at", { ascending: false })
+        .limit(80);
+      if (cancelled || !data?.length) return;
+      for (const msg of data as any[]) {
+        setMessages(prev => mergeMessageByIdentity(prev, msg));
+      }
+    };
+
+    const newId = setInterval(tickNew, 8_000);
+    const statusId = setInterval(tickStatus, 15_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void tickNew();
+        void tickStatus();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      clearInterval(newId);
+      clearInterval(statusId);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [selectedPhone, demoMode]);
 
   const uploadReplyMedia = async (file: File): Promise<string | null> => {
     const ext = file.name.split(".").pop() ?? "bin";

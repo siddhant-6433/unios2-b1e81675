@@ -57,17 +57,13 @@ export function HeaderFeedbackWidget() {
     if (!canShow || (isCounsellor && !profile?.id)) return;
 
     fetchFeedback();
-
-    const channel = supabase
-      .channel("header-feedback")
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "feedback_responses",
-      }, () => fetchFeedback())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const tick = () => { if (document.visibilityState === "visible") fetchFeedback(); };
+    const interval = setInterval(tick, 5 * 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [canShow, fetchFeedback, isCounsellor, profile?.id]);
 
   const summary = useMemo(() => {

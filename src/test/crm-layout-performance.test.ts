@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readMigration } from "./readMigration";
 
 const globalActionBar = readFileSync("src/components/layout/GlobalActionBar.tsx", "utf8");
 const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
@@ -40,12 +41,13 @@ describe("CRM layout performance guardrails", () => {
   });
 
   it("keeps mounted WhatsApp and TAT banners off heavyweight REST view/count paths", () => {
-    // The header pill counts CONVERSATIONS waiting on a reply, not unread
-    // messages, so it matches the inbox's "Needs Reply" chip. It still goes
-    // through the shared dedup helper — the aggregate costs ~1.2s, so a mounted
-    // header must not fire it raw on every render.
-    expect(whatsAppPanel).toContain("fetchWhatsAppReplyStateCounts(");
+    // Header WhatsApp chrome is unread notifications only. The ~1.2s
+    // needs-reply aggregate stays on the inbox (and sidebar menu badge),
+    // never on every CRM page via WhatsAppPanel.
+    expect(whatsAppPanel).not.toContain("fetchWhatsAppReplyStateCounts(");
+    expect(whatsAppPanel).not.toContain("need reply");
     expect(whatsAppPanel).not.toContain('.from("whatsapp_conversations"');
+    expect(appSidebar).toContain("fetchWhatsAppReplyStateCounts(");
     expect(actionBadgeCountsHelper).toContain('rpc("whatsapp_reply_state_counts"');
     expect(useTatDefaults).toContain('rpc("my_tat_defaults"');
     expect(myTatDefaults).toMatch(/\bSECURITY\s+INVOKER\b/i);
@@ -85,25 +87,33 @@ describe("CRM layout performance guardrails", () => {
 
   it("skips background polling of the expensive aggregates while the tab is hidden", () => {
     // Every open CRM tab polls independently; a backgrounded tab must not keep
-    // firing the 5-min action-badge aggregate or the 5s active-call poll.
+    // firing the action-badge aggregate or the live-call poll.
     expect(globalActionBar).toContain('document.visibilityState === "visible"');
     expect(globalActionBar).toContain('addEventListener("visibilitychange"');
     expect(liveCallBar).toContain('document.visibilityState === "visible"');
     expect(liveCallBar).toContain('addEventListener("visibilitychange"');
     expect(appSidebar).toContain('document.visibilityState === "visible"');
-    expect(whatsAppPanel).toContain('document.visibilityState === "visible"');
+    expect(liveCallBar).toContain("LIVE_CALL_IDLE_POLL_MS");
+    expect(liveCallBar).toContain("LIVE_CALL_ACTIVE_POLL_MS");
   });
 
   it("does not subscribe layout chrome to unfiltered hot-table WAL", () => {
     // Delivery-status updates on whatsapp_messages (up to 500/min) plus lead
     // writes used to fan out to every CRM tab and re-run action_badge_counts.
-    // Inbox may still listen; the always-mounted shell must not.
     expect(appSidebar).not.toContain('table: "whatsapp_messages"');
     expect(appSidebar).not.toContain('table: "leads"');
     expect(appSidebar).not.toContain('table: "lead_followups"');
     expect(appSidebar).not.toContain('table: "ai_call_records"');
     expect(whatsAppPanel).not.toContain("wa-conversations-header");
     expect(whatsAppPanel).not.toMatch(/table:\s*"whatsapp_messages"/);
+  });
+
+  it("polls the WhatsApp inbox instead of subscribing to every message WAL event", () => {
+    const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
+    expect(inbox).not.toContain('.channel("whatsapp-inbox")');
+    expect(inbox).not.toContain('event: "*"');
+    expect(inbox).toContain("tickNew");
+    expect(inbox).toContain("tickStatus");
   });
 
   it("moves the Counsellor Dashboard activity log off client-side row scans", () => {
@@ -128,5 +138,14 @@ describe("CRM layout performance guardrails", () => {
     );
     expect(pgStatSnapshots).toContain("'30 20 * * *'");
     expect(pgStatSnapshots).not.toMatch(/GRANT\s+SELECT/i);
+  });
+
+  it("drops whatsapp_messages from Realtime and skips empty cron Edge wakeups", () => {
+    const loadRelief = readMigration("reduce_small_compute_load");
+    expect(loadRelief).toContain("ALTER PUBLICATION supabase_realtime DROP TABLE public.whatsapp_messages");
+    expect(loadRelief).toContain("wm.status IS DISTINCT FROM l.status");
+    expect(loadRelief).toContain("fn_invoke_campaign_dispatcher_if_due");
+    expect(loadRelief).toContain("fn_invoke_whatsapp_buffer_if_due");
+    expect(loadRelief).toContain("fn_invoke_easebuzz_fast_if_pending");
   });
 });

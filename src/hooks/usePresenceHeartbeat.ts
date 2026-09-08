@@ -11,6 +11,7 @@ export function usePresenceHeartbeat() {
     if (!user) return;
 
     const ping = () => {
+      if (document.visibilityState !== "visible") return;
       supabase
         .from("profiles")
         .update({ last_seen_at: new Date().toISOString() } as any)
@@ -20,7 +21,11 @@ export function usePresenceHeartbeat() {
 
     ping();
     const id = setInterval(ping, INTERVAL_MS);
-    return () => clearInterval(id);
+    document.addEventListener("visibilitychange", ping);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", ping);
+    };
   }, [user?.id]);
 }
 

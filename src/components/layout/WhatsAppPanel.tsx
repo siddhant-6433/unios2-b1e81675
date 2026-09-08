@@ -1,13 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchWhatsAppReplyStateCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { CheckCheck, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
 interface Notification {
@@ -31,7 +29,6 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// Minimal WhatsApp SVG icon
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -41,18 +38,15 @@ function WhatsAppIcon({ className }: { className?: string }) {
 }
 
 export function WhatsAppPanel() {
-  const { user, role, profile } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
-  const isCounsellor = role === "counsellor";
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
-  const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  const toastIdSet = useRef(new Set<string>());
 
-  // Notifications are already scoped at write time by user_id. Avoid fetching
-  // every counsellor lead ID here; this component is mounted on every CRM page.
+  // Header chrome only shows unread WhatsApp notifications. The needs-reply
+  // conversation aggregate (~1.2s, RLS-heavy) stays on the inbox page.
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return;
     if (isAcademicPartnerPortalRole(role)) return;
@@ -72,8 +66,6 @@ export function WhatsAppPanel() {
     setNotifications(filtered);
     setLoading(false);
 
-    // Count unread with a dedicated head query — deriving it from the 50-row
-    // list above capped the bell badge at "50" even when more were unread.
     const { count } = await supabase
       .from("notifications" as never)
       .select("*", { count: "exact", head: true })
@@ -83,46 +75,15 @@ export function WhatsAppPanel() {
     setUnreadNotifCount(count ?? filtered.filter((n) => !n.is_read).length);
   }, [user?.id, role]);
 
-  // Conversations still waiting on us — the same number, computed the same way,
-  // as the inbox's "Needs Reply" chip.
-  //
-  // This used to read action_badge_counts.wa_unread, which counts unread
-  // MESSAGES under RLS while the inbox lists CONVERSATIONS through an
-  // RLS-bypassing view. That is why the header said 10 and the inbox said 30.
-  // whatsapp_reply_state_counts scopes exactly like the list query, and keys on
-  // reply state rather than read state, so opening a thread without replying no
-  // longer silently drops the count.
-  const fetchUnreplied = useCallback(async () => {
-    if (!role || (isCounsellor && !profile?.id)) return;
-    if (isAcademicPartnerPortalRole(role)) {
-      setUnrepliedCount(0);
-      return;
-    }
-    const { data, error } = await fetchWhatsAppReplyStateCounts({
-      p_counsellor_id: isCounsellor ? profile?.id ?? null : null,
-      p_business_key: null,
-      p_include_outbound_only: false,
-    });
-    if (error) {
-      console.error("[WhatsAppPanel] needs-reply count fetch failed:", error);
-      return;
-    }
-    const row = Array.isArray(data) ? data[0] : data;
-    setUnrepliedCount(Number(row?.needs_reply || 0));
-  }, [role, isCounsellor, profile?.id]);
-
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) {
       setNotifications([]);
       setUnreadNotifCount(0);
-      setUnrepliedCount(0);
       return;
     }
     fetchNotifications();
-    fetchUnreplied();
-  }, [fetchNotifications, fetchUnreplied, role]);
+  }, [fetchNotifications, role]);
 
-  // Realtime: new whatsapp_message notifications
   useEffect(() => {
     if (!user?.id) return;
     if (isAcademicPartnerPortalRole(role)) return;
@@ -134,28 +95,14 @@ export function WhatsAppPanel() {
       }, (payload: { new: Notification }) => {
         const n = payload.new as Notification;
         if (!["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"].includes(n.type)) return;
-        if (toastIdSet.current.has(n.id)) return;
         fetchNotifications();
-        fetchUnreplied();
       })
       .subscribe();
 
-    // Needs-reply is a ~1.2s aggregate. Do not subscribe to every
-    // whatsapp_messages change (delivery status alone is hundreds of writes
-    // per minute). New inbound still refreshes via the filtered notification
-    // channel above; this poll covers outbound-only reply-state drift.
-    const tickUnreplied = () => {
-      if (document.visibilityState === "visible") fetchUnreplied();
-    };
-    const unrepliedInterval = setInterval(tickUnreplied, 60_000);
-    document.addEventListener("visibilitychange", tickUnreplied);
-
     return () => {
       supabase.removeChannel(notifChannel);
-      clearInterval(unrepliedInterval);
-      document.removeEventListener("visibilitychange", tickUnreplied);
     };
-  }, [user?.id, fetchNotifications, fetchUnreplied, role]);
+  }, [user?.id, fetchNotifications, role]);
 
   const handleClick = async (notif: Notification) => {
     if (!notif.is_read) {
@@ -165,14 +112,11 @@ export function WhatsAppPanel() {
     }
     setOpen(false);
 
-    // Deep-link: extract phone from link param, title, or lead lookup
-    // 1. Link already has ?phone= (new webhook format)
     if (notif.link?.includes("phone=")) {
       navigate(notif.link);
       return;
     }
 
-    // 2. Extract phone from title or body: "New WhatsApp from 919917149576"
     const allText = `${notif.title || ""} ${notif.body || ""}`;
     const phoneMatch = allText.match(/(91\d{10})/);
     if (phoneMatch) {
@@ -180,7 +124,6 @@ export function WhatsAppPanel() {
       return;
     }
 
-    // 3. Look up phone via lead_id using whatsapp_messages (not the view, avoids RLS issues)
     if (notif.lead_id) {
       const { data: msg } = await supabase
         .from("whatsapp_messages" as never)
@@ -195,7 +138,6 @@ export function WhatsAppPanel() {
       }
     }
 
-    // 4. Fallback
     navigate(notif.link || "/whatsapp-inbox");
   };
 
@@ -224,135 +166,99 @@ export function WhatsAppPanel() {
     if (removed && !removed.is_read) setUnreadNotifCount(prev => Math.max(0, prev - 1));
   };
 
-  // Only show for roles that use WhatsApp
   if (!role || ["student", "parent", "accountant"].includes(role)) return null;
 
-  const hasNudge = unrepliedCount > 0;
-
   return (
-    <div className="flex items-center gap-1.5">
-      {/* Unreplied count pill */}
-      {hasNudge && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              // The pill counts every WhatsApp number, so land on the same view.
-              onClick={() => navigate("/whatsapp-inbox?inbox=all")}
-              className="hidden md:flex items-center gap-1.5 rounded-xl border border-success/30/60 bg-success/5 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/10 transition-colors cursor-pointer select-none"
-            >
-              <WhatsAppIcon className="h-3.5 w-3.5 shrink-0" />
-              <span>{unrepliedCount} need reply</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs max-w-[220px]">
-            <p className="font-semibold mb-1">🟢 {unrepliedCount} {unrepliedCount === 1 ? "conversation" : "conversations"} waiting on you</p>
-            <p className="leading-snug text-muted-foreground">These leads sent the last message and nobody has replied. Respond quickly — fast replies significantly improve conversion rates.</p>
-            <p className="mt-1.5 font-medium text-success">Click to open WhatsApp Inbox →</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
-
-      {/* WhatsApp notifications popover */}
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-success hover:text-success hover:bg-success/5 relative">
-            <WhatsAppIcon className="h-[18px] w-[18px]" />
-            {unrepliedCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-success/50 text-[9px] font-bold text-white px-1 ring-2 ring-card">
-                {unrepliedCount > 99 ? "99+" : unrepliedCount}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-success hover:text-success hover:bg-success/5 relative">
+          <WhatsAppIcon className="h-[18px] w-[18px]" />
+          {unreadNotifCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-success/50 text-[9px] font-bold text-white px-1 ring-2 ring-card">
+              {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[380px] p-0" sideOffset={8}>
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-2">
+            <WhatsAppIcon className="h-4 w-4 text-success" />
+            <h3 className="text-sm font-semibold text-foreground">WhatsApp</h3>
+            {unreadNotifCount > 0 && (
+              <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
+                {unreadNotifCount} unread
               </span>
             )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-[380px] p-0" sideOffset={8}>
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <div className="flex items-center gap-2">
-              <WhatsAppIcon className="h-4 w-4 text-success" />
-              <h3 className="text-sm font-semibold text-foreground">WhatsApp</h3>
-              {unrepliedCount > 0 && (
-                <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
-                  {unrepliedCount} unreplied
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {unreadNotifCount > 0 && (
-                <button onClick={markAllRead} className="flex items-center gap-1 text-xs text-primary hover:underline">
-                  <CheckCheck className="h-3 w-3" />
-                  Mark all read
-                </button>
-              )}
-              <button
-                onClick={() => { setOpen(false); navigate("/whatsapp-inbox"); }}
-                className="text-xs text-success hover:underline font-medium"
-              >
-                Open Inbox →
+          </div>
+          <div className="flex items-center gap-2">
+            {unreadNotifCount > 0 && (
+              <button onClick={markAllRead} className="flex items-center gap-1 text-xs text-primary hover:underline">
+                <CheckCheck className="h-3 w-3" />
+                Mark all read
               </button>
-            </div>
-          </div>
-
-          {unrepliedCount > 0 && (
-            <div className="border-b border-success/10 bg-success/5 px-4 py-2.5 flex items-center gap-2">
-              <WhatsAppIcon className="h-3.5 w-3.5 text-success shrink-0" />
-              <p className="text-xs text-success-foreground">
-                <strong>{unrepliedCount}</strong> conversation{unrepliedCount !== 1 ? "s" : ""} waiting for reply — respond quickly to improve conversions.
-              </p>
-            </div>
-          )}
-
-          <div className="max-h-[360px] overflow-y-auto">
-            {loading && notifications.length === 0 ? (
-              <div className="flex h-24 items-center justify-center">
-                <ButtonOrb state="connecting" />
-              </div>
-            ) : notifications.length === 0 ? (
-              <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-                No WhatsApp notifications
-              </div>
-            ) : (
-              notifications.map(notif => (
-                <div
-                  key={notif.id}
-                  className={`group relative flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${!notif.is_read ? "bg-success/50/[0.03]" : ""}`}
-                  onClick={() => handleClick(notif)}
-                >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-success/5 text-success">
-                    <WhatsAppIcon className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className={`text-sm leading-tight ${!notif.is_read ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>
-                        {notif.title}
-                      </p>
-                      {!notif.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-success/50" />}
-                    </div>
-                    {notif.body && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{notif.body}</p>}
-                    <p className="mt-1 text-[10px] text-muted-foreground/70">{timeAgo(notif.created_at)}</p>
-                  </div>
-                  <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    {!notif.is_read && (
-                      <button
-                        onClick={(e) => markNotificationRead(e, notif)}
-                        className="rounded-md p-1 text-muted-foreground hover:bg-success/10 hover:text-success"
-                        title="Mark read"
-                      >
-                        <CheckCheck className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <button
-                      onClick={(e) => deleteNotif(e, notif.id)}
-                      className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      title="Delete notification"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))
             )}
+            <button
+              onClick={() => { setOpen(false); navigate("/whatsapp-inbox"); }}
+              className="text-xs text-success hover:underline font-medium"
+            >
+              Open Inbox →
+            </button>
           </div>
-        </PopoverContent>
-      </Popover>
-    </div>
+        </div>
+
+        <div className="max-h-[360px] overflow-y-auto">
+          {loading && notifications.length === 0 ? (
+            <div className="flex h-24 items-center justify-center">
+              <ButtonOrb state="connecting" />
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
+              No WhatsApp notifications
+            </div>
+          ) : (
+            notifications.map(notif => (
+              <div
+                key={notif.id}
+                className={`group relative flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border/30 cursor-pointer ${!notif.is_read ? "bg-success/50/[0.03]" : ""}`}
+                onClick={() => handleClick(notif)}
+              >
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-success/5 text-success">
+                  <WhatsAppIcon className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={`text-sm leading-tight ${!notif.is_read ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>
+                      {notif.title}
+                    </p>
+                    {!notif.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-success/50" />}
+                  </div>
+                  {notif.body && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{notif.body}</p>}
+                  <p className="mt-1 text-[10px] text-muted-foreground/70">{timeAgo(notif.created_at)}</p>
+                </div>
+                <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  {!notif.is_read && (
+                    <button
+                      onClick={(e) => markNotificationRead(e, notif)}
+                      className="rounded-md p-1 text-muted-foreground hover:bg-success/10 hover:text-success"
+                      title="Mark read"
+                    >
+                      <CheckCheck className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => deleteNotif(e, notif.id)}
+                    className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    title="Delete notification"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

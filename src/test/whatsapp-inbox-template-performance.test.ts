@@ -88,9 +88,10 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain('title="Delivered"');
     expect(inbox).toContain('title="Read"');
     expect(inbox).toContain('title="Failed by Meta"');
-    expect(inbox).toContain('event: "*"');
-    expect(inbox).toContain("payload.eventType");
-    expect(inbox).toContain("sent -> delivered -> read -> failed");
+    expect(inbox).not.toContain('event: "*"');
+    expect(inbox).not.toContain("payload.eventType");
+    expect(inbox).toContain("tickStatus");
+    expect(inbox).toContain("tickNew");
     expect(whatsappSend).toContain("business_phone_number_id");
   });
 
@@ -171,8 +172,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(whatsappAiReply).toContain("full year-wise programme fees are published here: ${FEE_STRUCTURE_URL}");
     expect(whatsappAiReply).toContain("verifiedAdmissionsContext");
     expect(whatsappCopilotAssist).toContain("always include the canonical fee page: https://nimt.ac.in/admissions/fees/");
-    expect(inbox).toContain("Detailed year-wise fees are published here");
-    expect(inbox).toContain("https://nimt.ac.in/admissions/fees/");
+    // Canonical fee copy lives in the edge functions, not counsellor inbox chrome.
     expect(inbox).not.toContain("Contact admissions for latest fee");
   });
 

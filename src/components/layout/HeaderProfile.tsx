@@ -31,15 +31,13 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
   useEffect(() => {
     if (!profileId) return;
     fetchData();
-
-    const channel = supabase
-      .channel("header-score")
-      .on("postgres_changes" as any, {
-        event: "INSERT", schema: "public", table: "counsellor_score_events",
-      }, () => fetchData())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const tick = () => { if (document.visibilityState === "visible") fetchData(); };
+    const interval = setInterval(tick, 5 * 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [profileId]);
 
   // Close rank popover on outside click
