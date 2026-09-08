@@ -29,6 +29,12 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(staleLiveCallCronMigration).toContain("END;\n$do$;");
   });
 
+  it("revokes authenticated EXECUTE on the leftover client reconcile RPC", () => {
+    const revoke = readMigration("revoke_client_stale_live_call_reconcile");
+    expect(revoke).toContain("REVOKE ALL ON FUNCTION public.reconcile_stale_live_calls(integer) FROM PUBLIC, anon, authenticated");
+    expect(liveCallBarSource).not.toContain('rpc("reconcile_stale_live_calls"');
+  });
+
   it("closes live-transfer marker rows when the voice stream ends", () => {
     expect(voiceAgentSource).toContain("closeLiveTransferMarker");
     expect(voiceAgentSource).toContain('bridgeCallUuids.add(`${callCtx.plivoCallUuid}-bridge`)');

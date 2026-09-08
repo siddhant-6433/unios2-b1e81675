@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readMigration } from "./readMigration";
 
@@ -75,5 +76,14 @@ describe("WhatsApp status-queue drain", () => {
     expect(statusBatch).toContain("DEFAULT 80");
     expect(statusBatch).toContain("process_whatsapp_status_batch(80)");
     expect(statusBatch).not.toMatch(/Bearer [A-Za-z0-9._-]{20,}/);
+  });
+});
+
+describe("automation engine concurrency probe", () => {
+  it("does not COUNT(*) automation_rule_executions on every invoke", () => {
+    const engine = readFileSync("supabase/functions/automation-engine/index.ts", "utf8");
+    expect(engine).toContain('.select("id")');
+    expect(engine).toContain(".limit(MAX_CONCURRENT)");
+    expect(engine).not.toContain('count: "exact"');
   });
 });
