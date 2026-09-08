@@ -256,6 +256,13 @@ const fmtTime = (s: string | null | undefined) => {
 
 const formatBadgeCount = (n: number) => n > 99 ? "99+" : String(n);
 
+/** application-documents is a public bucket. Public URLs open on the click itself; signed URLs await first and get popup-blocked. */
+function applicationDocumentUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  return supabase.storage.from("application-documents").getPublicUrl(path).data.publicUrl || null;
+}
+
 const ADMISSIONS_ROLES = [
   "super_admin", "campus_admin", "principal", "admission_head", "counsellor", "data_entry",
 ];
@@ -271,6 +278,9 @@ export default function Inbox() {
   const [searchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<CategoryId | null>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const loadGenRef = useRef(0);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
   const [loading, setLoading] = useState(false);
@@ -427,8 +437,10 @@ export default function Inbox() {
   const totalVisibleCount = visibleCategories.reduce((sum, c) => sum + categoryDisplayCount(c), 0);
 
   const commitItems = useCallback((cat: CategoryId, nextItems: InboxItem[]) => {
-    setItems(nextItems);
     setCounts((prev) => prev[cat] === nextItems.length ? prev : { ...prev, [cat]: nextItems.length });
+    // A slower category (e.g. offer waivers) must not overwrite the list after the user switched.
+    if (selectedRef.current !== cat) return;
+    setItems(nextItems);
   }, []);
 
   // ── Counts ────────────────────────────────────────────────────────────────
@@ -592,6 +604,7 @@ export default function Inbox() {
   // ── Item loading ──────────────────────────────────────────────────────────
 
   const loadItems = useCallback(async (cat: CategoryId, keepSelection?: boolean) => {
+    const gen = ++loadGenRef.current;
     setLoading(true);
     if (!keepSelection) {
       setSelectedItem(null);
@@ -782,7 +795,7 @@ export default function Inbox() {
         const nextItems = Array.from(groupMap.values());
         // Store flat count for badge (total pending waivers, not groups)
         setCounts((prev) => prev[cat] === flatWaivers.length ? prev : { ...prev, [cat]: flatWaivers.length });
-        setItems(nextItems);
+        if (selectedRef.current === cat) setItems(nextItems);
       } else if (cat === "offer_approvals") {
         // offer_letters has course_id → courses FK; join directly
         const { data, error } = await supabase
@@ -1102,10 +1115,11 @@ export default function Inbox() {
         commitItems(cat, nextItems);
       }
     } catch (e: any) {
+      if (gen !== loadGenRef.current) return;
       toast({ title: "Failed to load items", description: e.message, variant: "destructive" });
       setItems([]);
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [toast, commitItems]);
 
@@ -1535,7 +1549,7 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{c.lead_name}</p>
               <p className="text-xs text-muted-foreground truncate">{c.course_name || "—"}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                ABVMU deposit · ₹{Number(c.amount).toLocaleString("en-IN")}
+                ABVMU deposit · {fmtINR(Number(c.amount))}
               </p>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
@@ -1808,6 +1822,7 @@ export default function Inbox() {
 
     if (selected === "abvmu_deposits") {
       const c = selectedItem as AbvmuDepositItem;
+      const proofUrl = applicationDocumentUrl(c.proof_path);
       return (
         <div className="p-5 space-y-5">
           <div>
@@ -1816,28 +1831,25 @@ export default function Inbox() {
             <p className="text-sm text-muted-foreground">ABVMU deposit challan claim</p>
           </div>
           <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Amount" value={`₹${Number(c.amount).toLocaleString("en-IN")}`} highlight />
+            <Row label="Amount" value={fmtINR(Number(c.amount))} highlight />
             <Row label="Challan no." value={c.challan_number || "—"} />
             <Row label="Challan date" value={c.challan_date || "—"} />
             <Row label="Submitted" value={fmtDate(c.submitted_at)} />
             <Row label="Notes" value={c.notes || "—"} />
-            <Row label="Proof file" value={c.proof_file_name || c.proof_path} />
+            <Row label="Proof file" value={c.proof_file_name || c.proof_path || "—"} />
           </div>
           <div className="flex flex-col gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={async () => {
-                const { data } = await supabase.storage
-                  .from("application-documents")
-                  .createSignedUrl(c.proof_path, 60 * 30);
-                if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
-                else toast({ title: "Could not open proof", variant: "destructive" });
-              }}
-            >
-              <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View proof
-            </Button>
+            {proofUrl ? (
+              <Button size="sm" variant="outline" className="w-full" asChild>
+                <a href={proofUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View proof
+                </a>
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" className="w-full" disabled>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> View proof
+              </Button>
+            )}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
