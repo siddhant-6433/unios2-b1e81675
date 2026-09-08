@@ -225,9 +225,9 @@ describe("reply-state counts", () => {
     );
   });
 
-  it("drives both the header pill and the inbox chips from that one RPC", () => {
-    expect(whatsAppPanel).toContain("fetchWhatsAppReplyStateCounts");
-    expect(whatsAppPanel).toContain("need reply");
+  it("drives inbox chips from the reply-state RPC, not the header icon", () => {
+    expect(whatsAppPanel).not.toContain("fetchWhatsAppReplyStateCounts");
+    expect(whatsAppPanel).not.toContain("need reply");
     expect(inbox).toContain("fetchWhatsAppReplyStateCounts");
     expect(inbox).toContain("Needs Reply");
     expect(inbox).toContain("Awaiting Them");

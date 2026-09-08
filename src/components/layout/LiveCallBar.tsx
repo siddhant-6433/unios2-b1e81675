@@ -41,7 +41,8 @@ const STAGE_COLORS: Record<string, string> = {
 
 const LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000;
 const UNCONNECTED_RING_DISPLAY_MS = 75 * 1000;
-const LIVE_CALL_POLL_MS = 5000;
+const LIVE_CALL_IDLE_POLL_MS = 15_000;
+const LIVE_CALL_ACTIVE_POLL_MS = 5_000;
 
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
@@ -53,6 +54,7 @@ export function LiveCallBar() {
   const tickRef = useRef<number | null>(null);
   const seenInboundRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pollDelayRef = useRef(LIVE_CALL_IDLE_POLL_MS);
 
   // Admins/TLs see all calls; counsellors see only their own inbound calls
   const isAdmin = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
@@ -89,6 +91,7 @@ export function LiveCallBar() {
       const { data: records } = await query;
 
       if (!records?.length) {
+        pollDelayRef.current = LIVE_CALL_IDLE_POLL_MS;
         setCalls([]);
         return;
       }
@@ -111,6 +114,7 @@ export function LiveCallBar() {
       });
 
       if (!activeRecords.length) {
+        pollDelayRef.current = LIVE_CALL_IDLE_POLL_MS;
         setCalls([]);
         return;
       }
@@ -169,6 +173,7 @@ export function LiveCallBar() {
         };
       });
 
+      pollDelayRef.current = mapped.length > 0 ? LIVE_CALL_ACTIVE_POLL_MS : LIVE_CALL_IDLE_POLL_MS;
       setCalls(mapped);
 
       // Alert for NEW inbound calls (ring + browser notification)
@@ -202,15 +207,28 @@ export function LiveCallBar() {
       }
     };
 
-    fetchActiveCalls();
-    // Skip the 5s poll while the tab is backgrounded; refresh on refocus so a
-    // call that landed while hidden shows up immediately.
-    const tick = () => { if (document.visibilityState === "visible") fetchActiveCalls(); };
-    const interval = setInterval(tick, LIVE_CALL_POLL_MS);
-    document.addEventListener("visibilitychange", tick);
+    // Idle tabs poll slowly; drop to 5s only while a live call is showing so
+    // inbound ring still feels immediate without 12 queries/min from every CRM tab.
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      if (stopped) return;
+      const run = document.visibilityState === "visible"
+        ? fetchActiveCalls()
+        : Promise.resolve();
+      void Promise.resolve(run).finally(() => {
+        if (!stopped) timer = setTimeout(tick, pollDelayRef.current);
+      });
+    };
+    tick();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void fetchActiveCalls();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", tick);
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (audioRef.current) { audioRef.current.pause(); }
     };
   }, [canView, isAdmin, user?.id]);

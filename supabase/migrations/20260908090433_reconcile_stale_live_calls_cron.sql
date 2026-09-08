@@ -39,7 +39,7 @@ DO $do$
 BEGIN
   PERFORM cron.unschedule('reconcile-stale-live-calls')
     WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'reconcile-stale-live-calls');
-END
+END;
 $do$;
 
 SELECT cron.schedule(

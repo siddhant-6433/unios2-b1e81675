@@ -309,7 +309,7 @@ export function AppSidebar() {
     const tickBadges = () => {
       if (document.visibilityState === "visible") fetchAdmissionBadges();
     };
-    const badgeInterval = setInterval(tickBadges, 60_000);
+    const badgeInterval = setInterval(tickBadges, 120_000);
     document.addEventListener("visibilitychange", tickBadges);
 
     const approvalsChannel = supabase

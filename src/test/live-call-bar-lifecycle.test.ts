@@ -1,13 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readMigration } from "./readMigration";
 
 const liveCallBarSource = readFileSync("src/components/layout/LiveCallBar.tsx", "utf8");
 const voiceAgentSource = readFileSync("voice-agent/server.ts", "utf8");
 const staleLiveCallMigration = readFileSync("supabase/migrations/20260618194000_reconcile_stale_live_calls.sql", "utf8");
-const staleLiveCallCronMigration = readFileSync(
-  "supabase/migrations/20260908143000_reconcile_stale_live_calls_cron.sql",
-  "utf8",
-);
+const staleLiveCallCronMigration = readMigration("reconcile_stale_live_calls_cron");
 
 describe("LiveCallBar lifecycle guards", () => {
   it("uses a short stale initiated-call display cutoff", () => {
@@ -27,6 +25,7 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(staleLiveCallCronMigration).toContain("cron.schedule(");
     expect(staleLiveCallCronMigration).toContain("'reconcile-stale-live-calls'");
     expect(staleLiveCallCronMigration).toContain("REVOKE ALL ON FUNCTION public.reconcile_stale_live_calls_cron(integer) FROM PUBLIC, anon, authenticated");
+    expect(staleLiveCallCronMigration).toContain("END;\n$do$;");
   });
 
   it("closes live-transfer marker rows when the voice stream ends", () => {
