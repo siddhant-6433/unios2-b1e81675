@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { BankCopyPopover } from "@/components/bank/BankCopyPopover";
-import { CheckCircle, XCircle, IndianRupee, Building2, Wallet, Upload } from "lucide-react";
+import { CheckCircle, XCircle, IndianRupee, Building2, Wallet, Upload, Copy } from "lucide-react";
 
 type RefundRow = {
   id: string;
@@ -63,6 +63,18 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "proof";
+
+function refundPaidDate(r: RefundRow) {
+  const raw = r.payment_date || r.paid_at;
+  return raw ? new Date(raw).toLocaleDateString("en-IN") : "";
+}
+
+/** WhatsApp-ready proof line the accountant can paste to the candidate. */
+function refundUtrShareText(r: RefundRow) {
+  const amount = `₹${Number(r.total_amount).toLocaleString("en-IN")}`;
+  const date = refundPaidDate(r);
+  return `Refund of ${amount} has been processed${date ? ` on ${date}` : ""}. UTR: ${r.payment_reference}.`;
+}
 
 export default function Refunds({ embedded = false }: { embedded?: boolean }) {
   const { role, hasPermission } = useAuth();
@@ -203,8 +215,13 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
                       <td className="px-3 py-3 text-[11px] text-muted-foreground">
                         <div>Created {new Date(r.created_at).toLocaleDateString("en-IN")}</div>
                         {r.approved_at && <div>Approved {new Date(r.approved_at).toLocaleDateString("en-IN")}</div>}
-                        {r.paid_at && <div>Paid {new Date(r.payment_date || r.paid_at).toLocaleDateString("en-IN")}</div>}
-                        {r.payment_mode && <div>{MODE_LABEL[r.payment_mode] || r.payment_mode}{r.payment_reference ? ` · ${r.payment_reference}` : ""}</div>}
+                        {r.paid_at && <div>Paid {refundPaidDate(r)}</div>}
+                        {r.status === "paid" && (
+                          r.payment_reference
+                            ? <RefundUtrShare refund={r} />
+                            : <div className="text-[10px] text-amber-700 dark:text-amber-400">No UTR — add details to share with the candidate</div>
+                        )}
+                        {r.payment_mode && <div>{MODE_LABEL[r.payment_mode] || r.payment_mode}</div>}
                         {r.payment_proof_url && (
                           <a href={r.payment_proof_url} target="_blank" rel="noopener" className="text-primary hover:underline">Proof</a>
                         )}
@@ -249,6 +266,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
                           )}
                           {r.status === "paid" && (
                             <>
+                              {r.payment_reference && <RefundUtrShare refund={r} asButton />}
                               {canPay && (
                                 <Button size="sm" variant="outline" className="gap-1 h-7 text-xs" onClick={() => setPayTarget(r)}>
                                   <Upload className="h-3 w-3" /> {r.payment_reference || r.payment_proof_url ? "Update details" : "Add details"}
@@ -286,6 +304,38 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
         />
       )}
     </div>
+  );
+}
+
+function RefundUtrShare({ refund, asButton = false }: { refund: RefundRow; asButton?: boolean }) {
+  const { toast } = useToast();
+  const utr = refund.payment_reference || "";
+  const copy = async () => {
+    const text = refundUtrShareText(refund);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "UTR copied", description: "Share this with the candidate as proof the refund was processed." });
+    } catch {
+      toast({ title: "Copy failed", description: utr, variant: "destructive" });
+    }
+  };
+  if (asButton) {
+    return (
+      <Button size="sm" variant="ghost" className="gap-1 h-7 text-xs" onClick={copy} title="Copy UTR to share with the candidate">
+        <Copy className="h-3 w-3" /> Copy UTR
+      </Button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-md bg-success/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-success hover:bg-success/20"
+      title="Copy UTR to share with the candidate"
+    >
+      <Copy className="h-3 w-3 shrink-0" />
+      <span className="truncate">UTR {utr}</span>
+    </button>
   );
 }
 
