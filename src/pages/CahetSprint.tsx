@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { CahetRegisterDialog, type CahetRegisterTarget } from "@/components/leads/CahetRegisterDialog";
 import {
+  CAHET_SPRINT_OPEN,
   effectiveCahetDeadline,
   effectiveCahetDeadlineLabel,
 } from "@/lib/deadlineRollover";
@@ -208,6 +209,10 @@ const CahetSprint = () => {
   // PostgREST caps RPC result sets (~1000 rows). Page through cahet_sprint_queue
   // so "Save as list" can include the full BPT/BMRIT pool (pool can be 1.4k+).
   const fetchAll = useCallback(async () => {
+    if (!CAHET_SPRINT_OPEN) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const counsellorParam = scope === "mine" ? profileId : null;
     const PAGE = 1000;
@@ -615,6 +620,21 @@ const CahetSprint = () => {
   }, [selectedRow, moveSelection, placeCall, skipRow, registerFor, activeCall, cancelCall, markDisposition]);
 
   // ── Render ──────────────────────────────────────────────────────────────
+  if (!CAHET_SPRINT_OPEN) {
+    return (
+      <div className="space-y-4">
+        <Card className="border-border bg-muted/30">
+          <CardContent className="p-4">
+            <div className="font-semibold text-foreground">CAHET sprint has ended</div>
+            <p className="text-sm text-muted-foreground mt-1">
+              The counselling registration sprint closed on {effectiveCahetDeadlineLabel()}. Direct links still open this page, but the live queue and stats RPCs no longer run.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const deadlineIso = stats ? effectiveCahetDeadline(stats.deadline_at) : null;
   const deadlineLabel = effectiveCahetDeadlineLabel();
   const days = deadlineIso ? daysRemaining(deadlineIso) : 0;

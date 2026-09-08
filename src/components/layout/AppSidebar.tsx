@@ -23,7 +23,8 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
+import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
+import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 import { canSeePolicyItem, isAcademicPartnerPortalRole, isAdmissionPartnerPortalRole, isPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -294,7 +295,7 @@ export function AppSidebar() {
     const tickBadges = () => {
       if (document.visibilityState === "visible") fetchAdmissionBadges();
     };
-    const badgeInterval = setInterval(tickBadges, 120_000);
+    const badgeInterval = setInterval(tickBadges, ACTION_BADGE_POLL_MS);
     document.addEventListener("visibilitychange", tickBadges);
 
     const approvalsChannel = supabase
@@ -323,7 +324,11 @@ export function AppSidebar() {
     if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
     return item;
   });
-  const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter(canSee)).map(item => {
+  const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter((item) => {
+    if (item.url === "/cahet-sprint" && !CAHET_SPRINT_OPEN) return false;
+    if (item.url === "/updeled-sprint" && !UPDELED_SPRINT_OPEN) return false;
+    return canSee(item);
+  })).map(item => {
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
     if (item.url === "/pending-followups" && pendingFollowupCount > 0) return { ...item, badge: pendingFollowupCount };

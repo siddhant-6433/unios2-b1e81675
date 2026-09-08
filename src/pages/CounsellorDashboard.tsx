@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Phone, MessageSquare, CalendarCheck, MapPin, UserCheck, Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp, Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, CalendarDays, History } from "lucide-react";
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
 import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
+import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 import { MorningBrief } from "@/components/dashboard/MorningBrief";
 import { IncentiveWidget } from "@/components/dashboard/IncentiveWidget";
@@ -807,10 +808,12 @@ const CounsellorDashboard = () => {
         ))}
       </div>
 
+      {(CAHET_SPRINT_OPEN || UPDELED_SPRINT_OPEN) && (
       <div className="grid gap-4 lg:grid-cols-2">
-        <CahetSprintLeaderboard />
-        <UpdeledSprintLeaderboard />
+        {CAHET_SPRINT_OPEN && <CahetSprintLeaderboard />}
+        {UPDELED_SPRINT_OPEN && <UpdeledSprintLeaderboard />}
       </div>
+      )}
 
       {/* Tab toggle */}
       <div className="flex items-center gap-3 overflow-x-auto">

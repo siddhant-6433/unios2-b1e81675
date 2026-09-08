@@ -27,6 +27,7 @@ const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index
 const badgeCounts = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
 const templateManager = readFileSync("src/pages/TemplateManager.tsx", "utf8");
 const replyStateMigration = readMigration("whatsapp_reply_state_counts");
+const pendingReplyMigration = readMigration("whatsapp_pending_reply_status");
 const templatesRlsMigration = readMigration("whatsapp_templates_staff_read_and_sync_cron");
 const routeHealthCronMigration = readMigration("whatsapp_route_health_cron");
 const courseParamsMigration = readMigration("whatsapp_course_info_params_by_course");
@@ -217,13 +218,14 @@ describe("AI outage visibility", () => {
 });
 
 describe("reply-state counts", () => {
-  it("counts conversations by reply state, scoped like the list query", () => {
-    expect(replyStateMigration).toContain("s.direction = 'inbound'");
-    expect(replyStateMigration).toContain("cl.counsellor_id = p_counsellor_id");
-    expect(replyStateMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
-    expect(replyStateMigration).toContain(
+  it("counts pending conversations from conversation_state, scoped like the list", () => {
+    expect(pendingReplyMigration).toContain("s.last_direction = 'inbound'");
+    expect(pendingReplyMigration).toContain("l.counsellor_id = p_counsellor_id");
+    expect(pendingReplyMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
+    expect(pendingReplyMigration).toContain(
       "GRANT EXECUTE ON FUNCTION public.whatsapp_reply_state_counts(uuid, text, boolean) TO authenticated",
     );
+    expect(replyStateMigration).toContain("idx_whatsapp_messages_conversation_key_created");
   });
 
   it("drives inbox chips from the reply-state RPC, not layout chrome", () => {
@@ -235,19 +237,25 @@ describe("reply-state counts", () => {
     expect(inbox).toContain("Awaiting Them");
   });
 
-  it("counts off whatsapp_messages, not the expensive conversations view", () => {
-    // Aggregating over whatsapp_conversations takes 7.3s in production — right
-    // on the 8s statement timeout — because the view builds a DISTINCT ON plus
-    // three LATERALs for every conversation before anything is counted.
-    expect(replyStateMigration).toContain("FROM public.whatsapp_messages wm");
-    expect(replyStateMigration).not.toContain("FROM public.whatsapp_conversations");
-    expect(replyStateMigration).toContain("idx_whatsapp_messages_conversation_key_created");
+  it("counts pending reply status off conversation_state, not every message", () => {
+    // Aggregating over whatsapp_messages / whatsapp_conversations was ~4s mean
+    // and hit the 8s timeout. last_direction is maintained on insert.
+    expect(pendingReplyMigration).toContain("FROM public.whatsapp_conversation_state s");
+    expect(pendingReplyMigration).not.toContain("FROM public.whatsapp_conversations");
+    expect(pendingReplyMigration).toContain("trg_whatsapp_messages_touch_conversation_state");
+    expect(pendingReplyMigration).toContain("AFTER INSERT ON public.whatsapp_messages");
+  });
+
+  it("does not refetch pending counts when the 8s message poll merges rows", () => {
+    expect(inbox).toContain("Do not depend on messages.length");
+    expect(inbox).toContain("replyStateEpoch");
   });
 
   it("dedups the RPC behind the shared TTL wrapper", () => {
     // Inbox chips call the aggregate; layout chrome must not.
     expect(badgeCounts).toContain("fetchWhatsAppReplyStateCounts");
     expect(badgeCounts).toContain("replyStateInflight");
+    expect(badgeCounts).toContain("REPLY_STATE_TTL_MS = 5 * 60_000");
     expect(inbox).toContain("invalidateWhatsAppReplyStateCounts()");
   });
 

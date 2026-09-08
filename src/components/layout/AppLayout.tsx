@@ -17,6 +17,7 @@ import { useLocation } from "react-router-dom";
 import { Suspense } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { isPortalRole } from "@/lib/accessPolicy";
+import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 import { useEffect, useState, lazy } from "react";
 import { Footprints } from "lucide-react";
@@ -204,8 +205,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <HeaderProfile />
               </div>
             </header>
-            {deferredShellReady && !isPortal && <CahetSprintTicker />}
-            {deferredShellReady && !isPortal && <UpdeledSprintTicker />}
+            {deferredShellReady && !isPortal && CAHET_SPRINT_OPEN && <CahetSprintTicker />}
+            {deferredShellReady && !isPortal && UPDELED_SPRINT_OPEN && <UpdeledSprintTicker />}
             {deferredShellReady && !isPortal && <ApplicantDeadlineTicker />}
             {/* Counsellors get the action bar as cross-page navigation everywhere
                 except the Cloud Dialer console, where these same numbers already

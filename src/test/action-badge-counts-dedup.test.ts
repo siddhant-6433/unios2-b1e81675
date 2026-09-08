@@ -2,13 +2,22 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // Mock the supabase client before importing the module under test.
 // vi.mock is hoisted, so the mock fn must be created via vi.hoisted.
-const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc } }));
+const { rpc, getSession } = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  getSession: vi.fn(),
+}));
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: { rpc, auth: { getSession } },
+}));
 
 import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 
 describe("fetchActionBadgeCounts dedup", () => {
-  beforeEach(() => rpc.mockReset());
+  beforeEach(() => {
+    rpc.mockReset();
+    getSession.mockReset();
+    getSession.mockResolvedValue({ data: { session: { user: { id: "test-user" } } } });
+  });
 
   it("collapses concurrent identical calls into a single RPC", async () => {
     let resolve!: (v: unknown) => void;

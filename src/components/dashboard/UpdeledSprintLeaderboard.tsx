@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { ArrowRight, GraduationCap, Trophy } from "lucide-react";
+import { UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 
 interface LeaderRow {
   counsellor_id: string;
@@ -45,6 +46,10 @@ export function UpdeledSprintLeaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!UPDELED_SPRINT_OPEN) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     async function load() {
       const [lb, st] = await Promise.all([
@@ -62,6 +67,8 @@ export function UpdeledSprintLeaderboard() {
     load();
     return () => { cancelled = true; };
   }, []);
+
+  if (!UPDELED_SPRINT_OPEN) return null;
 
   const days = stats ? daysRemaining(stats.deadline_at) : 0;
 

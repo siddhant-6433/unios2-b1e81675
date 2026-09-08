@@ -96,6 +96,26 @@ describe("CRM layout performance guardrails", () => {
     expect(liveCallBar).toContain("LIVE_CALL_ACTIVE_POLL_MS");
   });
 
+  it("treats action badge counts as directional chrome, not realtime", () => {
+    expect(actionBadgeCountsHelper).toContain("ACTION_BADGE_TTL_MS = 10 * 60_000");
+    expect(actionBadgeCountsHelper).toContain("ACTION_BADGE_POLL_MS");
+    expect(appSidebar).toContain("ACTION_BADGE_POLL_MS");
+    expect(globalActionBar).toContain("ACTION_BADGE_POLL_MS");
+    expect(appSidebar).not.toContain("120_000");
+  });
+
+  it("does not mount closed CAHET/UPDELED sprint tickers on every CRM page", () => {
+    expect(appLayout).toContain("CAHET_SPRINT_OPEN && <CahetSprintTicker");
+    expect(appLayout).toContain("UPDELED_SPRINT_OPEN && <UpdeledSprintTicker");
+  });
+
+  it("counts WhatsApp unreplied badges from conversation_state pending status", () => {
+    const pendingReply = readMigration("whatsapp_pending_reply_status");
+    expect(pendingReply).toContain("FROM public.whatsapp_conversation_state s");
+    expect(pendingReply).toContain("s.last_direction = 'inbound'");
+    expect(pendingReply).not.toMatch(/FROM public\.whatsapp_messages wm\s+JOIN public\.leads l ON l\.id = wm\.lead_id/);
+  });
+
   it("does not subscribe layout chrome to unfiltered hot-table WAL", () => {
     // Delivery-status updates on whatsapp_messages (up to 500/min) plus lead
     // writes used to fan out to every CRM tab and re-run action_badge_counts.

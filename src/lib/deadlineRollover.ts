@@ -2,6 +2,12 @@ export const INITIAL_APPLICATION_DEADLINE = "2026-06-14";
 export const INITIAL_CAHET_DEADLINE_ISO = "2026-06-14T23:59:59+05:30";
 export const UPDELED_DEADLINE_ISO = "2026-07-09T23:59:59+05:30";
 
+// Both counselling sprints have ended. Flip these to reopen chrome (tickers,
+// sidebar, dashboard leaderboards) without restoring the old 2-minute RPC poll
+// on every CRM tab.
+export const CAHET_SPRINT_OPEN = false;
+export const UPDELED_SPRINT_OPEN = false;
+
 const IST_DAY_MS = 86_400_000;
 const GENERAL_ADMISSION_ROUND_START = 2;
 const GENERAL_ADMISSION_EXTENSION_DAYS = 5;
