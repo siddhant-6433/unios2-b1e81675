@@ -16,6 +16,7 @@ import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGateway
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 import { feeTermLabel, feeTermLabelLong, feePeriodNoun } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
+import { uniformFeeFromMetadata } from "@/lib/abvmuCahetAllotment";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -183,6 +184,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   // programme, so only the fee structure's metadata can say "Semester 3".
   const { metadata: feeMeta } = useFeeStructureMeta(lead?.course_id, lead?.session_id);
   const termLabel = (term: string) => feeTermLabelLong(term, feeMeta);
+  const uniformFee = uniformFeeFromMetadata(feeMeta as Record<string, unknown> | null);
   const [leadPhone, setLeadPhone] = useState<string | null>(null);
   const [leadEmail, setLeadEmail] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
@@ -1628,6 +1630,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 </div>
               )}
 
+              {uniformFee > 0 && (
+                <div className="px-4 py-3 space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-gray-800">Uniform Fee</span>
+                    <span className="text-sm font-semibold text-gray-900">{fmt(uniformFee)}</span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 leading-snug">
+                    Payable with the {termLabel("year_1").toLowerCase()} one-time payment. Not included in the 5% lump-sum waiver (waiver applies to tuition only).
+                  </p>
+                </div>
+              )}
+
             </div>
           </div>
         );
@@ -1893,6 +1907,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           lumpSumPct: feeStatus.lump_sum_pct || 0,
           multiYearPct: feeStatus.multi_year_pct || 0,
           includeMultiYearWaiver: inMultiYearWindow,
+          uniformFee,
         });
         const y1Fee     = paymentOptions.year1NetFee;
         const totalFee  = paymentOptions.totalNetFee;
@@ -2008,8 +2023,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-success">
-                          <span>{lumpSumPct}% one-time off</span>
+                          <span>{lumpSumPct}% one-time off tuition</span>
                           <span>− {fmtRupee(y1Disc)}</span>
+                        </div>
+                      )}
+                      {uniformFee > 0 && (
+                        <div className="flex justify-between text-gray-700">
+                          <span>Uniform fee (no waiver)</span>
+                          <span>+ {fmtRupee(uniformFee)}</span>
                         </div>
                       )}
                       <div className="border-t border-warning/20/60 pt-1 mt-1 flex justify-between font-bold">
@@ -2149,6 +2170,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                               : `${lumpSumPct}% off years 2-N`}
                           </span>
                           <span>− {fmtRupee(multiDisc)}</span>
+                        </div>
+                      )}
+                      {uniformFee > 0 && (
+                        <div className="flex justify-between text-gray-700">
+                          <span>Uniform fee (no waiver)</span>
+                          <span>+ {fmtRupee(uniformFee)}</span>
                         </div>
                       )}
                       <div className="border-t border-success/30/60 pt-1.5 mt-1.5 flex justify-between font-bold">

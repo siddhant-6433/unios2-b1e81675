@@ -7,6 +7,7 @@ import { ApplicationData } from "./types";
 import { usePortal } from "@/components/apply/PortalContext";
 import { supabase } from "@/integrations/supabase/client";
 import { displayValue } from "@/lib/displayValue";
+import { hasAbvmuCahetAllotmentAnswer, isAbvmuCahetAllotted } from "@/lib/abvmuCahetAllotment";
 
 interface Props {
   data: ApplicationData;
@@ -158,6 +159,12 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
                 </span>
               </div>
             ))}
+            {isAbvmuCahetAllotted(data.flags) && (
+              <Row label="ABVMU CAHET allotment" value="Yes — challan uploaded" />
+            )}
+            {hasAbvmuCahetAllotmentAnswer(data.flags) && !isAbvmuCahetAllotted(data.flags) && (
+              <Row label="ABVMU CAHET allotment" value="No" />
+            )}
           </Section>
 
           <Section title={data.program_category === 'school' ? 'Child Details' : 'Personal Details'}>

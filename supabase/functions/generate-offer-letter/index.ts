@@ -674,6 +674,9 @@ interface BuildOpts {
   // (no receipt until the university remits). Rendered as a distinct
   // deduction line below the fee table — it is a payment, not a waiver.
   abvmuCredit?: number;
+  /** Uniform fee from fee_structures.metadata.uniform_cost. Shown separately;
+   *  not part of programme fee and not eligible for the lump-sum tuition waiver. */
+  uniformFee?: number;
   cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
   updeledRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
 }
@@ -927,6 +930,16 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   ctx.y -= 8;
 
+  // Uniform is billed with first-year one-time payment and is excluded from
+  // the lump-sum tuition waiver. Keep it off the programme-fee table so token
+  // / 25% math stays tuition-only.
+  const uniformFee = Math.max(0, Number(opts.uniformFee || 0));
+  if (uniformFee > 0) {
+    drawParagraph(ctx,
+      `Uniform Fee (payable with first-year fee; not eligible for lump-sum waiver): ${fmtINR(uniformFee)}`,
+      { size: 9.5, bold: true, gapAfter: 6 });
+  }
+
   // ── ABVMU deposit already paid to university ───────────────────────────
   // A payment the candidate made directly to ABVMU (seat-reservation
   // deposit), approved by super-admin. It reduces the programme fee due but
@@ -972,7 +985,9 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     `Token fee is adjustable against the ${firstFeePeriod} programme fee and is non-refundable once paid.`,
     "Education loan support letter can be downloaded from the applicant portal after the token fee is paid.",
     `Remaining ${firstFeePeriod} fee is due as per the schedule communicated post token-fee confirmation.`,
-    "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
+    uniformFee > 0
+      ? `Uniform Fee of ${fmtINR(uniformFee)} is payable with the first-year fee and is not eligible for the lump-sum tuition waiver. Examination Fee and other university / examination-body charges are extra.`
+      : "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
     "Offer lapses automatically if token fee is not received by the acceptance deadline.",
     "The institution may revoke this offer if any submitted information is found inaccurate.",
   ];
@@ -1298,6 +1313,17 @@ Deno.serve(async (req) => {
     const abvmuCredit = ((abvmuRows || []) as { amount: number | string | null }[])
       .reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
+    // Claims uploaded during the application (before an offer existed) need
+    // the offer id so they can be approved and adjusted on this letter.
+    if (offer.lead_id) {
+      await admin
+        .from("abvmu_deposit_claims")
+        .update({ offer_letter_id: offer_letter_id })
+        .eq("lead_id", offer.lead_id)
+        .is("offer_letter_id", null)
+        .in("status", ["pending", "approved"]);
+    }
+
     const { data: cahetRegistrationRow } = await admin
       .from("cahet_registrations")
       .select("registration_no, document_url, notes, registered_at")
@@ -1375,6 +1401,8 @@ Deno.serve(async (req) => {
         : Number(lead?.token_amount || 0);
     }
 
+    const uniformFee = Math.max(0, Number((yearRows?.metadata as { uniform_cost?: number | string } | null)?.uniform_cost || 0));
+
     const pdfBytes = await buildOfferPdf({
       offer,
       lead: pdfLead,
@@ -1392,6 +1420,7 @@ Deno.serve(async (req) => {
       applicationId,
       waivers,
       abvmuCredit,
+      uniformFee,
       cahetRegistration: cahetRegistration || null,
       updeledRegistration: updeledRegistration || null,
     });
