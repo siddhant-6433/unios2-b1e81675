@@ -24,6 +24,7 @@ import { RefundDialog } from "@/components/finance/RefundDialog";
 import { TransferCertificateSection } from "@/components/students/TransferCertificateSection";
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { isSchoolSessionYear } from "@/lib/sessionYears";
+import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
 
 interface StudentDocument {
   id: string;
@@ -576,6 +577,7 @@ const StudentProfile = () => {
       } as never);
       // PostgrestError is a plain object, not an Error — String() on it yields
       // "[object Object]". Carry its message (and hint) into a real Error.
+      const courseChanged = student.course_id !== pCourseId;
       if (error) throw new Error([error.message, error.hint].filter(Boolean).join(" — ") || "Placement RPC failed");
       if (!changedId) throw new Error("Placement change did not apply.");
 
@@ -584,14 +586,28 @@ const StudentProfile = () => {
       const { data: prov, error: provErr } = await supabase.functions.invoke("provision-student-fees", {
         body: { student_id: student.id, force_reprovision: true },
       });
+      let receiptNote = "";
+      if (courseChanged) {
+        const revised = await reviseStudentReceiptPdfs({
+          studentId: student.id,
+          leadId: student.lead_id,
+        });
+        if (revised.revised > 0) {
+          receiptNote = ` ${revised.revised} receipt${revised.revised === 1 ? "" : "s"} reprinted for the current course.`;
+        } else if (revised.attempted === 0) {
+          receiptNote = "";
+        } else if (revised.failed > 0) {
+          receiptNote = " Receipts still need a manual revise from Finance.";
+        }
+      }
       if (provErr) {
         const body = (provErr as { data?: unknown }).data;
         const detail = typeof body === "string" ? body : (body as { error?: string })?.error || provErr.message;
-        toast({ title: "Placement changed, but fee re-provision failed", description: detail, variant: "destructive" });
+        toast({ title: "Placement changed, but fee re-provision failed", description: `${detail}${receiptNote}`, variant: "destructive" });
       } else if ((prov as { results?: Array<{ status?: string; error?: string }> })?.results?.[0]?.status === "error") {
-        toast({ title: "Placement changed, fees need attention", description: (prov as { results: Array<{ error?: string }> }).results[0].error, variant: "destructive" });
+        toast({ title: "Placement changed, fees need attention", description: `${(prov as { results: Array<{ error?: string }> }).results[0].error}${receiptNote}`, variant: "destructive" });
       } else {
-        toast({ title: "Placement changed & fees re-provisioned" });
+        toast({ title: "Placement changed & fees re-provisioned", description: receiptNote.trim() || undefined });
       }
       setPlacementOpen(false);
       await fetchStudent(true);
@@ -2030,7 +2046,7 @@ const StudentProfile = () => {
           </DialogHeader>
 
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
-            Fees will be re-provisioned for the new placement. Amounts already paid are carried to the matching new fee heads; any head that can’t be matched is flagged for review. No money is refunded or moved out.
+            Fees will be re-provisioned for the new placement. Amounts already paid are carried to the matching new fee heads; any head that can’t be matched is flagged for review. No money is refunded or moved out. Existing fee receipts are reprinted with the current course and a note that they were migrated from the previous course.
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
