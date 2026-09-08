@@ -27,6 +27,15 @@ describe("IST cron day/night split", () => {
     expect(migration).toContain("('email-ai-reply'");
   });
 
+  it("installs process-wa-classification-queue on the day window", () => {
+    const install = readMigration("install_wa_classification_queue_cron");
+    expect(install).toContain("'process-wa-classification-queue'");
+    expect(install).toContain("'* 3-12 * * *'");
+    expect(install).toContain("SELECT public.fn_process_wa_classification_queue()");
+    expect(install).toContain("created_at <= now() - interval '90 seconds'");
+    expect(install).not.toMatch(/Bearer [A-Za-z0-9._-]{20,}/);
+  });
+
   it("moves miner, Zoho, photos, and reports to 13-23,0-3 UTC (≈ 6pm–9am IST)", () => {
     expect(migration).toContain("('counsellor-call-miner'");
     expect(migration).toContain("'*/2 13-23,0-3 * * *'");
